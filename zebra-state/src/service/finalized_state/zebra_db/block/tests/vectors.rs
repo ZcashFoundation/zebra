@@ -10,27 +10,42 @@
 //!
 //! Check transparent address indexes, UTXOs, etc.
 
-use std::{iter, sync::Arc};
+use std::{iter, path::Path, sync::Arc};
 
 use zebra_chain::{
     block::{
+        self,
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
             large_single_transaction_block_many_outputs,
         },
         Block, Height,
     },
-    parameters::Network::{self, *},
+    parameters::{
+        testnet,
+        Network::{self, *},
+        NetworkUpgrade,
+    },
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::new_ordered_outputs_with_height,
+    work::difficulty::ParameterDifficulty,
 };
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
-    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    constants::{
+        state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT,
+        MAX_HEADER_SYNC_HEIGHT_RANGE, STATE_DATABASE_KIND,
+    },
+    error::CommitHeaderRangeError,
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{
-        disk_db::DiskWriteBatch, ZebraDb, PRUNING_METADATA, STATE_COLUMN_FAMILIES_IN_CODE,
+    service::{
+        check::difficulty::AdjustedDifficulty,
+        finalized_state::{
+            disk_db::{DiskWriteBatch, WriteDisk},
+            ZebraDb, PRUNING_METADATA, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        read,
     },
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
@@ -74,6 +89,674 @@ fn test_block_db_round_trip() {
         .zcash_deserialize_into()
         .expect("deserialization of valid serialized block never fails");
     test_block_db_round_trip_with(&Mainnet, iter::once(block));
+}
+
+#[test]
+fn header_range_commit_keeps_body_availability_separate() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+
+    let mut batch = DiskWriteBatch::new();
+    let committed_hash = batch
+        .prepare_header_range_batch(&state, genesis.hash(), std::slice::from_ref(&block1.header))
+        .expect("block 1 header links to genesis and has valid context");
+    state
+        .write_batch(batch)
+        .expect("header range batch writes successfully");
+
+    assert_eq!(committed_hash, block1.hash());
+    assert_eq!(state.best_header_tip(), Some((Height(1), block1.hash())));
+    assert_eq!(state.finalized_tip_height(), Some(Height(0)));
+    assert_eq!(state.tip(), Some((Height(0), genesis.hash())));
+
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+    assert_eq!(
+        state.missing_block_bodies(Some(Height(0)), Some(Height(1)), Height(0), 10),
+        vec![Height(1)],
+    );
+
+    assert!(!state.contains_hash(block1.hash()));
+    assert!(!state.contains_body_at_height(Height(1)));
+    assert!(state.block(Height(1).into()).is_none());
+    assert!(state
+        .transaction_hashes_for_block(Height(1).into())
+        .is_none());
+}
+
+#[test]
+fn header_range_read_is_contiguous_capped_and_stops_at_first_gap() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+
+    let mut batch = DiskWriteBatch::new();
+    batch
+        .prepare_header_range_batch(&state, genesis.hash(), std::slice::from_ref(&block1.header))
+        .expect("block 1 header is valid");
+    state.write_batch(batch).expect("header batch writes");
+
+    assert_eq!(state.headers_by_height_range(Height(0), 3).len(), 2);
+    assert_eq!(
+        state.headers_by_height_range(Height(1), u32::MAX),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+    assert!(state.headers_by_height_range(Height(2), 10).is_empty());
+}
+
+#[test]
+fn header_range_read_enforces_max_range_cap() {
+    let _init_guard = zebra_test::init();
+    let (state, _genesis, block1) = mainnet_state_with_genesis();
+    let header_by_height = state.db.cf_handle("zakura_header_by_height").unwrap();
+    let hash_by_height = state.db.cf_handle("zakura_header_hash_by_height").unwrap();
+
+    let mut batch = DiskWriteBatch::new();
+    for height in 1..=MAX_HEADER_SYNC_HEIGHT_RANGE + 1 {
+        batch.zs_insert(&header_by_height, Height(height), &block1.header);
+        batch.zs_insert(&hash_by_height, Height(height), block1.hash());
+    }
+    state.db.write(batch).expect("header test rows write");
+
+    assert_eq!(
+        state.headers_by_height_range(Height(1), u32::MAX).len(),
+        usize::try_from(MAX_HEADER_SYNC_HEIGHT_RANGE).expect("range cap fits in usize"),
+    );
+}
+
+#[test]
+fn missing_block_bodies_respects_from_limit_and_empty_body_gap() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    let block2 = mainnet_block(2);
+    let block3 = mainnet_block(3);
+
+    assert!(state
+        .missing_block_bodies(Some(Height(0)), Some(Height(0)), Height(0), 10)
+        .is_empty());
+
+    commit_header_range(
+        &state,
+        genesis.hash(),
+        &[
+            block1.header.clone(),
+            block2.header.clone(),
+            block3.header.clone(),
+        ],
+    );
+
+    assert_eq!(
+        state.missing_block_bodies(Some(Height(0)), Some(Height(3)), Height(2), 1),
+        vec![Height(2)],
+    );
+    assert_eq!(
+        state.missing_block_bodies(Some(Height(0)), Some(Height(3)), Height(2), 10),
+        vec![Height(2), Height(3)],
+    );
+}
+
+#[test]
+fn header_range_commit_rejects_finalized_or_body_conflicts() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    write_full_block_header_and_transactions(&state, block1.clone());
+
+    let mut conflicting = *block1.header;
+    conflicting.nonce.0[0] ^= 1;
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(matches!(
+        batch.prepare_header_range_batch(&state, genesis.hash(), &[Arc::new(conflicting)]),
+        Err(CommitHeaderRangeError::ImmutableConflict { height: Height(1) })
+            | Err(CommitHeaderRangeError::ConflictingFullBlockHeader { height: Height(1) })
+    ));
+}
+
+#[test]
+fn header_range_commit_rejects_checkpoint_conflicts() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let block1 = mainnet_block(1);
+    let network = checkpoint_test_network(genesis.hash(), block1.hash());
+    let state = state_with_genesis(&network, genesis.clone());
+
+    let mut forged = *block1.header;
+    forged.nonce.0[0] ^= 1;
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(matches!(
+        batch.prepare_header_range_batch(&state, genesis.hash(), &[Arc::new(forged)]),
+        Err(CommitHeaderRangeError::CheckpointConflict {
+            height: Height(1),
+            expected,
+            actual,
+        }) if expected == block1.hash() && actual != expected
+    ));
+
+    assert_eq!(state.best_header_tip(), Some((Height(0), genesis.hash())));
+}
+
+#[test]
+fn header_range_commit_accepts_matching_checkpoint_hash() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let block1 = mainnet_block(1);
+    let network = checkpoint_test_network(genesis.hash(), block1.hash());
+    let state = state_with_genesis(&network, genesis.clone());
+
+    let committed_hash =
+        commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
+
+    assert_eq!(committed_hash, block1.hash());
+    assert_eq!(state.best_header_tip(), Some((Height(1), block1.hash())));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+}
+
+#[test]
+fn header_range_reorg_replaces_shorter_range_without_stale_indexes() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    let block2 = mainnet_block(2);
+    let block3 = mainnet_block(3);
+
+    commit_header_range(
+        &state,
+        genesis.hash(),
+        &[
+            block1.header.clone(),
+            block2.header.clone(),
+            block3.header.clone(),
+        ],
+    );
+
+    let old_block2_hash = block2.hash();
+    let old_block3_hash = block3.hash();
+    let alternate_block2 = alternate_header(block1.hash(), &block2.header, 1);
+
+    let alternate_block2_hash = commit_header_range(
+        &state,
+        block1.hash(),
+        std::slice::from_ref(&alternate_block2),
+    );
+
+    assert_eq!(alternate_block2_hash, block::Hash::from(&*alternate_block2));
+    assert_eq!(
+        state.best_header_tip(),
+        Some((Height(2), alternate_block2_hash))
+    );
+    assert_eq!(state.height(old_block2_hash), None);
+    assert_eq!(state.height(old_block3_hash), None);
+    assert!(!state.contains_hash(old_block2_hash));
+    assert!(state.block(old_block2_hash.into()).is_none());
+
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 3),
+        vec![
+            (Height(1), block1.hash(), block1.header.clone()),
+            (Height(2), alternate_block2_hash, alternate_block2),
+        ],
+    );
+}
+
+#[test]
+fn header_range_reorg_replaces_longer_range_without_stale_indexes() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    let block2 = mainnet_block(2);
+    let block3 = mainnet_block(3);
+
+    commit_header_range(
+        &state,
+        genesis.hash(),
+        &[block1.header.clone(), block2.header.clone()],
+    );
+
+    let old_block2_hash = block2.hash();
+    let alternate_block2 = alternate_header(block1.hash(), &block2.header, 1);
+    let alternate_block2_hash = block::Hash::from(&*alternate_block2);
+    let alternate_block3 = alternate_header(alternate_block2_hash, &block3.header, 2);
+    let alternate_block3_hash = block::Hash::from(&*alternate_block3);
+
+    let committed_hash = commit_header_range(
+        &state,
+        block1.hash(),
+        &[alternate_block2.clone(), alternate_block3.clone()],
+    );
+
+    assert_eq!(committed_hash, alternate_block3_hash);
+    assert_eq!(
+        state.best_header_tip(),
+        Some((Height(3), alternate_block3_hash))
+    );
+    assert_eq!(state.height(old_block2_hash), None);
+    assert!(state.block(old_block2_hash.into()).is_none());
+
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 4),
+        vec![
+            (Height(1), block1.hash(), block1.header.clone()),
+            (Height(2), alternate_block2_hash, alternate_block2),
+            (Height(3), alternate_block3_hash, alternate_block3),
+        ],
+    );
+}
+
+#[test]
+fn header_range_reorg_rejects_too_deep_overwrite() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let network = no_extra_checkpoint_test_network(genesis.hash());
+    let state = state_with_genesis(&network, genesis.clone());
+    let tip_height = Height(MAX_BLOCK_REORG_HEIGHT + 1);
+    let original_headers =
+        synthetic_headers_from_state(&state, Height(0), genesis.hash(), tip_height.0, 1);
+
+    commit_header_range(&state, genesis.hash(), &original_headers);
+
+    let conflict_height = Height(1);
+    let conflict_anchor = genesis.hash();
+    let conflicting_header = synthetic_headers_from_state(&state, Height(0), conflict_anchor, 1, 2)
+        .pop()
+        .expect("one synthetic conflicting header was generated");
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(matches!(
+        batch.prepare_header_range_batch(&state, conflict_anchor, &[conflicting_header]),
+        Err(CommitHeaderRangeError::ReorgTooDeep {
+            height,
+            best_header_tip,
+        }) if height == conflict_height && best_header_tip == tip_height
+    ));
+
+    assert_eq!(
+        state.best_header_tip(),
+        Some((
+            tip_height,
+            block::Hash::from(&**original_headers.last().unwrap())
+        )),
+    );
+}
+
+#[test]
+fn header_range_reorg_accepts_boundary_adjacent_overwrite() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let network = no_extra_checkpoint_test_network(genesis.hash());
+    let state = state_with_genesis(&network, genesis.clone());
+    let tip_height = Height(MAX_BLOCK_REORG_HEIGHT);
+    let original_headers =
+        synthetic_headers_from_state(&state, Height(0), genesis.hash(), tip_height.0, 1);
+
+    commit_header_range(&state, genesis.hash(), &original_headers);
+
+    let conflict_height = Height(1);
+    let old_conflict_hash = block::Hash::from(&*original_headers[0]);
+    let conflicting_header = synthetic_headers_from_state(&state, Height(0), genesis.hash(), 1, 2)
+        .pop()
+        .expect("one synthetic conflicting header was generated");
+    let conflicting_hash = block::Hash::from(&*conflicting_header);
+
+    let committed_hash = commit_header_range(
+        &state,
+        genesis.hash(),
+        std::slice::from_ref(&conflicting_header),
+    );
+
+    assert_eq!(committed_hash, conflicting_hash);
+    assert_eq!(
+        state.best_header_tip(),
+        Some((conflict_height, conflicting_hash)),
+    );
+    assert_eq!(state.height(old_conflict_hash), None);
+    assert_eq!(state.hash(Height(2)), None);
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 2),
+        vec![(Height(1), conflicting_hash, conflicting_header)],
+    );
+}
+
+#[test]
+fn header_range_commit_rejects_non_current_anchor_hash() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    let stale_anchor = block::Hash([0x42; 32]);
+    let height_by_hash = state.db.cf_handle("height_by_hash").unwrap();
+
+    commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
+
+    let mut stale_index_batch = DiskWriteBatch::new();
+    stale_index_batch.zs_insert(&height_by_hash, stale_anchor, Height(1));
+    state
+        .db
+        .write(stale_index_batch)
+        .expect("stale test index writes");
+
+    let block2 = mainnet_block(2);
+    let alternate_block2 = alternate_header(stale_anchor, &block2.header, 1);
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(matches!(
+        batch.prepare_header_range_batch(&state, stale_anchor, &[alternate_block2]),
+        Err(CommitHeaderRangeError::UnknownAnchor { anchor }) if anchor == stale_anchor
+    ));
+
+    assert_eq!(state.hash(Height(1)), None);
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+}
+
+#[test]
+fn header_range_rows_and_tip_survive_reopen_without_body_availability() {
+    let _init_guard = zebra_test::init();
+    let tempdir = tempfile::tempdir().expect("temporary cache directory is created");
+    let cache_dir = tempdir.path().to_owned();
+    let config = persistent_config(&cache_dir);
+    let genesis = mainnet_block(0);
+    let block1 = mainnet_block(1);
+    let block2 = mainnet_block(2);
+
+    {
+        let state = persistent_state(&config, &Mainnet);
+        write_full_block_header_and_transactions(&state, genesis.clone());
+        commit_header_range(
+            &state,
+            genesis.hash(),
+            &[block1.header.clone(), block2.header.clone()],
+        );
+
+        assert_eq!(state.best_header_tip(), Some((Height(2), block2.hash())));
+        let mut state = state;
+        state.shutdown(true);
+    }
+
+    let reopened = persistent_state(&config, &Mainnet);
+
+    assert_eq!(reopened.tip(), Some((Height(0), genesis.hash())));
+    assert_eq!(reopened.best_header_tip(), Some((Height(2), block2.hash())));
+    assert_eq!(
+        reopened.headers_by_height_range(Height(1), 2),
+        vec![
+            (Height(1), block1.hash(), block1.header.clone()),
+            (Height(2), block2.hash(), block2.header.clone()),
+        ],
+    );
+    assert!(!reopened.contains_hash(block2.hash()));
+    assert_eq!(reopened.body_hash(Height(2)), None);
+    assert!(reopened.block(Height(2).into()).is_none());
+}
+
+#[test]
+fn block_facing_hash_by_height_requires_body_availability() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+
+    commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
+
+    assert_eq!(state.hash(Height(1)), None);
+    assert_eq!(state.body_hash(Height(1)), None);
+    assert_eq!(
+        read::hash_by_height(
+            Option::<Arc<crate::service::non_finalized_state::Chain>>::None,
+            &state,
+            Height(1),
+        ),
+        None,
+    );
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+}
+
+#[test]
+fn full_block_commit_over_identical_header_only_row_is_noop_for_header_indexes() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+
+    commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
+
+    assert_eq!(state.hash(Height(1)), None);
+    assert_eq!(state.height(block1.hash()), None);
+    assert!(!state.contains_hash(block1.hash()));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 2),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+
+    write_full_block_header_and_transactions(&state, block1.clone());
+
+    assert_eq!(state.hash(Height(1)), Some(block1.hash()));
+    assert_eq!(state.height(block1.hash()), Some(Height(1)));
+    assert!(state.contains_hash(block1.hash()));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 2),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+}
+
+#[test]
+fn full_block_commit_overwrites_conflicting_header_only_rows() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis();
+    let block2 = mainnet_block(2);
+    let block3 = mainnet_block(3);
+
+    commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
+
+    let alternate_block2 = alternate_header(block1.hash(), &block2.header, 1);
+    let alternate_block2_hash = block::Hash::from(&*alternate_block2);
+    let alternate_block3 = alternate_header(alternate_block2_hash, &block3.header, 2);
+    let alternate_block3_hash = block::Hash::from(&*alternate_block3);
+    commit_header_range(&state, block1.hash(), &[alternate_block2, alternate_block3]);
+
+    write_full_block_header_and_transactions(&state, block2.clone());
+
+    assert_eq!(state.hash(Height(2)), Some(block2.hash()));
+    assert_eq!(state.height(alternate_block2_hash), None);
+    assert_eq!(state.height(alternate_block3_hash), None);
+    assert_eq!(state.best_header_tip(), Some((Height(2), block2.hash())));
+    assert!(state.contains_hash(block2.hash()));
+    assert!(state.block(block2.hash().into()).is_some());
+    assert!(state.block(alternate_block2_hash.into()).is_none());
+}
+
+fn mainnet_state_with_genesis() -> (ZebraDb, Arc<Block>, Arc<Block>) {
+    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .expect("genesis block deserializes");
+    let block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .expect("block 1 deserializes");
+    let state = state_with_genesis(&Mainnet, genesis.clone());
+
+    (state, genesis, block1)
+}
+
+fn state_with_genesis(network: &Network, genesis: Arc<Block>) -> ZebraDb {
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+
+    write_full_block_header_and_transactions(&state, genesis.clone());
+
+    state
+}
+
+fn persistent_config(cache_dir: &Path) -> Config {
+    Config {
+        cache_dir: cache_dir.to_owned(),
+        ephemeral: false,
+        debug_skip_non_finalized_state_backup_task: true,
+        ..Config::default()
+    }
+}
+
+fn persistent_state(config: &Config, network: &Network) -> ZebraDb {
+    ZebraDb::new(
+        config,
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+}
+
+fn checkpoint_test_network(genesis_hash: block::Hash, checkpoint_hash: block::Hash) -> Network {
+    testnet::Parameters::build()
+        .with_network_name("HeaderCheckpointTest")
+        .expect("test network name is valid")
+        .with_genesis_hash(genesis_hash)
+        .expect("test genesis hash is valid")
+        .with_target_difficulty_limit(Mainnet.target_difficulty_limit())
+        .expect("mainnet difficulty limit is valid for test network")
+        .with_activation_heights(testnet::ConfiguredActivationHeights {
+            canopy: Some(2),
+            ..Default::default()
+        })
+        .expect("test activation heights are valid")
+        .clear_funding_streams()
+        .with_checkpoints(testnet::ConfiguredCheckpoints::HeightsAndHashes(vec![
+            (Height(0), genesis_hash),
+            (Height(1), checkpoint_hash),
+        ]))
+        .expect("test checkpoints are valid")
+        .to_network()
+        .expect("test network is valid")
+}
+
+fn no_extra_checkpoint_test_network(genesis_hash: block::Hash) -> Network {
+    testnet::Parameters::build()
+        .with_network_name("HeaderReorgTest")
+        .expect("test network name is valid")
+        .with_genesis_hash(genesis_hash)
+        .expect("test genesis hash is valid")
+        .with_target_difficulty_limit(Mainnet.target_difficulty_limit())
+        .expect("mainnet difficulty limit is valid for test network")
+        .with_activation_heights(testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            ..Default::default()
+        })
+        .expect("test activation heights are valid")
+        .clear_funding_streams()
+        .clear_checkpoints()
+        .expect("genesis-only checkpoints are valid")
+        .to_network()
+        .expect("test network is valid")
+}
+
+fn mainnet_block(height: u32) -> Arc<Block> {
+    MAINNET_BLOCKS
+        .get(&height)
+        .expect("test vector exists")
+        .zcash_deserialize_into::<Arc<Block>>()
+        .expect("mainnet test block deserializes")
+}
+
+fn synthetic_headers_from_state(
+    state: &ZebraDb,
+    anchor_height: Height,
+    anchor_hash: block::Hash,
+    count: u32,
+    nonce_seed: u8,
+) -> Vec<Arc<block::Header>> {
+    let network = state.network();
+    let template = mainnet_block(1);
+    let mut context = state.recent_header_context(anchor_height);
+    let mut previous_hash = anchor_hash;
+    let mut previous_height = anchor_height;
+    let mut nonce_tag = nonce_seed;
+
+    (0..count)
+        .map(|_| {
+            let candidate_height = previous_height
+                .next()
+                .expect("test header height remains in range");
+            let previous_time = context
+                .first()
+                .expect("anchor header context is available")
+                .1;
+            let target_spacing =
+                NetworkUpgrade::target_spacing_for_height(&network, candidate_height);
+            let candidate_time = previous_time + target_spacing;
+            let expected_difficulty = AdjustedDifficulty::new_from_header_time(
+                candidate_time,
+                previous_height,
+                &network,
+                context.iter().copied(),
+            )
+            .expected_difficulty_threshold();
+
+            let mut header = *template.header;
+            header.previous_block_hash = previous_hash;
+            header.time = candidate_time;
+            header.difficulty_threshold = expected_difficulty;
+            header.nonce.0[0] = header.nonce.0[0].wrapping_add(nonce_tag);
+            nonce_tag = nonce_tag.wrapping_add(1);
+
+            let header = Arc::new(header);
+            previous_hash = block::Hash::from(&*header);
+            previous_height = candidate_height;
+            context.insert(0, (header.difficulty_threshold, header.time));
+            context.truncate(crate::service::check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN);
+            header
+        })
+        .collect()
+}
+
+fn alternate_header(
+    previous_block_hash: block::Hash,
+    template: &Arc<block::Header>,
+    nonce_tag: u8,
+) -> Arc<block::Header> {
+    let mut header = **template;
+    header.previous_block_hash = previous_block_hash;
+    header.nonce.0[0] ^= nonce_tag;
+    Arc::new(header)
+}
+
+fn commit_header_range(
+    state: &ZebraDb,
+    anchor: block::Hash,
+    headers: &[Arc<block::Header>],
+) -> block::Hash {
+    let mut batch = DiskWriteBatch::new();
+    let committed_hash = batch
+        .prepare_header_range_batch(state, anchor, headers)
+        .expect("header range is valid");
+    state
+        .write_batch(batch)
+        .expect("header range batch writes successfully");
+    committed_hash
+}
+
+fn write_full_block_header_and_transactions(state: &ZebraDb, block: Arc<Block>) {
+    let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+    let finalized =
+        FinalizedBlock::from_checkpoint_verified(checkpoint_verified, Treestate::default());
+
+    let mut batch = DiskWriteBatch::new();
+    batch
+        .prepare_block_header_and_transaction_data_batch(&state.db, &finalized)
+        .expect("full block header and transaction batch is valid");
+    state.db.write(batch).expect("full block batch writes");
 }
 
 fn test_block_db_round_trip_with(
@@ -148,7 +831,9 @@ fn test_block_db_round_trip_with(
 
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();
-        batch.prepare_block_header_and_transaction_data_batch(&state.db, &finalized, true);
+        batch
+            .prepare_block_header_and_transaction_data_batch(&state.db, &finalized, true)
+            .expect("test block header and transaction batch is valid");
         state.db.write(batch).expect("block is valid for writing");
 
         // Now read it back from the state

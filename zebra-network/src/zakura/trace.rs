@@ -60,11 +60,74 @@ pub const RATELIMIT_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     file_name: "ratelimit.jsonl",
 };
 
+/// Header-sync policy, accounting, and frontier events.
+pub const HEADER_SYNC_TABLE: ZakuraTraceTable = ZakuraTraceTable {
+    table: "header_sync",
+    file_name: "header_sync.jsonl",
+};
+
 /// Legacy compatibility request/response events.
 pub const LEGACY_REQUEST_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     table: "legacy_request",
     file_name: "legacy_request.jsonl",
 };
+
+/// Shared header-sync trace event names and field keys.
+pub mod header_sync_trace {
+    /// Trace row event field.
+    pub const EVENT: &str = "event";
+    /// Peer field.
+    pub const PEER: &str = "peer";
+    /// Source peer field for forwarded full-block floods.
+    pub const SOURCE_PEER: &str = "source_peer";
+    /// Height field.
+    pub const HEIGHT: &str = "height";
+    /// Hash field.
+    pub const HASH: &str = "hash";
+    /// Range start height field.
+    pub const RANGE_START: &str = "range_start";
+    /// Range count field.
+    pub const RANGE_COUNT: &str = "range_count";
+    /// Advertised peer range cap field.
+    pub const ADVERTISED_CAP: &str = "advertised_cap";
+    /// Expected header count field.
+    pub const EXPECTED_COUNT: &str = "expected_count";
+    /// In-flight request count field.
+    pub const IN_FLIGHT_COUNT: &str = "in_flight_count";
+    /// Destination peer count field.
+    pub const DESTINATION_PEER_COUNT: &str = "destination_peer_count";
+    /// Bounded reason field.
+    pub const REASON: &str = "reason";
+
+    /// Local status sent to a peer.
+    pub const HEADER_STATUS_SENT: &str = "header_status_sent";
+    /// Peer status received.
+    pub const HEADER_STATUS_RECEIVED: &str = "header_status_received";
+    /// Header range request sent.
+    pub const HEADER_GET_HEADERS_SENT: &str = "header_get_headers_sent";
+    /// Header range response received.
+    pub const HEADER_HEADERS_RECEIVED: &str = "header_headers_received";
+    /// Header range response served from local state.
+    pub const HEADER_HEADERS_SERVED: &str = "header_headers_served";
+    /// Header range committed.
+    pub const HEADER_RANGE_COMMITTED: &str = "header_range_committed";
+    /// Header range rejected.
+    pub const HEADER_RANGE_REJECTED: &str = "header_range_rejected";
+    /// NewBlock tip flood received.
+    pub const HEADER_NEW_BLOCK_RECEIVED: &str = "header_new_block_received";
+    /// NewBlock tip flood forwarded.
+    pub const HEADER_NEW_BLOCK_FORWARDED: &str = "header_new_block_forwarded";
+    /// NewBlock tip flood deduped.
+    pub const HEADER_NEW_BLOCK_DEDUPED: &str = "header_new_block_deduped";
+    /// Peer violation observed.
+    pub const HEADER_PEER_VIOLATION: &str = "header_peer_violation";
+    /// Peer disconnect requested.
+    pub const HEADER_PEER_DISCONNECT_REQUESTED: &str = "header_peer_disconnect_requested";
+    /// Header frontier advanced.
+    pub const HEADER_FRONTIER_ADVANCED: &str = "header_frontier_advanced";
+    /// Missing block bodies reported.
+    pub const HEADER_MISSING_BODIES_REPORTED: &str = "header_missing_bodies_reported";
+}
 
 /// Cloneable Zakura trace emitter.
 #[derive(Clone, Debug)]

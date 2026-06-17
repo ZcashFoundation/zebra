@@ -211,6 +211,23 @@ impl AdjustedDifficulty {
     /// Implements `ThresholdBits` from the Zcash specification. (Which excludes the
     /// Testnet minimum difficulty adjustment.)
     fn threshold_bits(&self) -> CompactDifficulty {
+        let averaging_window_height = u32::try_from(POW_AVERAGING_WINDOW)
+            .expect("averaging window is much smaller than u32::MAX");
+
+        if self.relevant_difficulty_thresholds.len() < POW_AVERAGING_WINDOW
+            && self.candidate_height.0 <= averaging_window_height
+        {
+            // # Consensus
+            //
+            // `ThresholdBits(height)` is `PoWLimit` for `height <= PoWAveragingWindow`.
+            // Zebra's full-block contextual validation on Mainnet and Testnet
+            // starts after the mandatory checkpoint, so this short-context path
+            // is only reachable through header sync and non-checkpointed test
+            // networks, where it implements the Zcash specification's early-chain
+            // `PoWLimit` rule.
+            return self.network.target_difficulty_limit().to_compact();
+        }
+
         let averaging_window_timespan = NetworkUpgrade::averaging_window_timespan_for_height(
             &self.network,
             self.candidate_height,

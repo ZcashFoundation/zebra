@@ -13,4 +13,4 @@ pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
-pub use initialize::init;
+pub use initialize::{init, init_with_zakura_header_sync};

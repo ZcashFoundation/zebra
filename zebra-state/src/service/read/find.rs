@@ -149,9 +149,11 @@ where
     // can only add overlapping blocks, and hashes are unique.
 
     let tip = tip_height(chain, db)?;
-    let height = height_by_hash(chain, db, hash)?;
+    let height = chain
+        .and_then(|chain| chain.as_ref().height_by_hash(hash))
+        .or_else(|| db.contains_hash(hash).then(|| db.height(hash)).flatten())?;
 
-    Some(tip.0 - height.0)
+    tip.0.checked_sub(height.0)
 }
 
 /// Returns the location of the block if present in the non-finalized state.
@@ -210,7 +212,7 @@ where
 
     chain
         .and_then(|chain| chain.as_ref().hash_by_height(height))
-        .or_else(|| db.hash(height))
+        .or_else(|| db.body_hash(height))
 }
 
 /// Return true if `hash` is in `chain` or `db`.

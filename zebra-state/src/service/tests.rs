@@ -7,7 +7,7 @@
 use std::{env, sync::Arc, time::Duration};
 
 use tokio::runtime::Runtime;
-use tower::{buffer::Buffer, util::BoxService};
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block, CountedHeader, Height},
@@ -24,9 +24,16 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     init_test,
-    service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
-    tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
+    service::{
+        arbitrary::populated_state, chain_tip::TipAction, headers_by_height_range,
+        non_finalized_state::Chain, StateService,
+    },
+    tests::{
+        setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
+        FakeChainHelper,
+    },
+    BoxError, CheckpointVerifiedBlock, Config, ReadRequest, ReadResponse, Request, Response,
+    SemanticallyVerifiedBlock,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -433,6 +440,200 @@ async fn handoff_trigger_microbench() -> Result<()> {
     println!("  finalized_tip_hash() DB read : {tip_ns:>8.2} ns/call");
     println!("  helper, full guard           : {guard_ns:>8.2} ns/call");
     println!("  helper, steady state         : {steady_ns:>8.2} ns/call");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn header_only_service_requests_preserve_body_boundary() -> std::result::Result<(), BoxError>
+{
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (mut state_service, read_state, _, _) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+    let genesis =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block1 =
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block2 =
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block1_hash = block1.hash();
+    let block2_hash = block2.hash();
+
+    assert_eq!(
+        state_service
+            .ready()
+            .await?
+            .call(Request::CommitCheckpointVerifiedBlock(
+                CheckpointVerifiedBlock::from(genesis.clone()),
+            ))
+            .await?,
+        Response::Committed(genesis.hash()),
+    );
+
+    state_service.block_write_sender.finalized = None;
+    let state = Buffer::new(BoxService::new(state_service), 1);
+
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::FinalizedTip)
+            .await?,
+        ReadResponse::FinalizedTip(Some((Height(0), genesis.hash()))),
+    );
+
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::CommitHeaderRange {
+                anchor: genesis.hash(),
+                headers: vec![block1.header.clone(), block2.header.clone()],
+            })
+            .await?,
+        Response::Committed(block2_hash),
+    );
+
+    assert_eq!(
+        state.clone().oneshot(Request::Depth(block1_hash)).await?,
+        Response::Depth(None),
+    );
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::Depth(block1_hash))
+            .await?,
+        ReadResponse::Depth(None),
+    );
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::KnownBlock(block1_hash))
+            .await?,
+        Response::KnownBlock(None),
+    );
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::KnownBlock(block2_hash))
+            .await?,
+        Response::KnownBlock(None),
+    );
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::Block(Height(1).into()))
+            .await?,
+        Response::Block(None),
+    );
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::Block(Height(2).into()))
+            .await?,
+        Response::Block(None),
+    );
+    assert_eq!(
+        state
+            .oneshot(Request::AnyChainBlock(block1_hash.into()))
+            .await?,
+        Response::Block(None),
+    );
+
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::BestChainBlockHash(Height(1)))
+            .await?,
+        ReadResponse::BlockHash(None),
+    );
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::TransactionIdsForBlock(Height(1).into()))
+            .await?,
+        ReadResponse::TransactionIdsForBlock(None),
+    );
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::HeadersByHeightRange {
+                start: Height(1),
+                count: 2,
+            })
+            .await?,
+        ReadResponse::Headers(vec![
+            (Height(1), block1_hash, block1.header.clone()),
+            (Height(2), block2_hash, block2.header.clone()),
+        ]),
+    );
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::BestHeaderTip)
+            .await?,
+        ReadResponse::BestHeaderTip(Some((Height(2), block2_hash))),
+    );
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::MissingBlockBodies {
+                from: Height(1),
+                limit: 10,
+            })
+            .await?,
+        ReadResponse::MissingBlockBodies(vec![Height(1), Height(2)]),
+    );
+    assert_eq!(
+        read_state.oneshot(ReadRequest::FinalizedTip).await?,
+        ReadResponse::FinalizedTip(Some((Height(0), genesis.hash()))),
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn header_range_reads_include_non_finalized_best_chain_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (state_service, _read_state, _, _) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+    let block1 = Arc::new(
+        network
+            .test_block(653599, 583999)
+            .expect("fake test block can be built for a post-Canopy height"),
+    );
+    let block2 = block1.make_fake_child();
+    let start = block1.coinbase_height().unwrap();
+    let block1_hash = block1.hash();
+    let block2_hash = block2.hash();
+    let mut chain = Chain::new(
+        &network,
+        (start - 1).unwrap(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    );
+    chain = chain.push(block1.clone().prepare().test_with_zero_spent_utxos())?;
+    chain = chain.push(block2.clone().prepare().test_with_zero_spent_utxos())?;
+
+    assert_eq!(
+        headers_by_height_range(
+            Some(Arc::new(chain)),
+            &state_service.read_service.db,
+            start,
+            2,
+        ),
+        vec![
+            (start, block1_hash, block1.header.clone()),
+            (start.next().unwrap(), block2_hash, block2.header.clone()),
+        ],
+    );
+    assert_eq!(
+        headers_by_height_range(None::<Arc<Chain>>, &state_service.read_service.db, start, 2),
+        Vec::new(),
+    );
 
     Ok(())
 }

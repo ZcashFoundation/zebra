@@ -131,6 +131,38 @@ where
     Ok(())
 }
 
+/// Check that a header is contextually valid for `network`, using the previous
+/// header height and recent held header data.
+#[tracing::instrument(skip(candidate_header, network, relevant_headers))]
+pub(crate) fn header_is_valid_for_recent_chain<C>(
+    candidate_header: &block::Header,
+    previous_block_height: block::Height,
+    network: &Network,
+    relevant_headers: C,
+) -> Result<(), ValidateContextError>
+where
+    C: IntoIterator<Item = (CompactDifficulty, chrono::DateTime<chrono::Utc>)>,
+{
+    let relevant_headers: Vec<_> = relevant_headers
+        .into_iter()
+        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .collect();
+
+    let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
+        candidate_header.time,
+        previous_block_height,
+        network,
+        relevant_headers,
+    );
+
+    check::difficulty_threshold_and_time_are_valid(
+        candidate_header.difficulty_threshold,
+        difficulty_adjustment,
+    )?;
+
+    Ok(())
+}
+
 /// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
 #[tracing::instrument(skip(block, history_tree))]
@@ -264,7 +296,7 @@ fn height_one_more_than_parent_height(
 ///
 /// These checks are performed together, because the time field is used to
 /// calculate the expected difficulty adjustment.
-fn difficulty_threshold_and_time_are_valid(
+pub(crate) fn difficulty_threshold_and_time_are_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
@@ -300,7 +332,16 @@ fn difficulty_threshold_and_time_are_valid(
     // of that block plus 90*60 seconds.
     //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    if network.is_max_block_time_enforced(candidate_height) && candidate_time > block_time_max {
+    //
+    // Mainnet height 1 is outside this rule, and Testnet does not enforce it
+    // until height 653_606. Zebra's full-block contextual validation on Mainnet
+    // and Testnet starts after the mandatory checkpoint, so this early-chain
+    // branch is only reachable through header sync and non-checkpointed test
+    // networks, where it preserves the spec exception.
+    if candidate_height.0 >= 2
+        && network.is_max_block_time_enforced(candidate_height)
+        && candidate_time > block_time_max
+    {
         Err(ValidateContextError::TimeTooLate {
             candidate_time,
             block_time_max,

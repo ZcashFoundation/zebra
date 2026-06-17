@@ -16,6 +16,7 @@ use zebra_chain::block::{self, Height};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    error::CommitHeaderRangeError,
     service::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
@@ -146,6 +147,13 @@ pub enum NonFinalizedWriteMessage {
     /// A newly downloaded and semantically verified block prepared for
     /// contextual validation and insertion into the non-finalized state.
     Commit(QueuedSemanticallyVerified),
+    /// A validated header range prepared for contextual storage checks and
+    /// insertion into the durable header store.
+    CommitHeaderRange {
+        anchor: block::Hash,
+        headers: Vec<Arc<block::Header>>,
+        rsp_tx: oneshot::Sender<Result<block::Hash, CommitHeaderRangeError>>,
+    },
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
     Invalidate {
@@ -357,6 +365,34 @@ impl WriteBlockWorkerTask {
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::CommitHeaderRange {
+                    anchor,
+                    headers,
+                    rsp_tx,
+                } => {
+                    let mut batch = crate::service::finalized_state::DiskWriteBatch::new();
+                    let result = batch
+                        .prepare_header_range_batch(&finalized_state.db, anchor, &headers)
+                        .and_then(|hash| {
+                            finalized_state
+                                .db
+                                .write_batch(batch)
+                                .map(|()| hash)
+                                .map_err(|error| {
+                                    tracing::error!(
+                                        ?error,
+                                        "failed to write validated header range"
+                                    );
+
+                                    CommitHeaderRangeError::StorageWriteError {
+                                        error: error.to_string(),
+                                    }
+                                })
+                        });
+
+                    let _ = rsp_tx.send(result);
+                    continue;
+                }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
                     let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));

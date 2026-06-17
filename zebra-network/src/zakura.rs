@@ -17,6 +17,7 @@ use crate::{
 mod discovery;
 mod handler;
 mod handshake;
+mod header_sync;
 mod legacy_gossip;
 #[cfg(any(test, feature = "zakura-testkit"))]
 pub mod testkit;
@@ -26,11 +27,12 @@ pub mod transport;
 pub use discovery::*;
 pub use handler::*;
 pub use handshake::*;
+pub use header_sync::*;
 pub use legacy_gossip::*;
 pub use trace::{
     peer_label as zakura_trace_peer_label, reject_reason_label as zakura_trace_reject_reason_label,
-    ZakuraTrace, ZakuraTraceEvent, CONN_TABLE, HANDSHAKE_TABLE, LEGACY_REQUEST_TABLE,
-    RATELIMIT_TABLE, STREAM_TABLE,
+    ZakuraTrace, ZakuraTraceEvent, CONN_TABLE, HANDSHAKE_TABLE, HEADER_SYNC_TABLE,
+    LEGACY_REQUEST_TABLE, RATELIMIT_TABLE, STREAM_TABLE,
 };
 pub use transport::*;
 
@@ -48,6 +50,9 @@ pub const IROH_VERSION: &str = "0.92.0";
 
 /// Capability bit for the legacy gossip compatibility service.
 pub const ZAKURA_CAP_LEGACY_GOSSIP: u64 = 1 << 0;
+
+/// Capability bit for the native header-sync service.
+pub const ZAKURA_CAP_HEADER_SYNC: u64 = 1 << 1;
 
 /// Capability bit for the native discovery service.
 pub const ZAKURA_CAP_DISCOVERY: u64 = 1 << 2;

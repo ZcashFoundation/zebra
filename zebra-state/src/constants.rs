@@ -145,6 +145,12 @@ pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 /// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
+/// The maximum number of headers returned by native Zakura header-sync range reads.
+///
+/// This must match `zebra-network`'s stream-5 hard cap, but lives here to avoid
+/// an upward dependency from `zebra-state` to `zebra-network`.
+pub const MAX_HEADER_SYNC_HEIGHT_RANGE: u32 = 4000;
+
 /// The maximum number of invalidated block records.
 ///
 /// Each record can hold a chain of invalidated descendants up to the rollback

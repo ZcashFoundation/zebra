@@ -81,6 +81,10 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "hash_by_height",
     "height_by_hash",
     "block_header_by_height",
+    // Header sync
+    "zakura_header_hash_by_height",
+    "zakura_header_height_by_hash",
+    "zakura_header_by_height",
     // Transactions
     "tx_by_loc",
     "hash_by_tx_loc",

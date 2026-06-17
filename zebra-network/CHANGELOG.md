@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legacy stream is dropped, so mutually capable peers move their gossip and
   inventory traffic onto Zakura with no configured bootstrap peers. Any neutral
   problem (no live endpoint, malformed/rejected prelude) falls back to legacy.
+- Added Zakura header-sync stream-5 wire constants, bounded message codecs,
+  stateless header validation, and the default `network.zakura.header_sync`
+  config surface.
 
 ### Changed
 

@@ -15,7 +15,10 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
+use crate::{
+    constants::{MAX_HEADER_SYNC_HEIGHT_RANGE, MIN_TRANSPARENT_COINBASE_MATURITY},
+    HashOrHeight, KnownBlock,
+};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -58,6 +61,10 @@ pub enum CommitBlockError {
     #[error("could not contextually validate semantically verified block")]
     ValidateContextError(#[from] Box<ValidateContextError>),
 
+    /// Header-only commit validation failed.
+    #[error("could not commit header range")]
+    HeaderCommitError(#[from] Box<CommitHeaderRangeError>),
+
     /// The write task exited (likely during shutdown).
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
@@ -77,6 +84,12 @@ impl CommitBlockError {
     }
 }
 
+impl From<CommitHeaderRangeError> for CommitBlockError {
+    fn from(value: CommitHeaderRangeError) -> Self {
+        Self::HeaderCommitError(Box::new(value))
+    }
+}
+
 /// An error describing why a `CommitSemanticallyVerified` request failed.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("could not commit semantically-verified block")]
@@ -85,6 +98,12 @@ pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
 impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     fn from(value: ValidateContextError) -> Self {
         Self(CommitBlockError::ValidateContextError(Box::new(value)))
+    }
+}
+
+impl From<CommitHeaderRangeError> for CommitSemanticallyVerifiedError {
+    fn from(value: CommitHeaderRangeError) -> Self {
+        Self(CommitBlockError::HeaderCommitError(Box::new(value)))
     }
 }
 
@@ -113,6 +132,104 @@ pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
         Self(CommitBlockError::ValidateContextError(Box::new(value)))
+    }
+}
+
+impl From<CommitHeaderRangeError> for CommitCheckpointVerifiedError {
+    fn from(value: CommitHeaderRangeError) -> Self {
+        Self(CommitBlockError::HeaderCommitError(Box::new(value)))
+    }
+}
+
+/// An error describing why a header-only range could not be committed.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CommitHeaderRangeError {
+    /// The request did not contain any headers.
+    #[error("header range is empty")]
+    EmptyRange,
+
+    /// The request exceeded the native header-sync range cap.
+    #[error(
+        "header range contains {actual} headers, exceeding the maximum {MAX_HEADER_SYNC_HEIGHT_RANGE}"
+    )]
+    RangeTooLong {
+        /// Number of headers in the request.
+        actual: usize,
+    },
+
+    /// The supplied anchor is not known to state.
+    #[error("header range anchor {anchor} is not known")]
+    UnknownAnchor {
+        /// The supplied anchor hash.
+        anchor: block::Hash,
+    },
+
+    /// The inferred header height overflowed the valid block height range.
+    #[error("header height overflow")]
+    HeightOverflow,
+
+    /// A committed immutable header conflicts with the requested header.
+    #[error("header at finalized height {height:?} conflicts with an existing header")]
+    ImmutableConflict {
+        /// The conflicting height.
+        height: block::Height,
+    },
+
+    /// A provisional reorg tried to overwrite too far behind the best header tip.
+    #[error(
+        "header reorg at {height:?} is deeper than the maximum reorg window from best header tip {best_header_tip:?}"
+    )]
+    ReorgTooDeep {
+        /// Height of the conflicting header.
+        height: block::Height,
+        /// Current best header tip.
+        best_header_tip: block::Height,
+    },
+
+    /// A header conflicts with a trusted checkpoint hash.
+    #[error("checkpoint conflict at {height:?}: expected {expected}, got {actual}")]
+    CheckpointConflict {
+        /// Checkpoint height.
+        height: block::Height,
+        /// Expected checkpoint hash.
+        expected: block::Hash,
+        /// Actual header hash.
+        actual: block::Hash,
+    },
+
+    /// The requested header conflicts with a full block already stored at the same height.
+    #[error("header at height {height:?} conflicts with an already stored full block")]
+    ConflictingFullBlockHeader {
+        /// The conflicting height.
+        height: block::Height,
+    },
+
+    /// Contextual header validation failed.
+    #[error("could not contextually validate header")]
+    ValidateContextError(#[from] Box<ValidateContextError>),
+
+    /// Local storage failed while writing a validated header range.
+    ///
+    /// This is a local resource/storage failure, not a peer validation failure.
+    #[error("failed to write validated header range to disk: {error}")]
+    StorageWriteError {
+        /// RocksDB error details.
+        error: String,
+    },
+
+    /// Sending the commit request to the write task failed.
+    #[error("failed to send header range commit request to block write task")]
+    SendCommitRequestFailed,
+
+    /// The commit request was dropped before processing.
+    #[error("header range commit request was unexpectedly dropped")]
+    CommitResponseDropped,
+}
+
+impl From<ValidateContextError> for CommitHeaderRangeError {
+    fn from(value: ValidateContextError) -> Self {
+        Self::ValidateContextError(Box::new(value))
     }
 }
 

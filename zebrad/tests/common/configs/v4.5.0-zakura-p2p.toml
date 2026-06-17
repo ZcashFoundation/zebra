@@ -86,6 +86,11 @@ max_pending_handshakes = 8
 message_rate_per_second = 128
 stream_open_rate_per_second = 16
 
+[network.zakura.header_sync]
+max_headers_per_response = 1000
+max_inflight_requests = 10
+status_refresh_interval = "30s"
+
 [rpc]
 cookie_dir = "cache_dir"
 debug_force_finished_sync = false

@@ -111,19 +111,27 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
-    let (peer_set, address_book, misbehavior_tx, _zakura_endpoint) =
-        init_with_zakura_endpoint(config, inbound_service, latest_chain_tip, user_agent).await;
+    let (peer_set, address_book, misbehavior_tx, _zakura_endpoint) = init_with_zakura_header_sync(
+        config,
+        inbound_service,
+        latest_chain_tip,
+        user_agent,
+        advertised_services,
+        None,
+    )
+    .await;
 
     (peer_set, address_book, misbehavior_tx)
 }
 
-/// Initialize a peer set and expose the live Zakura endpoint (used by the
-/// legacy->Zakura upgrade handshake connector).
-async fn init_with_zakura_endpoint<S, C>(
+/// Initialize a peer set and optionally expose a real-driver Zakura header-sync endpoint.
+pub async fn init_with_zakura_header_sync<S, C>(
     config: Config,
     inbound_service: S,
     latest_chain_tip: C,
     user_agent: String,
+    advertised_services: PeerServices,
+    header_sync_driver_startup: Option<crate::zakura::ZakuraHeaderSyncDriverStartup>,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -146,16 +154,19 @@ where
     // handshake builder consumes the original below. The factory only runs when
     // `v2_p2p` is enabled; otherwise the endpoint is `None` and the clone drops.
     let inbound_for_zakura_sink = inbound_service.clone();
-    let zakura_endpoint =
-        crate::zakura::spawn_zakura_endpoint(&config, move |supervisor, trace| {
+    let zakura_endpoint = crate::zakura::spawn_zakura_endpoint_with_header_sync_driver(
+        &config,
+        move |supervisor, trace| {
             Arc::new(crate::zakura::LegacyGossipSink::spawn_with_trace(
                 inbound_for_zakura_sink,
                 supervisor,
                 trace,
             )) as Arc<dyn crate::zakura::Service>
-        })
-        .await
-        .expect("Zakura endpoint should start when P2P v2 is enabled");
+        },
+        header_sync_driver_startup,
+    )
+    .await
+    .expect("Zakura endpoint should start when P2P v2 is enabled");
 
     let (
         address_book,

@@ -836,6 +836,18 @@ pub enum Request {
     /// [0]: (crate::error::CommitCheckpointVerifiedError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
+    /// Persist a validated, contiguous run of Zakura headers that links to `anchor`.
+    ///
+    /// Header-only commits write separate header-sync indexes, not finalized block
+    /// indexes. They do not write transaction/body rows and therefore do not make
+    /// the block known to body-serving APIs.
+    CommitHeaderRange {
+        /// Hash of the held parent header for the first header in `headers`.
+        anchor: block::Hash,
+        /// Contiguous headers in ascending height order.
+        headers: Vec<Arc<block::Header>>,
+    },
+
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
     /// Returns
@@ -1047,6 +1059,7 @@ impl Request {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
+            Request::CommitHeaderRange { .. } => "commit_header_range",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
@@ -1098,6 +1111,10 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
+
+    /// Returns [`ReadResponse::FinalizedTip(Option<(Height, block::Hash)>)`](ReadResponse::FinalizedTip)
+    /// with the durable finalized chain tip.
+    FinalizedTip,
 
     /// Returns [`ReadResponse::TipPoolValues(Option<(Height, block::Hash, ValueBalance)>)`](ReadResponse::TipPoolValues)
     /// with the pool values of the current best chain tip.
@@ -1275,6 +1292,28 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Returns contiguous headers by height, in ascending order.
+    ///
+    /// The response stops before the first missing height and is capped by
+    /// [`MAX_HEADER_SYNC_HEIGHT_RANGE`](crate::constants::MAX_HEADER_SYNC_HEIGHT_RANGE).
+    HeadersByHeightRange {
+        /// First height to read.
+        start: block::Height,
+        /// Maximum number of headers to return.
+        count: u32,
+    },
+
+    /// Returns the highest header held on disk.
+    BestHeaderTip,
+
+    /// Returns header-known, body-missing heights in `(verified_block_tip, best_header_tip]`.
+    MissingBlockBodies {
+        /// First height to consider.
+        from: block::Height,
+        /// Maximum number of heights to return.
+        limit: u32,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1423,6 +1462,7 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::IsPruned => "is_pruned",
             ReadRequest::Tip => "tip",
+            ReadRequest::FinalizedTip => "finalized_tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
@@ -1439,6 +1479,9 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::HeadersByHeightRange { .. } => "headers_by_height_range",
+            ReadRequest::BestHeaderTip => "best_header_tip",
+            ReadRequest::MissingBlockBodies { .. } => "missing_block_bodies",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
@@ -1512,6 +1555,7 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitSemanticallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
+            | Request::CommitHeaderRange { .. }
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 

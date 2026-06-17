@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Added bounded Zakura P2P v2 upgrade prelude and control-handshake wire types,
   including transcript binding, native-vs-upgraded control validation, and
   duplicate-peer handling scaffolding.
+- Added bounded Zakura header-sync stream-5 wire messages, stateless header
+  validation, and the default `network.zakura.header_sync` config surface.
 - Include the `zebra-rollback-state` and `zebra-prune-state` utilities alongside
   `zebrad` in release Docker images and Docker CI builds.
 - Use the `5.0.0-rc.3` release identity for this fork's v5 rollback build.

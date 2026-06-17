@@ -11,8 +11,8 @@ use crate::{
     zakura::{
         legacy_gossip::ZAKURA_STREAM_GOSSIP, run_native_initiator_handshake, Frame, StreamPrelude,
         ZakuraHandshakeConfig, ZakuraLocalLimits, ZakuraPeerId, FRAME_HEADER_BYTES, P2P_V2_ALPN,
-        STREAM_PRELUDE_MAGIC, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_LEGACY_GOSSIP,
-        ZAKURA_STREAM_DISCOVERY,
+        STREAM_PRELUDE_MAGIC, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
+        ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_HEADER_SYNC,
     },
     BoxError, Config,
 };
@@ -33,7 +33,7 @@ impl HostilePeer {
         Self::connect_native_with_capabilities(
             victim,
             seed,
-            ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_DISCOVERY,
+            ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
         )
         .await
     }
@@ -87,7 +87,10 @@ impl HostilePeer {
 
     /// Open one stream and send a valid prelude followed by `frame`.
     pub async fn send_raw_frame(&self, stream_kind: u16, frame: Frame) -> Result<(), BoxError> {
-        if matches!(stream_kind, ZAKURA_STREAM_GOSSIP | ZAKURA_STREAM_DISCOVERY) {
+        if matches!(
+            stream_kind,
+            ZAKURA_STREAM_GOSSIP | ZAKURA_STREAM_DISCOVERY | ZAKURA_STREAM_HEADER_SYNC
+        ) {
             return self.send_ordered_raw_frame(stream_kind, frame).await;
         }
 

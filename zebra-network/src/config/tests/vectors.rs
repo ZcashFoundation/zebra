@@ -1,5 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
+use std::time::Duration;
+
 use static_assertions::const_assert;
 use zebra_chain::{
     block::Height,
@@ -11,6 +13,7 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    zakura::{DEFAULT_HS_MAX_INFLIGHT, DEFAULT_HS_RANGE},
     Config,
 };
 
@@ -161,6 +164,20 @@ fn p2p_v2_old_config_without_zakura_fields_uses_safe_defaults() {
     assert!(config.zakura.bootstrap_peers.is_empty());
     assert!(config.zakura.max_connections > 0);
     assert!(config.zakura.max_pending_handshakes > 0);
+    assert_eq!(
+        config.zakura.header_sync.max_headers_per_response,
+        DEFAULT_HS_RANGE
+    );
+    assert_eq!(
+        config.zakura.header_sync.max_inflight_requests,
+        DEFAULT_HS_MAX_INFLIGHT
+    );
+    assert_eq!(
+        config.zakura.header_sync.status_refresh_interval,
+        Duration::from_secs(30)
+    );
+    assert_eq!(config.zakura.header_sync.anchor_height, None);
+    assert_eq!(config.zakura.header_sync.anchor_hash, None);
 }
 
 #[test]
@@ -185,6 +202,18 @@ fn p2p_v2_unknown_future_config_fields_are_rejected() {
         nested.to_string().contains("unknown field"),
         "unexpected error for unknown nested field: {nested}",
     );
+
+    let header_sync = toml::from_str::<Config>(
+        r#"
+        [zakura.header_sync]
+        future_field = true
+        "#,
+    )
+    .expect_err("deny_unknown_fields rejects unknown header-sync fields");
+    assert!(
+        header_sync.to_string().contains("unknown field"),
+        "unexpected error for unknown header-sync field: {header_sync}",
+    );
 }
 
 #[test]
@@ -203,6 +232,11 @@ fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
         stream_open_rate_per_second = 11
         message_rate_per_second = 13
         trace_dir = "target/zakura-test-traces"
+
+        [zakura.header_sync]
+        max_headers_per_response = 333
+        max_inflight_requests = 9
+        status_refresh_interval = "45s"
         "#,
     )
     .unwrap();
@@ -214,6 +248,10 @@ fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
     assert!(serialized.contains("bootstrap_peers"));
     assert!(serialized.contains("max_connections = 7"));
     assert!(serialized.contains("trace_dir = \"target/zakura-test-traces\""));
+    assert!(serialized.contains("[zakura.header_sync]"));
+    assert!(serialized.contains("max_headers_per_response = 333"));
+    assert!(serialized.contains("max_inflight_requests = 9"));
+    assert!(serialized.contains("status_refresh_interval = \"45s\""));
     assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), config);
 }
 

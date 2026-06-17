@@ -8,6 +8,8 @@ use std::{
 
 use serde_json::Value;
 
+use crate::zakura::trace::header_sync_trace as hs_trace;
+
 /// Loaded Zakura trace tables.
 #[derive(Clone, Debug, Default)]
 pub struct TraceReader {
@@ -219,6 +221,65 @@ impl<'a> TraceQuery<'a> {
             self.rows()
         );
     }
+
+    /// Assert a `header_get_headers_sent` range request row.
+    pub fn assert_header_range_request(&self, start_height: u32, count: u32) {
+        self.assert_header_range(hs_trace::HEADER_GET_HEADERS_SENT, start_height, count);
+    }
+
+    /// Assert a `header_headers_received` response row.
+    pub fn assert_header_range_response(&self, start_height: u32, count: u32) {
+        self.assert_header_range(hs_trace::HEADER_HEADERS_RECEIVED, start_height, count);
+    }
+
+    /// Assert a committed header range row.
+    pub fn assert_header_range_commit(&self, start_height: u32, count: u32) {
+        self.assert_header_range(hs_trace::HEADER_RANGE_COMMITTED, start_height, count);
+    }
+
+    /// Assert a rejected header range row with a bounded reason label.
+    pub fn assert_header_range_rejected(&self, start_height: u32, count: u32, reason: &str) {
+        self.assert_row(
+            hs_trace::HEADER_RANGE_REJECTED,
+            &[
+                (
+                    hs_trace::RANGE_START,
+                    TraceValue::U64(u64::from(start_height)),
+                ),
+                (hs_trace::RANGE_COUNT, TraceValue::U64(u64::from(count))),
+                (hs_trace::REASON, TraceValue::Str(reason)),
+            ],
+        );
+    }
+
+    /// Assert a `NewBlock` dedup row with its bounded reason label.
+    pub fn assert_header_new_block_deduped(&self, reason: &str) {
+        self.assert_row(
+            hs_trace::HEADER_NEW_BLOCK_DEDUPED,
+            &[(hs_trace::REASON, TraceValue::Str(reason))],
+        );
+    }
+
+    /// Assert a requested disconnect row with its bounded reason label.
+    pub fn assert_header_disconnect(&self, reason: &str) {
+        self.assert_row(
+            hs_trace::HEADER_PEER_DISCONNECT_REQUESTED,
+            &[(hs_trace::REASON, TraceValue::Str(reason))],
+        );
+    }
+
+    fn assert_header_range(&self, event: &str, start_height: u32, count: u32) {
+        self.assert_row(
+            event,
+            &[
+                (
+                    hs_trace::RANGE_START,
+                    TraceValue::U64(u64::from(start_height)),
+                ),
+                (hs_trace::RANGE_COUNT, TraceValue::U64(u64::from(count))),
+            ],
+        );
+    }
 }
 
 fn trace_value_matches(actual: Option<&Value>, expected: TraceValue<'_>) -> bool {
@@ -325,5 +386,40 @@ mod tests {
             .collect();
 
         assert_eq!(events, ["from-a", "from-b"]);
+    }
+
+    #[test]
+    fn reader_asserts_header_sync_rows_without_ordering() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let node_dir = dir.path().join("node-01");
+        fs::create_dir_all(&node_dir).expect("node dir");
+        fs::write(
+            node_dir.join("header_sync.jsonl"),
+            r#"{"node":"01","event":"header_peer_disconnect_requested","reason":"invalid_range"}"#
+                .to_string()
+                + "\n"
+                + r#"{"node":"01","event":"header_new_block_deduped","reason":"seen_cache"}"#
+                + "\n"
+                + r#"{"node":"01","event":"header_range_committed","range_start":4,"range_count":2,"reason":null}"#
+                + "\n"
+                + r#"{"node":"01","event":"header_headers_received","range_start":4,"range_count":2}"#
+                + "\n"
+                + r#"{"node":"01","event":"header_get_headers_sent","range_start":4,"range_count":2}"#
+                + "\n",
+        )
+        .expect("trace file");
+
+        let reader = TraceReader::load(dir.path()).expect("reader");
+        let header_sync = reader.node("01").table("header_sync");
+
+        header_sync.assert_header_range_request(4, 2);
+        header_sync.assert_header_range_response(4, 2);
+        header_sync.assert_header_range_commit(4, 2);
+        header_sync.assert_header_new_block_deduped("seen_cache");
+        header_sync.assert_header_disconnect("invalid_range");
+        header_sync.assert_row(
+            hs_trace::HEADER_RANGE_COMMITTED,
+            &[(hs_trace::REASON, TraceValue::Null)],
+        );
     }
 }

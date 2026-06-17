@@ -314,6 +314,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
+    /// Response to [`ReadRequest::FinalizedTip`] with the durable finalized chain tip.
+    FinalizedTip(Option<(block::Height, block::Hash)>),
+
     /// Response to [`ReadRequest::TipPoolValues`] with
     /// the current best chain tip and its [`ValueBalance`].
     TipPoolValues {
@@ -381,6 +384,15 @@ pub enum ReadResponse {
 
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
+
+    /// Response to [`ReadRequest::HeadersByHeightRange`].
+    Headers(Vec<(block::Height, block::Hash, Arc<block::Header>)>),
+
+    /// Response to [`ReadRequest::BestHeaderTip`].
+    BestHeaderTip(Option<(block::Height, block::Hash)>),
+
+    /// Response to [`ReadRequest::MissingBlockBodies`].
+    MissingBlockBodies(Vec<block::Height>),
 
     /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
     /// _best_ non-finalized chain, or the finalized chain.
@@ -505,6 +517,9 @@ impl TryFrom<ReadResponse> for Response {
     fn try_from(response: ReadResponse) -> Result<Response, Self::Error> {
         match response {
             ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
+            ReadResponse::FinalizedTip(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
             ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
             ReadResponse::BestChainNextMedianTimePast(median_time_past) => Ok(Response::BestChainNextMedianTimePast(median_time_past)),
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
@@ -552,6 +567,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
+            | ReadResponse::Headers(_)
+            | ReadResponse::BestHeaderTip(_)
+            | ReadResponse::MissingBlockBodies(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_) => {
                 Err("there is no corresponding Response for this ReadResponse")

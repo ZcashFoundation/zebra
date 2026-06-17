@@ -133,18 +133,43 @@ fn contains_peer(peers: &[ZakuraPeerId], expected: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::HostilePeer;
+    use super::super::{trace_reader::TraceValue, HostilePeer, WaitError};
     use super::*;
     use crate::{
+        zakura::trace::header_sync_trace as hs_trace,
         zakura::{
-            DiscoveryMessage, Frame, FramedSend, Peer, Service, Stream, ZakuraLocalLimits,
-            ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_STREAM_DISCOVERY,
-            ZAKURA_STREAM_GOSSIP,
+            spawn_header_sync_reactor, DiscoveryMessage, Frame, FramedSend, HeaderSyncAction,
+            HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers, HeaderSyncHandle,
+            HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncStartup, HeaderSyncStatus, Peer,
+            Service, Stream, ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraTrace,
+            ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
+            ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_GOSSIP, ZAKURA_STREAM_HEADER_SYNC,
         },
         Config,
     };
-    use std::{collections::HashMap, sync::Arc};
-    use tokio::sync::{mpsc, Mutex};
+    use std::{
+        collections::{BTreeMap, HashMap, HashSet},
+        sync::{Arc, Mutex as StdMutex},
+    };
+    use tokio::{
+        sync::{mpsc, Mutex},
+        task::JoinHandle,
+    };
+    use tokio_util::sync::CancellationToken;
+    use zebra_chain::{
+        block,
+        parameters::{
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredCheckpoints, Parameters as TestnetParameters,
+            },
+            Network,
+        },
+        serialization::ZcashDeserializeInto,
+    };
+    use zebra_test::vectors::{
+        BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES, BLOCK_MAINNET_3_BYTES, BLOCK_MAINNET_4_BYTES,
+        BLOCK_MAINNET_5_BYTES, BLOCK_MAINNET_GENESIS_BYTES,
+    };
 
     #[derive(Debug, Default)]
     struct OrderedSourceProbeService {
@@ -308,6 +333,849 @@ mod tests {
         .map_err(|_| -> BoxError { format!("timed out waiting for {label}").into() })?
     }
 
+    #[derive(Debug)]
+    struct E2eHeaderStore {
+        headers: BTreeMap<block::Height, (block::Hash, Arc<block::Header>)>,
+        bodies: HashSet<block::Hash>,
+        finalized_height: block::Height,
+        verified_block_tip: block::Height,
+        reject_next_commit: Option<HeaderSyncCommitFailureKind>,
+    }
+
+    impl E2eHeaderStore {
+        fn genesis_only() -> Self {
+            let genesis = mainnet_block(&BLOCK_MAINNET_GENESIS_BYTES);
+            let mut headers = BTreeMap::new();
+            headers.insert(block::Height(0), (genesis.hash(), genesis.header.clone()));
+            Self {
+                headers,
+                bodies: HashSet::from([genesis.hash()]),
+                finalized_height: block::Height(0),
+                verified_block_tip: block::Height(0),
+                reject_next_commit: None,
+            }
+        }
+
+        fn with_headers(up_to: u32) -> Self {
+            let mut store = Self::genesis_only();
+            for height in 1..=up_to {
+                let block = mainnet_block(block_bytes(height));
+                store
+                    .headers
+                    .insert(block::Height(height), (block.hash(), block.header.clone()));
+            }
+            store
+        }
+
+        fn with_checkpoint_anchor(height: u32) -> Self {
+            let mut store = Self::genesis_only();
+            let block = mainnet_block(block_bytes(height));
+            store
+                .headers
+                .insert(block::Height(height), (block.hash(), block.header.clone()));
+            store.finalized_height = block::Height(height);
+            store.verified_block_tip = block::Height(0);
+            store
+        }
+
+        fn best_header_tip(&self) -> (block::Height, block::Hash) {
+            self.headers
+                .last_key_value()
+                .map(|(height, (hash, _))| (*height, *hash))
+                .expect("test stores always contain genesis")
+        }
+
+        fn frontiers(&self) -> HeaderSyncFrontiers {
+            HeaderSyncFrontiers {
+                finalized_height: self.finalized_height,
+                verified_block_tip: self.verified_block_tip,
+            }
+        }
+
+        fn headers_by_range(&self, start: block::Height, count: u32) -> Vec<Arc<block::Header>> {
+            let mut headers = Vec::new();
+            for offset in 0..count {
+                let Some(height) = start + i64::from(offset) else {
+                    break;
+                };
+                let Some((_hash, header)) = self.headers.get(&height) else {
+                    break;
+                };
+                headers.push(header.clone());
+            }
+            headers
+        }
+
+        fn commit_headers(
+            &mut self,
+            anchor: block::Hash,
+            start: block::Height,
+            headers: Vec<Arc<block::Header>>,
+            finalized: bool,
+        ) -> Result<(block::Height, block::Hash), HeaderSyncCommitFailureKind> {
+            if let Some(kind) = self.reject_next_commit.take() {
+                return Err(kind);
+            }
+
+            let mut expected_previous = anchor;
+            for (offset, header) in headers.iter().enumerate() {
+                if header.previous_block_hash != expected_previous {
+                    return Err(HeaderSyncCommitFailureKind::InvalidPeerRange);
+                }
+                let height = (start
+                    + i64::try_from(offset)
+                        .map_err(|_| HeaderSyncCommitFailureKind::InvalidPeerRange)?)
+                .ok_or(HeaderSyncCommitFailureKind::InvalidPeerRange)?;
+                let hash = block::Hash::from(header.as_ref());
+                self.headers.insert(height, (hash, header.clone()));
+                expected_previous = hash;
+            }
+
+            let count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
+            let tip_height = block::Height(start.0.saturating_add(count.saturating_sub(1)));
+            let tip_hash = expected_previous;
+            if finalized {
+                self.finalized_height = self.finalized_height.max(tip_height);
+            }
+
+            Ok((tip_height, tip_hash))
+        }
+
+        fn commit_body(&mut self, block: Arc<block::Block>) {
+            let height = block.coinbase_height().expect("test block has height");
+            let hash = block.hash();
+            self.headers.insert(height, (hash, block.header.clone()));
+            self.bodies.insert(hash);
+            self.verified_block_tip = self.verified_block_tip.max(height);
+        }
+
+        fn has_body(&self, hash: block::Hash) -> bool {
+            self.bodies.contains(&hash)
+        }
+
+        fn missing_bodies(&self, from: block::Height, limit: u32) -> Vec<block::Height> {
+            let (tip, _) = self.best_header_tip();
+            let start = self
+                .verified_block_tip
+                .next()
+                .unwrap_or(self.verified_block_tip)
+                .max(from);
+
+            (start.0..=tip.0)
+                .map(block::Height)
+                .filter(|height| {
+                    self.headers
+                        .get(height)
+                        .is_some_and(|(hash, _)| !self.bodies.contains(hash))
+                })
+                .take(limit as usize)
+                .collect()
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct E2eNodeView {
+        peer_id: ZakuraPeerId,
+        handle: HeaderSyncHandle,
+        store: Arc<StdMutex<E2eHeaderStore>>,
+        observed_gaps: Arc<Mutex<Vec<(block::Height, block::Height)>>>,
+        disconnects: Arc<Mutex<Vec<(ZakuraPeerId, HeaderSyncMisbehavior)>>>,
+        sent: Arc<Mutex<Vec<(ZakuraPeerId, HeaderSyncMessage)>>>,
+    }
+
+    #[derive(Debug)]
+    struct E2eNode {
+        view: E2eNodeView,
+        actions: Option<mpsc::Receiver<HeaderSyncAction>>,
+        task: JoinHandle<()>,
+        shutdown: CancellationToken,
+    }
+
+    #[derive(Debug)]
+    struct HeaderSyncE2eCluster {
+        nodes: Vec<E2eNode>,
+        drivers: Vec<JoinHandle<()>>,
+    }
+
+    impl HeaderSyncE2eCluster {
+        fn new() -> Self {
+            Self {
+                nodes: Vec::new(),
+                drivers: Vec::new(),
+            }
+        }
+
+        fn spawn_node(
+            &mut self,
+            seed: u8,
+            network: Network,
+            anchor: (block::Height, block::Hash),
+            store: E2eHeaderStore,
+            trace: ZakuraTrace,
+        ) -> Result<usize, BoxError> {
+            let store = Arc::new(StdMutex::new(store));
+            let startup_store = store
+                .lock()
+                .map_err(|_| std::io::Error::other("test store mutex is poisoned"))?;
+            let mut startup = HeaderSyncStartup::new(
+                network,
+                anchor,
+                startup_store.frontiers(),
+                Some(startup_store.best_header_tip()),
+                ZakuraHeaderSyncConfig::default(),
+                4 * 1024 * 1024,
+            );
+            drop(startup_store);
+            startup.trace = trace;
+            startup.range_state_actions_enabled = true;
+            startup.inbound_new_block_acceptance_enabled = true;
+            startup.status_refresh_interval = Duration::from_millis(200);
+            startup.request_timeout = Duration::from_millis(500);
+            let shutdown = CancellationToken::new();
+            startup.shutdown = shutdown.clone();
+
+            let (handle, actions, task) = spawn_header_sync_reactor(startup)?;
+            let view = E2eNodeView {
+                peer_id: e2e_peer(seed),
+                handle,
+                store,
+                observed_gaps: Arc::new(Mutex::new(Vec::new())),
+                disconnects: Arc::new(Mutex::new(Vec::new())),
+                sent: Arc::new(Mutex::new(Vec::new())),
+            };
+            self.nodes.push(E2eNode {
+                view,
+                actions: Some(actions),
+                task,
+                shutdown,
+            });
+            Ok(self.nodes.len() - 1)
+        }
+
+        fn start_drivers(&mut self) {
+            let views: Vec<_> = self.nodes.iter().map(|node| node.view.clone()).collect();
+            let peer_to_index: HashMap<_, _> = views
+                .iter()
+                .enumerate()
+                .map(|(index, view)| (view.peer_id.clone(), index))
+                .collect();
+
+            for index in 0..self.nodes.len() {
+                let Some(actions) = self.nodes[index].actions.take() else {
+                    continue;
+                };
+                self.drivers.push(tokio::spawn(drive_e2e_node(
+                    index,
+                    actions,
+                    views.clone(),
+                    peer_to_index.clone(),
+                )));
+            }
+        }
+
+        async fn connect_all(&self) {
+            for left in 0..self.nodes.len() {
+                for right in 0..self.nodes.len() {
+                    if left == right {
+                        continue;
+                    }
+                    self.nodes[left]
+                        .view
+                        .handle
+                        .send(HeaderSyncEvent::PeerConnected(
+                            self.nodes[right].view.peer_id.clone(),
+                        ))
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+
+        async fn connect_peer(&self, node: usize, peer: ZakuraPeerId) {
+            self.nodes[node]
+                .view
+                .handle
+                .send(HeaderSyncEvent::PeerConnected(peer))
+                .await
+                .unwrap();
+        }
+
+        async fn inject(&self, node: usize, peer: ZakuraPeerId, msg: HeaderSyncMessage) {
+            self.nodes[node]
+                .view
+                .handle
+                .send(HeaderSyncEvent::WireMessage { peer, msg })
+                .await
+                .unwrap();
+        }
+
+        async fn commit_body(&self, node: usize, block: Arc<block::Block>) {
+            self.nodes[node]
+                .view
+                .store
+                .lock()
+                .expect("test store mutex is not poisoned")
+                .commit_body(block.clone());
+            let height = block.coinbase_height().expect("test block has height");
+            self.nodes[node]
+                .view
+                .handle
+                .send(HeaderSyncEvent::FullBlockCommitted {
+                    height,
+                    hash: block.hash(),
+                    header: block.header.clone(),
+                })
+                .await
+                .unwrap();
+        }
+
+        async fn missing_bodies(&self, node: usize) -> Vec<block::Height> {
+            self.nodes[node]
+                .view
+                .store
+                .lock()
+                .expect("test store mutex is not poisoned")
+                .missing_bodies(block::Height(1), 100)
+        }
+
+        async fn finalized_height(&self, node: usize) -> block::Height {
+            self.nodes[node]
+                .view
+                .store
+                .lock()
+                .expect("test store mutex is not poisoned")
+                .finalized_height
+        }
+
+        async fn reject_next_commit(&self, node: usize, kind: HeaderSyncCommitFailureKind) {
+            self.nodes[node]
+                .view
+                .store
+                .lock()
+                .expect("test store mutex is not poisoned")
+                .reject_next_commit = Some(kind);
+        }
+
+        async fn wait_for_tip(&self, node: usize, height: block::Height) -> Result<(), BoxError> {
+            let handle = self.nodes[node].view.handle.clone();
+            await_until("header-sync e2e best tip", Duration::from_secs(5), || {
+                handle.best_header_tip().0 >= height
+            })
+            .await
+            .map_err(Into::into)
+        }
+
+        async fn wait_for_body(&self, node: usize, hash: block::Hash) -> Result<(), BoxError> {
+            let store = self.nodes[node].view.store.clone();
+            await_until(
+                "header-sync e2e body commit",
+                Duration::from_secs(5),
+                || {
+                    store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .has_body(hash)
+                },
+            )
+            .await
+            .map_err(Into::into)
+        }
+
+        async fn disconnect_reasons(&self, node: usize) -> Vec<HeaderSyncMisbehavior> {
+            self.nodes[node]
+                .view
+                .disconnects
+                .lock()
+                .await
+                .iter()
+                .map(|(_, reason)| *reason)
+                .collect()
+        }
+
+        async fn wait_for_disconnect_reason(
+            &self,
+            node: usize,
+            reason: HeaderSyncMisbehavior,
+        ) -> Result<(), BoxError> {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if self.disconnect_reasons(node).await.contains(&reason) {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    return Ok(());
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(Box::new(WaitError::new(
+                        "header-sync e2e disconnect reason",
+                        Duration::from_secs(5),
+                    )));
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        async fn wait_for_get_headers(
+            &self,
+            node: usize,
+            peer: &ZakuraPeerId,
+            start_height: block::Height,
+            count: u32,
+        ) -> Result<(), BoxError> {
+            let sent = self.nodes[node].view.sent.clone();
+            let peer = peer.clone();
+            await_until(
+                format!(
+                    "header-sync e2e outbound getheaders peer={peer:?} start={start_height:?} count={count}"
+                ),
+                Duration::from_secs(5),
+                || {
+                    sent.try_lock().is_ok_and(|sent| {
+                        sent.iter().any(|(sent_peer, msg)| {
+                            sent_peer == &peer
+                                && matches!(
+                                    msg,
+                                    HeaderSyncMessage::GetHeaders {
+                                        start_height: actual_start,
+                                        count: actual_count,
+                                    } if *actual_start == start_height && *actual_count == count
+                                )
+                        })
+                    })
+                },
+            )
+            .await
+            .map_err(Into::into)
+        }
+
+        async fn observed_gaps(&self, node: usize) -> Vec<(block::Height, block::Height)> {
+            self.nodes[node].view.observed_gaps.lock().await.clone()
+        }
+
+        async fn shutdown(&mut self) {
+            for node in &self.nodes {
+                node.shutdown.cancel();
+                node.task.abort();
+            }
+            for driver in self.drivers.drain(..) {
+                driver.abort();
+            }
+        }
+    }
+
+    async fn drive_e2e_node(
+        index: usize,
+        mut actions: mpsc::Receiver<HeaderSyncAction>,
+        nodes: Vec<E2eNodeView>,
+        peer_to_index: HashMap<ZakuraPeerId, usize>,
+    ) {
+        let local = nodes[index].clone();
+        while let Some(action) = actions.recv().await {
+            match action {
+                HeaderSyncAction::SendMessage { peer, msg } => {
+                    if let Some(target) = peer_to_index.get(&peer) {
+                        let _ = nodes[*target]
+                            .handle
+                            .send(HeaderSyncEvent::WireMessage {
+                                peer: local.peer_id.clone(),
+                                msg,
+                            })
+                            .await;
+                    } else {
+                        local.sent.lock().await.push((peer, msg));
+                    }
+                }
+                HeaderSyncAction::ForwardNewBlock { peer, block, .. } => {
+                    if let Some(target) = peer_to_index.get(&peer) {
+                        let _ = nodes[*target]
+                            .handle
+                            .send(HeaderSyncEvent::WireMessage {
+                                peer: local.peer_id.clone(),
+                                msg: HeaderSyncMessage::NewBlock(block),
+                            })
+                            .await;
+                    } else {
+                        local
+                            .sent
+                            .lock()
+                            .await
+                            .push((peer, HeaderSyncMessage::NewBlock(block)));
+                    }
+                }
+                HeaderSyncAction::QueryHeadersByHeightRange { peer, start, count } => {
+                    let headers = local
+                        .store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .headers_by_range(start, count);
+                    let returned_count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
+                    if let Some(target) = peer_to_index.get(&peer) {
+                        let _ = nodes[*target]
+                            .handle
+                            .send(HeaderSyncEvent::WireMessage {
+                                peer: local.peer_id.clone(),
+                                msg: HeaderSyncMessage::Headers(headers),
+                            })
+                            .await;
+                        let _ = local
+                            .handle
+                            .send(HeaderSyncEvent::HeaderRangeResponseFinished {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                returned_count,
+                            })
+                            .await;
+                    }
+                }
+                HeaderSyncAction::CommitHeaderRange {
+                    peer,
+                    anchor,
+                    start_height,
+                    headers,
+                    finalized,
+                } => {
+                    let count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
+                    let result = local
+                        .store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .commit_headers(anchor, start_height, headers, finalized);
+                    match result {
+                        Ok((tip_height, tip_hash)) => {
+                            let frontiers = local
+                                .store
+                                .lock()
+                                .expect("test store mutex is not poisoned")
+                                .frontiers();
+                            let _ = local
+                                .handle
+                                .send(HeaderSyncEvent::HeaderRangeCommitted {
+                                    start_height,
+                                    tip_height,
+                                    tip_hash,
+                                })
+                                .await;
+                            let _ = local
+                                .handle
+                                .send(HeaderSyncEvent::StateFrontiersChanged(frontiers))
+                                .await;
+                        }
+                        Err(kind) => {
+                            let _ = local
+                                .handle
+                                .send(HeaderSyncEvent::HeaderRangeCommitFailed {
+                                    peer,
+                                    start_height,
+                                    count,
+                                    kind,
+                                })
+                                .await;
+                        }
+                    }
+                }
+                HeaderSyncAction::QueryBestHeaderTip => {
+                    let (tip_height, tip_hash) = local
+                        .store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .best_header_tip();
+                    let _ = local
+                        .handle
+                        .send(HeaderSyncEvent::HeaderRangeCommitted {
+                            start_height: tip_height,
+                            tip_height,
+                            tip_hash,
+                        })
+                        .await;
+                }
+                HeaderSyncAction::QueryMissingBlockBodies { from, limit } => {
+                    let heights = local
+                        .store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .missing_bodies(from, limit);
+                    if let (Some(first), Some(last)) =
+                        (heights.first().copied(), heights.last().copied())
+                    {
+                        local.observed_gaps.lock().await.push((first, last));
+                    }
+                }
+                HeaderSyncAction::BodyGaps { from, to } => {
+                    local.observed_gaps.lock().await.push((from, to));
+                }
+                HeaderSyncAction::NewBlockReceived {
+                    peer,
+                    height,
+                    hash,
+                    block,
+                } => {
+                    if local
+                        .store
+                        .lock()
+                        .expect("test store mutex is not poisoned")
+                        .has_body(hash)
+                    {
+                        let _ = local
+                            .handle
+                            .send(HeaderSyncEvent::NewBlockDuplicate { peer, height, hash })
+                            .await;
+                    } else {
+                        local
+                            .store
+                            .lock()
+                            .expect("test store mutex is not poisoned")
+                            .commit_body(block.clone());
+                        let _ = local
+                            .handle
+                            .send(HeaderSyncEvent::NewBlockAccepted {
+                                peer,
+                                height,
+                                hash,
+                                block,
+                            })
+                            .await;
+                    }
+                }
+                HeaderSyncAction::Misbehavior { peer, reason } => {
+                    local.disconnects.lock().await.push((peer.clone(), reason));
+                    let _ = local
+                        .handle
+                        .send(HeaderSyncEvent::PeerDisconnected(peer))
+                        .await;
+                }
+            }
+        }
+    }
+
+    fn e2e_peer(byte: u8) -> ZakuraPeerId {
+        ZakuraPeerId::new(vec![byte; 32]).expect("test peer id is within bounds")
+    }
+
+    fn mainnet_block(bytes: &[u8]) -> Arc<block::Block> {
+        Arc::new(bytes.zcash_deserialize_into().expect("block vector parses"))
+    }
+
+    fn block_bytes(height: u32) -> &'static [u8] {
+        match height {
+            1 => &BLOCK_MAINNET_1_BYTES,
+            2 => &BLOCK_MAINNET_2_BYTES,
+            3 => &BLOCK_MAINNET_3_BYTES,
+            4 => &BLOCK_MAINNET_4_BYTES,
+            5 => &BLOCK_MAINNET_5_BYTES,
+            _ => panic!("missing test vector for height {height}"),
+        }
+    }
+
+    fn mainnet_genesis_hash() -> block::Hash {
+        mainnet_block(&BLOCK_MAINNET_GENESIS_BYTES).hash()
+    }
+
+    fn status_for_tip(
+        height: u32,
+        max_headers_per_response: u32,
+        max_inflight_requests: u16,
+    ) -> HeaderSyncMessage {
+        let tip_hash = if height == 0 {
+            mainnet_genesis_hash()
+        } else {
+            mainnet_block(block_bytes(height)).hash()
+        };
+
+        HeaderSyncMessage::Status(HeaderSyncStatus {
+            tip_height: block::Height(height),
+            tip_hash,
+            anchor_height: block::Height(0),
+            max_headers_per_response,
+            max_inflight_requests,
+        })
+    }
+
+    fn e2e_network(checkpoints: impl IntoIterator<Item = u32>) -> Network {
+        let checkpoints = std::iter::once((block::Height(0), mainnet_genesis_hash()))
+            .chain(checkpoints.into_iter().map(|height| {
+                (
+                    block::Height(height),
+                    mainnet_block(block_bytes(height)).hash(),
+                )
+            }))
+            .collect();
+
+        TestnetParameters::build()
+            .with_genesis_hash(mainnet_genesis_hash())
+            .expect("mainnet genesis vector hash parses")
+            .with_activation_heights(ConfiguredActivationHeights {
+                before_overwinter: None,
+                overwinter: Some(1),
+                sapling: Some(1),
+                blossom: Some(1),
+                heartwood: Some(1),
+                canopy: Some(1),
+                nu5: None,
+                nu6: None,
+                nu6_1: None,
+                nu7: None,
+                #[cfg(zcash_unstable = "zfuture")]
+                zfuture: None,
+            })
+            .expect("height-1 activation set is valid")
+            .with_funding_streams(Vec::new())
+            .with_checkpoints(ConfiguredCheckpoints::HeightsAndHashes(checkpoints))
+            .expect("e2e checkpoints use valid header hashes")
+            .to_network()
+            .expect("e2e network has enough checkpoint coverage")
+    }
+
+    fn e2e_network_with_checkpoint_hash(height: u32, hash: block::Hash) -> Network {
+        let checkpoints = vec![
+            (block::Height(0), mainnet_genesis_hash()),
+            (block::Height(height), hash),
+        ];
+
+        TestnetParameters::build()
+            .with_genesis_hash(mainnet_genesis_hash())
+            .expect("mainnet genesis vector hash parses")
+            .with_activation_heights(ConfiguredActivationHeights {
+                before_overwinter: None,
+                overwinter: Some(1),
+                sapling: Some(1),
+                blossom: Some(1),
+                heartwood: Some(1),
+                canopy: Some(1),
+                nu5: None,
+                nu6: None,
+                nu6_1: None,
+                nu7: None,
+                #[cfg(zcash_unstable = "zfuture")]
+                zfuture: None,
+            })
+            .expect("height-1 activation set is valid")
+            .with_funding_streams(Vec::new())
+            .with_checkpoints(ConfiguredCheckpoints::HeightsAndHashes(checkpoints))
+            .expect("e2e checkpoints use valid header hashes")
+            .to_network()
+            .expect("e2e network has enough checkpoint coverage")
+    }
+
+    fn checkpoint_network(checkpoint_height: u32) -> (Network, block::Hash) {
+        let checkpoint_hash = mainnet_block(block_bytes(checkpoint_height)).hash();
+        (e2e_network([checkpoint_height]), checkpoint_hash)
+    }
+
+    fn header_sync_test_builder(
+        seed: u64,
+        network: Network,
+        trace: &mut TraceCapture,
+    ) -> super::super::ZakuraTestNodeBuilder {
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        ZakuraTestNode::builder(seed)
+            .tracer(trace.tracer_for_node(seed))
+            .header_sync_driver(
+                network,
+                anchor,
+                HeaderSyncFrontiers {
+                    finalized_height: block::Height(0),
+                    verified_block_tip: block::Height(0),
+                },
+                Some(anchor),
+            )
+    }
+
+    async fn drive_native_header_sync_actions(
+        node: &ZakuraTestNode,
+        disconnects: Arc<StdMutex<Vec<HeaderSyncMisbehavior>>>,
+    ) -> JoinHandle<()> {
+        let endpoint = node.endpoint();
+        let supervisor = node.supervisor();
+        let mut actions = node
+            .take_header_sync_actions()
+            .await
+            .expect("header-sync action receiver is enabled");
+
+        tokio::spawn(async move {
+            while let Some(action) = actions.recv().await {
+                match action {
+                    HeaderSyncAction::SendMessage { peer, msg } => {
+                        endpoint.send_header_sync_message(&peer, msg).await;
+                    }
+                    HeaderSyncAction::ForwardNewBlock { peer, block, .. } => {
+                        endpoint
+                            .send_header_sync_message(&peer, HeaderSyncMessage::NewBlock(block))
+                            .await;
+                    }
+                    HeaderSyncAction::Misbehavior { peer, reason } => {
+                        disconnects
+                            .lock()
+                            .expect("disconnect list mutex is not poisoned")
+                            .push(reason);
+                        let _ = supervisor.disconnect_peer(&peer).await;
+                    }
+                    HeaderSyncAction::QueryHeadersByHeightRange { peer, start, count } => {
+                        let Some(handle) = endpoint.header_sync() else {
+                            continue;
+                        };
+                        let _ = handle
+                            .send(HeaderSyncEvent::HeaderRangeResponseFinished {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                returned_count: 0,
+                            })
+                            .await;
+                    }
+                    HeaderSyncAction::CommitHeaderRange {
+                        peer,
+                        start_height,
+                        headers,
+                        ..
+                    } => {
+                        let Some(handle) = endpoint.header_sync() else {
+                            continue;
+                        };
+                        let count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
+                        let _ = handle
+                            .send(HeaderSyncEvent::HeaderRangeCommitFailed {
+                                peer,
+                                start_height,
+                                count,
+                                kind: HeaderSyncCommitFailureKind::Local,
+                            })
+                            .await;
+                    }
+                    HeaderSyncAction::NewBlockReceived {
+                        peer, height, hash, ..
+                    } => {
+                        let Some(handle) = endpoint.header_sync() else {
+                            continue;
+                        };
+                        let _ = handle
+                            .send(HeaderSyncEvent::NewBlockDuplicate { peer, height, hash })
+                            .await;
+                    }
+                    HeaderSyncAction::QueryBestHeaderTip
+                    | HeaderSyncAction::QueryMissingBlockBodies { .. }
+                    | HeaderSyncAction::BodyGaps { .. } => {}
+                }
+            }
+        })
+    }
+
+    async fn wait_for_native_disconnect(
+        disconnects: Arc<StdMutex<Vec<HeaderSyncMisbehavior>>>,
+        reason: HeaderSyncMisbehavior,
+    ) -> Result<(), BoxError> {
+        await_until(
+            "native header-sync disconnect reason",
+            Duration::from_secs(5),
+            || {
+                disconnects
+                    .lock()
+                    .expect("disconnect list mutex is not poisoned")
+                    .contains(&reason)
+            },
+        )
+        .await
+        .map_err(Into::into)
+    }
+
     #[tokio::test]
     #[ignore = "native handler mesh smoke is exercised by the zakura-integration nextest profile once dial scheduling is made deterministic"]
     async fn cluster_forms_native_two_node_mesh() -> Result<(), BoxError> {
@@ -450,6 +1318,98 @@ mod tests {
             .encode()
             .expect("empty GetPeers encodes"),
         }
+    }
+
+    #[tokio::test]
+    async fn recorder_transport_survives_malformed_header_sync_frame() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut cluster = ZakuraTestCluster::new();
+        let victim_idx = cluster.spawn_node(5).await?;
+        let victim = cluster.node(victim_idx);
+        let recorder = victim.recorder();
+        let hostile = HostilePeer::connect_native(victim, 6).await?;
+
+        let before = b"before-header-sync-error".to_vec();
+        let bad_header_sync_payload = vec![99];
+        hostile
+            .send_frame(ZAKURA_STREAM_HEADER_SYNC, bad_header_sync_payload.clone())
+            .await?;
+        hostile.send_frame(2, before.clone()).await?;
+        await_until("pre-error gossip delivered", Duration::from_secs(5), || {
+            recorder.contains_payload(2, &before)
+        })
+        .await?;
+
+        let after = b"after-header-sync-error".to_vec();
+        hostile.send_frame(2, after.clone()).await?;
+        await_until(
+            "post-header-sync gossip delivered",
+            Duration::from_secs(5),
+            || recorder.contains_payload(2, &after),
+        )
+        .await?;
+
+        let delivered = recorder.drain();
+        assert!(
+            delivered
+                .iter()
+                .any(|m| m.stream_kind == 2 && m.frame.payload == before),
+            "pre-error gossip frame must be delivered"
+        );
+        assert!(
+            delivered
+                .iter()
+                .any(|m| m.stream_kind == ZAKURA_STREAM_HEADER_SYNC
+                    && m.frame.payload == bad_header_sync_payload),
+            "recorder nodes assert transport routing only; production header-sync owners decode stream-5 frames and reject malformed payloads, got {delivered:?}"
+        );
+        assert!(
+            delivered.iter().any(|m| m.frame.payload == after),
+            "generic transport must not close on header-sync payload decode, got {delivered:?}"
+        );
+
+        hostile.shutdown().await;
+        cluster.shutdown().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unnegotiated_header_sync_stream_is_rejected_before_delivery() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut cluster = ZakuraTestCluster::new();
+        let victim_idx = cluster.spawn_node(7).await?;
+        let victim = cluster.node(victim_idx);
+        let recorder = victim.recorder();
+
+        let zero_cap_peer = HostilePeer::connect_native_with_capabilities(victim, 8, 0).await?;
+        let rejected_payload = b"unnegotiated-header-sync".to_vec();
+        zero_cap_peer
+            .send_frame(ZAKURA_STREAM_HEADER_SYNC, rejected_payload.clone())
+            .await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !recorder.contains_payload(ZAKURA_STREAM_HEADER_SYNC, &rejected_payload),
+            "stream 5 from a zero-capability peer must be rejected before delivery"
+        );
+
+        let header_cap_peer =
+            HostilePeer::connect_native_with_capabilities(victim, 9, ZAKURA_CAP_HEADER_SYNC)
+                .await?;
+        let admitted_payload = b"negotiated-header-sync".to_vec();
+        header_cap_peer
+            .send_frame(ZAKURA_STREAM_HEADER_SYNC, admitted_payload.clone())
+            .await?;
+        await_until(
+            "negotiated header-sync stream delivered",
+            Duration::from_secs(5),
+            || recorder.contains_payload(ZAKURA_STREAM_HEADER_SYNC, &admitted_payload),
+        )
+        .await?;
+
+        zero_cap_peer.shutdown().await;
+        header_cap_peer.shutdown().await;
+        cluster.shutdown().await;
+        Ok(())
     }
 
     #[tokio::test]
@@ -937,6 +1897,938 @@ mod tests {
             second.shutdown().await;
         }
         victim.shutdown().await;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_stream5_status_exchange_uses_handler_wire_path() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "native_stream5_status_exchange_uses_handler_wire_path",
+            false,
+        )?;
+        let network = e2e_network([1]);
+        let mut cluster = ZakuraTestCluster::new();
+        let node1 = header_sync_test_builder(1, network.clone(), &mut capture)
+            .spawn()
+            .await?;
+        let node2 = header_sync_test_builder(2, network, &mut capture)
+            .spawn()
+            .await?;
+        let disconnects1 = Arc::new(StdMutex::new(Vec::new()));
+        let disconnects2 = Arc::new(StdMutex::new(Vec::new()));
+        let driver1 = drive_native_header_sync_actions(&node1, disconnects1.clone()).await;
+        let driver2 = drive_native_header_sync_actions(&node2, disconnects2.clone()).await;
+        cluster.nodes.push(node1);
+        cluster.nodes.push(node2);
+
+        cluster.connect_full_mesh(Duration::from_secs(5)).await?;
+        cluster.await_all_connected(Duration::from_secs(5)).await?;
+        await_until(
+            "native stream-5 status received",
+            Duration::from_secs(5),
+            || {
+                capture.reader().is_ok_and(|reader| {
+                    reader
+                        .node("02")
+                        .table("header_sync")
+                        .count(hs_trace::HEADER_STATUS_RECEIVED)
+                        >= 1
+                })
+            },
+        )
+        .await?;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        reader.node("01").table("stream").assert_row(
+            "accepted",
+            &[("stream_kind", TraceValue::Str("header_sync"))],
+        );
+        reader.node("02").table("stream").assert_row(
+            "accepted",
+            &[("stream_kind", TraceValue::Str("header_sync"))],
+        );
+        reader
+            .node("01")
+            .table("header_sync")
+            .assert_event(hs_trace::HEADER_STATUS_SENT);
+        reader
+            .node("02")
+            .table("header_sync")
+            .assert_event(hs_trace::HEADER_STATUS_RECEIVED);
+        assert!(disconnects1.lock().unwrap().is_empty());
+        assert!(disconnects2.lock().unwrap().is_empty());
+
+        cluster.shutdown().await;
+        driver1.abort();
+        driver2.abort();
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_stream5_hostile_bytes_disconnect_with_traceable_reasons() -> Result<(), BoxError>
+    {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "native_stream5_hostile_bytes_disconnect_with_traceable_reasons",
+            false,
+        )?;
+        let victim = header_sync_test_builder(11, e2e_network([1]), &mut capture)
+            .spawn()
+            .await?;
+        let disconnects = Arc::new(StdMutex::new(Vec::new()));
+        let driver = drive_native_header_sync_actions(&victim, disconnects.clone()).await;
+
+        let malformed =
+            HostilePeer::connect_native_with_capabilities(&victim, 12, ZAKURA_CAP_HEADER_SYNC)
+                .await?;
+        malformed
+            .send_raw_frame(
+                ZAKURA_STREAM_HEADER_SYNC,
+                Frame {
+                    message_type: 99,
+                    flags: 0,
+                    payload: Vec::new(),
+                },
+            )
+            .await?;
+        wait_for_native_disconnect(disconnects.clone(), HeaderSyncMisbehavior::MalformedMessage)
+            .await?;
+        malformed.shutdown().await;
+
+        let unsolicited =
+            HostilePeer::connect_native_with_capabilities(&victim, 13, ZAKURA_CAP_HEADER_SYNC)
+                .await?;
+        let unsolicited_headers =
+            HeaderSyncMessage::Headers(vec![mainnet_block(&BLOCK_MAINNET_1_BYTES).header.clone()])
+                .encode_frame()?;
+        unsolicited
+            .send_raw_frame(ZAKURA_STREAM_HEADER_SYNC, unsolicited_headers)
+            .await?;
+        wait_for_native_disconnect(
+            disconnects.clone(),
+            HeaderSyncMisbehavior::UnsolicitedHeaders,
+        )
+        .await?;
+        unsolicited.shutdown().await;
+
+        let oversized =
+            HostilePeer::connect_native_with_capabilities(&victim, 14, ZAKURA_CAP_HEADER_SYNC)
+                .await?;
+        let oversized_peer = oversized.id()?;
+        let peer_set = victim.supervisor().subscribe();
+        await_until("oversized peer registered", Duration::from_secs(5), || {
+            peer_set.borrow().contains(&oversized_peer)
+        })
+        .await?;
+        oversized
+            .oversize_frame_declared_len(ZAKURA_STREAM_HEADER_SYNC)
+            .await?;
+        await_until(
+            "native stream-5 oversize trace",
+            Duration::from_secs(5),
+            || {
+                capture.reader().is_ok_and(|reader| {
+                    reader
+                        .node("11")
+                        .table("ratelimit")
+                        .rows()
+                        .iter()
+                        .any(|row| {
+                            row.get("event").and_then(serde_json::Value::as_str)
+                                == Some("frame.oversize")
+                                && row.get("stream_kind").and_then(serde_json::Value::as_str)
+                                    == Some("header_sync")
+                        })
+                })
+            },
+        )
+        .await?;
+        await_until(
+            "oversized persistent stream disconnects peer",
+            Duration::from_secs(5),
+            || !peer_set.borrow().contains(&oversized_peer),
+        )
+        .await?;
+        oversized.shutdown().await;
+
+        let truncated =
+            HostilePeer::connect_native_with_capabilities(&victim, 15, ZAKURA_CAP_HEADER_SYNC)
+                .await?;
+        truncated
+            .send_truncated_frame(ZAKURA_STREAM_HEADER_SYNC)
+            .await?;
+        truncated.shutdown().await;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        let header_sync = reader.node("11").table("header_sync");
+        header_sync.assert_header_disconnect("malformed_message");
+        header_sync.assert_header_disconnect("unsolicited_headers");
+        reader.node("11").table("stream").assert_row(
+            "accepted",
+            &[("stream_kind", TraceValue::Str("header_sync"))],
+        );
+        reader.node("11").table("ratelimit").assert_row(
+            "frame.oversize",
+            &[("stream_kind", TraceValue::Str("header_sync"))],
+        );
+
+        victim.shutdown().await;
+        driver.abort();
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_status_trace_smoke_uses_real_emitted_rows() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_status_trace_smoke_uses_real_emitted_rows",
+            false,
+        )?;
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let network = e2e_network([4]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+
+        cluster.spawn_node(
+            1,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(1), "01"),
+        )?;
+        cluster.spawn_node(
+            2,
+            network,
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(2), "02"),
+        )?;
+        cluster.start_drivers();
+        cluster.connect_all().await;
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        capture.flush().await;
+        let reader = capture.reader()?;
+        reader
+            .node("01")
+            .table("header_sync")
+            .assert_event(hs_trace::HEADER_STATUS_SENT);
+        reader
+            .node("02")
+            .table("header_sync")
+            .assert_event(hs_trace::HEADER_STATUS_RECEIVED);
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_genesis_converges_and_body_gap_api_shrinks() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_genesis_converges_and_body_gap_api_shrinks",
+            false,
+        )?;
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let network = e2e_network([4]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        let source = cluster.spawn_node(
+            1,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::with_headers(4),
+            ZakuraTrace::new(capture.tracer_for_node(1), "01"),
+        )?;
+        let empty = cluster.spawn_node(
+            2,
+            network,
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(2), "02"),
+        )?;
+        assert_eq!(source, 0);
+        cluster.start_drivers();
+        cluster.connect_all().await;
+        cluster.wait_for_tip(empty, block::Height(4)).await?;
+
+        let missing = cluster.missing_bodies(empty).await;
+        assert_eq!(
+            missing,
+            vec![
+                block::Height(1),
+                block::Height(2),
+                block::Height(3),
+                block::Height(4)
+            ]
+        );
+        assert!(
+            !cluster.observed_gaps(empty).await.is_empty(),
+            "body-gap watch/API surface must be observable without header-sync body commands"
+        );
+
+        for height in 1..=4 {
+            cluster
+                .commit_body(empty, mainnet_block(block_bytes(height)))
+                .await;
+        }
+        await_until("missing body gap shrinks", Duration::from_secs(5), || {
+            cluster
+                .nodes
+                .get(empty)
+                .expect("node exists")
+                .view
+                .store
+                .lock()
+                .expect("test store mutex is not poisoned")
+                .missing_bodies(block::Height(1), 100)
+                .is_empty()
+        })
+        .await?;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        let target_trace = reader.node("02").table("header_sync");
+        target_trace.assert_event(hs_trace::HEADER_STATUS_RECEIVED);
+        target_trace.assert_header_range_request(1, 4);
+        target_trace.assert_header_range_response(1, 4);
+        target_trace.assert_header_range_commit(1, 4);
+        target_trace.assert_row(
+            hs_trace::HEADER_MISSING_BODIES_REPORTED,
+            &[
+                (hs_trace::RANGE_START, TraceValue::U64(1)),
+                (hs_trace::RANGE_COUNT, TraceValue::U64(4)),
+            ],
+        );
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_checkpoint_forward_then_backward_finalizes_backfill(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_checkpoint_forward_then_backward_finalizes_backfill",
+            false,
+        )?;
+        let (network, checkpoint_hash) = checkpoint_network(3);
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let source = cluster.spawn_node(
+            1,
+            network.clone(),
+            (block::Height(0), mainnet_genesis_hash()),
+            E2eHeaderStore::with_headers(4),
+            ZakuraTrace::new(capture.tracer_for_node(1), "01"),
+        )?;
+        let checkpointed = cluster.spawn_node(
+            2,
+            network,
+            (block::Height(3), checkpoint_hash),
+            E2eHeaderStore::with_checkpoint_anchor(3),
+            ZakuraTrace::new(capture.tracer_for_node(2), "02"),
+        )?;
+        assert_eq!(source, 0);
+        cluster.start_drivers();
+        cluster.connect_all().await;
+        cluster.wait_for_tip(checkpointed, block::Height(4)).await?;
+        await_until(
+            "checkpoint backfill finalized",
+            Duration::from_secs(5),
+            || {
+                cluster
+                    .nodes
+                    .get(checkpointed)
+                    .expect("node exists")
+                    .view
+                    .store
+                    .lock()
+                    .expect("test store mutex is not poisoned")
+                    .finalized_height
+                    >= block::Height(3)
+            },
+        )
+        .await?;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        let target_trace = reader.node("02").table("header_sync");
+        target_trace.assert_header_range_request(4, 1);
+        target_trace.assert_header_range_request(1, 3);
+        target_trace.assert_header_range_commit(1, 3);
+        assert_eq!(
+            cluster.finalized_height(checkpointed).await,
+            block::Height(3)
+        );
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_tip_flood_and_no_double_gossip_cover_both_orderings(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_tip_flood_and_no_double_gossip_cover_both_orderings",
+            false,
+        )?;
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let network = e2e_network([]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        for seed in 1..=3 {
+            cluster.spawn_node(
+                seed,
+                network.clone(),
+                anchor,
+                E2eHeaderStore::genesis_only(),
+                ZakuraTrace::new(
+                    capture.tracer_for_node(u64::from(seed)),
+                    format!("{seed:02}"),
+                ),
+            )?;
+        }
+        cluster.start_drivers();
+        cluster.connect_all().await;
+
+        let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let hash1 = block1.hash();
+        cluster
+            .inject(
+                0,
+                cluster.nodes[1].view.peer_id.clone(),
+                HeaderSyncMessage::NewBlock(block1.clone()),
+            )
+            .await;
+        cluster.wait_for_body(0, hash1).await?;
+        cluster.wait_for_body(2, hash1).await?;
+
+        cluster.commit_body(0, block1.clone()).await;
+        cluster
+            .inject(
+                0,
+                cluster.nodes[1].view.peer_id.clone(),
+                HeaderSyncMessage::NewBlock(block1),
+            )
+            .await;
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            cluster.disconnect_reasons(0).await.is_empty(),
+            "honest tip-flood and duplicate paths must not disconnect peers"
+        );
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        let node1_trace = reader.node("01").table("header_sync");
+        node1_trace.assert_event(hs_trace::HEADER_NEW_BLOCK_RECEIVED);
+        node1_trace.assert_event(hs_trace::HEADER_NEW_BLOCK_FORWARDED);
+        node1_trace.assert_header_new_block_deduped("seen_cache");
+        assert_eq!(
+            node1_trace.count(hs_trace::HEADER_GET_HEADERS_SENT),
+            0,
+            "tip full-block flood must not use header advertise/body-pull"
+        );
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_concurrent_duplicate_new_block_does_not_disconnect(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_concurrent_duplicate_new_block_does_not_disconnect",
+            false,
+        )?;
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let network = e2e_network([]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        for seed in 1..=3 {
+            cluster.spawn_node(
+                seed,
+                network.clone(),
+                anchor,
+                E2eHeaderStore::genesis_only(),
+                ZakuraTrace::new(
+                    capture.tracer_for_node(u64::from(seed)),
+                    format!("{seed:02}"),
+                ),
+            )?;
+        }
+        cluster.connect_all().await;
+        let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let hash1 = block1.hash();
+        cluster
+            .inject(
+                0,
+                cluster.nodes[1].view.peer_id.clone(),
+                HeaderSyncMessage::NewBlock(block1.clone()),
+            )
+            .await;
+        cluster
+            .inject(
+                0,
+                cluster.nodes[2].view.peer_id.clone(),
+                HeaderSyncMessage::NewBlock(block1),
+            )
+            .await;
+        cluster.start_drivers();
+        cluster.wait_for_body(0, hash1).await?;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(cluster.disconnect_reasons(0).await.is_empty());
+
+        capture.flush().await;
+        capture
+            .reader()?
+            .node("01")
+            .table("header_sync")
+            .assert_header_new_block_deduped("pending_acceptance");
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_hostile_peer_disconnect_matrix_has_traceable_reasons(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_hostile_peer_disconnect_matrix_has_traceable_reasons",
+            false,
+        )?;
+        let mut cluster = HeaderSyncE2eCluster::new();
+        let network = e2e_network([]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        let victim = cluster.spawn_node(
+            1,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(1), "01"),
+        )?;
+        cluster.start_drivers();
+
+        let unsolicited = e2e_peer(90);
+        cluster.connect_peer(victim, unsolicited.clone()).await;
+        cluster
+            .inject(
+                victim,
+                unsolicited,
+                HeaderSyncMessage::Headers(vec![mainnet_block(&BLOCK_MAINNET_1_BYTES)
+                    .header
+                    .clone()]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::UnsolicitedHeaders)
+            .await?;
+
+        let out_of_range = e2e_peer(95);
+        cluster.connect_peer(victim, out_of_range.clone()).await;
+        cluster
+            .inject(victim, out_of_range.clone(), status_for_tip(4, 4, 1))
+            .await;
+        cluster
+            .wait_for_get_headers(victim, &out_of_range, block::Height(1), 4)
+            .await?;
+        cluster
+            .inject(
+                victim,
+                out_of_range,
+                HeaderSyncMessage::Headers(vec![mainnet_block(&BLOCK_MAINNET_2_BYTES)
+                    .header
+                    .clone()]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::InvalidRange)
+            .await?;
+
+        let over_in_flight = e2e_peer(96);
+        cluster.connect_peer(victim, over_in_flight.clone()).await;
+        cluster
+            .inject(victim, over_in_flight.clone(), status_for_tip(0, 4, 1))
+            .await;
+        for start in 1..=17 {
+            cluster
+                .inject(
+                    victim,
+                    over_in_flight.clone(),
+                    HeaderSyncMessage::GetHeaders {
+                        start_height: block::Height(start),
+                        count: 1,
+                    },
+                )
+                .await;
+        }
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::GetHeadersSpam)
+            .await?;
+
+        let response_too_long = e2e_peer(97);
+        cluster
+            .connect_peer(victim, response_too_long.clone())
+            .await;
+        cluster
+            .inject(victim, response_too_long.clone(), status_for_tip(4, 1, 1))
+            .await;
+        cluster
+            .wait_for_get_headers(victim, &response_too_long, block::Height(1), 1)
+            .await?;
+        cluster
+            .inject(
+                victim,
+                response_too_long,
+                HeaderSyncMessage::Headers(vec![
+                    mainnet_block(&BLOCK_MAINNET_1_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_2_BYTES).header.clone(),
+                ]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::ResponseTooLong)
+            .await?;
+
+        let bad_continuity_victim = cluster.spawn_node(
+            3,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(3), "03"),
+        )?;
+        cluster.start_drivers();
+        let bad_continuity = e2e_peer(98);
+        cluster
+            .connect_peer(bad_continuity_victim, bad_continuity.clone())
+            .await;
+        cluster
+            .inject(
+                bad_continuity_victim,
+                bad_continuity.clone(),
+                status_for_tip(4, 4, 1),
+            )
+            .await;
+        cluster
+            .wait_for_get_headers(bad_continuity_victim, &bad_continuity, block::Height(1), 4)
+            .await?;
+        let mut non_contiguous = *mainnet_block(&BLOCK_MAINNET_2_BYTES).header;
+        non_contiguous.previous_block_hash = block::Hash([7; 32]);
+        cluster
+            .inject(
+                bad_continuity_victim,
+                bad_continuity,
+                HeaderSyncMessage::Headers(vec![
+                    mainnet_block(&BLOCK_MAINNET_1_BYTES).header.clone(),
+                    Arc::new(non_contiguous),
+                ]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(bad_continuity_victim, HeaderSyncMisbehavior::InvalidRange)
+            .await?;
+
+        let bad_pow_victim = cluster.spawn_node(
+            4,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(4), "04"),
+        )?;
+        cluster.start_drivers();
+        let bad_pow = e2e_peer(99);
+        cluster.connect_peer(bad_pow_victim, bad_pow.clone()).await;
+        cluster
+            .inject(bad_pow_victim, bad_pow.clone(), status_for_tip(4, 4, 1))
+            .await;
+        cluster
+            .wait_for_get_headers(bad_pow_victim, &bad_pow, block::Height(1), 4)
+            .await?;
+        let mut bad_pow_header = *mainnet_block(&BLOCK_MAINNET_1_BYTES).header;
+        bad_pow_header.nonce = [1; 32].into();
+        cluster
+            .inject(
+                bad_pow_victim,
+                bad_pow,
+                HeaderSyncMessage::Headers(vec![Arc::new(bad_pow_header)]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(bad_pow_victim, HeaderSyncMisbehavior::InvalidRange)
+            .await?;
+
+        let bad_daa_victim = cluster.spawn_node(
+            5,
+            network,
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(5), "05"),
+        )?;
+        cluster.start_drivers();
+        let bad_daa = e2e_peer(100);
+        cluster.connect_peer(bad_daa_victim, bad_daa.clone()).await;
+        cluster
+            .inject(bad_daa_victim, bad_daa.clone(), status_for_tip(4, 4, 1))
+            .await;
+        cluster
+            .wait_for_get_headers(bad_daa_victim, &bad_daa, block::Height(1), 4)
+            .await?;
+        cluster
+            .reject_next_commit(
+                bad_daa_victim,
+                HeaderSyncCommitFailureKind::InvalidPeerRange,
+            )
+            .await;
+        cluster
+            .inject(
+                bad_daa_victim,
+                bad_daa,
+                HeaderSyncMessage::Headers(vec![
+                    mainnet_block(&BLOCK_MAINNET_1_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_2_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_3_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_4_BYTES).header.clone(),
+                ]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(bad_daa_victim, HeaderSyncMisbehavior::InvalidRange)
+            .await?;
+
+        let bad_checkpoint_backfill = e2e_peer(101);
+        let checkpoint_hash = mainnet_block(&BLOCK_MAINNET_1_BYTES).hash();
+        let checkpoint_network = e2e_network_with_checkpoint_hash(3, checkpoint_hash);
+        let checkpointed = cluster.spawn_node(
+            6,
+            checkpoint_network,
+            (block::Height(3), checkpoint_hash),
+            E2eHeaderStore::with_checkpoint_anchor(3),
+            ZakuraTrace::new(capture.tracer_for_node(6), "06"),
+        )?;
+        cluster.start_drivers();
+        cluster
+            .connect_peer(checkpointed, bad_checkpoint_backfill.clone())
+            .await;
+        cluster
+            .inject(
+                checkpointed,
+                bad_checkpoint_backfill.clone(),
+                status_for_tip(3, 4, 1),
+            )
+            .await;
+        cluster
+            .wait_for_get_headers(checkpointed, &bad_checkpoint_backfill, block::Height(1), 3)
+            .await?;
+        cluster
+            .inject(
+                checkpointed,
+                bad_checkpoint_backfill,
+                HeaderSyncMessage::Headers(vec![
+                    mainnet_block(&BLOCK_MAINNET_1_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_2_BYTES).header.clone(),
+                    mainnet_block(&BLOCK_MAINNET_3_BYTES).header.clone(),
+                ]),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(checkpointed, HeaderSyncMisbehavior::InvalidRange)
+            .await?;
+
+        let over_cap = e2e_peer(91);
+        cluster.connect_peer(victim, over_cap.clone()).await;
+        cluster
+            .inject(
+                victim,
+                over_cap.clone(),
+                HeaderSyncMessage::Status(Default::default()),
+            )
+            .await;
+        cluster
+            .inject(
+                victim,
+                over_cap,
+                HeaderSyncMessage::GetHeaders {
+                    start_height: block::Height(1),
+                    count: 4_001,
+                },
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::GetHeadersTooLong)
+            .await?;
+
+        let status_spam = e2e_peer(92);
+        cluster.connect_peer(victim, status_spam.clone()).await;
+        cluster
+            .inject(
+                victim,
+                status_spam.clone(),
+                HeaderSyncMessage::Status(Default::default()),
+            )
+            .await;
+        cluster
+            .inject(
+                victim,
+                status_spam,
+                HeaderSyncMessage::Status(Default::default()),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::StatusSpam)
+            .await?;
+
+        let new_block_spam = e2e_peer(93);
+        cluster.connect_peer(victim, new_block_spam.clone()).await;
+        cluster
+            .inject(
+                victim,
+                new_block_spam.clone(),
+                HeaderSyncMessage::NewBlock(mainnet_block(&BLOCK_MAINNET_1_BYTES)),
+            )
+            .await;
+        cluster
+            .inject(
+                victim,
+                new_block_spam,
+                HeaderSyncMessage::NewBlock(mainnet_block(&BLOCK_MAINNET_2_BYTES)),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::NewBlockSpam)
+            .await?;
+
+        let invalid_block = e2e_peer(94);
+        cluster.connect_peer(victim, invalid_block.clone()).await;
+        let mut bad_block = (*mainnet_block(&BLOCK_MAINNET_1_BYTES)).clone();
+        bad_block.transactions.clear();
+        cluster
+            .inject(
+                victim,
+                invalid_block,
+                HeaderSyncMessage::NewBlock(Arc::new(bad_block)),
+            )
+            .await;
+        cluster
+            .wait_for_disconnect_reason(victim, HeaderSyncMisbehavior::MalformedMessage)
+            .await?;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        let trace = reader.node("01").table("header_sync");
+        trace.assert_header_disconnect("unsolicited_headers");
+        trace.assert_header_disconnect("invalid_range");
+        trace.assert_header_disconnect("get_headers_spam");
+        trace.assert_header_disconnect("response_too_long");
+        trace.assert_header_disconnect("get_headers_too_long");
+        trace.assert_header_disconnect("status_spam");
+        trace.assert_header_disconnect("new_block_spam");
+        trace.assert_header_disconnect("malformed_message");
+        for node in ["03", "04", "05", "06"] {
+            reader
+                .node(node)
+                .table("header_sync")
+                .assert_header_disconnect("invalid_range");
+        }
+
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn header_sync_e2e_restart_reloads_durable_tip_and_rebuilds_scheduler(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "header_sync_e2e_restart_reloads_durable_tip_and_rebuilds_scheduler",
+            false,
+        )?;
+        let network = e2e_network([4]);
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+
+        let mut first = HeaderSyncE2eCluster::new();
+        let seeded = first.spawn_node(
+            1,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::with_headers(4),
+            ZakuraTrace::new(capture.tracer_for_node(1), "01"),
+        )?;
+        let syncing = first.spawn_node(
+            2,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::genesis_only(),
+            ZakuraTrace::new(capture.tracer_for_node(2), "02"),
+        )?;
+        first.start_drivers();
+        first.connect_all().await;
+        first.wait_for_tip(syncing, block::Height(4)).await?;
+        let durable_store = first.nodes[syncing].view.store.clone();
+        first.shutdown().await;
+
+        let restart_store = {
+            let store = durable_store
+                .lock()
+                .expect("test store mutex is not poisoned");
+            E2eHeaderStore {
+                headers: store.headers.clone(),
+                bodies: store.bodies.clone(),
+                finalized_height: store.finalized_height,
+                verified_block_tip: store.verified_block_tip,
+                reject_next_commit: None,
+            }
+        };
+
+        let mut restarted = HeaderSyncE2eCluster::new();
+        restarted.spawn_node(
+            1,
+            network.clone(),
+            anchor,
+            E2eHeaderStore::with_headers(5),
+            ZakuraTrace::new(capture.tracer_for_node(3), "03"),
+        )?;
+        let restarted_idx = restarted.spawn_node(
+            2,
+            network,
+            anchor,
+            restart_store,
+            ZakuraTrace::new(capture.tracer_for_node(4), "04"),
+        )?;
+        restarted.start_drivers();
+        restarted.connect_all().await;
+        restarted
+            .wait_for_tip(restarted_idx, block::Height(5))
+            .await?;
+
+        capture.flush().await;
+        let reader = capture.reader()?;
+        reader
+            .node("04")
+            .table("header_sync")
+            .assert_header_range_request(5, 1);
+        assert_eq!(
+            restarted.nodes[restarted_idx]
+                .view
+                .handle
+                .best_header_tip()
+                .0,
+            block::Height(5)
+        );
+        assert_eq!(seeded, 0);
+
+        restarted.shutdown().await;
+        assert!(capture.finish().await?.is_none());
         Ok(())
     }
 }
