@@ -133,6 +133,8 @@ pub mod block_sync_trace {
     pub const BODY_LAG: &str = "body_lag";
     /// Count of blocks submitted-but-not-yet-committed (held against budget).
     pub const APPLYING: &str = "applying";
+    /// Count of applying blocks already submitted to the verifier driver.
+    pub const SUBMITTED_APPLIES: &str = "submitted_applies";
     /// Count of out-of-order bodies buffered awaiting a contiguous prefix.
     pub const REORDER: &str = "reorder";
     /// Count of outstanding (in-flight) range requests across peers.
@@ -166,6 +168,14 @@ pub mod block_sync_trace {
 
     /// Peer status received (servable body range advertised by the peer).
     pub const BLOCK_STATUS_RECEIVED: &str = "block_status_received";
+    /// Local peer status queued for transport.
+    pub const BLOCK_STATUS_SENT: &str = "block_status_sent";
+    /// Local peer status failed to queue for transport.
+    pub const BLOCK_STATUS_SEND_FAILED: &str = "block_status_send_failed";
+    /// Block-sync peer connected to the reactor.
+    pub const BLOCK_PEER_CONNECTED: &str = "block_peer_connected";
+    /// Block-sync peer disconnected from the reactor.
+    pub const BLOCK_PEER_DISCONNECTED: &str = "block_peer_disconnected";
     /// Body range request sent to a peer.
     pub const BLOCK_GET_BLOCKS_SENT: &str = "block_get_blocks_sent";
     /// Reactor accepted an inbound event.

@@ -2993,7 +2993,7 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[tokio::test]
-    async fn block_sync_driver_combined_apply_limit_binds_checkpoint_applies() {
+    async fn block_sync_driver_combined_apply_limit_preserves_checkpoint_window() {
         let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
         let block2 = mainnet_block(&BLOCK_MAINNET_2_BYTES);
         let (action_tx, action_rx) = mpsc::channel(8);
@@ -3079,21 +3079,15 @@ mod zakura_header_sync_driver_tests {
             })
             .await
             .expect("driver action channel stays open");
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), commit_rx.recv())
-                .await
-                .is_err(),
-            "combined apply cap must bind checkpoint applies",
-        );
-
-        release_first.notify_one();
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), commit_rx.recv())
                 .await
-                .expect("second checkpoint commit starts after combined cap has room"),
+                .expect("second checkpoint commit starts despite the smaller combined cap"),
             Some(block::Height(2)),
+            "checkpoint applies need enough depth to complete a checkpoint verifier window",
         );
 
+        release_first.notify_waiters();
         let _ = shutdown_tx.send(());
         driver.await.expect("driver task exits cleanly");
         reactor_task.abort();
@@ -3565,9 +3559,10 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[tokio::test]
-    async fn block_sync_checkpoint_apply_limit_is_capped_to_one_checkpoint_gap() {
+    async fn block_sync_checkpoint_apply_limit_allows_two_checkpoint_gaps() {
         let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
-        let (action_tx, action_rx) = mpsc::channel(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP + 8);
+        let two_checkpoint_gaps = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP.saturating_mul(2);
+        let (action_tx, action_rx) = mpsc::channel(two_checkpoint_gaps + 8);
         let startup = block_sync_startup_for_test();
         let (block_sync, _reactor_actions, reactor_task) =
             zebra_network::zakura::spawn_block_sync_reactor(startup);
@@ -3600,7 +3595,7 @@ mod zakura_header_sync_driver_tests {
             read_state,
             verifier,
             block::Height::MAX,
-            zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2,
+            two_checkpoint_gaps,
             sync::MIN_CONCURRENCY_LIMIT,
             zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
             zebra_network::zakura::ZakuraTrace::noop(),
@@ -3609,7 +3604,7 @@ mod zakura_header_sync_driver_tests {
             },
         ));
 
-        for token in 0..=zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP {
+        for token in 0..=two_checkpoint_gaps {
             action_tx
                 .send(BlockSyncAction::SubmitBlock {
                     token: u64::try_from(token).expect("test token fits in u64"),
@@ -3620,17 +3615,17 @@ mod zakura_header_sync_driver_tests {
         }
 
         tokio::time::timeout(Duration::from_secs(1), async {
-            while commit_count.load(Ordering::SeqCst) < zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP {
+            while commit_count.load(Ordering::SeqCst) < two_checkpoint_gaps {
                 tokio::task::yield_now().await;
             }
         })
         .await
-        .expect("driver starts exactly one checkpoint gap of applies");
+        .expect("driver starts exactly two checkpoint gaps of applies");
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(
             commit_count.load(Ordering::SeqCst),
-            zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
-            "driver must not submit a second checkpoint range before the first range completes"
+            two_checkpoint_gaps,
+            "driver must not submit a third checkpoint range before earlier ranges complete"
         );
 
         let _ = shutdown_tx.send(());

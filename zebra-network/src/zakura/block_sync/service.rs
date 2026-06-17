@@ -4,6 +4,7 @@ use crate::zakura::{
     PeerStreamSession, Pipe, Service, SinkReject, Stream, StreamMode, ZakuraPeerId,
     FRAME_HEADER_BYTES,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 // The per-peer block-sync `Source` frame-pump is test-only scaffolding (see
 // `BlockSyncPeerRecord` / `add_peer`); its trait and boxed-future alias are only
 // referenced by that `cfg(test)` task.
@@ -181,10 +182,12 @@ struct BlockSyncServiceInner {
     events: mpsc::Sender<BlockSyncEvent>,
     lifecycle: mpsc::UnboundedSender<BlockSyncEvent>,
     peers: StdMutex<HashMap<ZakuraPeerId, BlockSyncPeerRecord>>,
+    next_session_id: AtomicU64,
 }
 
 #[derive(Debug)]
 struct BlockSyncPeerRecord {
+    session_id: u64,
     direction: ServicePeerDirection,
     cancel_token: CancellationToken,
     // Production outbound block-sync sends are authoritative through
@@ -214,6 +217,7 @@ impl BlockSyncService {
                 events: handle.events.clone(),
                 lifecycle: handle.lifecycle.clone(),
                 peers: StdMutex::new(HashMap::new()),
+                next_session_id: AtomicU64::new(1),
             }),
             _held_events: None,
             _reactor_task: None,
@@ -247,6 +251,7 @@ impl BlockSyncService {
                 events: handle.events.clone(),
                 lifecycle: handle.lifecycle.clone(),
                 peers: StdMutex::new(HashMap::new()),
+                next_session_id: AtomicU64::new(1),
             }),
             _held_events: None,
             _reactor_task: Some(reactor_task),
@@ -272,6 +277,7 @@ impl BlockSyncService {
                     events,
                     lifecycle,
                     peers: StdMutex::new(HashMap::new()),
+                    next_session_id: AtomicU64::new(1),
                 }),
                 _held_events: None,
                 _reactor_task: None,
@@ -372,6 +378,7 @@ impl Service for BlockSyncService {
         let service_cancel_token = session.cancel_token();
         let connection_cancel_token = peer.cancel_token();
         let block_sync_session = BlockSyncPeerSession::new(&session, peer.direction);
+        let session_id = self.inner.next_session_id.fetch_add(1, Ordering::Relaxed);
         let (_session_peer, _stream_kind, recv, send, _session_cancel) = session.into_parts();
 
         // The per-peer block-sync source frame-pump is test-only scaffolding (see
@@ -403,10 +410,23 @@ impl Service for BlockSyncService {
             let peer_id = peer_id.clone();
             let inner = self.inner.clone();
             move || {
-                if let Ok(mut peers) = inner.peers.lock() {
-                    peers.remove(&peer_id);
+                let should_notify = if let Ok(mut peers) = inner.peers.lock() {
+                    if peers
+                        .get(&peer_id)
+                        .is_some_and(|record| record.session_id == session_id)
+                    {
+                        peers.remove(&peer_id);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if should_notify {
+                    let _ = lifecycle.send(BlockSyncEvent::PeerDisconnected(peer_id));
                 }
-                let _ = lifecycle.send(BlockSyncEvent::PeerDisconnected(peer_id));
             }
         };
         let on_panic = {
@@ -439,9 +459,10 @@ impl Service for BlockSyncService {
                 .peers
                 .lock()
                 .expect("block-sync peer map mutex is never poisoned");
-            peers.insert(
+            if let Some(old_record) = peers.insert(
                 peer_id.clone(),
                 BlockSyncPeerRecord {
+                    session_id,
                     direction: peer.direction,
                     cancel_token: service_cancel_token,
                     #[cfg(test)]
@@ -449,7 +470,9 @@ impl Service for BlockSyncService {
                     #[cfg(test)]
                     _tasks: vec![source_task],
                 },
-            );
+            ) {
+                old_record.cancel_token.cancel();
+            }
         }
 
         let _ = self

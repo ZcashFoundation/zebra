@@ -180,7 +180,7 @@ impl BlockSyncReactor {
                 self.handle_state_frontiers_changed(frontiers).await
             }
             BlockSyncEvent::ChainTipReset(frontiers) => {
-                self.handle_chain_tip_reset(frontiers).await
+                self.handle_chain_tip_reset(frontiers, true).await
             }
             BlockSyncEvent::NeededBlocks(blocks) => {
                 self.handle_needed_blocks(blocks).await;
@@ -304,14 +304,19 @@ impl BlockSyncReactor {
                 peer_state.direction = direction;
             })
             .or_insert_with(|| PeerBlockState::new(session, &self.startup.config));
+        if let Some(peer_state) = self.state.peers.get_mut(&peer) {
+            peer_state.unsolicited.mark_taken(Instant::now());
+        }
+        self.trace_peer_connected(&peer, direction);
         self.publish_peer_snapshot();
         self.publish_candidate_state();
-        self.send_status(&peer).await;
+        self.send_status(&peer, "peer_connected").await;
         self.schedule().await;
     }
 
     fn handle_peer_disconnected(&mut self, peer: ZakuraPeerId) {
         if let Some(peer_state) = self.state.peers.remove(&peer) {
+            self.trace_peer_disconnected(&peer, peer_state.received_status);
             for outstanding in peer_state.outstanding.into_iter().rev() {
                 self.finish_detached_outstanding(
                     outstanding,
@@ -364,7 +369,7 @@ impl BlockSyncReactor {
             FrontierChange::HeaderReanchored => {
                 self.state.best_header_tip = frontier.best_header.height;
                 self.state.best_header_hash = frontier.best_header.hash;
-                self.handle_chain_tip_reset(state_frontiers).await;
+                self.handle_chain_tip_reset(state_frontiers, false).await;
             }
             FrontierChange::VerifiedGrow => {
                 self.handle_state_frontiers_changed(state_frontiers).await;
@@ -377,7 +382,7 @@ impl BlockSyncReactor {
                 }
             }
             FrontierChange::VerifiedReset => {
-                self.handle_chain_tip_reset(state_frontiers).await;
+                self.handle_chain_tip_reset(state_frontiers, true).await;
                 if frontier.best_header.height > self.state.best_header_tip {
                     self.handle_header_tip_changed(
                         frontier.best_header.height,
@@ -445,7 +450,11 @@ impl BlockSyncReactor {
         self.release_caught_up_block_sync_peers();
     }
 
-    async fn handle_chain_tip_reset(&mut self, frontiers: BlockSyncFrontiers) {
+    async fn handle_chain_tip_reset(
+        &mut self,
+        frontiers: BlockSyncFrontiers,
+        preserve_active_successors: bool,
+    ) {
         let reset_tip_matches_local_work = !self.reset_tip_conflicts_with_local_work(
             &frontiers,
             frontiers.verified_block_tip <= self.state.body_download_floor,
@@ -473,10 +482,8 @@ impl BlockSyncReactor {
         // already inside our contiguous submitted/downloaded body floor. Do not
         // destructively clear successor bodies in that case: a stale reset
         // snapshot can otherwise erase `applying`/covered state and re-request
-        // the same bodies while their first apply is still in flight. Keep
-        // finalized-floor resets destructive so a real restart/reorg from the
-        // base can still re-request the same hash.
-        if frontiers.verified_block_tip > frontiers.finalized_height
+        // the same bodies while their first apply is still in flight.
+        if preserve_active_successors
             && frontiers.verified_block_tip < self.state.body_download_floor
             && reset_tip_matches_local_work
             && self.has_active_successor_after(frontiers.verified_block_tip)
@@ -649,16 +656,18 @@ impl BlockSyncReactor {
                 .await;
             return;
         }
+        let now = Instant::now();
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
             return;
         };
         let servable_range_grew = status.servable_high > peer_state.servable_high
             || status.servable_low < peer_state.servable_low;
-        if !peer_state.inbound_status.try_take(Instant::now()) && !servable_range_grew {
+        if !peer_state.inbound_status.try_take(now) && !servable_range_grew {
             self.report_misbehavior(peer, BlockSyncMisbehavior::StatusSpam)
                 .await;
             return;
         }
+        let send_status_reply = peer_state.unsolicited.try_take(now);
         peer_state.servable_low = status.servable_low;
         peer_state.servable_high = status.servable_high;
         peer_state.max_blocks_per_response =
@@ -668,6 +677,9 @@ impl BlockSyncReactor {
         peer_state.received_status = true;
         self.trace_status_received(&peer, status);
         self.publish_candidate_state();
+        if send_status_reply {
+            self.send_status(&peer, "status_reply").await;
+        }
         self.schedule().await;
     }
 
@@ -1521,6 +1533,7 @@ impl BlockSyncReactor {
                         ?error,
                         "failed to queue Zakura block-sync GetBlocks"
                     );
+                    peer.session.cancel_token().cancel();
                     self.state.budget.release(request.estimated_bytes);
                     self.state.schedule.retry(request);
                     break;
@@ -1579,11 +1592,27 @@ impl BlockSyncReactor {
     }
 
     async fn submit_pending_blocks(&mut self) {
+        let submitted = self
+            .state
+            .applying
+            .values()
+            .filter(|applying| applying.submitted)
+            .count();
+        let available = self
+            .startup
+            .config
+            .submitted_apply_limit()
+            .saturating_sub(submitted);
+        if available == 0 {
+            return;
+        }
+
         let pending: Vec<_> = self
             .state
             .applying
             .iter()
             .filter_map(|(height, applying)| (!applying.submitted).then_some(*height))
+            .take(available)
             .collect();
 
         for height in pending {
@@ -1808,12 +1837,19 @@ impl BlockSyncReactor {
         self.clear_submitted_applies_from(from);
     }
 
-    async fn send_status(&self, peer: &ZakuraPeerId) {
+    async fn send_status(&self, peer: &ZakuraPeerId, reason: &'static str) {
         let Some(peer_state) = self.state.peers.get(peer) else {
             return;
         };
         let status = self.local_status();
-        let _ = peer_state.session.try_send_status(status);
+        let session = peer_state.session.clone();
+        if let Err(error) = session.try_send_status(status) {
+            tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Status");
+            self.trace_status_send_failed(peer, reason);
+            session.cancel_token().cancel();
+            return;
+        }
+        self.trace_status_sent(peer, reason, status);
         let _ = self
             .dispatch_action(BlockSyncAction::SendMessage {
                 peer: peer.clone(),
@@ -1838,11 +1874,13 @@ impl BlockSyncReactor {
             }
             Ok(Err(error)) => {
                 tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Block");
+                session.cancel_token().cancel();
                 false
             }
             Err(_) => {
                 metrics::counter!("sync.block.body.serve_timeout").increment(1);
                 tracing::debug!(?peer, "timed out queueing Zakura block-sync Block");
+                session.cancel_token().cancel();
                 false
             }
         }
@@ -1878,10 +1916,12 @@ impl BlockSyncReactor {
                     ?error,
                     "failed to queue Zakura block-sync BlocksDone"
                 );
+                session.cancel_token().cancel();
             }
             Err(_) => {
                 metrics::counter!("sync.block.done.serve_timeout").increment(1);
                 tracing::debug!(?peer, "timed out queueing Zakura block-sync BlocksDone");
+                session.cancel_token().cancel();
             }
         }
     }
@@ -1900,6 +1940,7 @@ impl BlockSyncReactor {
                 ?error,
                 "failed to queue Zakura block-sync RangeUnavailable"
             );
+            peer_state.session.cancel_token().cancel();
         }
     }
 
@@ -1931,6 +1972,7 @@ impl BlockSyncReactor {
                     ?error,
                     "failed to queue Zakura block-sync RangeUnavailable"
                 );
+                session.cancel_token().cancel();
             }
             Err(_) => {
                 metrics::counter!("sync.block.unavailable.serve_timeout").increment(1);
@@ -1938,12 +1980,14 @@ impl BlockSyncReactor {
                     ?peer,
                     "timed out queueing Zakura block-sync RangeUnavailable"
                 );
+                session.cancel_token().cancel();
             }
         }
     }
 
     async fn flush_status_refresh(&mut self) {
-        if !self.state.pending_status_refresh {
+        let has_unready_peers = self.state.peers.values().any(|peer| !peer.received_status);
+        if !self.state.pending_status_refresh && !has_unready_peers {
             return;
         }
         let now = Instant::now();
@@ -1951,24 +1995,29 @@ impl BlockSyncReactor {
             return;
         }
         let status = self.local_status();
-        if status == self.state.last_advertised_status {
-            self.state.pending_status_refresh = false;
-            return;
-        }
+        let status_changed = status != self.state.last_advertised_status;
 
         self.state.pending_status_refresh = false;
-        self.state.last_advertised_status = status;
-        let _ = self.status.send(status);
+        if status_changed {
+            self.state.last_advertised_status = status;
+            let _ = self.status.send(status);
+        }
 
         let peer_ids: Vec<_> = self
             .state
             .peers
             .iter_mut()
-            .filter_map(|(peer_id, peer)| peer.unsolicited.try_take(now).then(|| peer_id.clone()))
+            .filter_map(|(peer_id, peer)| {
+                if (status_changed || !peer.received_status) && peer.unsolicited.try_take(now) {
+                    Some(peer_id.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
 
         for peer in peer_ids {
-            self.send_status(&peer).await;
+            self.send_status(&peer, "refresh").await;
         }
     }
 
@@ -2016,6 +2065,12 @@ impl BlockSyncReactor {
             .values()
             .filter(|peer| peer.received_status)
             .count();
+        let submitted_applies = self
+            .state
+            .applying
+            .values()
+            .filter(|applying| applying.submitted)
+            .count();
         self.emit_trace(bs_trace::BLOCK_SYNC_STATE, |row| {
             bs_insert_height(
                 row,
@@ -2030,6 +2085,7 @@ impl BlockSyncReactor {
             bs_insert_height(row, bs_trace::BEST_HEADER_TIP, self.state.best_header_tip);
             bs_insert_u64(row, bs_trace::BODY_LAG, u64::from(self.body_lag()));
             bs_insert_u64(row, bs_trace::APPLYING, self.state.applying.len() as u64);
+            bs_insert_u64(row, bs_trace::SUBMITTED_APPLIES, submitted_applies as u64);
             bs_insert_u64(row, bs_trace::REORDER, self.state.reorder.len() as u64);
             bs_insert_u64(row, bs_trace::OUTSTANDING, outstanding as u64);
             bs_insert_u64(
@@ -2090,6 +2146,44 @@ impl BlockSyncReactor {
             bs_insert_peer(row, bs_trace::PEER, peer);
             bs_insert_height(row, bs_trace::RANGE_START, status.servable_low);
             bs_insert_height(row, bs_trace::HEIGHT, status.servable_high);
+        });
+    }
+
+    fn trace_status_sent(
+        &self,
+        peer: &ZakuraPeerId,
+        reason: &'static str,
+        status: BlockSyncStatus,
+    ) {
+        self.emit_trace(bs_trace::BLOCK_STATUS_SENT, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, bs_trace::REASON, reason);
+            bs_insert_height(row, bs_trace::RANGE_START, status.servable_low);
+            bs_insert_height(row, bs_trace::HEIGHT, status.servable_high);
+        });
+    }
+
+    fn trace_status_send_failed(&self, peer: &ZakuraPeerId, reason: &'static str) {
+        self.emit_trace(bs_trace::BLOCK_STATUS_SEND_FAILED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, bs_trace::REASON, reason);
+        });
+    }
+
+    fn trace_peer_connected(&self, peer: &ZakuraPeerId, direction: ServicePeerDirection) {
+        self.emit_trace(bs_trace::BLOCK_PEER_CONNECTED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, "direction", direction.trace_label());
+        });
+    }
+
+    fn trace_peer_disconnected(&self, peer: &ZakuraPeerId, received_status: bool) {
+        self.emit_trace(bs_trace::BLOCK_PEER_DISCONNECTED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            row.insert(
+                "received_status".to_string(),
+                serde_json::Value::Bool(received_status),
+            );
         });
     }
 

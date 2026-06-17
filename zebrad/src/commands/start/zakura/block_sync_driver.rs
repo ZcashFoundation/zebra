@@ -140,6 +140,29 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     let mut checkpoint_frontier_refresh = CheckpointFrontierRefresh::default();
 
     loop {
+        if !in_flight_applies.is_empty() {
+            if let Some(Some(completed)) = in_flight_applies.next().now_or_never() {
+                handle_completed_block_apply(
+                    completed,
+                    &mut pending_applies,
+                    &mut in_flight_applies,
+                    &mut checkpoint_in_flight,
+                    &mut full_in_flight,
+                    checkpoint_apply_limit,
+                    full_apply_limit,
+                    combined_apply_limit,
+                    latest_chain_tip.clone(),
+                    endpoint.clone(),
+                    read_state.clone(),
+                    block_verifier.clone(),
+                    block_sync.clone(),
+                    trace.clone(),
+                    &mut checkpoint_frontier_refresh,
+                );
+                continue;
+            }
+        }
+
         let action = if let Some(action) =
             coalesce_ready_needed_block_queries(&mut actions, &mut deferred_actions)
         {
@@ -153,19 +176,8 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                     let Some(completed) = completed else {
                         continue;
                     };
-                    match completed.class {
-                        BlockApplyClass::Checkpoint => {
-                            checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
-                        }
-                        BlockApplyClass::Full => {
-                            full_in_flight = full_in_flight.saturating_sub(1);
-                        }
-                    }
-                    if let Some(highest_observed_at_apply) = completed.checkpoint_refresh_floor {
-                        checkpoint_frontier_refresh
-                            .observe_checkpoint_commit(highest_observed_at_apply);
-                    }
-                    drain_pending_block_applies(
+                    handle_completed_block_apply(
+                        completed,
                         &mut pending_applies,
                         &mut in_flight_applies,
                         &mut checkpoint_in_flight,
@@ -179,6 +191,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         block_verifier.clone(),
                         block_sync.clone(),
                         trace.clone(),
+                        &mut checkpoint_frontier_refresh,
                     );
                     continue;
                 }
@@ -261,7 +274,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                                 insert_cs_u64(row, cs_trace::ELAPSED_MS, elapsed_ms(started));
                             },
                         );
-                        let _ = block_sync.send(BlockSyncEvent::NeededBlocks(blocks)).await;
+                        let _ = block_sync.send_control(BlockSyncEvent::NeededBlocks(blocks));
                         emit_commit_state(
                             &trace,
                             cs_trace::REACTOR_EVENT_SENT,
@@ -341,14 +354,12 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                                 insert_cs_u64(row, cs_trace::RANGE_COUNT, u64::from(count));
                             },
                         );
-                        let _ = block_sync
-                            .send(BlockSyncEvent::BlockRangeResponseReady {
-                                peer,
-                                start_height: start,
-                                requested_count: count,
-                                blocks,
-                            })
-                            .await;
+                        let _ = block_sync.send_control(BlockSyncEvent::BlockRangeResponseReady {
+                            peer,
+                            start_height: start,
+                            requested_count: count,
+                            blocks,
+                        });
                     }
                     Ok(Ok(response)) => {
                         trace_block_range_error(
@@ -361,14 +372,13 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         );
                         warn!(?peer, ?response, "unexpected BlocksByHeightRange response");
                         trace_block_range_finished(&trace, &peer, start, count, 0);
-                        let _ = block_sync
-                            .send(BlockSyncEvent::BlockRangeResponseFinished {
+                        let _ =
+                            block_sync.send_control(BlockSyncEvent::BlockRangeResponseFinished {
                                 peer,
                                 start_height: start,
                                 requested_count: count,
                                 returned_count: 0,
-                            })
-                            .await;
+                            });
                     }
                     Ok(Err(error)) => {
                         trace_block_range_error(
@@ -385,14 +395,13 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                             "failed to read Zakura Blocks response from state"
                         );
                         trace_block_range_finished(&trace, &peer, start, count, 0);
-                        let _ = block_sync
-                            .send(BlockSyncEvent::BlockRangeResponseFinished {
+                        let _ =
+                            block_sync.send_control(BlockSyncEvent::BlockRangeResponseFinished {
                                 peer,
                                 start_height: start,
                                 requested_count: count,
                                 returned_count: 0,
-                            })
-                            .await;
+                            });
                     }
                     Err(_elapsed) => {
                         emit_commit_state(
@@ -413,14 +422,13 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         );
                         warn!(?peer, "timed out reading Zakura block-sync serving range");
                         trace_block_range_finished(&trace, &peer, start, count, 0);
-                        let _ = block_sync
-                            .send(BlockSyncEvent::BlockRangeResponseFinished {
+                        let _ =
+                            block_sync.send_control(BlockSyncEvent::BlockRangeResponseFinished {
                                 peer,
                                 start_height: start,
                                 requested_count: count,
                                 returned_count: 0,
-                            })
-                            .await;
+                            });
                     }
                 }
             }
@@ -548,6 +556,67 @@ pub(crate) fn coalesce_stale_needed_block_queries(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn handle_completed_block_apply<ReadState, BlockVerifier>(
+    completed: BlockApplyCompletion,
+    pending_applies: &mut VecDeque<PendingBlockApply>,
+    in_flight_applies: &mut FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>>,
+    checkpoint_in_flight: &mut usize,
+    full_in_flight: &mut usize,
+    checkpoint_apply_limit: usize,
+    full_apply_limit: usize,
+    combined_apply_limit: usize,
+    latest_chain_tip: impl ChainTip + Clone + Send + Sync + 'static,
+    endpoint: Option<ZakuraEndpoint>,
+    read_state: ReadState,
+    block_verifier: BlockVerifier,
+    block_sync: BlockSyncHandle,
+    trace: ZakuraTrace,
+    checkpoint_frontier_refresh: &mut CheckpointFrontierRefresh,
+) where
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    ReadState::Future: Send + 'static,
+    BlockVerifier:
+        Service<zebra_consensus::Request, Response = block::Hash> + Clone + Send + 'static,
+    BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
+    BlockVerifier::Future: Send + 'static,
+{
+    match completed.class {
+        BlockApplyClass::Checkpoint => {
+            *checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
+        }
+        BlockApplyClass::Full => {
+            *full_in_flight = full_in_flight.saturating_sub(1);
+        }
+    }
+
+    if let Some(highest_observed_at_apply) = completed.checkpoint_refresh_floor {
+        checkpoint_frontier_refresh.observe_checkpoint_commit(highest_observed_at_apply);
+    }
+
+    drain_pending_block_applies(
+        pending_applies,
+        in_flight_applies,
+        checkpoint_in_flight,
+        full_in_flight,
+        checkpoint_apply_limit,
+        full_apply_limit,
+        combined_apply_limit,
+        latest_chain_tip,
+        endpoint,
+        read_state,
+        block_verifier,
+        block_sync,
+        trace,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn drain_pending_block_applies<ReadState, BlockVerifier>(
     pending_applies: &mut VecDeque<PendingBlockApply>,
     in_flight_applies: &mut FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>>,
@@ -576,12 +645,16 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
     BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
     BlockVerifier::Future: Send + 'static,
 {
+    // The checkpoint verifier can hold a complete range until its checkpoint is
+    // reached. Keep room for the current range and the next complete range.
+    let checkpoint_pipeline_apply_limit = checkpoint_apply_limit.saturating_mul(2);
+    let checkpoint_combined_apply_limit = combined_apply_limit.max(checkpoint_pipeline_apply_limit);
     while let Some(index) = pending_applies
         .iter()
         .position(|pending| match pending.class {
             BlockApplyClass::Checkpoint => {
-                *checkpoint_in_flight + *full_in_flight < combined_apply_limit
-                    && *checkpoint_in_flight < checkpoint_apply_limit
+                *checkpoint_in_flight + *full_in_flight < checkpoint_combined_apply_limit
+                    && *checkpoint_in_flight < checkpoint_pipeline_apply_limit
             }
             BlockApplyClass::Full => {
                 *checkpoint_in_flight + *full_in_flight < combined_apply_limit
@@ -740,15 +813,13 @@ where
         },
     );
 
-    let _ = block_sync
-        .send(BlockSyncEvent::BlockApplyFinished {
-            token,
-            height,
-            hash: expected_hash,
-            result,
-            local_frontier,
-        })
-        .await;
+    let _ = block_sync.send_control(BlockSyncEvent::BlockApplyFinished {
+        token,
+        height,
+        hash: expected_hash,
+        result,
+        local_frontier,
+    });
     emit_commit_state(
         &trace,
         cs_trace::REACTOR_EVENT_SENT,
@@ -976,9 +1047,7 @@ async fn refresh_block_sync_frontiers_for_checkpoint_window<ReadState>(
     highest_sent = frontiers.verified_block_tip;
     publish_body_frontier(endpoint.as_ref(), frontiers, FrontierChange::VerifiedGrow);
     if let Some(block_sync) = &block_sync {
-        let _ = block_sync
-            .send(BlockSyncEvent::ChainTipGrow(frontiers))
-            .await;
+        let _ = block_sync.send_control(BlockSyncEvent::ChainTipGrow(frontiers));
     }
     emit_commit_state(
         &trace,

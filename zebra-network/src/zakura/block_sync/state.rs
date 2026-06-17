@@ -8,9 +8,8 @@ use crate::zakura::{
 ///
 /// A safety bound only; the binding per-peer concurrency is the peer's advertised
 /// `max_inflight_requests` (config `max_inflight_requests`, clamped to
-/// [`DEFAULT_BS_MAX_INFLIGHT`]). Set well above the configured cap so the byte
-/// budget and per-peer byte cap, not this ceiling, govern in-flight depth.
-pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 4096;
+/// [`DEFAULT_BS_MAX_INFLIGHT`]).
+pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 16;
 
 /// Cached chain frontiers used by the block-sync reactor.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -143,14 +142,22 @@ impl BlockSyncHandle {
         self.events.try_send(event)
     }
 
-    /// Send a peer lifecycle event without sharing the bounded wire-event queue.
-    pub fn send_lifecycle(
+    /// Send a control-plane event without sharing the bounded wire-event queue.
+    pub fn send_control(
         &self,
         event: BlockSyncEvent,
     ) -> Result<(), mpsc::error::SendError<BlockSyncEvent>> {
         self.lifecycle
             .send(event)
             .map_err(|error| mpsc::error::SendError(error.0))
+    }
+
+    /// Send a peer lifecycle event without sharing the bounded wire-event queue.
+    pub fn send_lifecycle(
+        &self,
+        event: BlockSyncEvent,
+    ) -> Result<(), mpsc::error::SendError<BlockSyncEvent>> {
+        self.send_control(event)
     }
 
     /// Return the currently cached peer slot snapshot.
@@ -464,6 +471,10 @@ impl RateMeter {
         }
         self.next_allowed = now + self.interval;
         true
+    }
+
+    pub(super) fn mark_taken(&mut self, now: Instant) {
+        self.next_allowed = now + self.interval;
     }
 }
 

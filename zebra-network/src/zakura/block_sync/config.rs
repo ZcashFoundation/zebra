@@ -9,27 +9,34 @@ pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 128;
 /// Default number of in-flight block requests advertised per peer.
 ///
 /// Combined with the global byte budget ([`DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES`])
-/// this lets the budget — not a small fixed slot count — pace downloads.
-pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 4096;
+/// this gives each peer enough work to keep its stream busy while avoiding a
+/// response-frame backlog that can outlive the connection.
+pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 16;
 /// Default expected serving-peer fanout used to derive the per-peer in-flight
 /// byte cap (`max_inflight_block_bytes / expected_peers`).
 ///
 /// Bounds how much of the global byte budget a single peer can reserve so one
 /// fast peer cannot starve the others once the slot cap stops binding. `0`
 /// disables per-peer byte fairness.
-pub const DEFAULT_BS_EXPECTED_PEERS: usize = 1;
+pub const DEFAULT_BS_EXPECTED_PEERS: usize = 4;
 /// Default total response byte target advertised per range response.
 pub const DEFAULT_BS_MAX_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 /// Default global byte budget reserved for later block-download scheduling.
 pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-/// Default block-sync request timeout reserved for later scheduling.
-pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default maximum submitted block applies awaiting verifier completion.
+///
+/// The checkpoint verifier resolves a checkpoint window only after the whole
+/// window is queued, so this defaults to one maximum checkpoint gap.
+pub const DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES: usize =
+    zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_HEIGHT_GAP;
+/// Default block-sync request timeout.
+pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default block-sync status refresh interval reserved for later advertisement.
 pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// Default tolerated size-hint deviation percentage reserved for later soft scoring.
 pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
-/// Default block-sync peer fanout reserved for later range scheduling.
-pub const DEFAULT_BS_FANOUT: usize = 1;
+/// Default block-sync peer fanout for the same requested range.
+pub const DEFAULT_BS_FANOUT: usize = 2;
 /// Default body lag where block sync pauses new downloads and lets block propagation finish.
 pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
 /// Maximum peer-advertised aggregate byte target accepted per requested range.
@@ -115,6 +122,9 @@ pub struct ZakuraBlockSyncConfig {
     pub max_response_bytes: u32,
     /// Maximum estimated bytes reserved for in-flight and buffered block bodies.
     pub max_inflight_block_bytes: u64,
+    /// Maximum block bodies submitted to the verifier before completed applies
+    /// release more submission slots.
+    pub max_submitted_block_applies: usize,
     /// Expected serving-peer fanout used to derive the per-peer in-flight byte cap
     /// (`max_inflight_block_bytes / expected_peers`).
     ///
@@ -153,6 +163,7 @@ impl Default for ZakuraBlockSyncConfig {
             max_inflight_requests: DEFAULT_BS_MAX_INFLIGHT,
             max_response_bytes: DEFAULT_BS_MAX_RESPONSE_BYTES,
             max_inflight_block_bytes: DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES,
+            max_submitted_block_applies: DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES,
             expected_peers: DEFAULT_BS_EXPECTED_PEERS,
             request_timeout: DEFAULT_BS_REQUEST_TIMEOUT,
             status_refresh_interval: DEFAULT_BS_STATUS_REFRESH_INTERVAL,
@@ -178,6 +189,11 @@ impl ZakuraBlockSyncConfig {
     /// Return the non-zero response byte advertisement for status messages.
     pub fn advertised_max_response_bytes(&self) -> u32 {
         clamp_advertised_response_bytes(self.max_response_bytes)
+    }
+
+    /// Return the non-zero verifier submission cap.
+    pub fn submitted_apply_limit(&self) -> usize {
+        self.max_submitted_block_applies.max(1)
     }
 
     /// Per-peer in-flight byte cap derived from the global budget and expected fanout.
