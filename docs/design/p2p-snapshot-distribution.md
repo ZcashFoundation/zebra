@@ -326,3 +326,88 @@ set along the same rails.
   hashes are `Some`) plus at least one peer serving and a fresh-DB consumer with
   `state.snapshot_consume` configured; correctness will hold but the tree-load
   speedup waits on (1).
+
+## 9. Local-file source (solo snapshot-consume sync, the test path)
+
+A snapshot-consume node normally fetches the new artifacts (known-hash chunks,
+note commitment trees, the unspent-output set, the address-balance set, the chain
+value pools) from peers over the P2P extension above. To make the whole pipeline
+testable on a **single node with no peer speaking the extension**, the consumer
+can read those artifacts from **local files** instead. Blocks themselves still
+come over normal P2P / known-hash; only the new artifacts come from files.
+
+### 9.1 The single dispatch point
+
+The fetch is factored so P2P-vs-file is one decision: `SnapshotSource`
+(`zebrad/src/components/ibd/consume.rs`) has a `P2p` variant and a `LocalFiles`
+variant, each exposing the same three raw-byte fetches — `chunk_range`,
+`tree_bytes`, `set_range`. Everything downstream (the SHA-256 chunk check, the
+tree-root-vs-chunk check, the set-SHA-256 check) is applied **identically**
+regardless of source, so the local-file path and the P2P path verify against the
+*same* pinned constants and are byte-for-byte equivalent. The CF-backed
+`CfHashSource` holds a `SnapshotSource` for chunk fetches; the engine's
+`tree_fetch_stage` holds an optional `LocalSnapshotSource` for trees (the single
+tree-fetch dispatch point); `fetch_and_verify_set` takes a `SnapshotSource` for
+sets. With the default config (`sync.known_hash_local_source_dir = None`) every
+variant is `P2p` and behaviour is unchanged.
+
+### 9.2 Emitting the artifact set
+
+`emit-snapshot --emit-files --out-dir <dir>` writes the complete v2 artifact set
+into `<dir>`, all bytes byte-identical to what the P2P serve path returns (the
+chunk bytes come from the same `zebra_state::known_hash_chunk_bytes`; the tree
+records hold the same `note_commitment_tree_bytes` serialization; the set files
+hold the same sorted bytes; the value pools file holds the 40-byte
+`ValueBalance::to_bytes`). Layout (also written as `MANIFEST.txt`):
+
+```text
+<dir>/
+├── MANIFEST.txt                  layout + provenance (network, H_max)
+├── chunks/chunk-<index>.bin      exact v2 chunk bytes per index (5-digit zero-padded)
+├── sapling-trees.bin             (height u32 LE, len u32 LE, frontier-bytes)* sorted by height
+├── orchard-trees.bin             same record layout for orchard
+├── unspent-output-locations.bin  the sorted unspent-output-location set
+├── address-balances.bin          the sorted address-balance set
+└── chain-value-pools.bin         the 40-byte H_max ValueBalance
+```
+
+### 9.3 Consuming from local files
+
+Set, in the node config:
+
+```toml
+[sync]
+known_hash_sync = true
+snapshot_consume_sync = true
+known_hash_local_source_dir = "/path/to/<dir>"
+
+[state]
+# snapshot_consume must also be configured (survivor set, H_max, elision) —
+# see the `[state] snapshot_consume` config and docs/design/utxo-elision.md.
+```
+
+With this set on a fresh DB, the engine reads each artifact from `<dir>` instead
+of issuing the P2P request, verifying each against the identical pinned hashes
+(chunk SHA vs `chunk_hashes[index]`; set SHA vs the pinned set hash; tree root vs
+the chunk's recorded root). A wrong-hash file is rejected exactly as a corrupt
+peer would be. This is the path the round-trip tests exercise
+(`zebrad/src/components/ibd/consume/tests.rs` and the emit round-trip in
+`zebrad/src/commands/emit_snapshot.rs`).
+
+### 9.4 V1/V2 consistency (important)
+
+Applying v2 constants via `emit-snapshot` makes the **bundled v1 `.bin` known-hash
+assets stale**: a v2 chunk embeds the sapling/orchard tree roots a v1 chunk lacks,
+so the v1 file's SHA-256 no longer equals the v2 pinned `chunk_hashes[index]`. The
+local-file source (and the P2P source) supersede the bundled v1 `.bin` assets for
+snapshot-consume sync — the CF-backed `CfHashSource` has **no v1 fallback** by
+design (a v1/v2 disagreement at a chunk boundary would be invisible to the
+synchronous lookups). So:
+
+- The **bundled v1 `.bin` assets are not deleted** by this change (a normal,
+  non-snapshot known-hash sync still uses them, gated on the v1 pinned hashes).
+- For a **solo snapshot-consume test**, point `known_hash_local_source_dir` at a
+  directory emitted by `emit-snapshot --emit-files` against a node synced to the
+  same `H_max` the v2 constants pin. Then v2 constants + v2 files + the local
+  source are mutually consistent, and the node drives the known-hash sync from the
+  local v2 chunks with no peer serving the extension.

@@ -26,8 +26,31 @@
 //! snapshot height is the cached state's finalized tip, so point this at a state
 //! synced to the height you want to snapshot.
 //!
-//! The legacy `.bin` asset emit (unspent-output-locations / tree-roots) is kept
-//! behind the hidden `--emit-files` flag for debugging only.
+//! ## `--emit-files`: the complete local artifact set
+//!
+//! With `--emit-files --out-dir <dir>` the command **also** writes the complete
+//! v2 artifact set a snapshot-consume consumer needs, in the layout documented in
+//! [`crate::components::ibd::consume::local`]:
+//!
+//! - `chunks/chunk-<index>.bin`: the exact v2 chunk bytes for each index (the
+//!   same bytes whose SHA-256 is the pinned `chunk_hashes[index]`);
+//! - `sapling-trees.bin` / `orchard-trees.bin`: the note-commitment-tree frontier
+//!   at every updating height, as `(height u32 LE, len u32 LE, frontier-bytes)`
+//!   records sorted by height (the same canonical serialization the P2P
+//!   `NoteCommitmentTree` response uses, via
+//!   [`zebra_state::note_commitment_tree_bytes`]);
+//! - `unspent-output-locations.bin` / `address-balances.bin`: the sorted sets,
+//!   the same bytes the P2P range serve returns / whose SHA-256 is the pinned set
+//!   hashes;
+//! - `chain-value-pools.bin`: the 40-byte `H_max` chain value pools, for the
+//!   state's bulk value-pool load;
+//! - `MANIFEST.txt`: documents the layout and provenance (network, `H_max`).
+//!
+//! A node configured with `sync.known_hash_local_source_dir = <dir>` then drives
+//! a full snapshot-consume sync from these files alone — no peer need speak the
+//! P2P extension. The bytes are byte-identical to the P2P-served bytes, so they
+//! verify against the same pinned constants. See
+//! `docs/design/p2p-snapshot-distribution.md`.
 
 mod editor;
 
@@ -46,23 +69,17 @@ use zebra_chain::{
     block::Height,
     parameters::{known_hashes::HASHES_PER_CHUNK, Network},
 };
-use zebra_state::ZebraDb;
+use zebra_state::{ShieldedPool, ZebraDb};
 
-use crate::prelude::APPLICATION;
+use crate::{
+    components::ibd::consume::local::{
+        chunk_file_name, ADDRESS_BALANCES_FILE, CHAIN_VALUE_POOLS_FILE, CHUNKS_SUBDIR,
+        MANIFEST_FILE, ORCHARD_TREES_FILE, SAPLING_TREES_FILE, UNSPENT_OUTPUTS_FILE,
+    },
+    prelude::APPLICATION,
+};
 
 use editor::Change;
-
-/// The name of the emitted unspent-transparent-output-location artifact
-/// (only written under `--emit-files`).
-const UNSPENT_OUTPUTS_FILE: &str = "unspent-output-locations.bin";
-
-/// The name of the emitted Sapling note-commitment-tree-root artifact
-/// (only written under `--emit-files`).
-const SAPLING_ROOTS_FILE: &str = "sapling-tree-roots.bin";
-
-/// The name of the emitted Orchard note-commitment-tree-root artifact
-/// (only written under `--emit-files`).
-const ORCHARD_ROOTS_FILE: &str = "orchard-tree-roots.bin";
 
 /// The source file holding the known-hash list specs (chunk hashes + max height
 /// + the new snapshot-set hash constants), relative to the `zebrad` crate.
@@ -93,14 +110,19 @@ pub struct EmitSnapshotCmd {
     )]
     src_root: Option<PathBuf>,
 
-    /// Debugging only: also write the raw `.bin` asset files into this directory.
-    /// The release pipeline does not need these; the artifacts are served over
-    /// P2P and verified against the edited constants.
-    #[clap(long, help = "ALSO write the raw .bin asset files (debugging only)")]
+    /// Also write the complete v2 snapshot-consume artifact set into `--out-dir`.
+    /// The release pipeline does not need these (the artifacts are served over
+    /// P2P and verified against the edited constants), but a node configured with
+    /// `sync.known_hash_local_source_dir = <out-dir>` can drive a full
+    /// snapshot-consume sync from them alone (the solo-sync test path).
+    #[clap(
+        long,
+        help = "ALSO write the complete local artifact set into --out-dir"
+    )]
     emit_files: bool,
 
-    /// Output directory for the `--emit-files` debugging artifacts.
-    #[clap(long, short, help = "directory for --emit-files .bin artifacts")]
+    /// Output directory for the `--emit-files` artifact set.
+    #[clap(long, short, help = "directory for the --emit-files artifact set")]
     out_dir: Option<PathBuf>,
 }
 
@@ -180,7 +202,7 @@ impl EmitSnapshotCmd {
         }
 
         if self.emit_files {
-            self.emit_debug_files(&db)?;
+            self.emit_local_artifact_set(&db, tip_height)?;
         }
 
         Ok(())
@@ -419,26 +441,75 @@ impl EmitSnapshotCmd {
         Ok(())
     }
 
-    /// Writes the legacy `.bin` debugging artifacts under `--emit-files`.
+    /// Writes the complete v2 snapshot-consume artifact set under `--emit-files`.
+    ///
+    /// The layout (documented in [`crate::components::ibd::consume::local`]) is
+    /// what a node configured with `sync.known_hash_local_source_dir` reads to
+    /// drive a full solo snapshot-consume sync. Every artifact is byte-identical
+    /// to what the P2P serve path returns (the chunk bytes come from the same
+    /// [`zebra_state::known_hash_chunk_bytes`] function; the tree records hold the
+    /// same [`zebra_state::note_commitment_tree_bytes`] serialization; the set
+    /// files hold the same sorted bytes; the value-pool file holds the 40-byte
+    /// `ValueBalance::to_bytes`), so they verify against the same pinned
+    /// constants.
     #[allow(clippy::print_stdout)]
-    fn emit_debug_files(&self, db: &ZebraDb) -> Result<()> {
+    fn emit_local_artifact_set(&self, db: &ZebraDb, tip_height: Height) -> Result<()> {
         let out_dir = self
             .out_dir
             .clone()
             .ok_or_else(|| eyre!("--emit-files requires --out-dir"))?;
         std::fs::create_dir_all(&out_dir)?;
 
+        let chunks = emit_chunk_files(db, &out_dir, tip_height)?;
+        let sapling_trees = emit_tree_records(
+            &out_dir.join(SAPLING_TREES_FILE),
+            db.sapling_tree_by_height_range(..).map(|(height, _tree)| {
+                let bytes =
+                    zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Sapling, height)
+                        .expect("a tree exists at a height the range yielded");
+                (height.0, bytes)
+            }),
+        )?;
+        let orchard_trees = emit_tree_records(
+            &out_dir.join(ORCHARD_TREES_FILE),
+            db.orchard_tree_by_height_range(..).map(|(height, _tree)| {
+                let bytes =
+                    zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Orchard, height)
+                        .expect("a tree exists at a height the range yielded");
+                (height.0, bytes)
+            }),
+        )?;
         let unspent_outputs = emit_unspent_output_locations(db, &out_dir)?;
-        let (sapling_roots, orchard_roots) = emit_tree_roots(db, &out_dir)?;
+        let address_balances = emit_address_balances(db, &out_dir)?;
+        emit_chain_value_pools(db, &out_dir, tip_height)?;
+        write_manifest(
+            &out_dir,
+            &self.network,
+            tip_height,
+            chunks,
+            sapling_trees,
+            orchard_trees,
+            unspent_outputs,
+            address_balances,
+        )?;
 
         println!(
-            "wrote debugging .bin artifacts:\n  \
-             {unspent_outputs} unspent transparent output locations -> {}\n  \
-             {sapling_roots} Sapling tree roots -> {}\n  \
-             {orchard_roots} Orchard tree roots -> {}",
-            out_dir.join(UNSPENT_OUTPUTS_FILE).display(),
-            out_dir.join(SAPLING_ROOTS_FILE).display(),
-            out_dir.join(ORCHARD_ROOTS_FILE).display(),
+            "wrote the local snapshot-consume artifact set into {}:\n  \
+             {chunks} chunk files -> {CHUNKS_SUBDIR}/\n  \
+             {sapling_trees} Sapling tree records -> {SAPLING_TREES_FILE}\n  \
+             {orchard_trees} Orchard tree records -> {ORCHARD_TREES_FILE}\n  \
+             {unspent_outputs} unspent output locations -> {UNSPENT_OUTPUTS_FILE}\n  \
+             {address_balances} address balances -> {ADDRESS_BALANCES_FILE}\n  \
+             chain value pools at H_max={} -> {CHAIN_VALUE_POOLS_FILE}\n  \
+             layout manifest -> {MANIFEST_FILE}",
+            out_dir.display(),
+            tip_height.0,
+        );
+        println!(
+            "to drive a solo snapshot-consume sync, set \
+             `sync.known_hash_local_source_dir = \"{}\"` (with \
+             `sync.snapshot_consume_sync = true`)",
+            out_dir.display(),
         );
 
         Ok(())
@@ -548,26 +619,64 @@ fn read_standalone_height(source: &str, name: &str) -> Result<u32> {
         .map_err(|_| eyre!("could not parse the height for `const {name}`"))
 }
 
-/// Emits the Sapling and Orchard note-commitment-tree roots at every updating
-/// height (debugging only, under `--emit-files`). Returns the two counts.
-fn emit_tree_roots(db: &ZebraDb, out_dir: &Path) -> Result<(u64, u64)> {
-    let sapling = write_root_records(
-        &out_dir.join(SAPLING_ROOTS_FILE),
-        db.sapling_tree_by_height_range(..)
-            .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
-    )?;
+/// Writes one `chunks/chunk-<index>.bin` file per chunk covering
+/// `0..=tip_height`, holding the exact v2 chunk bytes (the same bytes whose
+/// SHA-256 is the pinned `chunk_hashes[index]`). Returns the chunk count.
+///
+/// The bytes come from [`zebra_state::known_hash_chunk_bytes`], the *same*
+/// function the P2P serve path and the constants-updater use, so a local chunk
+/// file and the P2P-served chunk are byte-identical.
+fn emit_chunk_files(db: &ZebraDb, out_dir: &Path, tip_height: Height) -> Result<u64> {
+    let chunks_dir = out_dir.join(CHUNKS_SUBDIR);
+    std::fs::create_dir_all(&chunks_dir)?;
 
-    let orchard = write_root_records(
-        &out_dir.join(ORCHARD_ROOTS_FILE),
-        db.orchard_tree_by_height_range(..)
-            .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
-    )?;
+    // Number of 150,000-block chunks covering heights `0..=tip_height`.
+    let num_chunks = (u64::from(tip_height.0) + 1).div_ceil(u64::from(HASHES_PER_CHUNK));
 
-    Ok((sapling, orchard))
+    for index in 0..num_chunks {
+        // `num_chunks` is bounded by the tip height (a u32 block height), so the
+        // chunk index always fits a u32.
+        let index = index as u32;
+        let bytes = zebra_state::known_hash_chunk_bytes(db, index).ok_or_else(|| {
+            eyre!("chunk {index} could not be regenerated for the local artifact set")
+        })?;
+
+        let path = chunks_dir.join(chunk_file_name(index));
+        std::fs::write(&path, &bytes)
+            .map_err(|error| eyre!("could not write {}: {error}", path.display()))?;
+    }
+
+    Ok(num_chunks)
 }
 
-/// Streams every unspent transparent output location to the debugging artifact
-/// file. Returns the count.
+/// Writes the note-commitment-tree records file at `path` from the `records`
+/// iterator (`(height, frontier-bytes)` ascending by height), returning the
+/// record count.
+///
+/// Each record is `(height u32 LE, len u32 LE, len-byte frontier)`. The frontier
+/// bytes are the canonical [`zebra_state::note_commitment_tree_bytes`]
+/// serialization the P2P `NoteCommitmentTree` response carries, so the consumer's
+/// recomputed `.root()` matches the chunk's recorded root.
+fn emit_tree_records(path: &Path, records: impl Iterator<Item = (u32, Vec<u8>)>) -> Result<u64> {
+    let mut writer = BufWriter::new(File::create(path)?);
+
+    let mut count: u64 = 0;
+    for (height, frontier) in records {
+        // `frontier.len()` is a serialized tree frontier (a few KiB at most), far
+        // below u32::MAX, so the cast never truncates.
+        let len = frontier.len() as u32;
+        writer.write_all(&height.to_le_bytes())?;
+        writer.write_all(&len.to_le_bytes())?;
+        writer.write_all(&frontier)?;
+        count += 1;
+    }
+
+    writer.flush()?;
+    Ok(count)
+}
+
+/// Streams the sorted unspent-output-location set to `unspent-output-locations.bin`,
+/// the same bytes the P2P range serve returns. Returns the record count.
 fn emit_unspent_output_locations(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
     let path = out_dir.join(UNSPENT_OUTPUTS_FILE);
     let mut writer = BufWriter::new(File::create(&path)?);
@@ -593,18 +702,286 @@ fn emit_unspent_output_locations(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
     Ok(count)
 }
 
-/// Writes `(height, root)` records (4-byte little-endian height + 32-byte root)
-/// to `path` in iteration order. Returns the number of records written.
-fn write_root_records(path: &Path, records: impl Iterator<Item = (u32, [u8; 32])>) -> Result<u64> {
-    let mut writer = BufWriter::new(File::create(path)?);
+/// Streams the sorted address-balance set to `address-balances.bin`, the same
+/// bytes the P2P range serve returns (per record: 21-byte address key + 24-byte
+/// balance value). Returns the record count.
+fn emit_address_balances(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
+    let path = out_dir.join(ADDRESS_BALANCES_FILE);
+    let mut writer = BufWriter::new(File::create(&path)?);
 
     let mut count: u64 = 0;
-    for (height, root) in records {
-        writer.write_all(&height.to_le_bytes())?;
-        writer.write_all(&root)?;
-        count += 1;
+    let mut write_error = None;
+    db.for_each_address_balance_bytes(|address_bytes, value_bytes| {
+        if write_error.is_some() {
+            return;
+        }
+        if let Err(error) = writer
+            .write_all(address_bytes)
+            .and_then(|()| writer.write_all(value_bytes))
+        {
+            write_error = Some(error);
+        } else {
+            count += 1;
+        }
+    });
+
+    if let Some(error) = write_error {
+        return Err(error.into());
     }
 
     writer.flush()?;
     Ok(count)
+}
+
+/// Writes the `H_max` chain value pools to `chain-value-pools.bin` as the 40-byte
+/// `ValueBalance::to_bytes` encoding, for the state's bulk value-pool load.
+fn emit_chain_value_pools(db: &ZebraDb, out_dir: &Path, _tip_height: Height) -> Result<()> {
+    let path = out_dir.join(CHAIN_VALUE_POOLS_FILE);
+    let value_pool = db.finalized_value_pool();
+    std::fs::write(&path, value_pool.to_bytes())
+        .map_err(|error| eyre!("could not write {}: {error}", path.display()))?;
+    Ok(())
+}
+
+/// Writes the human-readable `MANIFEST.txt` documenting the artifact layout and
+/// provenance.
+#[allow(clippy::too_many_arguments)]
+fn write_manifest(
+    out_dir: &Path,
+    network: &Network,
+    tip_height: Height,
+    chunks: u64,
+    sapling_trees: u64,
+    orchard_trees: u64,
+    unspent_outputs: u64,
+    address_balances: u64,
+) -> Result<()> {
+    let manifest = format!(
+        "# Zebra snapshot-consume local artifact set\n\
+         #\n\
+         # Written by `emit-snapshot --emit-files`. A node configured with\n\
+         # `sync.known_hash_local_source_dir = <this dir>` and\n\
+         # `sync.snapshot_consume_sync = true` drives a full snapshot-consume\n\
+         # sync from these files instead of P2P. Every artifact is byte-identical\n\
+         # to the P2P-served bytes and verifies against the same pinned SHA-256\n\
+         # constants. See docs/design/p2p-snapshot-distribution.md.\n\
+         #\n\
+         network = {network}\n\
+         h_max = {h_max}\n\
+         hashes_per_chunk = {hashes_per_chunk}\n\
+         \n\
+         # Layout:\n\
+         {chunks_subdir}/{chunk_example}   # exact v2 chunk bytes per index ({chunks} files)\n\
+         {sapling_trees_file}              # (height u32 LE, len u32 LE, frontier)* ({sapling_trees} records)\n\
+         {orchard_trees_file}              # (height u32 LE, len u32 LE, frontier)* ({orchard_trees} records)\n\
+         {unspent_outputs_file}   # sorted unspent-output-location set ({unspent_outputs} records)\n\
+         {address_balances_file}            # sorted address-balance set ({address_balances} records)\n\
+         {chain_value_pools_file}           # 40-byte H_max ValueBalance\n",
+        network = network,
+        h_max = tip_height.0,
+        hashes_per_chunk = HASHES_PER_CHUNK,
+        chunks_subdir = CHUNKS_SUBDIR,
+        chunk_example = chunk_file_name(0),
+        chunks = chunks,
+        sapling_trees_file = SAPLING_TREES_FILE,
+        sapling_trees = sapling_trees,
+        orchard_trees_file = ORCHARD_TREES_FILE,
+        orchard_trees = orchard_trees,
+        unspent_outputs_file = UNSPENT_OUTPUTS_FILE,
+        unspent_outputs = unspent_outputs,
+        address_balances_file = ADDRESS_BALANCES_FILE,
+        address_balances = address_balances,
+        chain_value_pools_file = CHAIN_VALUE_POOLS_FILE,
+    );
+
+    let path = out_dir.join(MANIFEST_FILE);
+    std::fs::write(&path, manifest)
+        .map_err(|error| eyre!("could not write {}: {error}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tempfile::TempDir;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+    use zebra_network::ShieldedPool as NetworkShieldedPool;
+    use zebra_state::{Config as StateConfig, FinalizedState};
+
+    use crate::components::ibd::consume::local::LocalSnapshotSource;
+
+    use super::*;
+
+    /// Builds an ephemeral finalized state with mainnet genesis, block 1, and
+    /// block 2 committed, returning it.
+    fn populated_state() -> FinalizedState {
+        let mut state = FinalizedState::new(
+            &StateConfig::ephemeral(),
+            &Network::Mainnet,
+            #[cfg(feature = "elasticsearch")]
+            false,
+        );
+
+        let block_bytes: [&[u8]; 3] = [
+            zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.as_ref(),
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_ref(),
+            zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_ref(),
+        ];
+        for bytes in block_bytes {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().expect("test data parses");
+            state
+                .commit_finalized_direct(block.into(), None, "emit-snapshot test")
+                .expect("test block is valid");
+        }
+
+        state
+    }
+
+    /// The emit helpers write exactly the bytes the P2P serve path produces, and
+    /// the local source reads them back byte-for-byte — so a local artifact set
+    /// and a P2P fetch deliver identical bytes that pass the same content-addressed
+    /// checks. This is the emit-side half of the solo-sync round trip.
+    #[test]
+    fn emit_local_artifact_set_round_trips_through_local_source() {
+        let _init = zebra_test::init();
+
+        let state = populated_state();
+        let db = &state.db;
+        let tip_height = db.finalized_tip_height().expect("the state has a tip");
+
+        let dir = TempDir::new().expect("temp dir is creatable");
+        let out_dir = dir.path();
+
+        // Emit each artifact through the real emit helpers.
+        let chunks = emit_chunk_files(db, out_dir, tip_height).expect("chunks emit");
+        assert_eq!(chunks, 1, "a 3-block state has one chunk");
+        emit_tree_records(
+            &out_dir.join(SAPLING_TREES_FILE),
+            db.sapling_tree_by_height_range(..).map(|(height, _t)| {
+                (
+                    height.0,
+                    zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Sapling, height)
+                        .expect("a sapling tree exists at this height"),
+                )
+            }),
+        )
+        .expect("sapling tree records emit");
+        emit_tree_records(
+            &out_dir.join(ORCHARD_TREES_FILE),
+            db.orchard_tree_by_height_range(..).map(|(height, _t)| {
+                (
+                    height.0,
+                    zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Orchard, height)
+                        .expect("an orchard tree exists at this height"),
+                )
+            }),
+        )
+        .expect("orchard tree records emit");
+        let unspent = emit_unspent_output_locations(db, out_dir).expect("unspent outputs emit");
+        let balances = emit_address_balances(db, out_dir).expect("address balances emit");
+        emit_chain_value_pools(db, out_dir, tip_height).expect("value pools emit");
+        write_manifest(
+            out_dir,
+            &Network::Mainnet,
+            tip_height,
+            chunks,
+            0,
+            0,
+            unspent,
+            balances,
+        )
+        .expect("manifest writes");
+
+        // Read each artifact back through the local source and assert byte parity
+        // with the P2P serve path's bytes.
+        let local = LocalSnapshotSource::new(out_dir);
+
+        // Chunk: the file's bytes equal the on-demand-generated chunk bytes (whose
+        // SHA-256 is the pinned chunk hash).
+        let chunk_from_file = local.read_chunk(0).expect("the chunk file is read");
+        let chunk_from_state =
+            zebra_state::known_hash_chunk_bytes(db, 0).expect("chunk 0 generates");
+        assert_eq!(
+            chunk_from_file, chunk_from_state,
+            "the emitted chunk file is byte-identical to the P2P-served chunk",
+        );
+
+        // Trees: each record equals the P2P NoteCommitmentTree serialization.
+        for (pool, net_pool) in [
+            (ShieldedPool::Sapling, NetworkShieldedPool::Sapling),
+            (ShieldedPool::Orchard, NetworkShieldedPool::Orchard),
+        ] {
+            let heights: Vec<_> = match pool {
+                ShieldedPool::Sapling => db
+                    .sapling_tree_by_height_range(..)
+                    .map(|(h, _)| h)
+                    .collect(),
+                ShieldedPool::Orchard => db
+                    .orchard_tree_by_height_range(..)
+                    .map(|(h, _)| h)
+                    .collect(),
+            };
+            for height in heights {
+                let from_file = local
+                    .read_tree(net_pool, height.0)
+                    .expect("the tree file parses")
+                    .expect("a record exists at this updating height");
+                let from_state = zebra_state::note_commitment_tree_bytes(db, pool, height)
+                    .expect("the state serves this tree");
+                assert_eq!(
+                    from_file, from_state,
+                    "the emitted {pool:?} tree at {height:?} matches the P2P-served tree",
+                );
+            }
+        }
+
+        // Unspent-output set: the whole file equals the streamed set bytes.
+        let mut streamed_unspent = Vec::new();
+        db.for_each_unspent_output_location_bytes(|b| streamed_unspent.extend_from_slice(b));
+        let unspent_from_file = local
+            .read_set_range(UNSPENT_OUTPUTS_FILE, 0, u32::MAX)
+            .expect("the unspent set file reads");
+        assert_eq!(
+            unspent_from_file, streamed_unspent,
+            "the emitted unspent-output set matches the P2P-served set bytes",
+        );
+
+        // Address-balance set: the whole file equals the streamed set bytes.
+        let mut streamed_balances = Vec::new();
+        db.for_each_address_balance_bytes(|k, v| {
+            streamed_balances.extend_from_slice(k);
+            streamed_balances.extend_from_slice(v);
+        });
+        let balances_from_file = local
+            .read_set_range(ADDRESS_BALANCES_FILE, 0, u32::MAX)
+            .expect("the balance set file reads");
+        assert_eq!(
+            balances_from_file, streamed_balances,
+            "the emitted address-balance set matches the P2P-served set bytes",
+        );
+
+        // Chain value pools: the file equals the finalized value pool encoding.
+        let pools_from_file = local
+            .read_chain_value_pools()
+            .expect("the value-pool file reads");
+        assert_eq!(
+            pools_from_file.as_slice(),
+            db.finalized_value_pool().to_bytes().as_slice(),
+            "the emitted value pools match the finalized value pool",
+        );
+
+        // The manifest is written and names the network and H_max.
+        let manifest =
+            std::fs::read_to_string(out_dir.join(MANIFEST_FILE)).expect("the manifest is written");
+        assert!(
+            manifest.contains("network = Mainnet"),
+            "manifest names network"
+        );
+        assert!(
+            manifest.contains(&format!("h_max = {}", tip_height.0)),
+            "manifest names H_max",
+        );
+    }
 }

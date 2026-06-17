@@ -333,13 +333,25 @@ where
             // bundled `.bin` list directly. Both paths run the same generic
             // engine over a `HashSource`.
             let run_result = if self.config.snapshot_consume_sync {
-                // The CF-backed source fetches chunks through the peer set and
-                // reads/persists them through the state; it has no v1 `.bin`
-                // fallback (the `list` opened above is unused in this mode — it
-                // carries no per-height tree roots and could silently disagree
-                // with the v2 chunks).
+                // The CF-backed source fetches chunks through the snapshot source
+                // (P2P peers, or local files when `known_hash_local_source_dir`
+                // is set) and reads/persists them through the state; it has no v1
+                // `.bin` fallback (the `list` opened above is unused in this mode
+                // — it carries no per-height tree roots and could silently
+                // disagree with the v2 chunks).
                 let _ = list;
-                let source = CfHashSource::new(spec, self.peer_set.clone(), self.state.clone());
+                let snapshot_source = match self.config.known_hash_local_source_dir.clone() {
+                    Some(dir) => {
+                        info!(
+                            local_source = %dir.display(),
+                            "snapshot-consume sync is reading artifacts from local files \
+                             instead of P2P (solo-sync test path)",
+                        );
+                        consume::SnapshotSource::local_files(dir, self.peer_set.clone())
+                    }
+                    None => consume::SnapshotSource::p2p(self.peer_set.clone()),
+                };
+                let source = CfHashSource::new(spec, snapshot_source, self.state.clone());
                 Self::bootstrap_and_run_engine(
                     self.network.clone(),
                     self.peer_set.clone(),
@@ -423,6 +435,16 @@ where
     where
         L: HashSource,
     {
+        // In snapshot-consume mode with a configured local source, the engine
+        // reads note commitment trees from local files too (the single tree-fetch
+        // dispatch point); otherwise trees fetch over P2P. The local source only
+        // applies when snapshot-consume sync is enabled.
+        let local_snapshot_source = config
+            .snapshot_consume_sync
+            .then(|| config.known_hash_local_source_dir.clone())
+            .flatten()
+            .map(consume::LocalSnapshotSource::new);
+
         let mut engine = engine::Engine::new(
             network,
             peer_set,
@@ -436,6 +458,7 @@ where
             config.known_hash_lookahead_bytes,
             Duration::from_secs(config.known_hash_gap_hedge_secs),
             config.known_hash_tree_lookahead,
+            local_snapshot_source,
         );
 
         engine.run().await

@@ -347,6 +347,27 @@ pub struct Config {
     /// tree, in that order.
     pub known_hash_list_dir: Option<PathBuf>,
 
+    /// A directory of **local snapshot-consume artifacts** to read instead of
+    /// fetching them over P2P.
+    ///
+    /// **Experimental; defaults to `None`, leaving P2P fetch unchanged.**
+    ///
+    /// Only used when [`snapshot_consume_sync`](Self::snapshot_consume_sync) is
+    /// also enabled. When set, the engine reads each snapshot artifact (the
+    /// known-hash chunks, the per-height note commitment trees, the
+    /// unspent-output set, the address-balance set, and the chain value pools)
+    /// from this directory instead of issuing the P2P request — verifying each
+    /// against the *same* pinned SHA-256 constants. This lets a single node drive
+    /// a full snapshot-consume sync without any peer speaking the P2P
+    /// snapshot-distribution extension (the solo-sync test path); blocks
+    /// themselves still come over normal P2P.
+    ///
+    /// The directory layout is the one written by
+    /// `emit-snapshot --emit-files --out-dir <dir>`; see
+    /// [`crate::components::ibd::consume::local`] and
+    /// `docs/design/p2p-snapshot-distribution.md`.
+    pub known_hash_local_source_dir: Option<PathBuf>,
+
     /// Enable snapshot-consume (assumeUTXO-style) initial sync.
     ///
     /// **Experimental; defaults to `false`, leaving normal sync unchanged.**
@@ -411,6 +432,9 @@ impl Default for Config {
 
             // Use the layered asset search by default.
             known_hash_list_dir: None,
+
+            // No local snapshot source by default: artifacts come over P2P.
+            known_hash_local_source_dir: None,
 
             // Experimental snapshot-consume sync is off by default, so normal
             // sync is completely unaffected.

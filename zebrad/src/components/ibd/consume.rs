@@ -45,6 +45,10 @@ use crate::{
     BoxError,
 };
 
+pub mod local;
+
+pub use local::{LocalSnapshotSource, LocalSourceError};
+
 /// Errors fetching or verifying snapshot-consume artifacts from peers.
 #[derive(Debug, Error)]
 pub enum ConsumeError {
@@ -174,6 +178,187 @@ pub enum ConsumeError {
     /// The peer set service failed, before any artifact could be fetched.
     #[error("the peer set service failed: {0}")]
     PeerSet(#[source] BoxError),
+
+    /// Reading an artifact from the configured local-file source failed.
+    #[error("reading an artifact from the local snapshot source failed: {0}")]
+    LocalSource(#[source] LocalSourceError),
+}
+
+/// The source of the raw (pre-verification) snapshot-consume artifact bytes: a
+/// peer set over P2P, or a directory of local files.
+///
+/// This is the **single dispatch point** for snapshot-consume fetches: every
+/// artifact fetch (a known-hash chunk range, a note commitment tree, a snapshot
+/// set range) goes through one of these three methods, which return the raw bytes
+/// a peer *would* have served. The content-addressed verification
+/// ([`verify_chunk_bytes`], [`verify_tree_root`], [`verify_set_hash`]) is applied
+/// *identically* afterwards regardless of source, so the rest of the consume
+/// logic is unchanged. The local-file variant is the solo-sync test path
+/// (`docs/design/p2p-snapshot-distribution.md`): with it configured a node drives
+/// the whole snapshot-consume sync without any peer speaking the P2P extension.
+///
+/// The enum holds a clone of the peer set even in the local variant, because
+/// blocks themselves are always fetched over P2P — only the new snapshot
+/// artifacts come from files.
+#[derive(Clone)]
+pub enum SnapshotSource<ZN> {
+    /// Fetch each artifact from peers over the P2P snapshot-distribution
+    /// extension (the default, content-addressed against the pinned hashes).
+    P2p {
+        /// The network service used to issue the artifact requests.
+        peer_set: ZN,
+    },
+
+    /// Read each artifact from a directory of local files laid out by
+    /// `emit-snapshot --emit-files` (the solo-sync test path), verifying against
+    /// the identical pinned hashes. `peer_set` is retained for block fetches,
+    /// which always use P2P.
+    LocalFiles {
+        /// The local artifact directory.
+        local: LocalSnapshotSource,
+        /// The network service, retained for P2P block fetches.
+        peer_set: ZN,
+    },
+}
+
+impl<ZN> SnapshotSource<ZN>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
+{
+    /// A P2P source over `peer_set`.
+    pub fn p2p(peer_set: ZN) -> Self {
+        Self::P2p { peer_set }
+    }
+
+    /// A local-file source rooted at `dir`, retaining `peer_set` for block
+    /// fetches.
+    pub fn local_files(dir: impl Into<std::path::PathBuf>, peer_set: ZN) -> Self {
+        Self::LocalFiles {
+            local: LocalSnapshotSource::new(dir),
+            peer_set,
+        }
+    }
+
+    /// The peer set, for block fetches (always P2P) and for callers that still
+    /// need the network service directly.
+    pub fn peer_set(&self) -> &ZN {
+        match self {
+            Self::P2p { peer_set } | Self::LocalFiles { peer_set, .. } => peer_set,
+        }
+    }
+
+    /// Whether this source reads artifacts from local files.
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::LocalFiles { .. })
+    }
+
+    /// Fetches the raw bytes of a known-hash chunk range `[offset, offset + len)`
+    /// for `index`, returning `None` if the range cannot be served (so the caller
+    /// retries another peer/attempt) and an empty slice as the chunk's end marker.
+    ///
+    /// For the local-file variant the whole chunk is read once and the requested
+    /// range is sliced out of it — the same ranged-assembly contract the P2P path
+    /// obeys, so the caller's reassembly + SHA-256 check is unchanged.
+    async fn chunk_range(
+        &self,
+        index: u32,
+        offset: u64,
+        len: u32,
+    ) -> Result<Option<Vec<u8>>, ConsumeError> {
+        match self {
+            Self::P2p { peer_set } => {
+                let response = peer_set
+                    .clone()
+                    .oneshot(zn::Request::KnownHashChunkRange { index, offset, len })
+                    .await
+                    .map_err(ConsumeError::PeerSet)?;
+                match response {
+                    zn::Response::SnapshotRange(bytes) => Ok(Some(bytes.to_vec())),
+                    zn::Response::NotFound => Ok(None),
+                    _ => Ok(None),
+                }
+            }
+            Self::LocalFiles { local, .. } => {
+                let whole = local.read_chunk(index).map_err(ConsumeError::LocalSource)?;
+                let file_len = whole.len() as u64;
+                if offset > file_len {
+                    return Ok(None);
+                }
+                // `offset <= file_len <= usize::MAX`, so the cast is exact.
+                let start = offset as usize;
+                let end = offset
+                    .saturating_add(u64::from(len))
+                    .min(file_len)
+                    // The clamped end is `<= file_len <= usize::MAX`, exact cast.
+                    as usize;
+                Ok(Some(whole[start..end].to_vec()))
+            }
+        }
+    }
+
+    /// Fetches the raw note-commitment-tree frontier bytes for `pool` as of
+    /// `height`, returning `None` if no tree is available (so the caller folds or
+    /// retries).
+    async fn tree_bytes(
+        &self,
+        pool: ShieldedPool,
+        height: block::Height,
+    ) -> Result<Option<Vec<u8>>, ConsumeError> {
+        match self {
+            Self::P2p { peer_set } => {
+                let response = peer_set
+                    .clone()
+                    .oneshot(zn::Request::NoteCommitmentTree { pool, height })
+                    .await
+                    .map_err(ConsumeError::PeerSet)?;
+                match response {
+                    zn::Response::NoteCommitmentTree(bytes) => Ok(Some(bytes.to_vec())),
+                    zn::Response::NotFound => Ok(None),
+                    _ => Ok(None),
+                }
+            }
+            Self::LocalFiles { local, .. } => local
+                .read_tree(pool, height.0)
+                .map_err(ConsumeError::LocalSource),
+        }
+    }
+
+    /// Fetches the raw bytes of a snapshot set range `[offset, offset + len)`,
+    /// returning `None` if the range cannot be served.
+    ///
+    /// `make_request` builds the P2P request for the chosen set; `set_file` names
+    /// the local file backing the same set. The two must describe the *same* set
+    /// (the caller pairs them), so the assembled bytes are byte-identical and
+    /// verify against the same pinned hash.
+    async fn set_range<F>(
+        &self,
+        make_request: &F,
+        set_file: &str,
+        offset: u64,
+        len: u32,
+    ) -> Result<Option<Vec<u8>>, ConsumeError>
+    where
+        F: Fn(u64, u32) -> zn::Request,
+    {
+        match self {
+            Self::P2p { peer_set } => {
+                let response = peer_set
+                    .clone()
+                    .oneshot(make_request(offset, len))
+                    .await
+                    .map_err(ConsumeError::PeerSet)?;
+                match response {
+                    zn::Response::SnapshotRange(bytes) => Ok(Some(bytes.to_vec())),
+                    zn::Response::NotFound => Ok(None),
+                    _ => Ok(None),
+                }
+            }
+            Self::LocalFiles { local, .. } => local
+                .read_set_range(set_file, offset, len)
+                .map(Some)
+                .map_err(ConsumeError::LocalSource),
+        }
+    }
 }
 
 /// Verifies peer-supplied `bytes` against the pinned chunk hash for `index` and
@@ -358,8 +543,10 @@ pub struct CfHashSource<ZN, ZS> {
     /// over a borrowed slice).
     chunks: HashMap<u32, Vec<u8>>,
 
-    /// The network service, used to fetch chunks ranged from peers.
-    peer_set: ZN,
+    /// The artifact source: P2P peers or a directory of local files. Chunk
+    /// ranges are fetched through it so the file vs P2P choice is a single
+    /// dispatch point; the verification afterwards is identical either way.
+    source: SnapshotSource<ZN>,
 
     /// The state service, used to read chunks from the local
     /// `known_hash_chunk` column family and to persist verified chunks back into
@@ -375,12 +562,13 @@ where
     ZS::Future: Send,
 {
     /// Returns a new CF-backed hash source over `spec`, fetching chunks through
-    /// `peer_set` and reading/persisting them through `state`.
-    pub fn new(spec: &'static KnownHashListSpec, peer_set: ZN, state: ZS) -> Self {
+    /// `source` (P2P peers or local files) and reading/persisting them through
+    /// `state`.
+    pub fn new(spec: &'static KnownHashListSpec, source: SnapshotSource<ZN>, state: ZS) -> Self {
         Self {
             spec,
             chunks: HashMap::new(),
-            peer_set,
+            source,
             state,
         }
     }
@@ -493,9 +681,12 @@ where
         }
 
         for attempt in 0..attempts {
-            // A transient peer-set failure on this attempt is tolerated: log it
-            // and try another peer, rather than aborting the whole prime.
-            let bytes = match self.fetch_chunk_from_peer(index).await {
+            // A transient source failure on this attempt is tolerated: log it
+            // and try another peer, rather than aborting the whole prime. (For a
+            // local-file source a read error is more likely a misconfiguration,
+            // but the SHA-256 gate and the final Unavailable error still surface
+            // it precisely.)
+            let bytes = match self.fetch_chunk_from_source(index).await {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => continue,
                 Err(error) => {
@@ -503,7 +694,7 @@ where
                         %error,
                         index,
                         attempt,
-                        "a peer chunk fetch failed transiently; trying another peer",
+                        "a chunk fetch failed transiently; trying another source",
                     );
                     continue;
                 }
@@ -573,32 +764,34 @@ where
         Ok(())
     }
 
-    /// Fetches the whole chunk at `index` from peers by reassembling its
-    /// `MAX_SNAPSHOT_RANGE_BYTES` ranges, or `None` if a range could not be
-    /// served (so the caller tries the next attempt).
+    /// Fetches the whole chunk at `index` from the configured source (P2P peers
+    /// or local files) by reassembling its `MAX_SNAPSHOT_RANGE_BYTES` ranges, or
+    /// `None` if a range could not be served (so the caller tries the next
+    /// attempt).
     ///
     /// A full v2 chunk (~4.72 MiB) exceeds `MAX_PROTOCOL_MESSAGE_LEN`, so it is
     /// transferred ranged like the snapshot sets. Unlike the snapshot sets the
     /// total chunk length is not known a priori, so this fetches ascending
-    /// ranges until a peer returns a short (or empty) range, marking the chunk's
-    /// end; the caller verifies the reassembled bytes' SHA-256 against the pinned
-    /// `chunk_hashes[index]` constant, which catches any disagreement on length
-    /// or content between peers, so a single adversarial range cannot corrupt the
-    /// chunk undetected.
+    /// ranges until the source returns a short (or empty) range, marking the
+    /// chunk's end; the caller verifies the reassembled bytes' SHA-256 against the
+    /// pinned `chunk_hashes[index]` constant, which catches any disagreement on
+    /// length or content between sources, so a single adversarial range cannot
+    /// corrupt the chunk undetected. The dispatch (P2P vs local file) is the
+    /// single [`SnapshotSource::chunk_range`] call.
     ///
     /// Bounded: each range is `≤ MAX_SNAPSHOT_RANGE_BYTES`, and the reassembled
     /// chunk is bounded by the maximum v2 chunk size (a function of
-    /// `HASHES_PER_CHUNK`), so a peer cannot grow the buffer without bound. A
-    /// transient peer-set failure returns `Err`, which the caller tolerates as a
+    /// `HASHES_PER_CHUNK`), so a source cannot grow the buffer without bound. A
+    /// transient source failure returns `Err`, which the caller tolerates as a
     /// single failed attempt.
-    async fn fetch_chunk_from_peer(&self, index: u32) -> Result<Option<Vec<u8>>, ConsumeError> {
+    async fn fetch_chunk_from_source(&self, index: u32) -> Result<Option<Vec<u8>>, ConsumeError> {
         let mut assembled: Vec<u8> = Vec::new();
         let mut offset: u64 = 0;
 
         loop {
             // The reassembled chunk can never exceed the maximum v2 chunk size; a
-            // peer that keeps returning full ranges past that bound is feeding us
-            // junk, so stop and let the caller try another attempt. The SHA-256
+            // source that keeps returning full ranges past that bound is feeding
+            // us junk, so stop and let the caller try another attempt. The SHA-256
             // check would reject it anyway; this just bounds the memory first.
             if assembled.len() as u64 > MAX_V2_CHUNK_BYTES {
                 return Ok(None);
@@ -608,24 +801,15 @@ where
             // never truncates.
             let len = MAX_SNAPSHOT_RANGE_BYTES as u32;
 
-            let response = self
-                .peer_set
-                .clone()
-                .oneshot(zn::Request::KnownHashChunkRange { index, offset, len })
-                .await
-                .map_err(ConsumeError::PeerSet)?;
-
-            let range = match response {
-                zn::Response::SnapshotRange(bytes) => bytes,
-                // The peer can't serve this range (unknown/above-tip chunk, or an
-                // offset past its chunk end): treat the whole fetch as a miss so
-                // the caller tries another peer/attempt.
-                zn::Response::NotFound => return Ok(None),
-                // Any other response is a peer/protocol bug; treat it as a miss.
-                _ => return Ok(None),
+            let range = match self.source.chunk_range(index, offset, len).await? {
+                Some(range) => range,
+                // The source can't serve this range (unknown/above-tip chunk, an
+                // offset past its chunk end, or a missing local file): treat the
+                // whole fetch as a miss so the caller tries another attempt.
+                None => return Ok(None),
             };
 
-            // A short or empty range marks the chunk's end (the peer has no more
+            // A short or empty range marks the chunk's end (the source has no more
             // bytes at this offset). Stop and return what we assembled; the
             // caller's SHA-256 check validates the full chunk.
             let is_final = (range.len() as u64) < u64::from(len);
@@ -858,16 +1042,18 @@ fn push_pool_updates(
     }
 }
 
-/// Fetches the `pool` note commitment tree as of `height` from a peer and
-/// verifies its root against `chunk`'s recorded root.
+/// Fetches the `pool` note commitment tree as of `height` from `source` (P2P
+/// peers or local files) and verifies its root against `chunk`'s recorded root.
 ///
-/// `span_base` is the chunk's first absolute height. Tries `attempts` peers; a
+/// `span_base` is the chunk's first absolute height. Tries `attempts` times; a
 /// tree that deserializes but whose root does not match, or that does not
-/// deserialize, is discarded and the next peer is tried (an honest peer's tree
-/// always verifies). Returns the verified tree bytes, ready to hand to the
-/// state's supplied-tree commit path.
+/// deserialize, is discarded and the next attempt is tried (an honest source's
+/// tree always verifies). Returns the verified tree bytes, ready to hand to the
+/// state's supplied-tree commit path. The P2P-vs-file dispatch is the single
+/// [`SnapshotSource::tree_bytes`] call; the [`verify_tree_root`] gate afterwards
+/// is identical for both.
 pub async fn fetch_and_verify_tree<ZN>(
-    peer_set: &ZN,
+    source: &SnapshotSource<ZN>,
     pool: ShieldedPool,
     height: block::Height,
     span_base: u32,
@@ -878,37 +1064,29 @@ where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
 {
     for attempt in 0..attempts {
-        // A transient peer-set failure on this attempt is tolerated: log it and
-        // try another peer, rather than aborting the whole fetch.
-        let response = match peer_set
-            .clone()
-            .oneshot(zn::Request::NoteCommitmentTree { pool, height })
-            .await
-        {
-            Ok(response) => response,
+        // A transient source failure on this attempt is tolerated: log it and
+        // try again, rather than aborting the whole fetch.
+        let bytes = match source.tree_bytes(pool, height).await {
+            Ok(Some(bytes)) => bytes,
+            // The source lacks the tree (a non-updating height with no local
+            // record, or a peer that answered NotFound): try again.
+            Ok(None) => continue,
             Err(error) => {
                 debug!(
                     %error,
                     ?pool,
                     ?height,
                     attempt,
-                    "a peer tree fetch failed transiently; trying another peer",
+                    "a tree fetch failed transiently; trying again",
                 );
                 continue;
             }
         };
 
-        let bytes = match response {
-            zn::Response::NoteCommitmentTree(bytes) => bytes.to_vec(),
-            // The peer lacks the tree, or answered unexpectedly: try another.
-            zn::Response::NotFound => continue,
-            _ => continue,
-        };
-
         match verify_tree_root(pool, height, span_base, chunk, bytes) {
             Ok(verified) => return Ok(verified),
-            // A corrupt tree: try another peer. A missing recorded root is a
-            // hard error (the chunk itself is wrong), so propagate it.
+            // A corrupt tree: try again. A missing recorded root is a hard error
+            // (the chunk itself is wrong), so propagate it.
             Err(ConsumeError::TreeRootMismatch { .. })
             | Err(ConsumeError::TreeDeserialize { .. }) => continue,
             Err(other) => return Err(other),
@@ -931,18 +1109,27 @@ where
 /// requires record-aligned `offset`/`len`
 /// ([`zebra_state::unspent_outputs_range`] /
 /// [`zebra_state::address_balances_range`]) — accepts every request.
-/// `make_request` builds the per-range network request
+/// `make_request` builds the per-range P2P request
 /// ([`Request::UnspentOutputs`](zn::Request::UnspentOutputs) or
-/// [`Request::AddressBalances`](zn::Request::AddressBalances)). Returns the
+/// [`Request::AddressBalances`](zn::Request::AddressBalances)); `set_file` names
+/// the local file backing the *same* set ([`local::UNSPENT_OUTPUTS_FILE`] /
+/// [`local::ADDRESS_BALANCES_FILE`]) for the local-file source. Returns the
 /// verified set bytes.
 ///
 /// Each range is `≤ MAX_SNAPSHOT_RANGE_BYTES` to stay well under the 2 MiB
 /// protocol frame; the assembled set is content-addressed, so a single
-/// adversarial range cannot corrupt it undetected.
+/// adversarial range cannot corrupt it undetected. The P2P-vs-file dispatch is
+/// the single [`SnapshotSource::set_range`] call.
+//
+// Each argument is a distinct part of the set-fetch contract (source, spec, set
+// name, backing file, length, record size, attempt budget, request builder);
+// bundling them into a struct would only move the argument list to the call site.
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_and_verify_set<ZN, F>(
-    peer_set: &ZN,
+    source: &SnapshotSource<ZN>,
     spec: &KnownHashListSpec,
     set: &'static str,
+    set_file: &str,
     total_len: u64,
     record_len: u64,
     attempts: u32,
@@ -989,10 +1176,11 @@ where
         let remaining = total_len - offset;
         let len = remaining.min(aligned_range) as u32;
 
-        let range = fetch_range(peer_set, &make_request, offset, len, set, attempts).await?;
+        let range =
+            fetch_range(source, &make_request, set_file, offset, len, set, attempts).await?;
 
-        // A peer that returns a short range (fewer bytes than requested) ends the
-        // set early; the final assembled hash check catches any disagreement.
+        // A source that returns a short range (fewer bytes than requested) ends
+        // the set early; the final assembled hash check catches any disagreement.
         if range.is_empty() {
             break;
         }
@@ -1003,11 +1191,12 @@ where
     verify_set_hash(spec, set, assembled)
 }
 
-/// Fetches a single snapshot range `[offset, offset + len)` from a peer, trying
-/// `attempts` peers.
+/// Fetches a single snapshot range `[offset, offset + len)` from `source` (P2P
+/// peers or local files), trying `attempts` times.
 async fn fetch_range<ZN, F>(
-    peer_set: &ZN,
+    source: &SnapshotSource<ZN>,
     make_request: &F,
+    set_file: &str,
     offset: u64,
     len: u32,
     set: &'static str,
@@ -1018,27 +1207,22 @@ where
     F: Fn(u64, u32) -> zn::Request,
 {
     for attempt in 0..attempts {
-        // A transient peer-set failure on this attempt is tolerated: log it and
-        // try another peer, rather than aborting the whole set assembly.
-        let response = match peer_set.clone().oneshot(make_request(offset, len)).await {
-            Ok(response) => response,
+        // A transient source failure on this attempt is tolerated: log it and
+        // try again, rather than aborting the whole set assembly.
+        match source.set_range(make_request, set_file, offset, len).await {
+            Ok(Some(bytes)) => return Ok(bytes),
+            // The source can't serve this range; try again.
+            Ok(None) => continue,
             Err(error) => {
                 debug!(
                     %error,
                     set,
                     offset,
                     attempt,
-                    "a peer snapshot-range fetch failed transiently; trying another peer",
+                    "a snapshot-range fetch failed transiently; trying again",
                 );
                 continue;
             }
-        };
-
-        match response {
-            zn::Response::SnapshotRange(bytes) => return Ok(bytes.to_vec()),
-            // The peer can't serve this range; try another.
-            zn::Response::NotFound => continue,
-            _ => continue,
         }
     }
 

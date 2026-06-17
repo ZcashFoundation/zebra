@@ -720,6 +720,15 @@ where
     /// commits.
     tree_lookahead_margin: u32,
 
+    /// An optional local-file source for note commitment trees
+    /// (`sync.known_hash_local_source_dir`). When set, the tree-fetch stage reads
+    /// each tree from a local file instead of issuing the P2P
+    /// `NoteCommitmentTree` request, verifying against the same recorded chunk
+    /// root (the single tree-fetch dispatch point, mirroring
+    /// [`super::consume::SnapshotSource`] for chunks/sets). `None` keeps the P2P
+    /// tree path unchanged. Blocks always fetch over P2P regardless.
+    local_snapshot_source: Option<super::consume::LocalSnapshotSource>,
+
     /// The total number of blocks fetched into the window (memory or disk),
     /// reported in the completion log.
     fetched_blocks: u64,
@@ -792,6 +801,7 @@ where
         lookahead_bytes: usize,
         gap_hedge_after: Duration,
         tree_lookahead_margin: u32,
+        local_snapshot_source: Option<super::consume::LocalSnapshotSource>,
     ) -> Self {
         // Size the batch layer at the hard ceiling: its `max_concurrent_batches`
         // is fixed for the worker's lifetime, and the live per-peer limit is
@@ -830,6 +840,7 @@ where
             // misconfiguration can't make the per-loop scheduling scan or the
             // in-flight tree-fetch count unbounded.
             tree_lookahead_margin: tree_lookahead_margin.min(TREE_LOOKAHEAD_MAX),
+            local_snapshot_source,
             fetched_blocks: 0,
             fetch_watermark: base,
             frontier_progress_at: now,
@@ -1521,11 +1532,13 @@ where
     /// serve resolves to `None`: never fatal, the block folds when it commits.
     fn push_tree_fetch(&mut self, fetch: TreeFetch, expected_root: [u8; 32]) {
         let peer_set = self.peer_set.clone();
+        let local_source = self.local_snapshot_source.clone();
         let TreeFetch { height, pool } = fetch;
 
         self.blocks.push(
             async move {
-                let outcome = tree_fetch_stage(peer_set, pool, height, expected_root).await;
+                let outcome =
+                    tree_fetch_stage(peer_set, local_source, pool, height, expected_root).await;
                 (height, StageOutcome::Tree { pool, outcome })
             }
             .boxed(),
@@ -2198,17 +2211,20 @@ where
 }
 
 /// The tree-fetch future body (design doc `p2p-snapshot-distribution.md` §3.2):
-/// fetches a `pool` note commitment tree as of `height` from a peer and
-/// verifies its deserialized `.root()` against `expected_root` (the root the
-/// known-hash chunk records for that height), trying [`SNAPSHOT_FETCH_ATTEMPTS`]
-/// peers.
+/// fetches a `pool` note commitment tree as of `height` from the configured
+/// source and verifies its deserialized `.root()` against `expected_root` (the
+/// root the known-hash chunk records for that height).
 ///
-/// A single-request `NoteCommitmentTree` through the plain peer set gets
-/// inventory-aware routing for free (like the gap hedge). Returns the verified
+/// When `local_source` is set, the tree is read from a local file (the solo-sync
+/// test path) and verified identically; otherwise the tree is fetched over P2P,
+/// trying [`SNAPSHOT_FETCH_ATTEMPTS`] peers — a single-request `NoteCommitmentTree`
+/// through the plain peer set gets inventory-aware routing for free (like the gap
+/// hedge). This is the single tree-fetch dispatch point. Returns the verified
 /// bytes, ready to hand to the state's supplied-tree commit path, or `None` when
-/// no peer served a tree whose root matches: never fatal, the block folds.
+/// no source served a tree whose root matches: never fatal, the block folds.
 async fn tree_fetch_stage<ZN>(
     peer_set: ZN,
+    local_source: Option<super::consume::LocalSnapshotSource>,
     pool: ShieldedPool,
     height: block::Height,
     expected_root: [u8; 32],
@@ -2220,6 +2236,23 @@ where
         ShieldedPool::Sapling => zs::ShieldedPool::Sapling,
         ShieldedPool::Orchard => zs::ShieldedPool::Orchard,
     };
+
+    // Local-file path: read the tree once and verify its root identically to the
+    // P2P path. A missing local record (a non-updating height the file omits) or
+    // a root mismatch returns `None` so the block folds, exactly like a P2P miss.
+    if let Some(local) = local_source {
+        return match local.read_tree(pool, height.0) {
+            Ok(Some(bytes)) => match zs::note_commitment_tree_root_from_bytes(zs_pool, &bytes) {
+                Some(actual) if actual == expected_root => Some(bytes),
+                _ => None,
+            },
+            Ok(None) => None,
+            Err(error) => {
+                debug!(%error, ?pool, ?height, "reading a local snapshot tree failed; folding");
+                None
+            }
+        };
+    }
 
     for _ in 0..SNAPSHOT_FETCH_ATTEMPTS {
         let response = peer_set
