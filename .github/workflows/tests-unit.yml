@@ -32,7 +32,7 @@ jobs:
     outputs:
       unit_tests: ${{ steps.filter.outputs.unit_tests || 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
@@ -67,7 +67,7 @@ jobs:
             rust-version: beta
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 #v6.0.3
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
@@ -75,7 +75,7 @@ jobs:
           toolchain: ${{ matrix.rust-version }}
           cache-key: unit-tests-${{ matrix.os }}-${{ matrix.rust-version }}-${{ matrix.features }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 #v2.81.11
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
@@ -114,14 +114,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 #v6.0.3
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 #v2.81.11
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
