@@ -81,6 +81,10 @@ fn config_rejects_unknown_fields() {
 
 /// Spawning a notify command runs the shell with `%s` substituted, detached from the caller, and
 /// reaps the child without blocking.
+///
+/// The test command uses `/bin/sh` syntax, so it only runs on Unix; the Windows `cmd /C` branch
+/// of `spawn_notify_command` is covered by `render_command` and the non-zero-exit test.
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn spawn_notify_command_runs_shell_with_substituted_hash() {
     let _init_guard = zebra_test::init();
