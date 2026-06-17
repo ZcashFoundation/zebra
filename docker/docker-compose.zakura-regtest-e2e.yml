@@ -13,7 +13,7 @@
 #     docker compose -f docker/docker-compose.zakura-regtest-e2e.yml up -d
 #
 # Or just run docker/zakura-regtest-e2e/run.sh, which does all of the above and
-# asserts coexistence + propagation.
+# asserts legacy compatibility, Zakura propagation, and block sync.
 #
 # Host networking is required: Regtest only accepts localhost initial peers
 # (zebra-network/src/config.rs: initial_peers filters to is_localhost), so the
@@ -44,7 +44,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ${ZAKURA_NODE1_CONFIG:-./zakura-regtest-e2e/node1.toml}:/etc/zebrad/node1.toml:ro
-      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node1:/traces
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}:/traces
 
   zakura-node-2:
     <<: *zakura-node
@@ -55,7 +55,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ${ZAKURA_NODE2_CONFIG:-./zakura-regtest-e2e/node2.toml}:/etc/zebrad/node2.toml:ro
-      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node2:/traces
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}:/traces
 
   zakura-node-3:
     <<: *zakura-node
@@ -66,7 +66,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ${ZAKURA_NODE3_CONFIG:-./zakura-regtest-e2e/node3.toml}:/etc/zebrad/node3.toml:ro
-      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node3:/traces
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}:/traces
 
   zakura-node-4:
     <<: *zakura-node
@@ -77,4 +77,4 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ${ZAKURA_NODE4_CONFIG:-./zakura-regtest-e2e/node4.toml}:/etc/zebrad/node4.toml:ro
-      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node4:/traces
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}:/traces

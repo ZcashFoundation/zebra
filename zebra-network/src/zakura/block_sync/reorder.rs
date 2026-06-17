@@ -18,8 +18,21 @@ impl ReorderBuffer {
         self.buffered_bytes
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
     pub(super) fn contains(&self, height: block::Height) -> bool {
         self.blocks.contains_key(&height)
+    }
+
+    pub(super) fn has_buffered_body_needed_to_advance(
+        &self,
+        verified_block_tip: block::Height,
+        best_header_tip: block::Height,
+    ) -> bool {
+        next_height(verified_block_tip)
+            .is_some_and(|height| height <= best_header_tip && self.contains(height))
     }
 
     pub(super) fn insert(
@@ -44,8 +57,7 @@ impl ReorderBuffer {
     pub(super) fn drain_contiguous_prefix(
         &mut self,
         verified_block_tip: block::Height,
-        budget: &mut ByteBudget,
-    ) -> Vec<(block::Height, Arc<block::Block>)> {
+    ) -> Vec<(block::Height, Arc<block::Block>, u64)> {
         let mut released = Vec::new();
         let mut next = match next_height(verified_block_tip) {
             Some(next) => next,
@@ -54,8 +66,7 @@ impl ReorderBuffer {
 
         while let Some(buffered) = self.blocks.remove(&next) {
             self.buffered_bytes = self.buffered_bytes.saturating_sub(buffered.bytes);
-            budget.release(buffered.bytes);
-            released.push((next, buffered.block));
+            released.push((next, buffered.block, buffered.bytes));
             let Some(after) = next_height(next) else {
                 break;
             };
@@ -67,6 +78,20 @@ impl ReorderBuffer {
 
     pub(crate) fn clear(&mut self, budget: &mut ByteBudget) {
         self.drop_from(block::Height::MIN, budget);
+    }
+
+    pub(crate) fn drop_through(&mut self, through: block::Height, budget: &mut ByteBudget) {
+        let heights: Vec<_> = self
+            .blocks
+            .range(..=through)
+            .map(|(height, _)| *height)
+            .collect();
+        for height in heights {
+            if let Some(buffered) = self.blocks.remove(&height) {
+                self.buffered_bytes = self.buffered_bytes.saturating_sub(buffered.bytes);
+                budget.release(buffered.bytes);
+            }
+        }
     }
 
     pub(crate) fn drop_from(&mut self, from: block::Height, budget: &mut ByteBudget) {

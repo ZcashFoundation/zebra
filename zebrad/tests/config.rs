@@ -9,6 +9,7 @@
 use std::{env, fs, io::Write, path::PathBuf, sync::Mutex};
 
 use tempfile::{Builder, TempDir};
+use zebra_network::zakura::DEFAULT_ZAKURA_LISTEN_ADDR;
 use zebrad::components::zcashd_compat::ConfigZcashdBinarySource;
 use zebrad::config::ZebradConfig;
 
@@ -79,6 +80,10 @@ fn config_load_defaults() {
     let config = ZebradConfig::load(None).expect("Should load default config");
 
     assert_eq!(config.network.network.to_string(), "Mainnet");
+    assert_eq!(
+        config.network.zakura.listen_addr,
+        Some(DEFAULT_ZAKURA_LISTEN_ADDR)
+    );
     assert_eq!(config.rpc.listen_addr, None); // RPC disabled by default
     assert_eq!(config.metrics.endpoint_addr, None); // Metrics disabled by default
 }

@@ -6,12 +6,15 @@ use crate::zakura::{
 pub(super) const HEADER_SYNC_ADVISORY_BACKOFF_FAILURES: u32 = 2;
 pub(super) const HEADER_SYNC_ADVISORY_BACKOFF: Duration = Duration::from_secs(60);
 pub(super) const HEADER_SYNC_ADVISORY_TTL: Duration = DEFAULT_LIVE_SERVICE_SUMMARY_TTL;
+pub(super) const HEADER_SYNC_STALE_ANCHOR_LINK_FAILURES: u32 = 3;
+pub(super) const HEADER_SYNC_STALE_ANCHOR_DISTINCT_PEERS: usize = 2;
 
 #[derive(Clone, Debug)]
 pub(super) struct HeaderSyncCore {
     pub(super) anchor: (block::Height, block::Hash),
     pub(super) finalized_height: block::Height,
     pub(super) verified_block_tip: block::Height,
+    pub(super) verified_block_hash: block::Hash,
     pub(super) best_header_tip: block::Height,
     pub(super) best_header_hash: block::Hash,
     pub(super) peers: HashMap<ZakuraPeerId, PeerHeaderState>,
@@ -21,6 +24,7 @@ pub(super) struct HeaderSyncCore {
     pub(super) schedule: RangeScheduler,
     pub(super) pending_commits: HashMap<PendingCommitKey, RangeRequest>,
     pub(super) advisory: HashMap<ZakuraPeerId, HeaderSyncAdvisoryPeerState>,
+    pub(super) stale_anchor: StaleAnchorFailures,
 }
 
 impl HeaderSyncCore {
@@ -32,6 +36,7 @@ impl HeaderSyncCore {
             anchor: startup.anchor,
             finalized_height: startup.frontiers.finalized_height,
             verified_block_tip: startup.frontiers.verified_block_tip,
+            verified_block_hash: startup.frontiers.verified_block_hash,
             best_header_tip,
             best_header_hash,
             peers: HashMap::new(),
@@ -41,6 +46,7 @@ impl HeaderSyncCore {
             schedule: RangeScheduler::new(),
             pending_commits: HashMap::new(),
             advisory: HashMap::new(),
+            stale_anchor: StaleAnchorFailures::default(),
         })
     }
 
@@ -115,6 +121,29 @@ impl HeaderSyncCore {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct StaleAnchorFailures {
+    pub(super) count: u32,
+    pub(super) peers: HashSet<ZakuraPeerId>,
+}
+
+impl StaleAnchorFailures {
+    pub(super) fn record(&mut self, peer: ZakuraPeerId) {
+        self.count = self.count.saturating_add(1);
+        self.peers.insert(peer);
+    }
+
+    pub(super) fn should_reanchor(&self) -> bool {
+        self.count >= HEADER_SYNC_STALE_ANCHOR_LINK_FAILURES
+            && self.peers.len() >= HEADER_SYNC_STALE_ANCHOR_DISTINCT_PEERS
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.count = 0;
+        self.peers.clear();
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub(super) struct HeaderSyncAdvisoryPeerState {
     pub(super) summary: HeaderSyncServiceSummary,
@@ -173,6 +202,10 @@ pub(super) struct PeerHeaderState {
     pub(super) max_headers_per_response: u32,
     pub(super) max_inflight_requests: u16,
     pub(super) received_status: bool,
+    /// The most recent status sent to this peer over its current session, if
+    /// any. Used to suppress re-sending an identical, non-tip-advancing status,
+    /// which the peer's inbound rate limiter would otherwise treat as spam.
+    pub(super) last_sent_status: Option<HeaderSyncStatus>,
     pub(super) outstanding: Vec<OutstandingRange>,
     pub(super) late_covered_responses: usize,
     pub(super) meters: HeaderSyncPeerMeters,
@@ -199,6 +232,7 @@ impl PeerHeaderState {
             max_headers_per_response: clamp_advertised_range(local_range),
             max_inflight_requests: local_inflight.clamp(1, LOCAL_MAX_HS_INFLIGHT_PER_PEER),
             received_status: false,
+            last_sent_status: None,
             outstanding: Vec::new(),
             late_covered_responses: 0,
             meters: HeaderSyncPeerMeters::new(
@@ -227,6 +261,28 @@ impl PeerHeaderState {
         }
         self.late_covered_responses -= 1;
         true
+    }
+
+    /// Whether `status` differs from the most recent status sent to this peer
+    /// over its current session. A status identical to the last one we sent is
+    /// redundant — the peer cannot learn anything from it and its inbound status
+    /// rate limiter would treat it as spam — so callers suppress it.
+    pub(super) fn status_differs_from_last_sent(&self, status: HeaderSyncStatus) -> bool {
+        self.last_sent_status != Some(status)
+    }
+
+    /// Records `status` as the most recent status sent to this peer, so a later
+    /// identical status can be suppressed by [`Self::status_differs_from_last_sent`].
+    pub(super) fn record_sent_status(&mut self, status: HeaderSyncStatus) {
+        self.last_sent_status = Some(status);
+    }
+
+    /// Forgets the last status sent to this peer so the next one is always sent.
+    /// Called when a fresh session replaces the peer's transport: the new
+    /// channel's remote has received no status yet and gates serving us on it,
+    /// so the initial status must go out regardless of its contents.
+    pub(super) fn reset_sent_status(&mut self) {
+        self.last_sent_status = None;
     }
 
     pub(super) fn try_start_serving_headers(&mut self, local_inflight_cap: u16) -> bool {

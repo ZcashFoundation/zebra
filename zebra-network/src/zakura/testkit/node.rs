@@ -13,11 +13,13 @@ use zebra_jsonl_trace::JsonlTracer;
 use super::{InboundRecorder, LocalEndpointFactory, WaitError};
 use crate::{
     zakura::{
-        discovery::build_discovery_handle, service_registry, spawn_header_sync_reactor,
-        DiscoveryService, HeaderSyncAction, HeaderSyncFrontiers, HeaderSyncHandle,
-        HeaderSyncStartup, Service, ZakuraBlockSyncConfig, ZakuraDiscoveryHandle, ZakuraEndpoint,
-        ZakuraHandshakeConfig, ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraPeerId,
-        ZakuraProtocolHandler, ZakuraServiceId, ZakuraSupervisorHandle, ZakuraTrace, P2P_V2_ALPN,
+        discovery::build_discovery_handle, service_registry, spawn_block_sync_reactor,
+        spawn_header_sync_reactor, BlockSyncAction, BlockSyncFrontiers, BlockSyncHandle,
+        BlockSyncStartup, DiscoveryService, HeaderSyncAction, HeaderSyncFrontiers,
+        HeaderSyncHandle, HeaderSyncStartup, Service, ZakuraBlockSyncConfig, ZakuraDiscoveryHandle,
+        ZakuraEndpoint, ZakuraHandshakeConfig, ZakuraHeaderSyncConfig, ZakuraLocalLimits,
+        ZakuraPeerId, ZakuraProtocolHandler, ZakuraServiceId, ZakuraSupervisorHandle, ZakuraTrace,
+        P2P_V2_ALPN,
     },
     BoxError, Config,
 };
@@ -68,10 +70,22 @@ impl ZakuraTestNode {
         self.endpoint.header_sync()
     }
 
+    /// Active block-sync handle, if this test node was spawned with stream-6
+    /// block sync enabled.
+    pub fn block_sync(&self) -> Option<BlockSyncHandle> {
+        self.endpoint.block_sync()
+    }
+
     /// Take the stream-5 header-sync action receiver for an externally driven
     /// test node.
     pub async fn take_header_sync_actions(&self) -> Option<mpsc::Receiver<HeaderSyncAction>> {
         self.endpoint.take_header_sync_actions().await
+    }
+
+    /// Take the stream-6 block-sync action receiver for an externally driven
+    /// test node.
+    pub async fn take_block_sync_actions(&self) -> Option<mpsc::Receiver<BlockSyncAction>> {
+        self.endpoint.take_block_sync_actions().await
     }
 
     /// Local limits used by this node.
@@ -198,6 +212,7 @@ pub struct ZakuraTestNodeBuilder {
     discovery_direct_addrs: Vec<SocketAddr>,
     extra_advertised_services: Vec<ZakuraServiceId>,
     header_sync: Option<TestHeaderSyncStartup>,
+    block_sync_config: ZakuraBlockSyncConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -206,6 +221,7 @@ struct TestHeaderSyncStartup {
     anchor: (block::Height, block::Hash),
     frontiers: HeaderSyncFrontiers,
     best_header_tip: Option<(block::Height, block::Hash)>,
+    verified_block_tip_hash: block::Hash,
 }
 
 impl fmt::Debug for ZakuraTestNodeBuilder {
@@ -246,6 +262,7 @@ impl ZakuraTestNodeBuilder {
             discovery_direct_addrs: Vec::new(),
             extra_advertised_services: Vec::new(),
             header_sync: None,
+            block_sync_config: ZakuraBlockSyncConfig::default(),
         }
     }
 
@@ -329,7 +346,14 @@ impl ZakuraTestNodeBuilder {
             anchor,
             frontiers,
             best_header_tip,
+            verified_block_tip_hash: anchor.1,
         });
+        self
+    }
+
+    /// Override the block-sync config used with [`Self::header_sync_driver`].
+    pub fn block_sync_config(mut self, config: ZakuraBlockSyncConfig) -> Self {
+        self.block_sync_config = config;
         self
     }
 
@@ -371,13 +395,22 @@ impl ZakuraTestNodeBuilder {
 
         let mut header_sync_handle = None;
         let mut header_sync_actions = None;
+        let mut block_sync_handle = None;
+        let mut block_sync_actions = None;
         let mut header_sync_tasks = Vec::new();
         let header_sync = if let Some(header_sync) = self.header_sync {
+            let TestHeaderSyncStartup {
+                network,
+                anchor,
+                frontiers,
+                best_header_tip,
+                verified_block_tip_hash,
+            } = header_sync;
             let mut startup = HeaderSyncStartup::new(
-                header_sync.network,
-                header_sync.anchor,
-                header_sync.frontiers,
-                header_sync.best_header_tip,
+                network,
+                anchor,
+                frontiers,
+                best_header_tip,
                 ZakuraHeaderSyncConfig::default(),
                 self.limits.max_frame_bytes,
             );
@@ -392,6 +425,29 @@ impl ZakuraTestNodeBuilder {
             header_sync_tasks.push(task);
             header_sync_actions = Some((shutdown, actions));
             header_sync_handle = Some(handle.clone());
+
+            let mut startup = BlockSyncStartup::new(
+                BlockSyncFrontiers {
+                    finalized_height: frontiers.finalized_height,
+                    verified_block_tip: frontiers.verified_block_tip,
+                    verified_block_hash: verified_block_tip_hash,
+                },
+                best_header_tip.unwrap_or(anchor),
+                handle.subscribe_tip(),
+                self.block_sync_config.clone(),
+            );
+            let shutdown = header_sync_actions
+                .as_ref()
+                .expect("header sync actions were just initialized")
+                .0
+                .clone();
+            startup.shutdown = shutdown;
+            startup.trace = ZakuraTrace::new(self.tracer.clone(), seed_label(self.seed));
+            let (block_handle, actions, task) = spawn_block_sync_reactor(startup);
+            header_sync_tasks.push(task);
+            block_sync_actions = Some(actions);
+            block_sync_handle = Some(block_handle.clone());
+
             Some(handle)
         } else {
             // Recorder-only nodes use the stream-5 passthrough so tests can
@@ -402,7 +458,7 @@ impl ZakuraTestNodeBuilder {
             Arc::new(DiscoveryService::with_sync_services(
                 discovery.clone(),
                 header_sync.clone(),
-                None,
+                block_sync_handle.clone(),
             )) as Arc<dyn Service>
         } else {
             Arc::new(DiscoveryService::new(discovery.clone())) as Arc<dyn Service>
@@ -410,8 +466,8 @@ impl ZakuraTestNodeBuilder {
         let registry = service_registry(
             &supervisor,
             header_sync,
-            None,
-            ZakuraBlockSyncConfig::default(),
+            block_sync_handle.clone(),
+            self.block_sync_config.clone(),
             base_service,
             discovery_service,
         )?;
@@ -426,17 +482,19 @@ impl ZakuraTestNodeBuilder {
         let router = Router::builder(endpoint)
             .accept(P2P_V2_ALPN, handler.clone())
             .spawn();
-        let endpoint = if let (Some(handle), Some((shutdown, actions))) =
-            (header_sync_handle, header_sync_actions)
+        let endpoint = if let (Some(header_handle), Some(block_handle), Some((shutdown, actions))) =
+            (header_sync_handle, block_sync_handle, header_sync_actions)
         {
-            ZakuraEndpoint::from_parts_with_header_sync(
+            ZakuraEndpoint::from_parts_with_sync_services(
                 router,
                 supervisor,
                 handler,
-                handle,
+                header_handle,
+                block_handle,
                 shutdown,
                 header_sync_tasks,
                 Some(actions),
+                block_sync_actions,
             )
         } else {
             ZakuraEndpoint::from_parts(router, supervisor, handler)

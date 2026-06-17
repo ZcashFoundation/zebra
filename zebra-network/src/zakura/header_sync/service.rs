@@ -270,7 +270,9 @@ pub(crate) async fn drive_header_sync_actions(
             }
             HeaderSyncAction::QueryBestHeaderTip
             | HeaderSyncAction::QueryMissingBlockBodies { .. }
-            | HeaderSyncAction::BodyGaps { .. } => {}
+            | HeaderSyncAction::BodyGaps { .. }
+            | HeaderSyncAction::HeaderAdvanced { .. }
+            | HeaderSyncAction::HeaderReanchored { .. } => {}
         }
     }
 }

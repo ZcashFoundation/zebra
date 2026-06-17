@@ -74,14 +74,35 @@ pub const LEGACY_REQUEST_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     file_name: "legacy_request.jsonl",
 };
 
-/// Shared header-sync trace event names and field keys.
-pub mod header_sync_trace {
+/// Block-sync (stream-6) scheduling, download, submit, and commit events.
+pub const BLOCK_SYNC_TABLE: ZakuraTraceTable = ZakuraTraceTable {
+    table: "block_sync",
+    file_name: "block_sync.jsonl",
+};
+
+/// Zebrad adapter boundary events for commits, state reads, and frontier mirrors.
+pub const COMMIT_STATE_TABLE: ZakuraTraceTable = ZakuraTraceTable {
+    table: "commit_state",
+    file_name: "commit_state.jsonl",
+};
+
+/// Shared block-sync trace event names and field keys.
+///
+/// The block-sync body pipeline has no `tracing`-macro coverage in release
+/// builds (the binary is compiled with `release_max_level_info`, which strips
+/// the `debug!` sites), so these JSONL rows are the only runtime visibility into
+/// scheduling, download, submit, and commit progress. The periodic
+/// [`BLOCK_SYNC_STATE`] snapshot is the single most useful row for diagnosing a
+/// stall: it reports where the body floor, verified tip, and header tip are, how
+/// much is buffered/applying, and whether the byte budget or peer status is
+/// blocking new downloads.
+pub mod block_sync_trace {
     /// Trace row event field.
     pub const EVENT: &str = "event";
     /// Peer field.
     pub const PEER: &str = "peer";
-    /// Source peer field for forwarded full-block floods.
-    pub const SOURCE_PEER: &str = "source_peer";
+    /// Action/event/message kind field.
+    pub const KIND: &str = "kind";
     /// Height field.
     pub const HEIGHT: &str = "height";
     /// Hash field.
@@ -90,6 +111,103 @@ pub mod header_sync_trace {
     pub const RANGE_START: &str = "range_start";
     /// Range count field.
     pub const RANGE_COUNT: &str = "range_count";
+    /// Expected/requested count field.
+    pub const EXPECTED_COUNT: &str = "expected_count";
+    /// Estimated byte reservation for a requested range.
+    pub const ESTIMATED_BYTES: &str = "estimated_bytes";
+    /// Serialized byte size of a received body.
+    pub const SERIALIZED_BYTES: &str = "serialized_bytes";
+    /// Commit result label (`committed`, `duplicate`, `rejected`, `timed_out`).
+    pub const RESULT: &str = "result";
+    /// Reactor-local verifier submission token.
+    pub const APPLY_TOKEN: &str = "apply_token";
+    /// Bounded reason field.
+    pub const REASON: &str = "reason";
+    /// Highest contiguous body height already submitted for apply.
+    pub const BODY_DOWNLOAD_FLOOR: &str = "body_download_floor";
+    /// Highest verified (committed) block-body height.
+    pub const VERIFIED_BLOCK_TIP: &str = "verified_block_tip";
+    /// Best header tip driving the body-download target.
+    pub const BEST_HEADER_TIP: &str = "best_header_tip";
+    /// Header tip minus verified body tip.
+    pub const BODY_LAG: &str = "body_lag";
+    /// Count of blocks submitted-but-not-yet-committed (held against budget).
+    pub const APPLYING: &str = "applying";
+    /// Count of out-of-order bodies buffered awaiting a contiguous prefix.
+    pub const REORDER: &str = "reorder";
+    /// Count of outstanding (in-flight) range requests across peers.
+    pub const OUTSTANDING: &str = "outstanding";
+    /// Remaining in-flight body byte budget.
+    pub const BUDGET_AVAILABLE: &str = "budget_available";
+    /// Reserved in-flight body byte budget.
+    pub const BUDGET_RESERVED: &str = "budget_reserved";
+    /// Connected block-sync peers.
+    pub const PEERS: &str = "peers";
+    /// Connected block-sync peers whose status we have received (schedulable).
+    pub const PEERS_WITH_STATUS: &str = "peers_with_status";
+    /// Lowest height still in the body-sync `needed` set (the gap to fetch next).
+    pub const NEEDED_MIN: &str = "needed_min";
+    /// Number of heights in the body-sync `needed` set after buffer filtering.
+    pub const NEEDED_COUNT: &str = "needed_count";
+    /// Number of ranges queued in the scheduler.
+    pub const QUEUE_LEN: &str = "queue_len";
+    /// Lowest start height across queued scheduler ranges.
+    pub const QUEUE_MIN_START: &str = "queue_min_start";
+    /// Number of distinct assigned range keys in the scheduler.
+    pub const ASSIGNED_LEN: &str = "assigned_len";
+    /// Highest end height across the scheduler's covered intervals.
+    pub const COVERED_MAX_END: &str = "covered_max_end";
+
+    /// Peer status received (servable body range advertised by the peer).
+    pub const BLOCK_STATUS_RECEIVED: &str = "block_status_received";
+    /// Body range request sent to a peer.
+    pub const BLOCK_GET_BLOCKS_SENT: &str = "block_get_blocks_sent";
+    /// Reactor accepted an inbound event.
+    pub const BLOCK_EVENT_RECEIVED: &str = "block_event_received";
+    /// Reactor queued an outbound driver action.
+    pub const BLOCK_ACTION_DISPATCHED: &str = "block_action_dispatched";
+    /// Body received from a peer.
+    pub const BLOCK_BODY_RECEIVED: &str = "block_body_received";
+    /// Body submitted to the verifier for commit.
+    pub const BLOCK_BODY_SUBMITTED: &str = "block_body_submitted";
+    /// Verifier finished applying a submitted body.
+    pub const BLOCK_APPLY_FINISHED: &str = "block_apply_finished";
+    /// Peer reported a requested range as unavailable.
+    pub const BLOCK_RANGE_UNAVAILABLE: &str = "block_range_unavailable";
+    /// New body downloads were paused (lag, near-tip, or budget).
+    pub const BLOCK_DOWNLOADS_PAUSED: &str = "block_downloads_paused";
+    /// Verified body frontier advanced from state.
+    pub const BLOCK_FRONTIERS_CHANGED: &str = "block_frontiers_changed";
+    /// Chain tip reset rolled the body frontier back.
+    pub const BLOCK_CHAIN_TIP_RESET: &str = "block_chain_tip_reset";
+    /// Periodic reactor state snapshot (the key stall-diagnosis row).
+    pub const BLOCK_SYNC_STATE: &str = "block_sync_state";
+}
+
+/// Shared header-sync trace event names and field keys.
+pub mod header_sync_trace {
+    /// Trace row event field.
+    pub const EVENT: &str = "event";
+    /// Peer field.
+    pub const PEER: &str = "peer";
+    /// Action/event/message kind field.
+    pub const KIND: &str = "kind";
+    /// Source peer field for forwarded full-block floods.
+    pub const SOURCE_PEER: &str = "source_peer";
+    /// Height field.
+    pub const HEIGHT: &str = "height";
+    /// Hash field.
+    pub const HASH: &str = "hash";
+    /// Header anchor hash field.
+    pub const ANCHOR_HASH: &str = "anchor_hash";
+    /// Range start height field.
+    pub const RANGE_START: &str = "range_start";
+    /// Range count field.
+    pub const RANGE_COUNT: &str = "range_count";
+    /// Header validation stage field.
+    pub const VALIDATION_STAGE: &str = "validation_stage";
+    /// Concrete validation error kind field.
+    pub const ERROR_KIND: &str = "error_kind";
     /// Advertised peer range cap field.
     pub const ADVERTISED_CAP: &str = "advertised_cap";
     /// Expected header count field.
@@ -101,6 +219,10 @@ pub mod header_sync_trace {
     /// Bounded reason field.
     pub const REASON: &str = "reason";
 
+    /// Reactor accepted an inbound event.
+    pub const HEADER_EVENT_RECEIVED: &str = "header_event_received";
+    /// Reactor queued an outbound driver action.
+    pub const HEADER_ACTION_DISPATCHED: &str = "header_action_dispatched";
     /// Local status sent to a peer.
     pub const HEADER_STATUS_SENT: &str = "header_status_sent";
     /// Peer status received.
@@ -127,8 +249,119 @@ pub mod header_sync_trace {
     pub const HEADER_PEER_DISCONNECT_REQUESTED: &str = "header_peer_disconnect_requested";
     /// Header frontier advanced.
     pub const HEADER_FRONTIER_ADVANCED: &str = "header_frontier_advanced";
+    /// Header frontier re-anchored down to the verified block frontier.
+    pub const HEADER_FRONTIER_REANCHORED: &str = "header_frontier_reanchored";
     /// Missing block bodies reported.
     pub const HEADER_MISSING_BODIES_REPORTED: &str = "header_missing_bodies_reported";
+}
+
+/// Shared commit/frontier adapter trace event names and field keys.
+pub mod commit_state_trace {
+    /// Trace row event field.
+    pub const EVENT: &str = "event";
+    /// Source driver/subsystem field.
+    pub const SOURCE: &str = "source";
+    /// Height field.
+    pub const HEIGHT: &str = "height";
+    /// Hash field.
+    pub const HASH: &str = "hash";
+    /// Range start height field.
+    pub const RANGE_START: &str = "range_start";
+    /// Range count field.
+    pub const RANGE_COUNT: &str = "range_count";
+    /// Result label field.
+    pub const RESULT: &str = "result";
+    /// Bounded reason field.
+    pub const REASON: &str = "reason";
+    /// Reactor-local block apply token field.
+    pub const APPLY_TOKEN: &str = "apply_token";
+    /// Apply class field (`checkpoint` or `full`).
+    pub const APPLY_CLASS: &str = "apply_class";
+    /// Finalized height observed from state.
+    pub const FINALIZED_HEIGHT: &str = "finalized_height";
+    /// Verified full-block/body tip height.
+    pub const VERIFIED_BLOCK_TIP: &str = "verified_block_tip";
+    /// Verified full-block/body tip hash.
+    pub const VERIFIED_BLOCK_HASH: &str = "verified_block_hash";
+    /// Best header tip height.
+    pub const BEST_HEADER_TIP: &str = "best_header_tip";
+    /// Elapsed milliseconds field.
+    pub const ELAPSED_MS: &str = "elapsed_ms";
+    /// Peer field.
+    pub const PEER: &str = "peer";
+    /// Queue length field.
+    pub const QUEUE_LEN: &str = "queue_len";
+    /// In-flight count field.
+    pub const IN_FLIGHT_COUNT: &str = "in_flight_count";
+    /// Action kind field.
+    pub const ACTION: &str = "action";
+    /// Whether an optional frontier was present.
+    pub const LOCAL_FRONTIER: &str = "local_frontier";
+
+    /// Driver received a reactor action.
+    pub const ACTION_RECEIVED: &str = "action_received";
+    /// State read started.
+    pub const STATE_READ_START: &str = "state_read_start";
+    /// State read completed successfully.
+    pub const STATE_READ_SUCCESS: &str = "state_read_success";
+    /// State read failed or returned an unexpected response.
+    pub const STATE_READ_ERROR: &str = "state_read_error";
+    /// State read timed out.
+    pub const STATE_READ_TIMEOUT: &str = "state_read_timeout";
+    /// Block submit was queued in the driver.
+    pub const BLOCK_SUBMIT_QUEUED: &str = "block_submit_queued";
+    /// Verifier commit started.
+    pub const COMMIT_START: &str = "commit_start";
+    /// Verifier commit exceeded the driver timeout but is still being awaited.
+    pub const COMMIT_STALLED: &str = "commit_stalled";
+    /// Verifier commit finished.
+    pub const COMMIT_FINISH: &str = "commit_finish";
+    /// Post-commit frontier query started.
+    pub const FRONTIER_QUERY_START: &str = "frontier_query_start";
+    /// Post-commit frontier query finished.
+    pub const FRONTIER_QUERY_FINISH: &str = "frontier_query_finish";
+    /// Driver sent an event back to a reactor.
+    pub const REACTOR_EVENT_SENT: &str = "reactor_event_sent";
+    /// Delayed checkpoint frontier refresh attempted.
+    pub const CHECKPOINT_REFRESH_ATTEMPT: &str = "checkpoint_refresh_attempt";
+    /// Delayed checkpoint frontier refresh sent a frontier event.
+    pub const CHECKPOINT_REFRESH_SENT: &str = "checkpoint_refresh_sent";
+    /// Header-sync driver notified block sync about a header tip.
+    pub const BLOCK_SYNC_NOTIFY_SENT: &str = "block_sync_notify_sent";
+    /// Chain-tip mirror observed a watch action.
+    pub const CHAIN_TIP_ACTION: &str = "chain_tip_action";
+    /// Chain-tip mirror derived local frontiers.
+    pub const FRONTIER_DERIVED: &str = "frontier_derived";
+    /// Shared sync exchange accepted or ignored a frontier update.
+    pub const SYNC_FRONTIER_TRANSITION: &str = "sync_frontier_transition";
+    /// Monotonic shared sync exchange transition sequence.
+    pub const SEQUENCE: &str = "sequence";
+    /// Shared sync exchange transition cause.
+    pub const CAUSE: &str = "cause";
+    /// Previous finalized frontier height.
+    pub const OLD_FINALIZED_HEIGHT: &str = "old_finalized_height";
+    /// Previous finalized frontier hash.
+    pub const OLD_FINALIZED_HASH: &str = "old_finalized_hash";
+    /// Previous verified body frontier height.
+    pub const OLD_VERIFIED_BODY_HEIGHT: &str = "old_verified_body_height";
+    /// Previous verified body frontier hash.
+    pub const OLD_VERIFIED_BODY_HASH: &str = "old_verified_body_hash";
+    /// Previous best header frontier height.
+    pub const OLD_BEST_HEADER_HEIGHT: &str = "old_best_header_height";
+    /// Previous best header frontier hash.
+    pub const OLD_BEST_HEADER_HASH: &str = "old_best_header_hash";
+    /// New finalized frontier height.
+    pub const NEW_FINALIZED_HEIGHT: &str = "new_finalized_height";
+    /// New finalized frontier hash.
+    pub const NEW_FINALIZED_HASH: &str = "new_finalized_hash";
+    /// New verified body frontier height.
+    pub const NEW_VERIFIED_BODY_HEIGHT: &str = "new_verified_body_height";
+    /// New verified body frontier hash.
+    pub const NEW_VERIFIED_BODY_HASH: &str = "new_verified_body_hash";
+    /// New best header frontier height.
+    pub const NEW_BEST_HEADER_HEIGHT: &str = "new_best_header_height";
+    /// New best header frontier hash.
+    pub const NEW_BEST_HEADER_HASH: &str = "new_best_header_hash";
 }
 
 /// Cloneable Zakura trace emitter.
@@ -206,6 +439,9 @@ pub struct ZakuraTraceEvent<'a> {
     event: &'static str,
     conn: Option<u64>,
     stream: Option<u64>,
+    payload_len: Option<u64>,
+    frame_len: Option<u64>,
+    max_frame_bytes: Option<u64>,
     peer: Option<&'a str>,
     role: Option<&'static str>,
     phase: Option<&'static str>,
@@ -223,6 +459,9 @@ impl<'a> ZakuraTraceEvent<'a> {
             event,
             conn: None,
             stream: None,
+            payload_len: None,
+            frame_len: None,
+            max_frame_bytes: None,
             peer: None,
             role: None,
             phase: None,
@@ -243,6 +482,24 @@ impl<'a> ZakuraTraceEvent<'a> {
     /// Attach a local stream id.
     pub fn stream(mut self, stream: u64) -> Self {
         self.stream = Some(stream);
+        self
+    }
+
+    /// Attach a declared frame payload length.
+    pub fn payload_len(mut self, payload_len: u64) -> Self {
+        self.payload_len = Some(payload_len);
+        self
+    }
+
+    /// Attach an encoded frame length.
+    pub fn frame_len(mut self, frame_len: u64) -> Self {
+        self.frame_len = Some(frame_len);
+        self
+    }
+
+    /// Attach the effective frame byte cap used by the receiver.
+    pub fn max_frame_bytes(mut self, max_frame_bytes: u64) -> Self {
+        self.max_frame_bytes = Some(max_frame_bytes);
         self
     }
 
@@ -304,6 +561,9 @@ impl<'a> ZakuraTraceEvent<'a> {
         row.insert("event".to_string(), Value::String(self.event.to_string()));
         insert_optional_u64(row, "conn", self.conn);
         insert_optional_u64(row, "stream", self.stream);
+        insert_optional_u64(row, "payload_len", self.payload_len);
+        insert_optional_u64(row, "frame_len", self.frame_len);
+        insert_optional_u64(row, "max_frame_bytes", self.max_frame_bytes);
         insert_optional_str(row, "peer", self.peer);
         insert_optional_str(row, "role", self.role);
         insert_optional_str(row, "phase", self.phase);

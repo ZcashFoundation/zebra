@@ -204,12 +204,14 @@ impl<S, Env> Pipe<S, Env> {
 /// map Flow`. block_sync drives its stream-6 inbound path through it directly;
 /// header_sync and discovery fork their own loops (command draining / async
 /// handler handoff) that are genuinely different shapes.
+#[allow(dead_code)]
 pub(crate) struct PipeSink<S, Env> {
     pipe: Pipe<S, Env>,
     recv: FramedRecv,
     cancel: CancellationToken,
 }
 
+#[allow(dead_code)]
 impl<S, Env> PipeSink<S, Env>
 where
     S: Send + 'static,

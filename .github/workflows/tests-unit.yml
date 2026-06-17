@@ -10,6 +10,8 @@ on:
       - "**/Cargo.lock"
       - .config/nextest.toml
       - .github/workflows/tests-unit.yml
+      - docker/docker-compose.zakura-regtest-e2e.yml
+      - docker/zakura-regtest-e2e/**
 
   push:
     branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
@@ -19,6 +21,8 @@ on:
       - "**/Cargo.lock"
       - .config/nextest.toml
       - .github/workflows/tests-unit.yml
+      - docker/docker-compose.zakura-regtest-e2e.yml
+      - docker/zakura-regtest-e2e/**
 
   # Run the full unit-test suite when a PR is queued so the merge queue validates
   # the merged result against the latest `main`. `merge_group` ignores path
@@ -114,14 +118,63 @@ jobs:
       - name: Check no git dependencies
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
-  zakura-regtest-e2e:
-    name: Zakura regtest e2e
+  zakura-regtest-e2e-pr-gate:
+    name: Zakura regtest e2e (pr-gate)
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push'
     permissions:
       contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-key: zakura-regtest-e2e-pr-gate
+          cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Build zebrad (debug)
+        run: cargo build -p zebrad --bin zebrad
+        env:
+          CXXFLAGS: "-include cstdint"
+      - name: Run Zakura regtest PR gate
+        run: cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
+        env:
+          CXXFLAGS: "-include cstdint"
+          ZAKURA_REGTEST_E2E: "1"
+          ZAKURA_E2E_MODE: pr-gate
+          ZAKURA_E2E_TRACE_DIR: ${{ runner.temp }}/zakura-regtest-e2e-traces-pr-gate
+          ZAKURA_REGTEST_E2E_LABEL: zakura-pr-gate
+      - name: Upload Zakura e2e traces
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: zakura-regtest-e2e-pr-gate
+          path: ${{ runner.temp }}/zakura-regtest-e2e-traces-pr-gate
+          if-no-files-found: ignore
+
+  zakura-regtest-e2e:
+    name: Zakura regtest e2e (${{ matrix.zakura-mode }})
+    # The long four-node docker stack runs only on the nightly schedule and on
+    # demand. PRs and merge queue use the trimmed pr-gate job above.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        zakura-mode:
+          - checkpoint-long
+          - no-checkpoint-long
+          - restart-matrix
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -138,12 +191,25 @@ jobs:
       # failure surfaces clearly and separately from the e2e run.
       - name: Build zebrad (debug)
         run: cargo build -p zebrad --bin zebrad
+        env:
+          CXXFLAGS: "-include cstdint"
       - name: Run Zakura regtest dual-stack e2e
         # The test is `#[ignore]` and additionally returns early in CI unless
         # `ZAKURA_REGTEST_E2E=1` is set, so both flags are required to force it.
         run: cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
         env:
+          CXXFLAGS: "-include cstdint"
           ZAKURA_REGTEST_E2E: "1"
+          ZAKURA_E2E_MODE: ${{ matrix.zakura-mode }}
+          ZAKURA_E2E_TRACE_DIR: ${{ runner.temp }}/zakura-regtest-e2e-traces-${{ matrix.zakura-mode }}
+          ZAKURA_REGTEST_E2E_LABEL: zakura-${{ matrix.zakura-mode }}
+      - name: Upload Zakura e2e traces
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: zakura-regtest-e2e-${{ matrix.zakura-mode }}
+          path: ${{ runner.temp }}/zakura-regtest-e2e-traces-${{ matrix.zakura-mode }}
+          if-no-files-found: ignore
 
   test-success:
     name: test success
@@ -152,6 +218,7 @@ jobs:
     needs:
       - unit-tests
       - check-no-git-dependencies
+      - zakura-regtest-e2e-pr-gate
       - zakura-regtest-e2e
     timeout-minutes: 30
     steps:
@@ -159,4 +226,7 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: check-no-git-dependencies
+          # The release-only dependency check and mode-specific e2e lanes are
+          # skipped outside their event scopes. Failed, non-skipped jobs still
+          # fail this aggregate status.
+          allowed-skips: check-no-git-dependencies, zakura-regtest-e2e-pr-gate, zakura-regtest-e2e

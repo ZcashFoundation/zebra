@@ -617,6 +617,37 @@ fn header_range_commit_rejects_non_current_anchor_hash() {
 }
 
 #[test]
+fn header_range_commit_reports_missing_genesis_before_scratch_bootstrap() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let block1 = mainnet_block(1);
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &Mainnet,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(matches!(
+        batch.prepare_header_range_batch(
+            &state,
+            genesis.hash(),
+            std::slice::from_ref(&block1.header),
+            &[0],
+        ),
+        Err(CommitHeaderRangeError::MissingGenesisAnchor { anchor }) if anchor == genesis.hash()
+    ));
+
+    assert_eq!(state.best_header_tip(), None);
+}
+
+#[test]
 fn header_range_rows_and_tip_survive_reopen_without_body_availability() {
     let _init_guard = zebra_test::init();
     let tempdir = tempfile::tempdir().expect("temporary cache directory is created");

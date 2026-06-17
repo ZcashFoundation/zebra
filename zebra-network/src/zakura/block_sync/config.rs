@@ -7,7 +7,7 @@ pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 4;
 /// Default total response byte target advertised per range response.
 pub const DEFAULT_BS_MAX_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 /// Default global byte budget reserved for later block-download scheduling.
-pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
+pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Default block-sync request timeout reserved for later scheduling.
 pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default block-sync status refresh interval reserved for later advertisement.
@@ -16,6 +16,8 @@ pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30)
 pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
 /// Default block-sync peer fanout reserved for later range scheduling.
 pub const DEFAULT_BS_FANOUT: usize = 3;
+/// Default body lag where block sync pauses new downloads and lets block propagation finish.
+pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
 /// Maximum peer-advertised response byte target accepted from stream-6 status.
 pub const MAX_BS_RESPONSE_BYTES: u32 = {
     // This cast is safe: MAX_BS_MESSAGE_BYTES is asserted below 4 MiB.
@@ -79,10 +81,16 @@ impl Default for BlockSyncStatus {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ZakuraBlockSyncConfig {
-    /// Disable the legacy `ChainSync` body downloader on Zakura-enabled nodes.
+    /// Deprecated compatibility key for older rollout configs.
     ///
-    /// This leaves the legacy syncer available for non-Zakura nodes and as the
-    /// default-safe fallback when the gate is unset.
+    /// Zakura block sync is now selected by the top-level `v2_p2p` flag. This
+    /// field is accepted but ignored so older configs keep parsing.
+    #[doc(hidden)]
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "deserialize_ignored_replace_legacy_syncer"
+    )]
     pub replace_legacy_syncer: bool,
     /// Maximum blocks this node advertises per `GetBlocks` response.
     pub max_blocks_per_response: u32,
@@ -102,8 +110,18 @@ pub struct ZakuraBlockSyncConfig {
     pub size_deviation_tolerance: u32,
     /// Number of peers later range scheduling may fan out to for the same body gap.
     pub fanout: usize,
+    /// Body lag at or below which block sync pauses new downloads near the header tip.
+    pub near_tip_body_download_pause_blocks: u32,
     /// Block-sync peer caps and queue limits owned by this service.
     pub peer_limits: ServicePeerLimits,
+}
+
+fn deserialize_ignored_replace_legacy_syncer<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let _ = bool::deserialize(deserializer)?;
+    Ok(false)
 }
 
 impl Default for ZakuraBlockSyncConfig {
@@ -118,6 +136,7 @@ impl Default for ZakuraBlockSyncConfig {
             status_refresh_interval: DEFAULT_BS_STATUS_REFRESH_INTERVAL,
             size_deviation_tolerance: DEFAULT_BS_SIZE_DEVIATION_TOLERANCE,
             fanout: DEFAULT_BS_FANOUT,
+            near_tip_body_download_pause_blocks: DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS,
             peer_limits: ServicePeerLimits::default(),
         }
     }

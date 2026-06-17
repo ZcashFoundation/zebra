@@ -1,5 +1,8 @@
-use super::{config::*, reorder::*, scheduler::*, *};
-use crate::zakura::{ServicePeerDirection, ServicePeerSnapshot, ZakuraBlockSyncCandidateState};
+use super::{config::*, events::BlockApplyToken, reorder::*, scheduler::*, *};
+use crate::zakura::{
+    chain_frontier_from_parts, Frontier, FrontierUpdate, ServicePeerDirection, ServicePeerSnapshot,
+    ZakuraBlockSyncCandidateState,
+};
 
 pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 8;
 
@@ -22,13 +25,17 @@ pub struct BlockSyncStartup {
     /// Durable best header tip at startup.
     pub best_header_tip: (block::Height, block::Hash),
     /// Header-sync best-tip watch used as the moving body-download target.
-    pub header_tip: watch::Receiver<(block::Height, block::Hash)>,
+    pub header_tip: Option<watch::Receiver<(block::Height, block::Hash)>>,
+    /// Shared sync exchange frontier stream used as the moving body-download target.
+    pub frontier_updates: Option<watch::Receiver<FrontierUpdate>>,
     /// Local stream-6 configuration.
     pub config: ZakuraBlockSyncConfig,
     /// Shared shutdown signal owned by the embedding endpoint or test harness.
     pub shutdown: CancellationToken,
     /// Enables query actions for state-backed metadata.
     pub state_queries_enabled: bool,
+    /// JSONL trace emitter for block-sync scheduling, download, and commit rows.
+    pub trace: ZakuraTrace,
 }
 
 impl BlockSyncStartup {
@@ -42,16 +49,50 @@ impl BlockSyncStartup {
         Self {
             frontiers,
             best_header_tip,
-            header_tip,
+            header_tip: Some(header_tip),
+            frontier_updates: None,
             config,
             shutdown: CancellationToken::new(),
             state_queries_enabled: true,
+            trace: ZakuraTrace::noop(),
+        }
+    }
+
+    /// Build block-sync startup config from shared sync exchange frontiers.
+    pub fn new_with_exchange(
+        frontiers: BlockSyncFrontiers,
+        best_header_tip: (block::Height, block::Hash),
+        frontier_updates: watch::Receiver<FrontierUpdate>,
+        config: ZakuraBlockSyncConfig,
+    ) -> Self {
+        Self {
+            frontiers,
+            best_header_tip,
+            header_tip: None,
+            frontier_updates: Some(frontier_updates),
+            config,
+            shutdown: CancellationToken::new(),
+            state_queries_enabled: true,
+            trace: ZakuraTrace::noop(),
+        }
+    }
+
+    /// Build a latest-value frontier update stream from legacy startup pieces.
+    pub fn frontier_update_from_parts(
+        frontiers: BlockSyncFrontiers,
+        best_header_tip: (block::Height, block::Hash),
+    ) -> FrontierUpdate {
+        FrontierUpdate {
+            frontier: chain_frontier_from_parts(
+                frontiers.finalized_height,
+                Frontier::new(frontiers.verified_block_tip, frontiers.verified_block_hash),
+                Frontier::new(best_header_tip.0, best_header_tip.1),
+            ),
+            change: crate::zakura::FrontierChange::Snapshot,
         }
     }
 
     pub(super) fn inert(config: ZakuraBlockSyncConfig) -> Self {
-        let (tip_tx, header_tip) = watch::channel((block::Height::MIN, block::Hash([0; 32])));
-        drop(tip_tx);
         Self {
             frontiers: BlockSyncFrontiers {
                 finalized_height: block::Height::MIN,
@@ -59,10 +100,12 @@ impl BlockSyncStartup {
                 verified_block_hash: block::Hash([0; 32]),
             },
             best_header_tip: (block::Height::MIN, block::Hash([0; 32])),
-            header_tip,
+            header_tip: None,
+            frontier_updates: None,
             config,
             shutdown: CancellationToken::new(),
             state_queries_enabled: false,
+            trace: ZakuraTrace::noop(),
         }
     }
 }
@@ -135,6 +178,7 @@ pub(super) struct BlockSyncState {
     pub(super) finalized_height: block::Height,
     pub(super) verified_block_tip: block::Height,
     pub(super) verified_block_hash: block::Hash,
+    pub(super) body_download_floor: block::Height,
     pub(super) servable_high: block::Height,
     pub(super) servable_hash: block::Hash,
     pub(super) best_header_tip: block::Height,
@@ -143,6 +187,8 @@ pub(super) struct BlockSyncState {
     pub(super) parked_peers: HashSet<ZakuraPeerId>,
     pub(super) schedule: BlockRangeScheduler,
     pub(super) reorder: ReorderBuffer,
+    pub(super) applying: BTreeMap<block::Height, ApplyingBlock>,
+    pub(super) next_apply_token: BlockApplyToken,
     pub(super) budget: ByteBudget,
     pub(super) needed_heights: Vec<block::Height>,
     pub(super) status_refresh: RateMeter,
@@ -165,6 +211,7 @@ impl BlockSyncState {
             finalized_height: startup.frontiers.finalized_height,
             verified_block_tip: startup.frontiers.verified_block_tip,
             verified_block_hash: startup.frontiers.verified_block_hash,
+            body_download_floor: startup.frontiers.verified_block_tip,
             servable_high: startup.frontiers.verified_block_tip,
             servable_hash: startup.frontiers.verified_block_hash,
             best_header_tip: startup.best_header_tip.0,
@@ -173,6 +220,8 @@ impl BlockSyncState {
             parked_peers: HashSet::new(),
             schedule: BlockRangeScheduler::new(startup.config.fanout),
             reorder: ReorderBuffer::new(),
+            applying: BTreeMap::new(),
+            next_apply_token: 1,
             budget: ByteBudget::new(startup.config.max_inflight_block_bytes),
             needed_heights: Vec::new(),
             status_refresh: RateMeter::new(startup.config.status_refresh_interval),
@@ -194,6 +243,15 @@ impl BlockSyncState {
             .count();
         ServicePeerSnapshot::new(inbound, outbound, limits)
     }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ApplyingBlock {
+    pub(super) token: BlockApplyToken,
+    pub(super) hash: block::Hash,
+    pub(super) block: Arc<block::Block>,
+    pub(super) bytes: u64,
+    pub(super) submitted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -240,10 +298,23 @@ impl PeerBlockState {
             .saturating_sub(self.outstanding.len())
     }
 
+    pub(super) fn can_serve_any(&self, heights: &[block::Height]) -> bool {
+        self.received_status
+            && heights
+                .iter()
+                .any(|height| self.servable_low <= *height && *height <= self.servable_high)
+    }
+
     pub(super) fn outstanding_index_for_height(&self, height: block::Height) -> Option<usize> {
         self.outstanding
             .iter()
             .position(|outstanding| outstanding.request.contains(height))
+    }
+
+    pub(super) fn outstanding_index_for_start(&self, start_height: block::Height) -> Option<usize> {
+        self.outstanding
+            .iter()
+            .position(|outstanding| outstanding.request.start_height == start_height)
     }
 
     pub(super) fn try_start_serving_blocks(&mut self, local_inflight_cap: u16) -> bool {
@@ -290,6 +361,33 @@ impl OutstandingBlockRange {
 
     pub(super) fn is_complete(&self) -> bool {
         self.received.len() == self.request.expected_hashes.len()
+    }
+
+    pub(super) fn missing_retry_requests(&self) -> Vec<BlockRangeRequest> {
+        self.request
+            .expected_hashes
+            .iter()
+            .filter_map(|(height, _)| {
+                (!self.received.contains(height))
+                    .then(|| self.request.single_height_retry(*height))
+                    .flatten()
+            })
+            .collect()
+    }
+
+    pub(super) fn missing_retry_requests_after(
+        &self,
+        tip: block::Height,
+    ) -> Vec<BlockRangeRequest> {
+        self.request
+            .expected_hashes
+            .iter()
+            .filter_map(|(height, _)| {
+                (*height > tip && !self.received.contains(height))
+                    .then(|| self.request.single_height_retry(*height))
+                    .flatten()
+            })
+            .collect()
     }
 }
 

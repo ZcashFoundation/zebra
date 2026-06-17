@@ -22,7 +22,7 @@ pub(crate) use guard::{Admit, ByteBudget, PeerMeters, SessionGuard};
 pub use io::{framed_channel, FramedRecv, FramedSend};
 pub(crate) use pipe::{
     handle_pipe_exit, spawn_supervised_peer_task, spawn_supervised_pipe, Edge, Flow, Node,
-    NodeKind, Pipe, PipeCx, PipeShape, PipeSink,
+    NodeKind, Pipe, PipeCx, PipeShape,
 };
 pub use registry::{RegistryError, ServiceRegistry};
 pub(crate) use service::ServiceStream;

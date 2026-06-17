@@ -136,15 +136,18 @@ mod tests {
     use super::super::{trace_reader::TraceValue, HostilePeer, WaitError};
     use super::*;
     use crate::{
-        zakura::trace::header_sync_trace as hs_trace,
+        zakura::trace::{block_sync_trace as bs_trace, header_sync_trace as hs_trace},
         zakura::{
-            spawn_header_sync_reactor, DiscoveryMessage, Frame, FramedRecv, FramedSend,
-            HeaderSyncAction, HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers,
-            HeaderSyncHandle, HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncPeerSession,
-            HeaderSyncStartup, HeaderSyncStatus, Peer, Service, Stream, ZakuraHeaderSyncConfig,
-            ZakuraLocalLimits, ZakuraTrace, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
-            ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_GOSSIP,
-            ZAKURA_STREAM_HEADER_SYNC,
+            block_sync::{MAX_BS_FRAME_BYTES, ZAKURA_CAP_BLOCK_SYNC, ZAKURA_STREAM_BLOCK_SYNC},
+            spawn_header_sync_reactor, BlockApplyResult, BlockSizeEstimate, BlockSyncAction,
+            BlockSyncBlockMeta, BlockSyncEvent, BlockSyncFrontiers, BlockSyncMessage,
+            BlockSyncStatus, DiscoveryMessage, Frame, FramedRecv, FramedSend, HeaderSyncAction,
+            HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers, HeaderSyncHandle,
+            HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncPeerSession, HeaderSyncStartup,
+            HeaderSyncStatus, Peer, Service, ServicePeerLimits, Stream, ZakuraBlockSyncConfig,
+            ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraTrace, MAX_BS_RESPONSE_BYTES,
+            ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
+            ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_GOSSIP, ZAKURA_STREAM_HEADER_SYNC,
         },
         Config,
     };
@@ -165,7 +168,7 @@ mod tests {
             },
             Network,
         },
-        serialization::ZcashDeserializeInto,
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
     };
     use zebra_test::vectors::{
         BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES, BLOCK_MAINNET_3_BYTES, BLOCK_MAINNET_4_BYTES,
@@ -395,9 +398,15 @@ mod tests {
         }
 
         fn frontiers(&self) -> HeaderSyncFrontiers {
+            let verified_block_hash = self
+                .headers
+                .get(&self.verified_block_tip)
+                .map(|(hash, _)| *hash)
+                .expect("verified test frontier has a known header");
             HeaderSyncFrontiers {
                 finalized_height: self.finalized_height,
                 verified_block_tip: self.verified_block_tip,
+                verified_block_hash,
             }
         }
 
@@ -926,6 +935,8 @@ mod tests {
                 HeaderSyncAction::BodyGaps { from, to } => {
                     local.observed_gaps.lock().await.push((from, to));
                 }
+                HeaderSyncAction::HeaderAdvanced { .. } => {}
+                HeaderSyncAction::HeaderReanchored { .. } => {}
                 HeaderSyncAction::NewBlockReceived {
                     peer,
                     height,
@@ -976,6 +987,98 @@ mod tests {
 
     fn mainnet_block(bytes: &[u8]) -> Arc<block::Block> {
         Arc::new(bytes.zcash_deserialize_into().expect("block vector parses"))
+    }
+
+    fn block_size(block: &block::Block) -> u32 {
+        u32::try_from(
+            block
+                .zcash_serialize_to_vec()
+                .expect("test block serializes")
+                .len(),
+        )
+        .expect("test block size fits u32")
+    }
+
+    async fn drive_native_block_sync_actions(
+        node: &ZakuraTestNode,
+        blocks: Vec<Arc<block::Block>>,
+        submitted: Arc<StdMutex<Vec<block::Height>>>,
+    ) -> JoinHandle<()> {
+        let endpoint = node.endpoint();
+        let mut actions = node
+            .take_block_sync_actions()
+            .await
+            .expect("block-sync action receiver is enabled");
+        let by_height: BTreeMap<_, _> = blocks
+            .into_iter()
+            .map(|block| {
+                (
+                    block.coinbase_height().expect("test block has height"),
+                    block,
+                )
+            })
+            .collect();
+
+        tokio::spawn(async move {
+            while let Some(action) = actions.recv().await {
+                let Some(handle) = endpoint.block_sync() else {
+                    continue;
+                };
+                match action {
+                    BlockSyncAction::QueryNeededBlocks {
+                        verified_block_tip,
+                        best_header_tip,
+                    } => {
+                        let metas = by_height
+                            .range(
+                                verified_block_tip.next().unwrap_or(verified_block_tip)
+                                    ..=best_header_tip,
+                            )
+                            .map(|(height, block)| BlockSyncBlockMeta {
+                                height: *height,
+                                hash: block.hash(),
+                                size: BlockSizeEstimate::Advertised(block_size(block)),
+                            })
+                            .collect();
+                        let _ = handle.send(BlockSyncEvent::NeededBlocks(metas)).await;
+                    }
+                    BlockSyncAction::SubmitBlock { token, block } => {
+                        let height = block.coinbase_height().expect("submitted block has height");
+                        submitted
+                            .lock()
+                            .expect("submitted list mutex is not poisoned")
+                            .push(height);
+                        let _ = handle
+                            .send(BlockSyncEvent::BlockApplyFinished {
+                                token,
+                                height,
+                                hash: block.hash(),
+                                result: BlockApplyResult::Committed,
+                                local_frontier: Some(BlockSyncFrontiers {
+                                    finalized_height: height,
+                                    verified_block_tip: height,
+                                    verified_block_hash: block.hash(),
+                                }),
+                            })
+                            .await;
+                    }
+                    BlockSyncAction::QueryBlocksByHeightRange { peer, start, count } => {
+                        let _ = handle
+                            .send(BlockSyncEvent::BlockRangeResponseFinished {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                returned_count: 0,
+                            })
+                            .await;
+                    }
+                    BlockSyncAction::Misbehavior { peer, .. } => {
+                        let _ = endpoint.supervisor().disconnect_peer(&peer).await;
+                    }
+                    BlockSyncAction::SendMessage { .. } => {}
+                }
+            }
+        })
     }
 
     fn block_bytes(height: u32) -> &'static [u8] {
@@ -1100,6 +1203,7 @@ mod tests {
                 HeaderSyncFrontiers {
                     finalized_height: block::Height(0),
                     verified_block_tip: block::Height(0),
+                    verified_block_hash: anchor.1,
                 },
                 Some(anchor),
             )
@@ -1172,7 +1276,9 @@ mod tests {
                     }
                     HeaderSyncAction::QueryBestHeaderTip
                     | HeaderSyncAction::QueryMissingBlockBodies { .. }
-                    | HeaderSyncAction::BodyGaps { .. } => {}
+                    | HeaderSyncAction::BodyGaps { .. }
+                    | HeaderSyncAction::HeaderAdvanced { .. }
+                    | HeaderSyncAction::HeaderReanchored { .. } => {}
                 }
             }
         })
@@ -1240,6 +1346,325 @@ mod tests {
         assert!(reader.node("01").table("stream").count("accepted") >= 1);
         assert!(reader.node("01").table("ratelimit").count("frame.oversize") >= 1);
 
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn native_stream6_oversize_frame_is_traceable_over_real_connection(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "native_stream6_oversize_frame_is_traceable_over_real_connection",
+            false,
+        )?;
+        let mut cluster = ZakuraTestCluster::new();
+        let victim_idx = cluster.spawn_traced_node(1, &mut capture).await?;
+        let victim = cluster.node(victim_idx);
+        let hostile =
+            HostilePeer::connect_native_with_capabilities(victim, 2, ZAKURA_CAP_BLOCK_SYNC).await?;
+        let hostile_peer = hostile.id()?;
+        let peer_set = victim.supervisor().subscribe();
+
+        await_until("block-sync peer registered", Duration::from_secs(5), || {
+            peer_set.borrow().contains(&hostile_peer)
+        })
+        .await?;
+        assert!(
+            MAX_BS_FRAME_BYTES < victim.limits().max_frame_bytes,
+            "test payload must fit the negotiated connection cap but exceed stream-6's cap"
+        );
+        hostile
+            .send_frame_header_with_declared_payload_len(
+                ZAKURA_STREAM_BLOCK_SYNC,
+                MAX_BS_FRAME_BYTES,
+            )
+            .await?;
+
+        await_until("stream-6 oversize trace", Duration::from_secs(5), || {
+            capture.reader().is_ok_and(|reader| {
+                reader
+                    .node("01")
+                    .table("ratelimit")
+                    .rows()
+                    .iter()
+                    .any(|row| {
+                        row.get("event").and_then(serde_json::Value::as_str)
+                            == Some("frame.oversize")
+                            && row.get("stream_kind").and_then(serde_json::Value::as_str)
+                                == Some("block_sync")
+                    })
+            })
+        })
+        .await?;
+        await_until(
+            "oversized stream-6 frame disconnects peer",
+            Duration::from_secs(5),
+            || !peer_set.borrow().contains(&hostile_peer),
+        )
+        .await?;
+
+        hostile.shutdown().await;
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn native_stream6_declared_payload_above_old_cap_is_not_raw_oversize(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "native_stream6_declared_payload_above_old_cap_is_not_raw_oversize",
+            false,
+        )?;
+        let mut cluster = ZakuraTestCluster::new();
+        let victim_idx = cluster.spawn_traced_node(1, &mut capture).await?;
+        let victim = cluster.node(victim_idx);
+        let hostile =
+            HostilePeer::connect_native_with_capabilities(victim, 2, ZAKURA_CAP_BLOCK_SYNC).await?;
+        let hostile_peer = hostile.id()?;
+        let peer_set = victim.supervisor().subscribe();
+
+        await_until("block-sync peer registered", Duration::from_secs(5), || {
+            peer_set.borrow().contains(&hostile_peer)
+        })
+        .await?;
+
+        let old_max_bs_message_bytes =
+            u32::try_from(block::MAX_BLOCK_BYTES).expect("max block bytes fits in u32") + 1;
+        let regression_payload_len = old_max_bs_message_bytes + 1;
+        assert!(
+            regression_payload_len < MAX_BS_FRAME_BYTES,
+            "test payload must exceed the old stream-6 cap but fit the new one"
+        );
+
+        hostile
+            .send_frame_header_with_declared_payload_len(
+                ZAKURA_STREAM_BLOCK_SYNC,
+                regression_payload_len,
+            )
+            .await?;
+
+        await_until(
+            "incomplete stream-6 frame disconnects peer",
+            Duration::from_secs(5),
+            || !peer_set.borrow().contains(&hostile_peer),
+        )
+        .await?;
+
+        let reader = capture.reader()?;
+        let raw_oversize = reader
+            .node("01")
+            .table("ratelimit")
+            .rows()
+            .iter()
+            .any(|row| {
+                row.get("event").and_then(serde_json::Value::as_str) == Some("frame.oversize")
+                    && row.get("stream_kind").and_then(serde_json::Value::as_str)
+                        == Some("block_sync")
+            });
+        assert!(
+            !raw_oversize,
+            "payloads above the old stream-6 cap but below the new cap must reach \
+             the stream payload reader instead of being dropped as raw frame.oversize"
+        );
+
+        hostile.shutdown().await;
+        cluster.shutdown().await;
+        assert!(capture.finish().await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn native_block_sync_getblocks_flushes_before_hostile_peer_sends_bodies(
+    ) -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "native_block_sync_getblocks_flushes_before_hostile_peer_sends_bodies",
+            false,
+        )?;
+        let blocks = vec![
+            mainnet_block(&BLOCK_MAINNET_1_BYTES),
+            mainnet_block(&BLOCK_MAINNET_2_BYTES),
+            mainnet_block(&BLOCK_MAINNET_3_BYTES),
+        ];
+
+        let mut limits = ZakuraLocalLimits::from_config(&Config::default());
+        limits.max_connections = 16;
+        limits.max_pending_handshakes = 8;
+        limits.max_open_streams = 16;
+        limits.max_inbound_queue_depth = 8;
+        limits.message_rate_per_second = 64;
+        limits.stream_open_rate_per_second = 64;
+
+        let block_sync_config = ZakuraBlockSyncConfig {
+            near_tip_body_download_pause_blocks: 0,
+            max_blocks_per_response: 3,
+            max_inflight_block_bytes: u64::MAX,
+            request_timeout: Duration::from_secs(300),
+            peer_limits: ServicePeerLimits {
+                inbound_queue_depth: 1,
+                outbound_queue_depth: 1,
+                ..ServicePeerLimits::default()
+            },
+            ..ZakuraBlockSyncConfig::default()
+        };
+
+        let anchor = (block::Height(0), mainnet_genesis_hash());
+        let mut cluster = ZakuraTestCluster::new();
+        let victim = ZakuraTestNode::builder(60)
+            .limits(limits)
+            .tracer(capture.tracer_for_node(60))
+            .header_sync_driver(
+                e2e_network([3]),
+                anchor,
+                HeaderSyncFrontiers {
+                    finalized_height: block::Height(0),
+                    verified_block_tip: block::Height(0),
+                    verified_block_hash: anchor.1,
+                },
+                Some((block::Height(3), blocks[2].hash())),
+            )
+            .block_sync_config(block_sync_config)
+            .spawn()
+            .await?;
+        cluster.nodes.push(victim);
+        let victim = cluster.node(0);
+        assert!(
+            victim.block_sync().is_some(),
+            "block-sync handle should be enabled with the header-sync test driver"
+        );
+
+        let submitted = Arc::new(StdMutex::new(Vec::new()));
+        let driver =
+            drive_native_block_sync_actions(victim, blocks.clone(), submitted.clone()).await;
+        let hostile =
+            HostilePeer::connect_native_with_capabilities(victim, 61, ZAKURA_CAP_BLOCK_SYNC)
+                .await?;
+        let hostile_peer = hostile.id()?;
+        let peer_set = victim.supervisor().subscribe();
+        await_until("block-sync peer registered", Duration::from_secs(5), || {
+            peer_set.borrow().contains(&hostile_peer)
+        })
+        .await?;
+
+        hostile
+            .send_raw_frame(
+                ZAKURA_STREAM_BLOCK_SYNC,
+                BlockSyncMessage::Status(BlockSyncStatus {
+                    servable_low: block::Height(1),
+                    servable_high: block::Height(3),
+                    tip_hash: blocks[2].hash(),
+                    max_blocks_per_response: 3,
+                    max_inflight_requests: 1,
+                    max_response_bytes: MAX_BS_RESPONSE_BYTES,
+                })
+                .encode_frame()?,
+            )
+            .await?;
+
+        let (start_height, count) = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = hostile.recv_ordered_frame(ZAKURA_STREAM_BLOCK_SYNC).await?;
+                match BlockSyncMessage::decode_frame(frame)
+                    .map_err(|error| -> BoxError { Box::new(error) })?
+                {
+                    BlockSyncMessage::GetBlocks {
+                        start_height,
+                        count,
+                    } => return Ok::<_, BoxError>((start_height, count)),
+                    BlockSyncMessage::Status(_) => {}
+                    msg => {
+                        return Err(format!("unexpected native block-sync message: {msg:?}").into())
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| -> BoxError {
+            "timed out waiting for physical stream-6 GetBlocks frame".into()
+        })??;
+
+        assert_eq!(start_height, block::Height(1));
+        assert_eq!(count, 3);
+        assert!(
+            submitted
+                .lock()
+                .expect("submitted list mutex is not poisoned")
+                .is_empty(),
+            "the test-side responder must not send bodies or trigger submissions before it has \
+             physically read GetBlocks from stream 6"
+        );
+
+        let end_height = start_height
+            .0
+            .checked_add(count)
+            .expect("test request height range fits u32");
+        for height in start_height.0..end_height {
+            let block = blocks
+                .iter()
+                .find(|block| block.coinbase_height() == Some(block::Height(height)))
+                .expect("requested test block exists")
+                .clone();
+            hostile
+                .send_raw_frame(
+                    ZAKURA_STREAM_BLOCK_SYNC,
+                    BlockSyncMessage::Block(block).encode_frame()?,
+                )
+                .await?;
+        }
+        hostile
+            .send_raw_frame(
+                ZAKURA_STREAM_BLOCK_SYNC,
+                BlockSyncMessage::BlocksDone {
+                    start_height,
+                    returned: count,
+                }
+                .encode_frame()?,
+            )
+            .await?;
+
+        let expected: Vec<_> = (start_height.0..end_height).map(block::Height).collect();
+        await_until(
+            "native block-sync submitted requested bodies",
+            Duration::from_secs(5),
+            || {
+                let mut actual = submitted
+                    .lock()
+                    .expect("submitted list mutex is not poisoned")
+                    .clone();
+                actual.sort_unstable();
+                actual.dedup();
+                expected.iter().all(|height| actual.contains(height))
+            },
+        )
+        .await?;
+
+        await_until(
+            "native block-sync submitted trace rows",
+            Duration::from_secs(5),
+            || {
+                capture.reader().is_ok_and(|reader| {
+                    let rows = reader.node("60").table("block_sync").rows();
+                    expected.iter().all(|height| {
+                        rows.iter().any(|row| {
+                            row.get(bs_trace::EVENT).and_then(serde_json::Value::as_str)
+                                == Some(bs_trace::BLOCK_BODY_SUBMITTED)
+                                && row
+                                    .get(bs_trace::HEIGHT)
+                                    .and_then(serde_json::Value::as_u64)
+                                    == Some(u64::from(height.0))
+                        })
+                    })
+                })
+            },
+        )
+        .await?;
+
+        driver.abort();
+        hostile.shutdown().await;
+        cluster.shutdown().await;
         assert!(capture.finish().await?.is_none());
         Ok(())
     }
@@ -1626,6 +2051,9 @@ mod tests {
         let flooding =
             HostilePeer::connect_native_with_capabilities(&victim, 30, ZAKURA_CAP_DISCOVERY)
                 .await?;
+        // Exceeding the per-kind message rate is advisory at transport ingress:
+        // it is still traced, but frames are delivered so ordered streams do not
+        // lose solicited data.
         flooding
             .flood_stream(ZAKURA_STREAM_DISCOVERY, 'd', 16)
             .await?;
@@ -1682,8 +2110,10 @@ mod tests {
 
     #[tokio::test]
     async fn persistent_ordered_stream_uses_message_budget() -> Result<(), BoxError> {
-        // P2: a long-lived ordered stream still spends the transport-owned
-        // per-kind message-rate budget before frames reach the service.
+        // P2: a long-lived ordered stream spends the transport-owned per-kind
+        // message-rate budget before frames reach the service. A peer that
+        // floods past the budget is disconnected (we never drop a solicited
+        // frame), so no more than ~one budget of frames is ever delivered.
         let _guard = zebra_test::init();
 
         // Small, deterministic message budget so the aggregate cap is observable
@@ -1706,9 +2136,15 @@ mod tests {
 
         let sent = message_budget * 8;
         for index in 0..sent {
-            hostile
+            // Once the budget is exceeded the victim disconnects, so later
+            // sends race the teardown and may error -- that is expected.
+            if hostile
                 .send_frame(2, format!("a-{index}").into_bytes())
-                .await?;
+                .await
+                .is_err()
+            {
+                break;
+            }
         }
 
         // Wait until rate limiting has clearly engaged (more frames sent than one

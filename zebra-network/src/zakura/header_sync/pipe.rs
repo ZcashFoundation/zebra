@@ -181,7 +181,8 @@ pub(super) fn run_inbound(cx: &mut PipeCx<'_, HsLocal, HsEnv>, frame: Frame) -> 
     // dedup-without-scoring policy, so honest re-floods are not penalized; the
     // first frame in each window still reaches the reactor, preserving
     // first-offense malformed/spam disconnects.
-    if u8::try_from(frame.message_type).ok() == Some(MSG_HS_NEW_BLOCK) && !cx.local.admit_new_block()
+    if u8::try_from(frame.message_type).ok() == Some(MSG_HS_NEW_BLOCK)
+        && !cx.local.admit_new_block()
     {
         metrics::counter!("sync.header.tip.new_block.predecode_throttled").increment(1);
         return Flow::Done;

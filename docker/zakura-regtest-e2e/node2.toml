@@ -8,6 +8,14 @@
 
 [network]
 network = "Regtest"
+# Persistent Zakura identity (distinct from node1's 0101..01). Production nodes
+# keep a stable node id across restarts; the e2e's from-scratch reset must too,
+# otherwise a restarted node returns under a *new* identity while reusing the
+# same loopback address, colliding with its own stale entry in node1's iroh node
+# map. node1 then holds the dead connection until the ~150s app idle reaper,
+# stalling the kind-6 catch-up. With a stable identity the restart is a normal
+# same-peer reconnect that node1's duplicate-eviction path clears in seconds.
+zakura_node_secret_key = "0202020202020202020202020202020202020202020202020202020202020202"
 # Inert with legacy_p2p = false (no TCP listener is opened), but the field is
 # required, so keep it on a distinct loopback port for clarity.
 listen_addr = "127.0.0.1:18333"
@@ -30,6 +38,13 @@ trace_dir = "/traces/node2"
 
 [state]
 ephemeral = true
+
+[sync]
+# Force the from-scratch genesis-bootstrap path: skip the Regtest direct genesis
+# self-seed so this pure-Zakura node must download and verify genesis from node1
+# over Zakura before native header/body sync can advance. This is the exact path
+# a Mainnet/Testnet Zakura-only node takes from an empty state.
+debug_skip_regtest_genesis_self_seed = true
 
 [rpc]
 listen_addr = "127.0.0.1:18332"

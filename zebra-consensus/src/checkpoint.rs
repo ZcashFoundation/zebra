@@ -230,8 +230,11 @@ where
     /// details.
     ///
     /// This function is designed for use in tests.
+    ///
+    /// Only reachable from test/`proptest-impl` builds: the `checkpoint` module is
+    /// private and [`CheckpointVerifier`] is re-exported only under those cfgs.
     #[allow(dead_code)]
-    pub(crate) fn from_list(
+    pub fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
         network: &Network,
         initial_tip: Option<(block::Height, block::Hash)>,
@@ -1037,6 +1040,17 @@ impl VerifyCheckpointError {
             VerifyCheckpointError::NewerRequest { .. } => true,
             VerifyCheckpointError::VerifyBlock(block_error) => block_error.is_duplicate_request(),
             _ => false,
+        }
+    }
+
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&zs::KnownBlock> {
+        match self {
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .and_then(|error| error.duplicate_location()),
+            VerifyCheckpointError::VerifyBlock(block_error) => block_error.duplicate_location(),
+            _ => None,
         }
     }
 

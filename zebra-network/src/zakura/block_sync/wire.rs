@@ -21,14 +21,17 @@ pub const MSG_BS_RANGE_UNAVAILABLE: u8 = 5;
 /// Maximum block bodies ever requested or reported by stream 6.
 pub const MAX_BS_BLOCKS_PER_REQUEST: u32 = 128;
 /// Maximum encoded stream-6 message bytes.
-pub const MAX_BS_MESSAGE_BYTES: usize = {
-    // This cast is safe: MAX_BLOCK_BYTES is a small fixed consensus bound.
-    block::MAX_BLOCK_BYTES as usize + BLOCK_SYNC_MESSAGE_TYPE_BYTES
-};
+///
+/// This cap is intentionally larger than Zebra's consensus block-size limit so
+/// stream-6 can read and classify slightly oversized or future-expanded frames
+/// in the block-sync codec instead of dropping them at the raw transport gate.
+/// Decoded `Block` messages are still bounded by [`block::MAX_BLOCK_BYTES`].
+pub const MAX_BS_MESSAGE_BYTES: usize = 3 * 1024 * 1024;
 
 pub(super) const BLOCK_SYNC_MESSAGE_TYPE_BYTES: usize = 1;
 
 const _: () = assert!(MAX_BS_MESSAGE_BYTES < 4 * 1024 * 1024);
+const _: () = assert!(MAX_BS_MESSAGE_BYTES > block::MAX_BLOCK_BYTES as usize);
 
 /// Native stream-6 block-sync message.
 #[derive(Clone, Debug, Eq, PartialEq)]

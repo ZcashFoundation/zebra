@@ -667,7 +667,7 @@ async fn commit_header_range_completes_while_in_finalized_write_phase(
 ) -> std::result::Result<(), BoxError> {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
-    let (mut state_service, _read_state, _, _) =
+    let (mut state_service, read_state, _, _) =
         StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
     let genesis =
         zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
@@ -709,6 +709,21 @@ async fn commit_header_range_completes_while_in_finalized_write_phase(
     .expect("CommitHeaderRange must not deadlock while in the finalized write phase")?;
 
     assert_eq!(committed, Response::Committed(block2_hash));
+
+    assert_eq!(
+        state
+            .clone()
+            .oneshot(Request::CommitCheckpointVerifiedBlock(
+                CheckpointVerifiedBlock::from(block1.clone()),
+            ))
+            .await?,
+        Response::Committed(block1.hash()),
+    );
+
+    assert_eq!(
+        read_state.oneshot(ReadRequest::FinalizedTip).await?,
+        ReadResponse::FinalizedTip(Some((Height(1), block1.hash()))),
+    );
 
     Ok(())
 }

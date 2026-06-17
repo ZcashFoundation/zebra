@@ -870,40 +870,6 @@ impl StateService {
         rsp_rx
     }
 
-    /// Stop committing checkpoint verified blocks to the finalized state and move
-    /// the block write task on to committing semantically verified blocks to the
-    /// non-finalized state.
-    ///
-    /// This is the checkpoint-sync -> semantic-verification handoff. It is
-    /// normally triggered when a non-finalized block forks the finalized tip, but
-    /// a Zakura header range commit also triggers it: that commit is processed by
-    /// the block write task's non-finalized loop, which only runs after the
-    /// finalized block-write channel closes. A node catching up to a peer at a
-    /// static tip over Zakura never queues a non-finalized child of the tip, so
-    /// without this handoff the header range commit would block forever and the
-    /// node would stall (the header tip never advances, gating off block sync).
-    ///
-    /// Idempotent: a no-op once the finalized sender has already been dropped.
-    fn finish_checkpoint_finalized_writes(&mut self) {
-        if self.block_write_sender.finalized.is_none() {
-            return;
-        }
-
-        std::mem::drop(self.block_write_sender.finalized.take());
-        // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
-        self.non_finalized_block_write_sent_hashes = SentHashes::default();
-        // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-        self.non_finalized_block_write_sent_hashes
-            .can_fork_chain_at_hashes = true;
-        // Send blocks from non-finalized queue
-        self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
-        // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-        self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-            None,
-            KnownBlock::Finalized,
-        ));
-    }
-
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.non_finalized_block_write_sent_hashes
@@ -1272,13 +1238,6 @@ impl Service<Request> for StateService {
                 headers,
                 body_sizes,
             } => {
-                // A header range commit is processed by the block write task's
-                // non-finalized loop, which only runs after the finalized
-                // block-write channel closes. End the checkpoint-sync finalized
-                // write phase now (idempotent) so the commit is not blocked
-                // behind a finalized channel that, for a Zakura node catching up
-                // to a static tip, would otherwise never close.
-                self.finish_checkpoint_finalized_writes();
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.send_header_range(anchor, headers, body_sizes))
                 });

@@ -39,14 +39,28 @@ pub enum BlockSyncEvent {
         /// Current best header hash.
         hash: block::Hash,
     },
-    /// State finalized or verified-body frontiers changed.
+    /// Locally observed finalized or verified-body frontiers changed.
     StateFrontiersChanged(BlockSyncFrontiers),
     /// State grew the verified body chain tip.
     ChainTipGrow(BlockSyncFrontiers),
-    /// State reset the verified body chain tip after a rollback or best-chain switch.
+    /// State reset the verified body chain tip after a rollback, best-chain switch,
+    /// activation boundary, or coalesced multi-block tip update.
     ChainTipReset(BlockSyncFrontiers),
     /// Driver returned the current body-missing, header-known heights with committed hashes.
     NeededBlocks(Vec<BlockSyncBlockMeta>),
+    /// Node wiring finished applying a submitted block body.
+    BlockApplyFinished {
+        /// Submission token from the matching [`BlockSyncAction::SubmitBlock`].
+        token: BlockApplyToken,
+        /// Submitted block height.
+        height: block::Height,
+        /// Submitted block hash.
+        hash: block::Hash,
+        /// Apply result from the verifier driver.
+        result: BlockApplyResult,
+        /// Locally observed chain frontier after the apply attempt completed.
+        local_frontier: Option<BlockSyncFrontiers>,
+    },
     /// Node wiring finished or abandoned a `Block` response to an inbound `GetBlocks`.
     BlockRangeResponseFinished {
         /// Peer whose served-response slot can be released.
@@ -70,6 +84,26 @@ pub enum BlockSyncEvent {
         blocks: Vec<(block::Height, Arc<block::Block>, usize)>,
     },
 }
+
+/// Result of applying a block-sync body through the verifier driver.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum BlockApplyResult {
+    /// The block was verified and committed.
+    Committed,
+    /// The verifier reported the block was already committed.
+    Duplicate,
+    /// The verifier rejected the block.
+    Rejected,
+    /// The verifier did not answer before the driver timeout.
+    TimedOut,
+}
+
+/// Monotonic token assigned by the reactor to each verifier submission.
+///
+/// The verifier can return stale duplicate completions after a reset and
+/// resubmission of the same height/hash. Echoing this token lets the reactor
+/// ignore those stale completions instead of releasing a newer in-flight body.
+pub type BlockApplyToken = u64;
 
 /// Actions emitted by the future block-sync reactor for the service seam.
 #[derive(Clone, Debug)]
@@ -99,6 +133,8 @@ pub enum BlockSyncAction {
     },
     /// Parent-first body ready for B3's verifier/commit driver.
     SubmitBlock {
+        /// Submission token to echo in [`BlockSyncEvent::BlockApplyFinished`].
+        token: BlockApplyToken,
         /// Block body that is contiguous above `verified_block_tip`.
         block: Arc<block::Block>,
     },

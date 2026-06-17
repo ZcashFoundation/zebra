@@ -94,6 +94,18 @@ impl BlockRangeScheduler {
         });
     }
 
+    pub(super) fn clear_queued(&mut self) {
+        self.queue.clear();
+    }
+
+    pub(super) fn drop_through(&mut self, tip: block::Height) {
+        for range in &mut self.queue {
+            range.blocks.retain(|block| block.height > tip);
+        }
+        self.queue.retain(|range| !range.blocks.is_empty());
+        self.assigned.retain(|range, _| range.start > tip);
+    }
+
     pub(super) fn next_for_peer(
         &mut self,
         peer_id: &ZakuraPeerId,
@@ -225,6 +237,23 @@ impl BlockRangeScheduler {
         self.prune_covered();
     }
 
+    pub(super) fn clear_covered_from(&mut self, from: block::Height) {
+        let previous = previous_height(from);
+        self.covered.retain_mut(|covered| {
+            if covered.start >= from {
+                return false;
+            }
+            if covered.end >= from {
+                if let Some(previous) = previous {
+                    covered.end = previous;
+                } else {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+
     #[cfg(test)]
     pub(super) fn release_cancelled(&mut self, budget: &mut ByteBudget) {
         self.assigned.clear();
@@ -236,6 +265,31 @@ impl BlockRangeScheduler {
     #[cfg(test)]
     pub(super) fn assigned_range_count(&self) -> usize {
         self.assigned.len()
+    }
+
+    /// Diagnostics: number of queued (not-yet-assigned-to-fanout) ranges.
+    pub(super) fn queued_range_count(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Diagnostics: lowest start height across all queued ranges.
+    ///
+    /// A frozen download floor with a non-empty `needed` set but a
+    /// `queued_min_start` above the gap means the gap range was rejected by
+    /// `ensure` (covered/queue/assigned overlap) rather than starved.
+    pub(super) fn queued_min_start(&self) -> Option<block::Height> {
+        self.queue.iter().map(|range| range.start_height()).min()
+    }
+
+    /// Diagnostics: number of distinct assigned range keys (including any left
+    /// behind by `forget_peer` with an empty peer set).
+    pub(super) fn assigned_key_count(&self) -> usize {
+        self.assigned.len()
+    }
+
+    /// Diagnostics: highest end height across all covered intervals.
+    pub(super) fn covered_max_end(&self) -> Option<block::Height> {
+        self.covered.iter().map(|covered| covered.end).max()
     }
 
     fn ensure(&mut self, range: BlockRange) {

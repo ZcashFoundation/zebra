@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
-    zakura::{DEFAULT_HS_MAX_INFLIGHT, DEFAULT_HS_RANGE},
+    zakura::{DEFAULT_HS_MAX_INFLIGHT, DEFAULT_HS_RANGE, DEFAULT_ZAKURA_LISTEN_ADDR},
     CacheDir, Config,
 };
 
@@ -270,10 +270,68 @@ fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
     assert!(serialized.contains("max_inflight_requests = 9"));
     assert!(serialized.contains("status_refresh_interval = \"45s\""));
     assert!(serialized.contains("[zakura.block_sync]"));
-    assert!(serialized.contains("replace_legacy_syncer = true"));
+    assert!(!serialized.contains("replace_legacy_syncer"));
     assert!(serialized.contains("max_blocks_per_response = 5"));
     assert!(serialized.contains("status_refresh_interval = \"12s\""));
     assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), config);
+    assert!(
+        !config.zakura.block_sync.replace_legacy_syncer,
+        "deprecated replace_legacy_syncer config is accepted but ignored"
+    );
+}
+
+#[test]
+fn configured_regtest_checkpoints_preserve_regtest_identity() {
+    let _init_guard = zebra_test::init();
+
+    // Mirrors the per-node config the zakura-regtest-e2e harness writes for the from-scratch
+    // catch-up node: a Regtest node that overrides only the checkpoint list (derived at
+    // runtime from the miner's chain). Regtest identity — genesis hash and network magic —
+    // must be preserved so the node still peers with a plain-Regtest miner; only checkpoint
+    // verification is added.
+    let genesis = Network::new_regtest(Default::default()).genesis_hash();
+    let checkpoint = zebra_chain::block::Hash([7; 32]);
+
+    // The exact minimal `[network.params]` table the harness writes: it overrides only the
+    // checkpoint list and lets every other Regtest parameter default. `block::Hash`
+    // serializes as a 32-byte array in internal (display-reversed) order, so the harness must
+    // emit byte arrays, not hex — this asserts that exact form parses.
+    let bytes_csv = |hash: zebra_chain::block::Hash| {
+        hash.0
+            .iter()
+            .map(|byte| byte.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    // The harness rewrites node2's `network = "Regtest"` line in place with this inline table
+    // (a single-line `sed` replacement), so verify exactly that form.
+    let inline = format!(
+        "network = {{ params = {{ checkpoints = [[0, [{}]], [10, [{}]]] }} }}\n",
+        bytes_csv(genesis),
+        bytes_csv(checkpoint),
+    );
+
+    let config: Config = toml::from_str(&inline)
+        .expect("the harness's inline ConfiguredRegtest checkpoint TOML deserializes");
+
+    assert!(
+        config.network.is_regtest(),
+        "a checkpoint-only override must stay Regtest",
+    );
+    assert_eq!(
+        config.network.genesis_hash(),
+        genesis,
+        "Regtest genesis hash is preserved, so the node still peers with a plain-Regtest miner",
+    );
+
+    let checkpoints = config.network.checkpoint_list();
+    assert_eq!(
+        checkpoints.max_height(),
+        Height(10),
+        "the derived checkpoint list replaces the genesis-only Regtest default",
+    );
+    assert_eq!(checkpoints.hash(Height(0)), Some(genesis));
+    assert_eq!(checkpoints.hash(Height(10)), Some(checkpoint));
 }
 
 #[test]
@@ -310,6 +368,7 @@ fn default_config_uses_ipv6() {
 
     assert_eq!(config.listen_addr.to_string(), "[::]:8233");
     assert!(config.listen_addr.is_ipv6());
+    assert_eq!(config.zakura.listen_addr, Some(DEFAULT_ZAKURA_LISTEN_ADDR));
 }
 
 #[test]

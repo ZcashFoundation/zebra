@@ -161,6 +161,12 @@ impl RangeScheduler {
         self.assigned.remove(&range);
     }
 
+    pub(super) fn clear_forward(&mut self) {
+        self.forward.clear();
+        self.assigned
+            .retain(|range, _| range.priority != RangePriority::Forward);
+    }
+
     pub(super) fn mark_height_covered(&mut self, height: block::Height) {
         self.mark_covered_interval(CoveredRange {
             start: height,

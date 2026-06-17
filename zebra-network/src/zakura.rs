@@ -17,6 +17,7 @@ use crate::{
 
 mod block_sync;
 mod discovery;
+mod exchange;
 mod handler;
 mod handshake;
 mod header_sync;
@@ -28,13 +29,15 @@ pub mod transport;
 
 pub use block_sync::*;
 pub use discovery::*;
+pub use exchange::*;
 pub use handler::*;
 pub use handshake::*;
 pub use header_sync::*;
 pub use legacy_gossip::*;
 pub use trace::{
-    peer_label as zakura_trace_peer_label, reject_reason_label as zakura_trace_reject_reason_label,
-    ZakuraTrace, ZakuraTraceEvent, CONN_TABLE, HANDSHAKE_TABLE, HEADER_SYNC_TABLE,
+    commit_state_trace, peer_label as zakura_trace_peer_label,
+    reject_reason_label as zakura_trace_reject_reason_label, ZakuraTrace, ZakuraTraceEvent,
+    BLOCK_SYNC_TABLE, COMMIT_STATE_TABLE, CONN_TABLE, HANDSHAKE_TABLE, HEADER_SYNC_TABLE,
     LEGACY_REQUEST_TABLE, RATELIMIT_TABLE, STREAM_TABLE,
 };
 pub use transport::*;

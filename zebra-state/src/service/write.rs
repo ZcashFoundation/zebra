@@ -1,13 +1,15 @@
 //! Writing blocks to the finalized and non-finalized states.
 
 use std::{
+    collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use indexmap::IndexMap;
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
+    mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
     oneshot, watch,
 };
 
@@ -117,6 +119,33 @@ fn update_latest_chain_channels(
     chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
     tip_block_height
+}
+
+fn commit_header_range(
+    finalized_state: &FinalizedState,
+    anchor: block::Hash,
+    headers: Vec<Arc<block::Header>>,
+    body_sizes: Vec<u32>,
+    rsp_tx: oneshot::Sender<Result<block::Hash, CommitHeaderRangeError>>,
+) {
+    let mut batch = crate::service::finalized_state::DiskWriteBatch::new();
+    let result = batch
+        .prepare_header_range_batch(&finalized_state.db, anchor, &headers, &body_sizes)
+        .and_then(|hash| {
+            finalized_state
+                .db
+                .write_batch(batch)
+                .map(|()| hash)
+                .map_err(|error| {
+                    tracing::error!(?error, "failed to write validated header range");
+
+                    CommitHeaderRangeError::StorageWriteError {
+                        error: error.to_string(),
+                    }
+                })
+        });
+
+    let _ = rsp_tx.send(result);
 }
 
 /// A worker task that reads, validates, and writes blocks to the
@@ -289,10 +318,35 @@ impl WriteBlockWorkerTask {
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
+        let mut deferred_non_finalized_messages = VecDeque::new();
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+        loop {
+            match non_finalized_block_write_receiver.try_recv() {
+                Ok(NonFinalizedWriteMessage::CommitHeaderRange {
+                    anchor,
+                    headers,
+                    body_sizes,
+                    rsp_tx,
+                }) => {
+                    commit_header_range(finalized_state, anchor, headers, body_sizes, rsp_tx);
+                    continue;
+                }
+                Ok(msg) => deferred_non_finalized_messages.push_back(msg),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+
+            let ordered_block = match finalized_block_write_receiver.try_recv() {
+                Ok(block) => block,
+                Err(TryRecvError::Empty) => {
+                    std::thread::park_timeout(Duration::from_millis(10));
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => break,
+            };
+
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -371,7 +425,10 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
-        while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+        while let Some(msg) = deferred_non_finalized_messages
+            .pop_front()
+            .or_else(|| non_finalized_block_write_receiver.blocking_recv())
+        {
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
                 NonFinalizedWriteMessage::CommitHeaderRange {
@@ -380,32 +437,7 @@ impl WriteBlockWorkerTask {
                     body_sizes,
                     rsp_tx,
                 } => {
-                    let mut batch = crate::service::finalized_state::DiskWriteBatch::new();
-                    let result = batch
-                        .prepare_header_range_batch(
-                            &finalized_state.db,
-                            anchor,
-                            &headers,
-                            &body_sizes,
-                        )
-                        .and_then(|hash| {
-                            finalized_state
-                                .db
-                                .write_batch(batch)
-                                .map(|()| hash)
-                                .map_err(|error| {
-                                    tracing::error!(
-                                        ?error,
-                                        "failed to write validated header range"
-                                    );
-
-                                    CommitHeaderRangeError::StorageWriteError {
-                                        error: error.to_string(),
-                                    }
-                                })
-                        });
-
-                    let _ = rsp_tx.send(result);
+                    commit_header_range(finalized_state, anchor, headers, body_sizes, rsp_tx);
                     continue;
                 }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {

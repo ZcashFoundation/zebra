@@ -78,6 +78,14 @@ impl CommitBlockError {
         matches!(self, CommitBlockError::Duplicate { .. })
     }
 
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&KnownBlock> {
+        match self {
+            CommitBlockError::Duplicate { location, .. } => Some(location),
+            _ => None,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         0
@@ -94,6 +102,13 @@ impl From<CommitHeaderRangeError> for CommitBlockError {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("could not commit semantically-verified block")]
 pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
+
+impl CommitSemanticallyVerifiedError {
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&KnownBlock> {
+        self.0.duplicate_location()
+    }
+}
 
 impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     fn from(value: ValidateContextError) -> Self {
@@ -128,6 +143,13 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 #[derive(Debug, Error, Clone)]
 #[error("could not commit checkpoint-verified block")]
 pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+
+impl CommitCheckpointVerifiedError {
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&KnownBlock> {
+        self.0.duplicate_location()
+    }
+}
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
@@ -171,6 +193,14 @@ pub enum CommitHeaderRangeError {
     #[error("header range anchor {anchor} is not known")]
     UnknownAnchor {
         /// The supplied anchor hash.
+        anchor: block::Hash,
+    },
+
+    /// The supplied anchor is the network genesis hash, but the genesis block has not been
+    /// committed to state yet.
+    #[error("header range genesis anchor {anchor} is not committed to state yet")]
+    MissingGenesisAnchor {
+        /// The supplied genesis anchor hash.
         anchor: block::Hash,
     },
 

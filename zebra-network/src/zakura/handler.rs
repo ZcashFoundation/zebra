@@ -50,15 +50,16 @@ use crate::{
     zakura::{
         direct_endpoint_builder, drive_header_sync_actions, spawn_block_sync_reactor,
         spawn_header_sync_reactor, BlockSyncAction, BlockSyncFrontiers, BlockSyncHandle,
-        BlockSyncService, BlockSyncStartup, Clock, Frame, FramedRecv, FramedSend, HeaderSyncAction,
-        HeaderSyncFrontiers, HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup,
-        Peer, RealClock, Service, ServicePeerDirection, ServiceRegistry, ServiceStream, SinkReject,
-        Stream, StreamMode, StreamPrelude, ZakuraAcceptedLimits, ZakuraBlockSyncConfig,
-        ZakuraControlAck, ZakuraControlHello, ZakuraControlRole, ZakuraControlValidation,
-        ZakuraHandshakeConfig, ZakuraHandshakePath, ZakuraHeaderSyncConfig, ZakuraInitialLimits,
-        ZakuraLimits, ZakuraPeerId, ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason,
-        ZakuraUpgradeOutcome, CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC, CONTROL_VERSION,
-        FRAME_HEADER_BYTES, LOCAL_MAX_CONTROL_FRAME_BYTES, MAX_BS_FRAME_BYTES,
+        BlockSyncService, BlockSyncStartup, Clock, Frame, FramedRecv, FramedSend, Frontier,
+        FrontierChange, FrontierUpdate, HeaderSyncAction, HeaderSyncFrontiers,
+        HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup, Peer, RealClock,
+        Service, ServicePeerDirection, ServiceRegistry, ServiceStream, SinkReject, Stream,
+        StreamMode, StreamPrelude, ZakuraAcceptedLimits, ZakuraBlockSyncConfig, ZakuraControlAck,
+        ZakuraControlHello, ZakuraControlRole, ZakuraControlValidation, ZakuraHandshakeConfig,
+        ZakuraHandshakePath, ZakuraHeaderSyncConfig, ZakuraInitialLimits, ZakuraLimits,
+        ZakuraPeerId, ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason,
+        ZakuraSyncExchange, ZakuraUpgradeOutcome, CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC,
+        CONTROL_VERSION, FRAME_HEADER_BYTES, LOCAL_MAX_CONTROL_FRAME_BYTES, MAX_BS_FRAME_BYTES,
         MAX_CONTROL_PAYLOAD_BYTES, MAX_HS_MESSAGE_BYTES, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC,
         TRANSCRIPT_HASH_BYTES, ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_PROTOCOL_VERSION_1,
         ZAKURA_STREAM_BLOCK_SYNC, ZAKURA_STREAM_HEADER_SYNC,
@@ -72,8 +73,19 @@ pub const DEFAULT_ZAKURA_MAX_CONNECTIONS: usize = 32;
 pub const DEFAULT_ZAKURA_MAX_PENDING_HANDSHAKES: usize = 8;
 /// Conservative default for stream-open churn per connection.
 pub const DEFAULT_ZAKURA_STREAM_OPEN_RATE_PER_SECOND: u32 = 16;
-/// Conservative default for per-kind message rate per connection.
-pub const DEFAULT_ZAKURA_MESSAGE_RATE_PER_SECOND: u32 = 128;
+/// Per-kind inbound message rate per connection.
+///
+/// This is a generous universal cap: block-sync legitimately delivers
+/// hundreds of solicited bodies per second in bursts, so a low limit
+/// starves sync. Exceeding it is treated as misbehavior and disconnects the
+/// peer (we never silently drop a solicited frame -- a dropped block body is
+/// a permanent gap on a reliable stream). Longer term this should be split
+/// per message type (some unbounded, some near-one-shot) rather than a single
+/// universal value.
+pub const DEFAULT_ZAKURA_MESSAGE_RATE_PER_SECOND: u32 = 2048;
+/// Default native Zakura QUIC listen address.
+pub const DEFAULT_ZAKURA_LISTEN_ADDR: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 8234));
 /// Default maximum bytes read before the peer's stream prelude is decoded.
 pub const DEFAULT_ZAKURA_PRELUDE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Default timeout for one control-handshake read or write.
@@ -226,14 +238,13 @@ pub struct ZakuraConfig {
     pub bootstrap_peers: Vec<String>,
     /// Address the native Zakura QUIC endpoint binds to.
     ///
-    /// When unset the endpoint binds an OS-assigned ephemeral port on loopback
+    /// Defaults to `0.0.0.0:8234`, giving the node a stable, advertisable
+    /// Zakura endpoint so other nodes can list it in their
+    /// [`bootstrap_peers`](Self::bootstrap_peers). If code constructs this as
+    /// `None`, the endpoint binds an OS-assigned ephemeral port on loopback
     /// only (`127.0.0.1` and `::1`), which is fine for a node that only dials
     /// out and keeps the experimental native P2P_V2_ALPN surface off all
-    /// non-loopback interfaces. Set a fixed address to give this node a stable,
-    /// advertisable Zakura endpoint so other nodes can list it in their
-    /// [`bootstrap_peers`](Self::bootstrap_peers) — required for a node that acts
-    /// as a Zakura seed or otherwise accepts inbound native connections, since
-    /// relays and discovery are disabled.
+    /// non-loopback interfaces.
     pub listen_addr: Option<SocketAddr>,
     /// Total concurrent Zakura connections, inbound plus outbound.
     pub max_connections: usize,
@@ -258,7 +269,7 @@ impl Default for ZakuraConfig {
     fn default() -> Self {
         Self {
             bootstrap_peers: Vec::new(),
-            listen_addr: None,
+            listen_addr: Some(DEFAULT_ZAKURA_LISTEN_ADDR),
             max_connections: DEFAULT_ZAKURA_MAX_CONNECTIONS,
             max_pending_handshakes: DEFAULT_ZAKURA_MAX_PENDING_HANDSHAKES,
             stream_open_rate_per_second: DEFAULT_ZAKURA_STREAM_OPEN_RATE_PER_SECOND,
@@ -413,6 +424,7 @@ pub struct ZakuraEndpoint {
     handler: ZakuraProtocolHandler,
     header_sync: Option<super::HeaderSyncHandle>,
     block_sync: Option<BlockSyncHandle>,
+    sync_frontier: Option<ZakuraSyncExchange>,
     header_sync_tasks: Option<Arc<HeaderSyncBackgroundTasks>>,
     header_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<HeaderSyncAction>>>>>,
     block_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<BlockSyncAction>>>>>,
@@ -481,6 +493,32 @@ impl ZakuraEndpoint {
     /// Returns the block-sync handle when native block sync is active.
     pub fn block_sync(&self) -> Option<BlockSyncHandle> {
         self.block_sync.clone()
+    }
+
+    /// Subscribe to the shared Zakura sync frontier stream.
+    pub fn subscribe_sync_frontier(&self) -> Option<watch::Receiver<FrontierUpdate>> {
+        self.sync_frontier
+            .as_ref()
+            .map(ZakuraSyncExchange::subscribe_frontier)
+    }
+
+    /// Return the currently cached shared Zakura sync frontier update.
+    pub fn current_sync_frontier(&self) -> Option<FrontierUpdate> {
+        self.sync_frontier
+            .as_ref()
+            .map(ZakuraSyncExchange::current_frontier)
+    }
+
+    /// Publish a shared Zakura sync frontier update.
+    pub fn publish_sync_frontier(&self, update: FrontierUpdate) {
+        self.publish_sync_frontier_from(update, "unknown");
+    }
+
+    /// Publish a shared Zakura sync frontier update with a trace source.
+    pub fn publish_sync_frontier_from(&self, update: FrontierUpdate, source: &'static str) {
+        if let Some(sync_frontier) = &self.sync_frontier {
+            sync_frontier.publish_frontier(update, source);
+        }
     }
 
     /// Take the header-sync action receiver when this endpoint was started in external-driver mode.
@@ -665,6 +703,7 @@ impl ZakuraEndpoint {
             handler,
             header_sync: None,
             block_sync: None,
+            sync_frontier: None,
             header_sync_tasks: None,
             header_sync_actions: None,
             block_sync_actions: None,
@@ -673,6 +712,7 @@ impl ZakuraEndpoint {
     }
 
     #[cfg(any(test, feature = "zakura-testkit"))]
+    #[allow(dead_code)]
     pub(crate) fn from_parts_with_header_sync(
         router: Router,
         supervisor: ZakuraSupervisorHandle,
@@ -688,12 +728,45 @@ impl ZakuraEndpoint {
             handler,
             header_sync: Some(header_sync),
             block_sync: None,
+            sync_frontier: None,
             header_sync_tasks: Some(Arc::new(HeaderSyncBackgroundTasks {
                 shutdown,
                 tasks: Mutex::new(tasks),
             })),
             header_sync_actions: actions.map(|actions| Arc::new(Mutex::new(Some(actions)))),
             block_sync_actions: None,
+            upgrade_dials: Arc::new(StdMutex::new(HashMap::new())),
+        }
+    }
+
+    #[cfg(any(test, feature = "zakura-testkit"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts_with_sync_services(
+        router: Router,
+        supervisor: ZakuraSupervisorHandle,
+        handler: ZakuraProtocolHandler,
+        header_sync: super::HeaderSyncHandle,
+        block_sync: BlockSyncHandle,
+        shutdown: CancellationToken,
+        tasks: Vec<JoinHandle<()>>,
+        header_sync_actions: Option<mpsc::Receiver<HeaderSyncAction>>,
+        block_sync_actions: Option<mpsc::Receiver<BlockSyncAction>>,
+    ) -> Self {
+        Self {
+            router,
+            supervisor,
+            handler,
+            header_sync: Some(header_sync),
+            block_sync: Some(block_sync),
+            sync_frontier: None,
+            header_sync_tasks: Some(Arc::new(HeaderSyncBackgroundTasks {
+                shutdown,
+                tasks: Mutex::new(tasks),
+            })),
+            header_sync_actions: header_sync_actions
+                .map(|actions| Arc::new(Mutex::new(Some(actions)))),
+            block_sync_actions: block_sync_actions
+                .map(|actions| Arc::new(Mutex::new(Some(actions)))),
             upgrade_dials: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
@@ -2266,8 +2339,7 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
     validate_idle_invariant(&limits)?;
     let secret_key = zakura_secret_key(config)?;
     let discovery_secret_key = secret_key.clone();
-    let builder =
-        direct_endpoint_builder(secret_key).transport_config(limits.transport_config());
+    let builder = direct_endpoint_builder(secret_key).transport_config(limits.transport_config());
     // Bind a fixed address when configured so this node has a stable, advertisable
     // Zakura endpoint; otherwise bind loopback-only so the unset (dial-out-only)
     // case does not expose the native P2P_V2_ALPN surface on all interfaces.
@@ -2296,12 +2368,28 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         HeaderSyncFrontiers {
             finalized_height: anchor.0,
             verified_block_tip: anchor.0,
+            verified_block_hash: anchor.1,
         },
         |startup| startup.frontiers,
     );
     let best_header_tip = header_sync_driver_startup
         .as_ref()
         .map_or(Some(anchor), |startup| startup.best_header_tip);
+    let sync_frontier = header_sync_driver_startup.as_ref().map(|driver_startup| {
+        let best_header_tip = driver_startup.best_header_tip.unwrap_or(anchor);
+        let initial = FrontierUpdate {
+            frontier: crate::zakura::chain_frontier_from_parts(
+                driver_startup.frontiers.finalized_height,
+                Frontier::new(
+                    driver_startup.frontiers.verified_block_tip,
+                    driver_startup.verified_block_tip_hash,
+                ),
+                Frontier::new(best_header_tip.0, best_header_tip.1),
+            ),
+            change: FrontierChange::Snapshot,
+        };
+        ZakuraSyncExchange::new(initial, trace.clone())
+    });
     let mut startup = HeaderSyncStartup::new(
         config.network.clone(),
         anchor,
@@ -2312,6 +2400,9 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
     );
     startup.status_refresh_interval = config.zakura.header_sync.status_refresh_interval;
     startup.trace = trace.clone();
+    startup.frontier_updates = sync_frontier
+        .as_ref()
+        .map(ZakuraSyncExchange::subscribe_frontier);
     let header_sync_shutdown = CancellationToken::new();
     startup.shutdown = header_sync_shutdown.clone();
     if header_sync_driver_startup.is_some() {
@@ -2323,17 +2414,22 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
     let (block_sync, block_sync_actions, block_sync_task) =
         if let Some(driver_startup) = header_sync_driver_startup.as_ref() {
             let best_header_tip = driver_startup.best_header_tip.unwrap_or(anchor);
-            let mut startup = BlockSyncStartup::new(
+            let frontier_updates = sync_frontier
+                .as_ref()
+                .expect("sync frontier is initialized when block sync driver is enabled")
+                .subscribe_frontier();
+            let mut startup = BlockSyncStartup::new_with_exchange(
                 BlockSyncFrontiers {
                     finalized_height: driver_startup.frontiers.finalized_height,
                     verified_block_tip: driver_startup.frontiers.verified_block_tip,
                     verified_block_hash: driver_startup.verified_block_tip_hash,
                 },
                 best_header_tip,
-                header_sync.subscribe_tip(),
+                frontier_updates,
                 config.zakura.block_sync.clone(),
             );
             startup.shutdown = header_sync_shutdown.clone();
+            startup.trace = trace.clone();
             let (handle, actions, task) = spawn_block_sync_reactor(startup);
             (Some(handle), Some(actions), Some(task))
         } else {
@@ -2396,6 +2492,7 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         handler,
         header_sync: Some(header_sync),
         block_sync,
+        sync_frontier,
         header_sync_tasks: Some(header_sync_tasks),
         header_sync_actions,
         block_sync_actions,
@@ -2632,13 +2729,102 @@ fn spawn_persistent_stream_worker(
 
 async fn persistent_stream_worker(
     mut send: SendStream,
-    mut recv: RecvStream,
+    recv: RecvStream,
     prelude: StreamPrelude,
     context: StreamWorkerContext,
     inbound_tx: mpsc::Sender<Frame>,
     outbound_rx: mpsc::Receiver<Frame>,
     queue_depth_limit: usize,
 ) {
+    let context = Arc::new(context);
+    let stream_kind = prelude.stream_kind;
+
+    // The inbound reader runs in its own task, not as a `select!` branch racing
+    // the outbound writer below. `read_frame` is NOT cancellation-safe: it
+    // consumes the fixed frame header, then awaits the (multi-packet) payload. If
+    // it shared this `select!` with the outbound arm, an outbound frame becoming
+    // ready mid-read would drop the `read_frame` future and discard the header
+    // bytes it already consumed, desyncing the stream forever -- the next read
+    // decodes body bytes as a header, yielding a garbage multi-GiB `payload_len`,
+    // an `OversizeFrame` error, and a stream reset. Heavy concurrent body-sync
+    // (inbound bodies + outbound `GetBlocks`) made this fire constantly. Reading
+    // in a dedicated task removes the write/read race; the main loop only ever
+    // *receives* fully-read frames over a channel, which is cancellation-safe.
+    let (frame_tx, mut frame_rx) = mpsc::channel::<Result<Frame, ZakuraHandlerError>>(1);
+    let reader_context = Arc::clone(&context);
+    let reader = tokio::spawn(async move {
+        let mut recv = recv;
+        loop {
+            let frame = tokio::select! {
+                biased;
+                _ = reader_context.connection_token.cancelled() => break,
+                _ = reader_context.stream_token.cancelled() => break,
+                frame = read_frame(
+                    &mut recv,
+                    inbound_frame_cap_for_stream_kind(&reader_context.limits, stream_kind),
+                    reader_context.limits.idle_timeout,
+                ) => frame,
+            };
+            // Admit (rate/oversize) at ingress, the instant a frame is read, so
+            // throttling never trails behind the main loop draining queued
+            // outbound writes or forwarding an earlier frame to a service that
+            // might disconnect first. The main loop only ever receives frames
+            // that already cleared admission, plus terminal errors it maps to a
+            // reset code (it owns the send half). Admission is charged exactly
+            // once, here.
+            let message = match frame {
+                Ok(frame) => {
+                    let _ = reader_context.freshness_tx.send(Instant::now());
+                    match admit_inbound_message(frame.payload.len(), &reader_context, stream_kind) {
+                        InboundMessageAdmission::Admit => Ok(frame),
+                        InboundMessageAdmission::Oversize => Err(ZakuraHandlerError::Oversize),
+                        // Never drop a solicited frame: on a reliable ordered
+                        // stream the peer will not resend, so a dropped block
+                        // body is a permanent gap that stalls the checkpoint.
+                        // Keep the throttle metric/trace from admission, but
+                        // defer enforcement and deliver the frame.
+                        InboundMessageAdmission::Throttled => Ok(frame),
+                    }
+                }
+                Err(error) => {
+                    // Emit the oversize-desync diagnostic here, at the read, so
+                    // it is recorded even if the main loop tears the worker down
+                    // for an outbound write that stopped first.
+                    if let Some((payload_len, frame_len, max_frame_bytes)) =
+                        error.oversize_frame_details()
+                    {
+                        reader_context.trace.emit(
+                            RATELIMIT_TABLE,
+                            reader_context
+                                .event("frame.oversize")
+                                .stream_kind(stream_kind_label(stream_kind))
+                                .payload_len(payload_len)
+                                .frame_len(frame_len)
+                                .max_frame_bytes(max_frame_bytes),
+                        );
+                    }
+                    Err(error)
+                }
+            };
+            // Any error is terminal. `Closed` is a clean peer-initiated close;
+            // every other error is a protocol/limit violation that must
+            // disconnect the peer. Forward the error first so the main loop can
+            // map it to a reset code, then cancel the connection ourselves so
+            // the disconnect is guaranteed even if the main loop tore the worker
+            // down for a stopped outbound write before processing it.
+            let is_terminal = message.is_err();
+            let must_disconnect =
+                matches!(&message, Err(error) if !matches!(error, ZakuraHandlerError::Closed));
+            let forward_failed = frame_tx.send(message).await.is_err();
+            if must_disconnect {
+                reader_context.connection_token.cancel();
+            }
+            if forward_failed || is_terminal {
+                break;
+            }
+        }
+    });
+
     let mut outbound_rx = Some(outbound_rx);
     loop {
         tokio::select! {
@@ -2653,7 +2839,7 @@ async fn persistent_stream_worker(
             } => {
                 match outbound {
                     Some(frame) => {
-                        if let Err(error) = write_ordered_frame(&mut send, frame, context.limits, prelude.stream_kind).await {
+                        if let Err(error) = write_ordered_frame(&mut send, frame, context.limits, stream_kind).await {
                             if ordered_stream_write_was_stopped(&error) {
                                 debug!(?error, "closing Zakura ordered stream after peer stopped receiving");
                                 break;
@@ -2669,48 +2855,34 @@ async fn persistent_stream_worker(
                     }
                 }
             }
-            frame = read_frame(
-                &mut recv,
-                inbound_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
-                context.limits.idle_timeout,
-            ) => {
-                match frame {
-                    Ok(frame) => {
-                        let _ = context.freshness_tx.send(Instant::now());
-                        match admit_inbound_message(frame.payload.len(), &context, prelude.stream_kind) {
-                            InboundMessageAdmission::Admit => {}
-                            InboundMessageAdmission::Oversize => {
-                                let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_OVERSIZE));
-                                context.connection_token.cancel();
-                                break;
-                            }
-                            InboundMessageAdmission::Throttled => continue,
-                        }
+            inbound = frame_rx.recv() => {
+                match inbound {
+                    // Frames here already cleared ingress admission in the reader.
+                    Some(Ok(frame)) => {
                         if inbound_tx.send(frame).await.is_err() {
                             debug!(
-                                stream_kind = prelude.stream_kind,
+                                stream_kind,
                                 "closing Zakura ordered stream after local service receiver dropped"
                             );
                             break;
                         }
                         metrics::gauge!(
                             "zakura.p2p.queue.depth",
-                            "stream_kind" => stream_kind_label(prelude.stream_kind),
+                            "stream_kind" => stream_kind_label(stream_kind),
                         )
                         .set(queue_depth_limit.saturating_sub(inbound_tx.capacity()) as f64);
                     }
-                    Err(ZakuraHandlerError::Closed) => {
+                    // The reader signalled an oversize message: disconnect it.
+                    Some(Err(ZakuraHandlerError::Oversize)) => {
+                        let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_OVERSIZE));
+                        context.connection_token.cancel();
                         break;
                     }
-                    Err(error) => {
-                        if matches!(error, ZakuraHandlerError::Oversize) {
-                            context.trace.emit(
-                                RATELIMIT_TABLE,
-                                context
-                                    .event("frame.oversize")
-                                    .stream_kind(stream_kind_label(prelude.stream_kind)),
-                            );
-                        }
+                    Some(Err(ZakuraHandlerError::Closed)) | None => {
+                        break;
+                    }
+                    // The reader already emitted any oversize-desync diagnostic.
+                    Some(Err(error)) => {
                         debug!(?error, "closing Zakura stream worker");
                         let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_BAD_PRELUDE));
                         context.connection_token.cancel();
@@ -2720,6 +2892,11 @@ async fn persistent_stream_worker(
             }
         }
     }
+
+    // Stop the reader: it also observes the cancellation tokens, but abort
+    // guarantees a prompt exit on the paths that break without cancelling one
+    // (e.g. a peer that stopped receiving, or the local service receiver closing).
+    reader.abort();
 }
 
 fn ordered_stream_write_was_stopped(error: &BoxError) -> bool {
@@ -2774,8 +2951,10 @@ async fn request_stream_worker(
             return;
         }
         InboundMessageAdmission::Throttled => {
-            let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_RATE_LIMIT));
-            return;
+            // The admission path already counted/traced the over-rate frame.
+            // Do not reject request streams here: request/response peers also
+            // will not resend a dropped frame, and backpressure is safer than
+            // data loss while block sync is catching up.
         }
     }
 
@@ -2906,7 +3085,11 @@ async fn read_frame(
     let frame_len = FRAME_HEADER_BYTES.saturating_add(payload_len);
     if frame_len > max_frame_bytes {
         metrics::counter!("zakura.p2p.ratelimit.frame.oversize").increment(1);
-        return Err(ZakuraHandlerError::Oversize);
+        return Err(ZakuraHandlerError::OversizeFrame {
+            payload_len,
+            frame_len,
+            max_frame_bytes,
+        });
     }
     let mut payload = vec![0; payload_len];
     timeout(read_timeout, recv.read_exact(&mut payload))
@@ -3085,10 +3268,9 @@ async fn write_outbound_request_frame_inner(
                     ZakuraHandlerError::Timeout("outbound response"),
                 )));
             }
-            Err(ZakuraHandlerError::Oversize) => {
-                return Err(OutboundRequestError::Fatal(Box::new(
-                    ZakuraHandlerError::Oversize,
-                )));
+            Err(error @ ZakuraHandlerError::OversizeFrame { .. })
+            | Err(error @ ZakuraHandlerError::Oversize) => {
+                return Err(OutboundRequestError::Fatal(Box::new(error)));
             }
             Err(error) => return Err(OutboundRequestError::Fatal(Box::new(error))),
         }
@@ -3832,6 +4014,19 @@ pub enum ZakuraHandlerError {
     /// A peer-controlled payload exceeded its cap.
     #[error("Zakura payload exceeded its cap")]
     Oversize,
+    /// A peer declared a frame larger than the effective receiver cap.
+    #[error(
+        "Zakura frame length {frame_len} exceeded cap {max_frame_bytes} \
+         (payload length {payload_len})"
+    )]
+    OversizeFrame {
+        /// Declared frame payload length.
+        payload_len: usize,
+        /// Full frame length including the fixed header.
+        frame_len: usize,
+        /// Effective frame cap used before reading the payload.
+        max_frame_bytes: usize,
+    },
     /// The peer closed the stream or connection.
     #[error("Zakura stream closed")]
     Closed,
@@ -3874,6 +4069,25 @@ pub enum ZakuraHandlerError {
     /// I/O error while encoding or decoding local buffers.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl ZakuraHandlerError {
+    fn oversize_frame_details(&self) -> Option<(u64, u64, u64)> {
+        let Self::OversizeFrame {
+            payload_len,
+            frame_len,
+            max_frame_bytes,
+        } = self
+        else {
+            return None;
+        };
+
+        Some((
+            u64::try_from(*payload_len).unwrap_or(u64::MAX),
+            u64::try_from(*frame_len).unwrap_or(u64::MAX),
+            u64::try_from(*max_frame_bytes).unwrap_or(u64::MAX),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -4081,6 +4295,7 @@ mod tests {
             HeaderSyncFrontiers {
                 finalized_height: anchor.0,
                 verified_block_tip: anchor.0,
+                verified_block_hash: anchor.1,
             },
             Some(anchor),
             ZakuraHeaderSyncConfig::default(),
@@ -4349,7 +4564,8 @@ mod tests {
         let peer_id = ZakuraPeerId::new(node_id.clone()).expect("32-byte node id is valid");
         let direct_addresses = vec![b"192.0.2.1:1".to_vec()];
 
-        let connector = crate::zakura::ZakuraHandshakeConnector::new_with_endpoint(endpoint.clone());
+        let connector =
+            crate::zakura::ZakuraHandshakeConnector::new_with_endpoint(endpoint.clone());
         let upgraded = connector
             .spawn_zakura_dial_to_hints_and_wait(&peer_id, &node_id, &direct_addresses)
             .await;
@@ -4936,8 +5152,8 @@ mod tests {
     // rejects it first, a dead incumbent keeps its own peer blocked until the QUIC
     // idle timeout (~150s) instead of being evicted in milliseconds.
     #[tokio::test(start_paused = true)]
-    async fn same_peer_duplicate_at_per_ip_cap_still_evicts_stale_incumbent(
-    ) -> Result<(), BoxError> {
+    async fn same_peer_duplicate_at_per_ip_cap_still_evicts_stale_incumbent() -> Result<(), BoxError>
+    {
         async fn register_from_ip(
             supervisor: &ZakuraSupervisorHandle,
             peer: &ZakuraPeerId,
@@ -5207,8 +5423,7 @@ mod tests {
             payload: vec![0xab; 4096],
         };
         assert!(
-            oversized.payload.len()
-                <= app_frame_cap_for_stream_kind(&limits, stream_kind) as usize,
+            oversized.payload.len() <= app_frame_cap_for_stream_kind(&limits, stream_kind) as usize,
             "test payload must fit the frame cap so only the message cap can reject it"
         );
 
@@ -5436,7 +5651,7 @@ mod tests {
             .expect("capture handler forwards the oversized inbound-cap stream");
         let rejected = read_frame(&mut s1_recv, inbound_cap, Duration::from_secs(2)).await;
         assert!(
-            matches!(rejected, Err(ZakuraHandlerError::Oversize)),
+            matches!(rejected, Err(ZakuraHandlerError::OversizeFrame { .. })),
             "a frame whose payload exceeds max_message_bytes must be rejected as Oversize \
              on the header alone with the inbound (message-limited) cap, before the payload \
              is allocated and read; got {rejected:?}"
@@ -5463,7 +5678,11 @@ mod tests {
             .expect("capture handler forwards the oversized raw-cap stream");
         let allocated = read_frame(&mut s2_recv, raw_cap, Duration::from_secs(2)).await;
         assert!(
-            allocated.is_err() && !matches!(allocated, Err(ZakuraHandlerError::Oversize)),
+            allocated.is_err()
+                && !matches!(
+                    allocated,
+                    Err(ZakuraHandlerError::Oversize | ZakuraHandlerError::OversizeFrame { .. })
+                ),
             "with the raw frame cap the same oversized frame passes the size check and \
              read_frame proceeds to allocate/read the payload (it is not rejected as \
              Oversize), proving the message cap is enforced too late; got {allocated:?}"

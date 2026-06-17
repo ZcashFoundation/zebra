@@ -20,7 +20,22 @@
 use std::sync::Arc;
 
 use super::{events::*, wire::*, *};
-use crate::zakura::{Edge, Flow, Node, NodeKind, PipeCx, PipeShape, SinkReject, ZakuraPeerId};
+use crate::zakura::{
+    Admit, Edge, Flow, FramedRecv, Node, NodeKind, PipeCx, PipeShape, SessionGuard, SinkReject,
+    ZakuraPeerId,
+};
+
+pub(super) fn block_sync_guard() -> SessionGuard {
+    // The transport already applies the per-connection count bucket and frame
+    // cap; this guard adds the same payload cap the codec enforces. Type
+    // validity is left to the decode stage on purpose: a disallowed or unknown
+    // stream-6 type must surface as `WireDecodeFailed` so the reactor records
+    // `MalformedMessage` misbehavior, rather than a pre-decode guard reject
+    // dropping that signal (see BS1). The block-sync byte budget likewise stays
+    // in the reactor scheduler/reorder state so existing request/retry
+    // accounting is not double-counted.
+    SessionGuard::oversize_only(MAX_BS_MESSAGE_BYTES as u32)
+}
 
 /// Per-peer block-sync local state.
 ///
@@ -131,6 +146,83 @@ pub(super) fn run_inbound(cx: &mut PipeCx<'_, BsLocal, BsEnv>, frame: Frame) -> 
     }
 }
 
+/// Run one production block-sync peer until stream close, cancellation, or reject.
+///
+/// Unlike the generic synchronous pipe runner, this loop awaits the reactor
+/// event queue after decoding a frame. That preserves ordered-stream semantics:
+/// if the reactor is full, the stream reader backpressures before reading the
+/// next QUIC frame instead of consuming a block body and then losing it on a
+/// failed `try_send`.
+pub(super) async fn run_peer(
+    peer_id: ZakuraPeerId,
+    mut recv: FramedRecv,
+    events: mpsc::Sender<BlockSyncEvent>,
+    cancel: CancellationToken,
+) -> Result<(), SinkReject> {
+    let mut guard = block_sync_guard();
+
+    loop {
+        let frame = tokio::select! {
+            () = cancel.cancelled() => return Ok(()),
+            frame = recv.recv() => frame,
+        };
+        let Some(frame) = frame else {
+            return Ok(());
+        };
+
+        match guard.admit(&frame) {
+            Admit::Pass => {}
+            Admit::Throttle => {
+                return Err(SinkReject::local(
+                    "block-sync guard unexpectedly throttled an inbound frame",
+                ));
+            }
+            Admit::Reject(reason) => {
+                return Err(SinkReject::protocol(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    reason,
+                )));
+            }
+        }
+
+        let msg = match BlockSyncMessage::decode_frame(frame) {
+            Ok(msg) => msg,
+            Err(error) => {
+                let protocol_error =
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string());
+                send_event(
+                    &events,
+                    BlockSyncEvent::WireDecodeFailed {
+                        peer: peer_id.clone(),
+                        error: Arc::new(error),
+                    },
+                )
+                .await?;
+                return Err(SinkReject::protocol(protocol_error));
+            }
+        };
+
+        send_event(
+            &events,
+            BlockSyncEvent::WireMessage {
+                peer: peer_id.clone(),
+                msg,
+            },
+        )
+        .await?;
+    }
+}
+
+async fn send_event(
+    events: &mpsc::Sender<BlockSyncEvent>,
+    event: BlockSyncEvent,
+) -> Result<(), SinkReject> {
+    events
+        .send(event)
+        .await
+        .map_err(|error| SinkReject::local(format!("block-sync queue closed: {error}")))
+}
+
 /// The single frame decode stage shared by production and `deliver_frame`.
 fn decode(
     events: &mpsc::Sender<BlockSyncEvent>,
@@ -166,6 +258,9 @@ fn forward(events: &mpsc::Sender<BlockSyncEvent>, event: BlockSyncEvent) -> Flow
 mod tests {
     use super::super::service::block_sync_pipe;
     use super::*;
+    use crate::zakura::transport::framed_channel;
+    use std::time::Duration;
+    use tokio::time;
 
     const MESSAGE_BRANCHES: [&str; 5] = [
         "Status",
@@ -253,6 +348,61 @@ mod tests {
             }
             other => panic!("expected WireMessage, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn run_peer_waits_when_reactor_queue_is_full() {
+        let (events_tx, mut events_rx) = mpsc::channel(1);
+        let peer = peer();
+        events_tx
+            .send(BlockSyncEvent::PeerDisconnected(peer.clone()))
+            .await
+            .expect("test event queue has capacity");
+
+        let (send, recv) = framed_channel(4);
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(run_peer(peer.clone(), recv, events_tx, cancel.clone()));
+
+        let message = BlockSyncMessage::GetBlocks {
+            start_height: block::Height(1),
+            count: 4,
+        };
+        send.send(message.clone().encode_frame().expect("message encodes"))
+            .await
+            .expect("test stream has capacity");
+
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "full reactor queue must backpressure the peer task, not drop/reject the frame"
+        );
+
+        assert!(matches!(
+            events_rx.recv().await,
+            Some(BlockSyncEvent::PeerDisconnected(_))
+        ));
+
+        match time::timeout(Duration::from_secs(1), events_rx.recv())
+            .await
+            .expect("frame should be forwarded after queue space opens")
+        {
+            Some(BlockSyncEvent::WireMessage { peer: got, msg }) => {
+                assert_eq!(got, peer);
+                assert_eq!(msg, message);
+            }
+            other => panic!("expected WireMessage, got {other:?}"),
+        }
+
+        drop(send);
+        assert!(
+            time::timeout(Duration::from_secs(1), task)
+                .await
+                .expect("peer task exits after stream close")
+                .expect("peer task does not panic")
+                .is_ok(),
+            "peer task exits cleanly"
+        );
+        cancel.cancel();
     }
 
     #[test]

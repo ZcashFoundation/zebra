@@ -4640,8 +4640,7 @@ mod tests {
             Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))]),
             frame_cap,
             frame_cap,
-        )
-        .expect("a single block response is within the responder aggregate budget");
+        )?;
 
         // Enough available blocks to overflow the cumulative byte budget must be
         // rejected, not fully materialized as a `Vec<Frame>`.

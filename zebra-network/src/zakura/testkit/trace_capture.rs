@@ -199,7 +199,14 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use crate::zakura::{ZakuraTrace, ZakuraTraceEvent, CONN_TABLE};
+    use crate::zakura::{
+        trace::{
+            block_sync_trace as bs_trace, commit_state_trace as cs_trace,
+            header_sync_trace as hs_trace, BLOCK_SYNC_TABLE, COMMIT_STATE_TABLE, CONN_TABLE,
+            HEADER_SYNC_TABLE,
+        },
+        ZakuraTrace, ZakuraTraceEvent,
+    };
 
     use super::*;
 
@@ -303,5 +310,66 @@ mod tests {
         assert_eq!(reader.node("01").table("conn").count("accepted"), 1);
 
         let _ = fs::remove_dir_all(persisted);
+    }
+
+    #[tokio::test]
+    async fn zakura_sync_trace_tables_write_separate_files() {
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "zakura_sync_trace_tables_write_separate_files",
+            false,
+        )
+        .unwrap();
+        let trace = ZakuraTrace::new(capture.tracer(), "01");
+
+        trace.emit_with(BLOCK_SYNC_TABLE, |row| {
+            row.insert(
+                bs_trace::EVENT.to_string(),
+                serde_json::Value::String("block_test".to_string()),
+            );
+        });
+        trace.emit_with(HEADER_SYNC_TABLE, |row| {
+            row.insert(
+                hs_trace::EVENT.to_string(),
+                serde_json::Value::String("header_test".to_string()),
+            );
+        });
+        trace.emit_with(COMMIT_STATE_TABLE, |row| {
+            row.insert(
+                cs_trace::EVENT.to_string(),
+                serde_json::Value::String("commit_test".to_string()),
+            );
+        });
+
+        capture.flush().await;
+
+        assert!(capture.path().join(BLOCK_SYNC_TABLE.file_name()).exists());
+        assert!(capture.path().join(HEADER_SYNC_TABLE.file_name()).exists());
+        assert!(capture.path().join(COMMIT_STATE_TABLE.file_name()).exists());
+
+        let reader = capture.reader().unwrap();
+        assert_eq!(
+            reader.table(BLOCK_SYNC_TABLE.table()).count("block_test"),
+            1
+        );
+        assert_eq!(
+            reader.table(HEADER_SYNC_TABLE.table()).count("header_test"),
+            1
+        );
+        assert_eq!(
+            reader
+                .table(COMMIT_STATE_TABLE.table())
+                .count("commit_test"),
+            1
+        );
+        assert_eq!(
+            reader.table(BLOCK_SYNC_TABLE.table()).count("commit_test"),
+            0
+        );
+        assert_eq!(
+            reader.table(HEADER_SYNC_TABLE.table()).count("commit_test"),
+            0
+        );
+
+        let _ = capture.finish().await.unwrap();
     }
 }

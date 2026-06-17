@@ -1,6 +1,6 @@
 use super::{config::*, error::*, validation::*, wire::*, *};
 use crate::zakura::{
-    HeaderSyncPeerSession, HeaderSyncServiceSummary, ServicePeerSnapshot,
+    FrontierUpdate, HeaderSyncPeerSession, HeaderSyncServiceSummary, ServicePeerSnapshot,
     ZakuraHeaderSyncCandidateState,
 };
 
@@ -11,6 +11,8 @@ pub struct HeaderSyncFrontiers {
     pub finalized_height: block::Height,
     /// Highest verified block body height, supplied by state.
     pub verified_block_tip: block::Height,
+    /// Hash at the highest verified block body height, supplied by state.
+    pub verified_block_hash: block::Hash,
 }
 
 /// Startup inputs for the dependency-neutral header-sync reactor.
@@ -24,6 +26,8 @@ pub struct HeaderSyncStartup {
     pub frontiers: HeaderSyncFrontiers,
     /// Durable best header tip loaded from storage at startup.
     pub best_header_tip: Option<(block::Height, block::Hash)>,
+    /// Shared sync exchange frontier stream.
+    pub frontier_updates: Option<watch::Receiver<FrontierUpdate>>,
     /// Local stream-5 advertisement.
     pub config: ZakuraHeaderSyncConfig,
     /// Negotiated or local application frame cap for header-sync responses.
@@ -57,6 +61,7 @@ impl HeaderSyncStartup {
             anchor,
             frontiers,
             best_header_tip,
+            frontier_updates: None,
             config,
             max_frame_bytes,
             request_timeout: DEFAULT_HS_REQUEST_TIMEOUT,
@@ -315,6 +320,20 @@ pub enum HeaderSyncAction {
         from: block::Height,
         /// Last missing height.
         to: block::Height,
+    },
+    /// Notify production wiring that header sync advanced its best header target.
+    HeaderAdvanced {
+        /// New best-header target height.
+        height: block::Height,
+        /// New best-header target hash.
+        hash: block::Hash,
+    },
+    /// Notify production wiring that header sync re-anchored its best header target.
+    HeaderReanchored {
+        /// Previous best-header target.
+        old: (block::Height, block::Hash),
+        /// New best-header target.
+        new: (block::Height, block::Hash),
     },
     /// Inform later block-pipeline wiring that a validated tip block arrived.
     NewBlockReceived {

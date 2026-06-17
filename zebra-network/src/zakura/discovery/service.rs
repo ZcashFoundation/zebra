@@ -807,6 +807,7 @@ mod tests {
             HeaderSyncFrontiers {
                 finalized_height: anchor.0,
                 verified_block_tip: anchor.0,
+                verified_block_hash: anchor.1,
             },
             Some(anchor),
             ZakuraHeaderSyncConfig::default(),

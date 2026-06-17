@@ -642,7 +642,10 @@ impl Config {
                 .map_err(|_| ZakuraSecretKeyError::InvalidConfigured);
         }
 
-        match self.cache_dir.zakura_node_secret_key_file_path(&self.network) {
+        match self
+            .cache_dir
+            .zakura_node_secret_key_file_path(&self.network)
+        {
             Some(key_file) => Ok(load_or_generate_zakura_secret_key(&key_file)),
             // The cache dir is disabled, so there is nowhere to persist a stable
             // key: fall back to an ephemeral identity for this run.

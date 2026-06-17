@@ -318,6 +318,25 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+
+    /// Skip the Regtest direct genesis self-seed at startup, forcing this node to
+    /// obtain the genesis block from peers like a Mainnet/Testnet node.
+    ///
+    /// On Regtest, zebrad normally commits the genesis block directly at startup
+    /// (the genesis block is a known constant and there may be no peer to download
+    /// it from). When this is `true`, that shortcut is skipped and genesis must be
+    /// downloaded and verified from a peer instead. This exercises the production
+    /// genesis-bootstrap path — in particular a Zakura-only node
+    /// (`legacy_p2p = false`) that must fetch genesis over Zakura before native
+    /// header/body sync can advance from an empty state.
+    ///
+    /// Defaults to `false`, so standalone Regtest nodes keep self-seeding genesis.
+    ///
+    /// Skipped when serializing so `zebrad generate` output (and the stored config
+    /// compatibility snapshot) stays stable; it is only ever set by hand in
+    /// test/bootstrap configs.
+    #[serde(skip_serializing)]
+    pub debug_skip_regtest_genesis_self_seed: bool,
 }
 
 impl Default for Config {
@@ -346,6 +365,10 @@ impl Default for Config {
             // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
+
+            // Standalone Regtest nodes self-seed genesis; only opt-in test/bootstrap
+            // setups download it from peers.
+            debug_skip_regtest_genesis_self_seed: false,
         }
     }
 }
@@ -627,6 +650,20 @@ where
             );
             sleep(restart_delay).await;
         }
+    }
+
+    /// Downloads and verifies genesis, then parks this legacy syncer.
+    ///
+    /// Zakura block sync uses this bootstrap path because header range validation needs the
+    /// committed genesis header before native Zakura header/body sync can advance from scratch.
+    #[instrument(skip(self))]
+    pub async fn bootstrap_genesis_then_pause(mut self) -> Result<(), Report> {
+        self.request_genesis().await?;
+        info!(
+            "Zakura block sync replacement completed genesis bootstrap; parking legacy ChainSync"
+        );
+        std::future::pending::<()>().await;
+        Ok(())
     }
 
     /// Tries to synchronize the chain as far as it can.
@@ -1215,6 +1252,14 @@ where
                 Ok(Err(fatal_error)) => Err(fatal_error)?,
                 // Handle timeouts and block errors
                 Err(error) | Ok(Ok(Err(error))) => {
+                    if self.is_duplicate_finalized_genesis_error(&error) {
+                        info!(
+                            ?error,
+                            "genesis block is already finalized, continuing sync"
+                        );
+                        return Ok(());
+                    }
+
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
                         warn!(
@@ -1234,6 +1279,26 @@ where
         }
 
         Ok(())
+    }
+
+    fn is_duplicate_finalized_genesis_error(&self, error: &BlockDownloadVerifyError) -> bool {
+        match error {
+            BlockDownloadVerifyError::Invalid {
+                error,
+                height,
+                hash,
+                ..
+            } => {
+                *height == Height(0)
+                    && *hash == self.genesis_hash
+                    && Self::is_duplicate_finalized_error(error)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_duplicate_finalized_error(error: &zebra_consensus::RouterError) -> bool {
+        error.duplicate_location() == Some(&zs::KnownBlock::Finalized)
     }
 
     /// Try to download and verify the genesis block once.
@@ -1554,6 +1619,15 @@ where
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if Self::is_duplicate_finalized_error(error) =>
+            {
+                debug!(
+                    error = ?e,
+                    "block was already finalized, possibly from a previous sync run, continuing"
+                );
                 false
             }
 

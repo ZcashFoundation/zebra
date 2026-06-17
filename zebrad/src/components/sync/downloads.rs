@@ -436,17 +436,28 @@ where
                 };
 
                 let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
-                    assert_eq!(
-                        blocks.len(),
-                        1,
-                        "wrong number of blocks in response to a single hash"
-                    );
-
-                    blocks
-                        .first()
-                        .expect("just checked length")
-                        .available()
-                        .expect("unexpected missing block status: single block failures should be errors")
+                    // A cooperating peer returns exactly one available block for a
+                    // single-hash request. A response with a different count, or a
+                    // `Missing` status, means the peer is misbehaving or raced us
+                    // (e.g. the block was reorged away between advertisement and
+                    // fetch). Treat it as a retryable download failure rather than
+                    // asserting and bringing the whole node down.
+                    match blocks.first().and_then(|block| block.available()) {
+                        Some(available) if blocks.len() == 1 => available,
+                        _ => {
+                            metrics::histogram!("sync.block.download.duration_seconds", "result" => "failed")
+                                .record(download_start.elapsed().as_secs_f64());
+                            return Err(BlockDownloadVerifyError::DownloadFailed {
+                                error: format!(
+                                    "expected one available block in response to a \
+                                     single-hash request, got {}",
+                                    blocks.len()
+                                )
+                                .into(),
+                                hash,
+                            });
+                        }
+                    }
                 } else {
                     unreachable!("wrong response to block request");
                 };

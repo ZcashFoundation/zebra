@@ -143,6 +143,14 @@ impl RouterError {
         }
     }
 
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&zs::KnownBlock> {
+        match self {
+            RouterError::Checkpoint { source, .. } => source.duplicate_location(),
+            RouterError::Block { source, .. } => source.duplicate_location(),
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).

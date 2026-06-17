@@ -21,7 +21,10 @@ use zebra_chain::{
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
-use super::{Frame, ServicePeerDirection, ServicePeerLimits, ZakuraPeerId};
+use super::{
+    trace::{block_sync_trace as bs_trace, peer_label as trace_peer_label, BLOCK_SYNC_TABLE},
+    Frame, ServicePeerDirection, ServicePeerLimits, ZakuraPeerId, ZakuraTrace,
+};
 
 mod config;
 mod error;
@@ -38,7 +41,10 @@ mod wire;
 
 pub use config::{BlockSyncStatus, ZakuraBlockSyncConfig, MAX_BS_RESPONSE_BYTES};
 pub use error::BlockSyncWireError;
-pub use events::{BlockSyncAction, BlockSyncBlockMeta, BlockSyncEvent, BlockSyncMisbehavior};
+pub use events::{
+    BlockApplyResult, BlockApplyToken, BlockSyncAction, BlockSyncBlockMeta, BlockSyncEvent,
+    BlockSyncMisbehavior,
+};
 pub use reactor::spawn_block_sync_reactor;
 pub use scheduler::BlockSizeEstimate;
 #[cfg(test)]

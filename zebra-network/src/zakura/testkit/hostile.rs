@@ -11,9 +11,10 @@ use crate::{
     zakura::{
         legacy_gossip::ZAKURA_STREAM_GOSSIP, run_native_initiator_handshake, Frame, StreamPrelude,
         ZakuraHandshakeConfig, ZakuraLocalLimits, ZakuraPeerId, FRAME_HEADER_BYTES,
-        LEGACY_GOSSIP_VERSION, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC, ZAKURA_CAP_HEADER_SYNC,
-        ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_DISCOVERY_STREAM_VERSION,
-        ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_HEADER_SYNC,
+        LEGACY_GOSSIP_VERSION, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC, ZAKURA_BLOCK_SYNC_STREAM_VERSION,
+        ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_DISCOVERY_STREAM_VERSION,
+        ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_STREAM_BLOCK_SYNC, ZAKURA_STREAM_DISCOVERY,
+        ZAKURA_STREAM_HEADER_SYNC,
     },
     BoxError, Config,
 };
@@ -90,7 +91,10 @@ impl HostilePeer {
     pub async fn send_raw_frame(&self, stream_kind: u16, frame: Frame) -> Result<(), BoxError> {
         if matches!(
             stream_kind,
-            ZAKURA_STREAM_GOSSIP | ZAKURA_STREAM_DISCOVERY | ZAKURA_STREAM_HEADER_SYNC
+            ZAKURA_STREAM_GOSSIP
+                | ZAKURA_STREAM_DISCOVERY
+                | ZAKURA_STREAM_HEADER_SYNC
+                | ZAKURA_STREAM_BLOCK_SYNC
         ) {
             return self.send_ordered_raw_frame(stream_kind, frame).await;
         }
@@ -269,15 +273,25 @@ impl HostilePeer {
 
     /// Send a frame header whose declared length exceeds the victim cap.
     pub async fn oversize_frame_declared_len(&self, stream_kind: u16) -> Result<(), BoxError> {
+        self.send_frame_header_with_declared_payload_len(
+            stream_kind,
+            self.limits.max_frame_bytes.saturating_add(1),
+        )
+        .await
+    }
+
+    /// Send a frame header with an explicit declared payload length and no payload.
+    pub async fn send_frame_header_with_declared_payload_len(
+        &self,
+        stream_kind: u16,
+        declared_payload_len: u32,
+    ) -> Result<(), BoxError> {
         let (mut send, _recv) = self.connection.open_bi().await?;
         self.write_prelude(&mut send, stream_kind).await?;
         let mut header = Vec::with_capacity(FRAME_HEADER_BYTES);
         WriteBytesExt::write_u16::<LittleEndian>(&mut header, 1)?;
         WriteBytesExt::write_u16::<LittleEndian>(&mut header, 0)?;
-        WriteBytesExt::write_u32::<LittleEndian>(
-            &mut header,
-            self.limits.max_frame_bytes.saturating_add(1),
-        )?;
+        WriteBytesExt::write_u32::<LittleEndian>(&mut header, declared_payload_len)?;
         send.write_all(&header).await?;
         let _ = send.finish();
         Ok(())
@@ -325,6 +339,7 @@ impl HostilePeer {
             ZAKURA_STREAM_GOSSIP => LEGACY_GOSSIP_VERSION,
             ZAKURA_STREAM_DISCOVERY => ZAKURA_DISCOVERY_STREAM_VERSION,
             ZAKURA_STREAM_HEADER_SYNC => ZAKURA_HEADER_SYNC_STREAM_VERSION,
+            ZAKURA_STREAM_BLOCK_SYNC => ZAKURA_BLOCK_SYNC_STREAM_VERSION,
             _ => 1,
         }
     }

@@ -1532,6 +1532,9 @@ impl DiskWriteBatch {
 
         let mut recent_headers = zebra_db.recent_header_context(anchor_height);
         if recent_headers.is_empty() {
+            if anchor == zebra_db.network().genesis_hash() && anchor_height == block::Height(0) {
+                return Err(CommitHeaderRangeError::MissingGenesisAnchor { anchor });
+            }
             return Err(CommitHeaderRangeError::UnknownAnchor { anchor });
         }
 

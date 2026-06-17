@@ -302,7 +302,7 @@ color-eyre = { workspace = true }
 
 zebra-chain = { path = "../zebra-chain", version = "9.0.0", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "8.0.0", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "8.0.0", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "8.0.0", features = ["proptest-impl", "zakura-testkit"] }
 zebra-state = { path = "../zebra-state", version = "8.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "3.0.0" }

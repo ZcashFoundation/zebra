@@ -1,8 +1,8 @@
 use super::{config::*, events::*, pipe::*, wire::*, *};
 use crate::zakura::{
     handle_pipe_exit, spawn_supervised_pipe, Flow, FramedSend, OrderedSendError, Peer,
-    PeerStreamSession, Pipe, PipeSink, Service, SessionGuard, SinkReject, Stream, StreamMode,
-    ZakuraPeerId, FRAME_HEADER_BYTES,
+    PeerStreamSession, Pipe, Service, SinkReject, Stream, StreamMode, ZakuraPeerId,
+    FRAME_HEADER_BYTES,
 };
 // The per-peer block-sync `Source` frame-pump is test-only scaffolding (see
 // `BlockSyncPeerRecord` / `add_peer`); its trait and boxed-future alias are only
@@ -12,9 +12,10 @@ use crate::zakura::{BoxRunFuture, Source};
 
 /// Maximum frame bytes for one stream-6 body frame plus protocol framing.
 ///
-/// A block body is one frame and may be up to Zebra's `MAX_BLOCK_BYTES`; the
-/// stream also carries the inherited inner message discriminator and outer
-/// Zakura frame header, so it is intentionally larger than control frames.
+/// A block body is still decoded and validated against Zebra's
+/// `MAX_BLOCK_BYTES`; this frame cap has extra slack so stream-6 can classify
+/// oversized or incompatible block-sync payloads in the codec instead of
+/// dropping them at the raw transport gate.
 pub const MAX_BS_FRAME_BYTES: u32 = {
     // This cast is safe: MAX_BS_MESSAGE_BYTES is asserted below 4 MiB.
     (MAX_BS_MESSAGE_BYTES + FRAME_HEADER_BYTES) as u32
@@ -353,12 +354,17 @@ impl Service for BlockSyncService {
         #[cfg(not(test))]
         drop(send);
 
-        let pipe = block_sync_pipe(peer_id.clone(), self.inner.events.clone());
-        let sink = PipeSink::new(pipe, recv, service_cancel_token.clone());
+        let events = self.inner.events.clone();
+        let run_peer_id = peer_id.clone();
+        let run_cancel = service_cancel_token.clone();
         let on_teardown = {
             let lifecycle = self.inner.lifecycle.clone();
             let peer_id = peer_id.clone();
+            let inner = self.inner.clone();
             move || {
+                if let Ok(mut peers) = inner.peers.lock() {
+                    peers.remove(&peer_id);
+                }
                 let _ = lifecycle.send(BlockSyncEvent::PeerDisconnected(peer_id));
             }
         };
@@ -370,7 +376,11 @@ impl Service for BlockSyncService {
         // leaves it for the other services riding on it. Panic teardown is in
         // `on_panic`.
         let pipe = async move {
-            handle_pipe_exit("block-sync", &connection_cancel_token, sink.run().await);
+            handle_pipe_exit(
+                "block-sync",
+                &connection_cancel_token,
+                run_peer(run_peer_id, recv, events, run_cancel).await,
+            );
         };
         // Let the returned handle drop to detach the supervised task (like
         // `tokio::spawn`); the `PipeTeardown` still runs on every exit path.
@@ -519,15 +529,7 @@ pub(super) fn block_sync_pipe(
         peer_id,
         BsLocal,
         BsEnv::new(events),
-        // The transport already applies the per-connection count bucket and
-        // frame cap; this guard adds the same payload cap the codec enforces.
-        // Type validity is left to the decode stage on purpose: a disallowed or
-        // unknown stream-6 type must surface as `WireDecodeFailed` so the reactor
-        // records `MalformedMessage` misbehavior — a pre-decode guard reject would
-        // disconnect the peer but drop that misbehavior signal (see BS1). The
-        // block-sync byte budget likewise stays in the reactor scheduler/reorder
-        // state so existing request/retry accounting is not double-counted.
-        SessionGuard::oversize_only(MAX_BS_MESSAGE_BYTES as u32),
+        block_sync_guard(),
         run_inbound,
         &PIPE_SHAPE,
     )
