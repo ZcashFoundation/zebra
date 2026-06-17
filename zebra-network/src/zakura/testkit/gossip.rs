@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 
 use super::{InboundRecorder, LocalEndpointFactory};
 use crate::{
-    zakura::{Frame, InboundSink, ZakuraPeerId},
+    zakura::{Frame, ZakuraPeerId},
     BoxError,
 };
 

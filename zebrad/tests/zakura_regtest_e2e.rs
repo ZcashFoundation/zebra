@@ -20,8 +20,10 @@
 //! dual-stack seed, a pure Zakura-only node (`legacy_p2p = false`) that joins
 //! only via the seed's `zakura.bootstrap_peers`, a legacy-only node, and a
 //! dual-stack node that upgrades — and asserts legacy TCP backwards
-//! compatibility, the legacy->Zakura upgrade, and block propagation to the
-//! pure-Zakura, legacy-only, and upgraded peers. See that script for the exact
+//! compatibility, the legacy->Zakura upgrade handshake, and block propagation
+//! to the pure-Zakura and legacy-only peers. The upgraded node4 propagation path
+//! remains a documented P2 known issue and can be made fatal with
+//! `ZAKURA_REGTEST_E2E_STRICT_UPGRADE=1`. See that script for the exact
 //! assertions.
 
 #![allow(clippy::print_stderr)]

@@ -30,7 +30,6 @@ x-zakura-node: &zakura-node
   stop_grace_period: 5s
   tmpfs:
     - /tmp
-    - /traces
   deploy:
     resources:
       limits:
@@ -45,6 +44,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ./zakura-regtest-e2e/node1.toml:/etc/zebrad/node1.toml:ro
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node1:/traces
 
   zakura-node-2:
     <<: *zakura-node
@@ -55,6 +55,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ./zakura-regtest-e2e/node2.toml:/etc/zebrad/node2.toml:ro
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node2:/traces
 
   zakura-node-3:
     <<: *zakura-node
@@ -65,6 +66,7 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ./zakura-regtest-e2e/node3.toml:/etc/zebrad/node3.toml:ro
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node3:/traces
 
   zakura-node-4:
     <<: *zakura-node
@@ -75,3 +77,4 @@ services:
     volumes:
       - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
       - ./zakura-regtest-e2e/node4.toml:/etc/zebrad/node4.toml:ro
+      - ${ZAKURA_E2E_TRACE_DIR:-/tmp/zakura-regtest-e2e-traces}/node4:/traces

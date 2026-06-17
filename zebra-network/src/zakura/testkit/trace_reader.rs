@@ -29,6 +29,17 @@ pub struct TraceQuery<'a> {
     node: Option<&'a str>,
 }
 
+/// Expected JSON value in a trace row.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TraceValue<'a> {
+    /// A string field.
+    Str(&'a str),
+    /// An unsigned integer field.
+    U64(u64),
+    /// A null field.
+    Null,
+}
+
 impl TraceReader {
     /// Load all `*.jsonl` files in `path` and one level of per-node
     /// subdirectories.
@@ -40,8 +51,9 @@ impl TraceReader {
         }
 
         reader.load_dir(path, None)?;
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
+        let mut dirs = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+        dirs.sort_by_key(|entry| entry.path());
+        for entry in dirs {
             if entry.file_type()?.is_dir() {
                 let source_node = source_node_from_dir(&entry.path());
                 reader.load_dir(&entry.path(), source_node)?;
@@ -183,6 +195,38 @@ impl<'a> TraceQuery<'a> {
             "trace did not contain expected event subsequence: {events:?}",
         );
     }
+
+    /// Assert that this query contains an event row, ignoring row order.
+    pub fn assert_event(&self, event: &str) {
+        self.assert_row(event, &[]);
+    }
+
+    /// Assert that this query contains an event row with all expected fields.
+    ///
+    /// This is intentionally unordered: JSONL writers batch rows, and e2e
+    /// tests should only assert ordering when it is part of the protocol.
+    pub fn assert_row(&self, event: &str, fields: &[(&str, TraceValue<'_>)]) {
+        let matched = self.matching().map(|row| &row.row).any(|row| {
+            row.get("event").and_then(Value::as_str) == Some(event)
+                && fields
+                    .iter()
+                    .all(|(field, value)| trace_value_matches(row.get(*field), *value))
+        });
+
+        assert!(
+            matched,
+            "trace did not contain event {event:?} with fields {fields:?}; matching rows: {:?}",
+            self.rows()
+        );
+    }
+}
+
+fn trace_value_matches(actual: Option<&Value>, expected: TraceValue<'_>) -> bool {
+    match expected {
+        TraceValue::Str(expected) => actual.and_then(Value::as_str) == Some(expected),
+        TraceValue::U64(expected) => actual.and_then(Value::as_u64) == Some(expected),
+        TraceValue::Null => actual.is_some_and(Value::is_null),
+    }
 }
 
 impl TraceRow {
@@ -252,5 +296,34 @@ mod tests {
         let reader = TraceReader::load(dir.path()).expect("reader");
         assert_eq!(reader.node("01").table("conn").count("accepted"), 1);
         assert_eq!(reader.node("wrong").table("conn").count("accepted"), 0);
+    }
+
+    #[test]
+    fn reader_loads_node_subdirs_in_deterministic_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let node_b = dir.path().join("node-b");
+        let node_a = dir.path().join("node-a");
+        fs::create_dir_all(&node_b).expect("node-b dir");
+        fs::create_dir_all(&node_a).expect("node-a dir");
+        fs::write(
+            node_b.join("conn.jsonl"),
+            r#"{"node":"b","event":"from-b"}"#.to_string() + "\n",
+        )
+        .expect("node-b trace file");
+        fs::write(
+            node_a.join("conn.jsonl"),
+            r#"{"node":"a","event":"from-a"}"#.to_string() + "\n",
+        )
+        .expect("node-a trace file");
+
+        let reader = TraceReader::load(dir.path()).expect("reader");
+        let events: Vec<_> = reader
+            .table("conn")
+            .rows()
+            .into_iter()
+            .filter_map(|row| row.get("event").and_then(Value::as_str))
+            .collect();
+
+        assert_eq!(events, ["from-a", "from-b"]);
     }
 }

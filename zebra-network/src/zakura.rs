@@ -14,20 +14,25 @@ use crate::{
     PeerSocketAddr,
 };
 
+mod discovery;
 mod handler;
 mod handshake;
 mod legacy_gossip;
 #[cfg(any(test, feature = "zakura-testkit"))]
 pub mod testkit;
 mod trace;
+pub mod transport;
 
+pub use discovery::*;
 pub use handler::*;
 pub use handshake::*;
 pub use legacy_gossip::*;
 pub use trace::{
     peer_label as zakura_trace_peer_label, reject_reason_label as zakura_trace_reject_reason_label,
-    ZakuraTrace, ZakuraTraceEvent, CONN_TABLE, HANDSHAKE_TABLE, RATELIMIT_TABLE, STREAM_TABLE,
+    ZakuraTrace, ZakuraTraceEvent, CONN_TABLE, HANDSHAKE_TABLE, LEGACY_REQUEST_TABLE,
+    RATELIMIT_TABLE, STREAM_TABLE,
 };
+pub use transport::*;
 
 #[cfg(any(test, feature = "zakura-testkit"))]
 pub(crate) use handler::run_native_initiator_handshake_without_trace as run_native_initiator_handshake;
@@ -40,6 +45,12 @@ use std::sync::{
 
 /// The pinned iroh version the Zakura P2P plan was verified against.
 pub const IROH_VERSION: &str = "0.92.0";
+
+/// Capability bit for the legacy gossip compatibility service.
+pub const ZAKURA_CAP_LEGACY_GOSSIP: u64 = 1 << 0;
+
+/// Capability bit for the native discovery service.
+pub const ZAKURA_CAP_DISCOVERY: u64 = 1 << 2;
 
 /// How long the legacy->Zakura liveness keeper waits for the upgraded QUIC
 /// connection to register with the supervisor before giving up.
@@ -143,10 +154,15 @@ impl ZakuraHandshakeConnector {
     }
 
     /// Dial a peer over Zakura QUIC using the node id and direct-address hints it
-    /// advertised in the legacy upgrade prelude. Returns `false` when there is no
-    /// live endpoint or the hints cannot be parsed into a dial address.
-    pub(crate) fn spawn_zakura_dial_to_hints(
+    /// advertised in the legacy upgrade prelude, then wait until the connection
+    /// registers with the local supervisor.
+    ///
+    /// The legacy side drops its TCP connection once the upgrade is selected, so
+    /// the Zakura request adapter must have a usable outbound handle before the
+    /// handoff reports success.
+    pub(crate) async fn spawn_zakura_dial_to_hints_and_wait(
         &self,
+        peer_id: &ZakuraPeerId,
         node_id: &[u8],
         direct_addresses: &[Vec<u8>],
     ) -> bool {
@@ -156,8 +172,11 @@ impl ZakuraHandshakeConnector {
         let Some(node_addr) = node_addr_from_hints(node_id, direct_addresses) else {
             return false;
         };
-        endpoint.spawn_native_dial(node_addr);
-        true
+        let mut registered = endpoint.supervisor().subscribe();
+        if !endpoint.ensure_upgrade_native_dial(node_addr) {
+            return false;
+        }
+        wait_for_zakura_peer(&mut registered, peer_id, ZAKURA_LIVENESS_APPEAR_TIMEOUT).await
     }
 
     /// Keep an upgraded peer's legacy address-book entry live for the lifetime

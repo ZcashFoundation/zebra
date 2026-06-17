@@ -24,7 +24,7 @@ use zebra_chain::{
     },
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_network::{
@@ -2835,7 +2835,7 @@ async fn rpc_getdifficulty() {
     assert_eq!(format!("{:.9}", get_difficulty.unwrap()), "0.000122072");
 
     // Fake the ChainInfo response: difficulty limit - smallest valid difficulty
-    let pow_limit = Mainnet.target_difficulty_limit();
+    let pow_limit = ParameterDifficulty::target_difficulty_limit(&Mainnet);
     let fake_difficulty = pow_limit.into();
     let mut read_state2 = read_state.clone();
     let mock_read_state_request_handler = async move {

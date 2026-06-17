@@ -8,7 +8,11 @@ use std::{
     },
 };
 
-use crate::zakura::{Frame, InboundSink, InboundSinkReject, ZakuraPeerId};
+use tracing::debug;
+
+use crate::zakura::{
+    legacy_gossip_streams, Frame, Peer, Service, SinkReject, Stream, ZakuraPeerId,
+};
 
 /// One frame delivered to an [`InboundRecorder`].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,19 +84,18 @@ impl InboundRecorder {
     pub fn dropped_count(&self) -> usize {
         self.dropped.load(Ordering::Relaxed)
     }
-}
 
-impl InboundSink for InboundRecorder {
-    fn deliver(
+    /// Record one decoded frame.
+    pub fn deliver(
         &self,
         peer_id: ZakuraPeerId,
         stream_kind: u16,
         frame: Frame,
-    ) -> Result<(), InboundSinkReject> {
+    ) -> Result<(), SinkReject> {
         let mut messages = self
             .messages
             .lock()
-            .map_err(|_| InboundSinkReject::local("recorder mutex should not be poisoned"))?;
+            .map_err(|_| SinkReject::local("recorder mutex should not be poisoned"))?;
         if messages.len() == self.capacity {
             messages.pop_front();
             self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -103,6 +106,61 @@ impl InboundSink for InboundRecorder {
             frame,
         });
         Ok(())
+    }
+}
+
+impl Service for InboundRecorder {
+    fn name(&self) -> &'static str {
+        "inbound-recorder"
+    }
+
+    fn streams(&self) -> &[Stream] {
+        legacy_gossip_streams()
+    }
+
+    fn add_peer(&self, mut peer: Peer) {
+        for stream in self
+            .streams()
+            .iter()
+            .filter(|stream| matches!(stream.mode, crate::zakura::StreamMode::Ordered))
+        {
+            let Some((mut recv, _send)) = peer.take_stream(stream.kind) else {
+                continue;
+            };
+            // The recorder observes inbound frames only; it has no source side.
+            let recorder = self.clone();
+            let peer_id = peer.id.clone();
+            let stream_kind = stream.kind;
+            let cancel_token = peer.cancel_token();
+            tokio::spawn(async move {
+                loop {
+                    let frame = tokio::select! {
+                        _ = cancel_token.cancelled() => return,
+                        frame = recv.recv() => {
+                            let Some(frame) = frame else {
+                                return;
+                            };
+                            frame
+                        }
+                    };
+
+                    if let Err(error) = recorder.deliver(peer_id.clone(), stream_kind, frame) {
+                        debug!(?error, ?peer_id, "inbound recorder could not record frame");
+                    }
+                }
+            });
+        }
+    }
+
+    fn remove_peer(&self, _peer: &ZakuraPeerId) {}
+
+    fn deliver_frame(
+        &self,
+        peer_id: ZakuraPeerId,
+        stream_kind: u16,
+        frame: Frame,
+    ) -> Result<(), SinkReject> {
+        self.deliver(peer_id, stream_kind, frame)
     }
 }
 

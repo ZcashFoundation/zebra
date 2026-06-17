@@ -1102,10 +1102,17 @@ where
         return Ok(neutral_upgrade_fallback());
     };
 
-    // Dial the responder's Zakura endpoint over QUIC. The dial and connection
-    // service run in the background; the supervisor registers the peer on
-    // success and increments `zakura.p2p.handshake.upgraded`.
-    if !connector.spawn_zakura_dial_to_hints(&accept.iroh_node_id, &accept.iroh_direct_addresses) {
+    // Dial the responder's Zakura endpoint over QUIC and wait for the local
+    // supervisor to register a usable outbound handle before dropping the
+    // legacy connection.
+    if !connector
+        .spawn_zakura_dial_to_hints_and_wait(
+            &peer_id,
+            &accept.iroh_node_id,
+            &accept.iroh_direct_addresses,
+        )
+        .await
+    {
         return Ok(neutral_upgrade_fallback());
     }
 

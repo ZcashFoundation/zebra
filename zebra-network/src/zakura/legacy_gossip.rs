@@ -8,20 +8,17 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, OnceLock,
+        Arc, Mutex as StdMutex, OnceLock,
     },
     task::{Context, Poll},
     time::Duration,
 };
 
-use futures::{
-    stream::{FuturesUnordered, StreamExt},
-    FutureExt,
-};
+use serde_json::{Map, Number, Value};
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit, Semaphore},
-    time::{timeout, Instant},
+    time::{sleep, timeout, Instant},
 };
 use tower::{Service, ServiceExt};
 
@@ -43,8 +40,10 @@ use crate::{
 };
 
 use super::{
-    Frame, InboundSink, InboundSinkReject, ZakuraPeerHandle, ZakuraPeerId, ZakuraSupervisorHandle,
-    FRAME_HEADER_BYTES,
+    trace::peer_label as trace_peer_label, BoxRunFuture, Frame, FramedSend, Peer,
+    Service as ZakuraService, SinkReject, Stream, StreamMode, ZakuraPeerHandle, ZakuraPeerId,
+    ZakuraSupervisorHandle, ZakuraTrace, FRAME_HEADER_BYTES, LEGACY_REQUEST_TABLE,
+    LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_LEGACY_GOSSIP,
 };
 
 /// Zakura stream kind reserved for legacy gossip compatibility.
@@ -95,8 +94,12 @@ const LEGACY_REQUEST_IN_FLIGHT_LIMIT: usize = 64;
 const LEGACY_GOSSIP_SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_FIRST_SEEN_TTL: Duration = Duration::from_secs(10 * 60);
 const DEFAULT_FIRST_SEEN_CAPACITY: usize = 50_000;
-const GOSSIP_FANOUT_PEER_TIMEOUT: Duration = Duration::from_secs(10);
 const LEGACY_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Maximum time a gossip broadcast waits for one peer's bounded source queue.
+const LEGACY_GOSSIP_FANOUT_TIMEOUT: Duration = Duration::from_secs(2);
+const SOURCE_INVENTORY_MISSING_RETRIES: usize = 8;
+const SOURCE_INVENTORY_MISSING_RETRY_DELAY: Duration = Duration::from_millis(500);
+const LEGACY_REQUEST_READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the dual-stack tries the (buffered) legacy peer set for an inventory
 /// fetch before falling back to Zakura. Without this bound, a node that upgraded
 /// all its peers to Zakura (and so has no ready legacy peer) would block every
@@ -106,6 +109,31 @@ const LEGACY_RESPONSE_CHUNK_BYTES: usize = 512 * 1024;
 const REQUEST_ID_BYTES: usize = 8;
 const RESPONSE_CHUNK_HEADER_BYTES: usize = REQUEST_ID_BYTES + 1;
 const NO_STOP_HASH: block::Hash = block::Hash([0; 32]);
+const LEGACY_GOSSIP_SERVICE_STREAMS: [Stream; 2] = [
+    Stream {
+        kind: ZAKURA_STREAM_GOSSIP,
+        version: LEGACY_GOSSIP_VERSION,
+        // Advisory until the transport wires Stream::frame_cap end-to-end; the
+        // authoritative inbound cap is app_frame_cap_for_stream_kind.
+        frame_cap: LOCAL_MAX_CONTROL_FRAME_BYTES,
+        capability: ZAKURA_CAP_LEGACY_GOSSIP,
+        mode: StreamMode::Ordered,
+    },
+    Stream {
+        kind: ZAKURA_STREAM_LEGACY_REQUESTS,
+        version: LEGACY_GOSSIP_VERSION,
+        // Advisory until the transport wires Stream::frame_cap end-to-end; the
+        // authoritative inbound cap is app_frame_cap_for_stream_kind.
+        frame_cap: LOCAL_MAX_CONTROL_FRAME_BYTES,
+        capability: ZAKURA_CAP_LEGACY_GOSSIP,
+        mode: StreamMode::RequestResponse,
+    },
+];
+
+/// Service-declared streams for legacy gossip compatibility.
+pub(crate) fn legacy_gossip_streams() -> &'static [Stream] {
+    &LEGACY_GOSSIP_SERVICE_STREAMS
+}
 
 static FIRST_SEEN_BY_SUPERVISOR: OnceLock<std::sync::Mutex<HashMap<u64, FirstSeenCache>>> =
     OnceLock::new();
@@ -422,6 +450,18 @@ impl LegacyRequestKind {
             LegacyRequestKind::MempoolTransactionIds => "MempoolTransactionIds",
             LegacyRequestKind::Ping => "Ping",
             LegacyRequestKind::PushTransaction => "PushTransaction",
+        }
+    }
+
+    fn message_type(self) -> u16 {
+        match self {
+            LegacyRequestKind::Blocks => MSG_REQUEST_BLOCKS_BY_HASH,
+            LegacyRequestKind::Transactions => MSG_REQUEST_TRANSACTIONS_BY_ID,
+            LegacyRequestKind::FindBlocks => MSG_REQUEST_FIND_BLOCKS,
+            LegacyRequestKind::FindHeaders => MSG_REQUEST_FIND_HEADERS,
+            LegacyRequestKind::MempoolTransactionIds => MSG_REQUEST_MEMPOOL_TRANSACTION_IDS,
+            LegacyRequestKind::Ping => MSG_REQUEST_PING,
+            LegacyRequestKind::PushTransaction => MSG_REQUEST_PUSH_TRANSACTION,
         }
     }
 }
@@ -1078,17 +1118,18 @@ fn reject_trailing(reader: &Cursor<&[u8]>) -> Result<(), LegacyGossipError> {
 /// Broadcasts legacy gossip frames to outbound-ready Zakura peers.
 #[derive(Clone, Debug)]
 pub struct ZakuraGossipBroadcast {
-    supervisor: ZakuraSupervisorHandle,
     first_seen: FirstSeenCache,
+    outbound: LegacyGossipOutbound,
 }
 
 impl ZakuraGossipBroadcast {
     /// Create a broadcaster from a Zakura supervisor.
     pub fn new(supervisor: ZakuraSupervisorHandle) -> Self {
         let first_seen = first_seen_for_supervisor(&supervisor);
+        let outbound = outbound_for_supervisor(&supervisor);
         Self {
-            supervisor,
             first_seen,
+            outbound,
         }
     }
 
@@ -1098,8 +1139,8 @@ impl ZakuraGossipBroadcast {
         exclude: Option<&ZakuraPeerId>,
     ) -> Result<(), BoxError> {
         let frame = frame.encode_frame()?;
-        let handles = self.supervisor.outbound_peer_handles().await;
-        send_to_handles(handles, frame, exclude).await
+        self.outbound.remember_latest_block(&frame);
+        self.outbound.send_to_peers(frame, exclude).await
     }
 
     async fn record_first_seen(&self, frame: &LegacyGossipFrame) -> Option<LegacyGossipFrame> {
@@ -1115,6 +1156,92 @@ impl ZakuraGossipBroadcast {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct LegacyGossipOutbound {
+    senders: Arc<StdMutex<HashMap<ZakuraPeerId, FramedSend>>>,
+    latest_block: Arc<StdMutex<Option<Frame>>>,
+}
+
+impl LegacyGossipOutbound {
+    fn insert(&self, peer: ZakuraPeerId, sender: FramedSend) {
+        self.senders
+            .lock()
+            .expect("legacy gossip outbound mutex is never poisoned")
+            .insert(peer, sender);
+    }
+
+    fn remove(&self, peer: &ZakuraPeerId) {
+        self.senders
+            .lock()
+            .expect("legacy gossip outbound mutex is never poisoned")
+            .remove(peer);
+    }
+
+    fn remember_latest_block(&self, frame: &Frame) {
+        if frame.message_type != MSG_ADVERTISE_BLOCK {
+            return;
+        }
+
+        *self
+            .latest_block
+            .lock()
+            .expect("legacy gossip latest-block mutex is never poisoned") = Some(Frame {
+            message_type: frame.message_type,
+            flags: frame.flags,
+            payload: frame.payload.clone(),
+        });
+    }
+
+    async fn replay_latest_block_to_peer(
+        &self,
+        peer_id: ZakuraPeerId,
+        sender: FramedSend,
+    ) -> Result<(), BoxError> {
+        let Some(frame) = self
+            .latest_block
+            .lock()
+            .expect("legacy gossip latest-block mutex is never poisoned")
+            .clone()
+        else {
+            return Ok(());
+        };
+
+        send_to_senders(vec![(peer_id, sender)], frame).await
+    }
+
+    async fn send_to_peers(
+        &self,
+        frame: Frame,
+        exclude: Option<&ZakuraPeerId>,
+    ) -> Result<(), BoxError> {
+        let senders: Vec<_> = {
+            let senders = self
+                .senders
+                .lock()
+                .expect("legacy gossip outbound mutex is never poisoned");
+            senders
+                .iter()
+                .filter(|(peer_id, _)| !exclude.is_some_and(|exclude| exclude == *peer_id))
+                .map(|(peer_id, sender)| (peer_id.clone(), sender.clone()))
+                .collect()
+        };
+
+        send_to_senders(senders, frame).await
+    }
+}
+
+static LEGACY_GOSSIP_OUTBOUND_BY_SUPERVISOR: OnceLock<
+    std::sync::Mutex<HashMap<u64, LegacyGossipOutbound>>,
+> = OnceLock::new();
+
+fn outbound_for_supervisor(supervisor: &ZakuraSupervisorHandle) -> LegacyGossipOutbound {
+    let registry = LEGACY_GOSSIP_OUTBOUND_BY_SUPERVISOR.get_or_init(Default::default);
+    let mut registry = registry
+        .lock()
+        .expect("legacy gossip outbound registry mutex is never poisoned");
+    registry.entry(supervisor.id()).or_default().clone()
+}
+
 fn first_seen_for_supervisor(supervisor: &ZakuraSupervisorHandle) -> FirstSeenCache {
     let registry = FIRST_SEEN_BY_SUPERVISOR.get_or_init(Default::default);
     let mut registry = registry
@@ -1126,39 +1253,38 @@ fn first_seen_for_supervisor(supervisor: &ZakuraSupervisorHandle) -> FirstSeenCa
         .clone()
 }
 
-async fn send_to_handles(
-    handles: Vec<ZakuraPeerHandle>,
+async fn send_to_senders(
+    senders: Vec<(ZakuraPeerId, FramedSend)>,
     frame: Frame,
-    exclude: Option<&ZakuraPeerId>,
 ) -> Result<(), BoxError> {
-    let mut completions = FuturesUnordered::new();
-    let mut first_error = None;
-    for handle in handles {
-        if exclude.is_some_and(|peer_id| peer_id == handle.peer_id()) {
-            continue;
-        }
-        match handle.try_send(
-            ZAKURA_STREAM_GOSSIP,
-            frame.message_type,
-            frame.flags,
-            frame.payload.clone(),
-        ) {
-            Ok(completion) => {
-                let peer_id = handle.peer_id().clone();
-                completions.push(wait_for_send_completion(peer_id, completion).boxed());
+    let sends = senders.into_iter().map(|(peer_id, sender)| {
+        let frame = Frame {
+            message_type: frame.message_type,
+            flags: frame.flags,
+            payload: frame.payload.clone(),
+        };
+
+        async move {
+            match timeout(LEGACY_GOSSIP_FANOUT_TIMEOUT, sender.send(frame)).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error)) => Err(format!(
+                    "Zakura gossip source queue unavailable for peer {peer_id:?}: {error}"
+                )),
+                Err(_) => Err(format!(
+                    "Zakura gossip source queue unavailable for peer {peer_id:?}: fanout timed out"
+                )),
             }
+        }
+    });
+
+    let mut first_error = None;
+    for result in futures::future::join_all(sends).await {
+        match result {
+            Ok(()) => {}
             Err(error) => {
                 if first_error.is_none() {
-                    first_error = Some(error);
+                    first_error = Some(error.into());
                 }
-            }
-        }
-    }
-
-    while let Some(result) = completions.next().await {
-        if let Err(error) = result {
-            if first_error.is_none() {
-                first_error = Some(error);
             }
         }
     }
@@ -1167,20 +1293,6 @@ async fn send_to_handles(
         return Err(error);
     }
     Ok(())
-}
-
-async fn wait_for_send_completion(
-    peer_id: ZakuraPeerId,
-    completion: oneshot::Receiver<Result<(), BoxError>>,
-) -> Result<(), BoxError> {
-    timeout(GOSSIP_FANOUT_PEER_TIMEOUT, completion)
-        .await
-        .map_err(|_| -> BoxError {
-            format!("Zakura gossip send timed out for peer {peer_id:?}").into()
-        })?
-        .map_err(|_| -> BoxError {
-            format!("Zakura outbound completion dropped for peer {peer_id:?}").into()
-        })?
 }
 
 /// Tower service that adapts legacy Zebra gossip requests onto Zakura streams.
@@ -1238,6 +1350,13 @@ impl LegacyRequestAdapter {
         }
     }
 
+    /// Create an adapter backed by the given Zakura supervisor and trace emitter.
+    pub fn new_with_trace(supervisor: ZakuraSupervisorHandle, trace: ZakuraTrace) -> Self {
+        Self {
+            client: ZakuraRequestClient::new_with_trace(supervisor, trace),
+        }
+    }
+
     #[cfg(test)]
     fn new_with_timeout(supervisor: ZakuraSupervisorHandle, request_timeout: Duration) -> Self {
         Self {
@@ -1252,7 +1371,7 @@ impl LegacyRequestAdapter {
         source: Option<PeerSource>,
     ) -> Result<Response, BoxError> {
         let frame = LegacyRequestFrame::from_request(request)?;
-        self.client.request(frame, source).await
+        self.client.request(frame, source, false).await
     }
 }
 
@@ -1269,8 +1388,9 @@ impl Service<Request> for LegacyRequestAdapter {
         let client = self.client.clone();
         Box::pin(async move {
             let source = request.inventory_source();
+            let retry_source_missing = source.is_some();
             let frame = LegacyRequestFrame::from_request(request)?;
-            client.request(frame, source).await
+            client.request(frame, source, retry_source_missing).await
         })
     }
 }
@@ -1329,11 +1449,27 @@ impl<L> ZakuraDualStackService<L> {
     ///
     /// `supervisor` must be the endpoint's supervisor so the first-seen cache is
     /// shared with the inbound sink.
+    #[cfg(test)]
     pub(crate) fn new(legacy: L, supervisor: ZakuraSupervisorHandle, legacy_enabled: bool) -> Self {
         Self {
             legacy,
             gossip: LegacyGossipAdapter::new(supervisor.clone()),
             request: LegacyRequestAdapter::new(supervisor),
+            legacy_enabled,
+        }
+    }
+
+    /// Wrap `legacy` with Zakura adapters and a trace emitter.
+    pub(crate) fn new_with_trace(
+        legacy: L,
+        supervisor: ZakuraSupervisorHandle,
+        legacy_enabled: bool,
+        trace: ZakuraTrace,
+    ) -> Self {
+        Self {
+            legacy,
+            gossip: LegacyGossipAdapter::new(supervisor.clone()),
+            request: LegacyRequestAdapter::new_with_trace(supervisor, trace),
             legacy_enabled,
         }
     }
@@ -1349,10 +1485,9 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Reserve readiness on every inner service we might dispatch to. The
-        // adapters are always ready; the legacy peer set is the only source of
-        // backpressure.
-        std::task::ready!(self.legacy.poll_ready(cx))?;
+        // The route is request-dependent, so legacy readiness is awaited inside
+        // the branches that actually use legacy. Source-aware Zakura requests
+        // must not block behind an empty or unready legacy peer set.
         std::task::ready!(self.gossip.poll_ready(cx))?;
         std::task::ready!(self.request.poll_ready(cx))?;
         Poll::Ready(Ok(()))
@@ -1377,12 +1512,7 @@ where
         let legacy_enabled = self.legacy_enabled;
         let mut gossip = self.gossip.clone();
         let mut request_adapter = self.request.clone();
-        // Consume the readiness reserved for `legacy` in `poll_ready`, leaving a
-        // fresh (un-reserved) clone behind for the next call. Dropping an unused
-        // ready clone returns its `Buffer` permit, so paths that skip `legacy`
-        // (e.g. Zakura-only inventory) don't leak readiness.
-        let legacy_replacement = self.legacy.clone();
-        let mut legacy = std::mem::replace(&mut self.legacy, legacy_replacement);
+        let mut legacy = self.legacy.clone();
 
         Box::pin(async move {
             match route {
@@ -1393,7 +1523,10 @@ where
                     let gossip_fut = gossip.call(request.clone());
                     let legacy_fut = async move {
                         if legacy_enabled {
-                            Some(legacy.call(request).await)
+                            Some(match legacy.ready().await {
+                                Ok(service) => service.call(request).await,
+                                Err(error) => Err(error),
+                            })
                         } else {
                             None
                         }
@@ -1408,6 +1541,9 @@ where
                     Ok(Response::Nil)
                 }
                 DualStackRoute::LegacyFirstThenZakura => {
+                    if matches!(request.inventory_source(), Some(PeerSource::Zakura(_))) {
+                        return request_adapter.call(request).await;
+                    }
                     if !legacy_enabled {
                         return request_adapter.call(request).await;
                     }
@@ -1415,10 +1551,9 @@ where
                     // even when it has no ready peer (e.g. every legacy peer was
                     // upgraded to Zakura). Bound the legacy attempt so we fall
                     // back to the Zakura path instead of blocking forever.
-                    let legacy_attempt = timeout(
-                        DUAL_STACK_LEGACY_INVENTORY_TIMEOUT,
-                        legacy.call(request.clone()),
-                    )
+                    let legacy_attempt = timeout(DUAL_STACK_LEGACY_INVENTORY_TIMEOUT, async {
+                        legacy.ready().await?.call(request.clone()).await
+                    })
                     .await;
                     match legacy_attempt {
                         Ok(Ok(response)) if !all_inventory_missing(&response) => Ok(response),
@@ -1434,7 +1569,7 @@ where
                         Err(_) => request_adapter.call(request).await,
                     }
                 }
-                DualStackRoute::Passthrough => legacy.call(request).await,
+                DualStackRoute::Passthrough => legacy.ready().await?.call(request).await,
             }
         })
     }
@@ -1445,14 +1580,21 @@ where
 pub struct ZakuraRequestClient {
     supervisor: ZakuraSupervisorHandle,
     request_timeout: Duration,
+    trace: ZakuraTrace,
 }
 
 impl ZakuraRequestClient {
     /// Create a client from a Zakura supervisor.
     pub fn new(supervisor: ZakuraSupervisorHandle) -> Self {
+        Self::new_with_trace(supervisor, ZakuraTrace::noop())
+    }
+
+    /// Create a client from a Zakura supervisor and trace emitter.
+    pub fn new_with_trace(supervisor: ZakuraSupervisorHandle, trace: ZakuraTrace) -> Self {
         Self {
             supervisor,
             request_timeout: LEGACY_REQUEST_TIMEOUT,
+            trace,
         }
     }
 
@@ -1461,6 +1603,7 @@ impl ZakuraRequestClient {
         Self {
             supervisor,
             request_timeout,
+            trace: ZakuraTrace::noop(),
         }
     }
 
@@ -1468,13 +1611,14 @@ impl ZakuraRequestClient {
         &self,
         frame: LegacyRequestFrame,
         source: Option<PeerSource>,
+        retry_source_missing: bool,
     ) -> Result<Response, BoxError> {
         let preferred = match source {
             Some(PeerSource::Zakura(peer_id)) => Some(peer_id),
             _ => None,
         };
 
-        let handles = self.supervisor.outbound_peer_handles().await;
+        let handles = self.ready_handles().await?;
         let Some(primary) = select_handle(&handles, preferred.as_ref()) else {
             return Err("no ready Zakura peer for legacy inventory request".into());
         };
@@ -1487,6 +1631,11 @@ impl ZakuraRequestClient {
             Ok(response) if !all_inventory_missing(&response) => Ok(response),
             Ok(response) => {
                 let Some(fallback) = select_fallback_handle(&handles, primary.peer_id()) else {
+                    if retry_source_missing && preferred.is_some() {
+                        return self
+                            .retry_source_missing(primary, frame, request_kind, response)
+                            .await;
+                    }
                     return Ok(response);
                 };
                 self.request_one(fallback, frame, request_kind)
@@ -1502,6 +1651,47 @@ impl ZakuraRequestClient {
         }
     }
 
+    async fn retry_source_missing(
+        &self,
+        handle: ZakuraPeerHandle,
+        frame: LegacyRequestFrame,
+        request_kind: LegacyRequestKind,
+        initial_response: Response,
+    ) -> Result<Response, BoxError> {
+        let mut last_response = initial_response;
+        for _ in 0..SOURCE_INVENTORY_MISSING_RETRIES {
+            sleep(SOURCE_INVENTORY_MISSING_RETRY_DELAY).await;
+            match self
+                .request_one(handle.clone(), frame.clone(), request_kind)
+                .await
+            {
+                Ok(response) if !all_inventory_missing(&response) => return Ok(response),
+                Ok(response) => last_response = response,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(last_response)
+    }
+
+    async fn ready_handles(&self) -> Result<Vec<ZakuraPeerHandle>, BoxError> {
+        let mut registered = self.supervisor.subscribe();
+
+        timeout(LEGACY_REQUEST_READY_TIMEOUT, async {
+            loop {
+                let handles = self.supervisor.outbound_peer_handles().await;
+                if !handles.is_empty() {
+                    return Ok(handles);
+                }
+
+                if registered.changed().await.is_err() {
+                    return Err("Zakura peer set closed before a peer was ready".into());
+                }
+            }
+        })
+        .await
+        .map_err(|_| -> BoxError { "no ready Zakura peer for legacy inventory request".into() })?
+    }
+
     async fn request_one(
         &self,
         handle: ZakuraPeerHandle,
@@ -1510,8 +1700,16 @@ impl ZakuraRequestClient {
     ) -> Result<Response, BoxError> {
         let request_id = NEXT_LEGACY_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         let frame = frame.encode_frame()?;
+        trace_legacy_request_start(
+            &self.trace,
+            "outbound.request",
+            Some(handle.peer_id()),
+            request_id,
+            request_kind,
+            frame.message_type,
+        );
         let started_at = Instant::now();
-        let response = timeout(
+        let response = match timeout(
             self.request_timeout,
             handle.request(
                 ZAKURA_STREAM_LEGACY_REQUESTS,
@@ -1522,19 +1720,63 @@ impl ZakuraRequestClient {
             ),
         )
         .await
-        .map_err(|_| -> BoxError {
-            format!(
-                "Zakura legacy request timed out for peer {:?}",
-                handle.peer_id()
-            )
-            .into()
-        })??;
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                trace_legacy_request_error(
+                    &self.trace,
+                    "outbound.error",
+                    Some(handle.peer_id()),
+                    request_id,
+                    request_kind.command(),
+                    error.to_string(),
+                );
+                return Err(error);
+            }
+            Err(_) => {
+                let error: BoxError = format!(
+                    "Zakura legacy request timed out for peer {:?}",
+                    handle.peer_id()
+                )
+                .into();
+                trace_legacy_request_error(
+                    &self.trace,
+                    "outbound.error",
+                    Some(handle.peer_id()),
+                    request_id,
+                    request_kind.command(),
+                    error.to_string(),
+                );
+                return Err(error);
+            }
+        };
         let mut response =
-            LegacyResponseCodec::decode_response(request_id, request_kind, response)?;
+            match LegacyResponseCodec::decode_response(request_id, request_kind, response) {
+                Ok(response) => response,
+                Err(error) => {
+                    trace_legacy_request_error(
+                        &self.trace,
+                        "outbound.decode_error",
+                        Some(handle.peer_id()),
+                        request_id,
+                        request_kind.command(),
+                        error.to_string(),
+                    );
+                    return Err(error.into());
+                }
+            };
         if request_kind == LegacyRequestKind::Ping {
             // The responder can only acknowledge a Ping; the requester stamps the RTT.
             response = Response::Pong(started_at.elapsed());
         }
+        trace_legacy_request_response(
+            &self.trace,
+            "outbound.response",
+            Some(handle.peer_id()),
+            request_id,
+            request_kind.command(),
+            &response,
+        );
         Ok(response)
     }
 }
@@ -1569,16 +1811,118 @@ fn select_fallback_handle(
 fn all_inventory_missing(response: &Response) -> bool {
     match response {
         Response::Blocks(blocks) => {
-            !blocks.is_empty() && blocks.iter().all(|block| block.is_missing())
+            blocks.is_empty() || blocks.iter().all(|block| block.is_missing())
         }
         Response::Transactions(transactions) => {
-            !transactions.is_empty()
-                && transactions
+            transactions.is_empty()
+                || transactions
                     .iter()
                     .all(|transaction| transaction.is_missing())
         }
+        Response::BlockHashes(hashes) => hashes.is_empty(),
+        Response::BlockHeaders(headers) => headers.is_empty(),
+        Response::TransactionIds(ids) => ids.is_empty(),
         _ => false,
     }
+}
+
+fn trace_legacy_request_start(
+    trace: &ZakuraTrace,
+    event: &'static str,
+    peer: Option<&ZakuraPeerId>,
+    request_id: u64,
+    request_kind: LegacyRequestKind,
+    message_type: u16,
+) {
+    trace.emit_with(LEGACY_REQUEST_TABLE, |row| {
+        insert_trace_str(row, "event", event);
+        insert_trace_peer(row, peer);
+        insert_trace_u64(row, "request_id", request_id);
+        insert_trace_str(row, "request", request_kind.command());
+        insert_trace_u64(row, "message_type", u64::from(message_type));
+    });
+}
+
+fn trace_legacy_request_response(
+    trace: &ZakuraTrace,
+    event: &'static str,
+    peer: Option<&ZakuraPeerId>,
+    request_id: u64,
+    request: &'static str,
+    response: &Response,
+) {
+    let (response_kind, item_count, missing_count) = response_summary(response);
+    trace.emit_with(LEGACY_REQUEST_TABLE, |row| {
+        insert_trace_str(row, "event", event);
+        insert_trace_peer(row, peer);
+        insert_trace_u64(row, "request_id", request_id);
+        insert_trace_str(row, "request", request);
+        insert_trace_str(row, "response", response_kind);
+        insert_trace_u64(row, "item_count", item_count);
+        insert_trace_u64(row, "missing_count", missing_count);
+    });
+}
+
+fn trace_legacy_request_error(
+    trace: &ZakuraTrace,
+    event: &'static str,
+    peer: Option<&ZakuraPeerId>,
+    request_id: u64,
+    request: &'static str,
+    error: String,
+) {
+    trace.emit_with(LEGACY_REQUEST_TABLE, |row| {
+        insert_trace_str(row, "event", event);
+        insert_trace_peer(row, peer);
+        insert_trace_u64(row, "request_id", request_id);
+        insert_trace_str(row, "request", request);
+        row.insert("error".to_string(), Value::String(error));
+    });
+}
+
+fn response_summary(response: &Response) -> (&'static str, u64, u64) {
+    match response {
+        Response::Blocks(blocks) => (
+            "Blocks",
+            bounded_u64(blocks.len()),
+            bounded_u64(blocks.iter().filter(|block| block.is_missing()).count()),
+        ),
+        Response::Transactions(transactions) => (
+            "Transactions",
+            bounded_u64(transactions.len()),
+            bounded_u64(
+                transactions
+                    .iter()
+                    .filter(|transaction| transaction.is_missing())
+                    .count(),
+            ),
+        ),
+        Response::BlockHashes(hashes) => ("BlockHashes", bounded_u64(hashes.len()), 0),
+        Response::BlockHeaders(headers) => ("BlockHeaders", bounded_u64(headers.len()), 0),
+        Response::TransactionIds(ids) => ("TransactionIds", bounded_u64(ids.len()), 0),
+        Response::Pong(_) => ("Pong", 1, 0),
+        Response::Nil => ("Nil", 0, 0),
+        response => (response.command(), 0, 0),
+    }
+}
+
+fn insert_trace_peer(row: &mut Map<String, Value>, peer: Option<&ZakuraPeerId>) {
+    row.insert(
+        "peer".to_string(),
+        peer.map_or(Value::Null, |peer| Value::String(trace_peer_label(peer))),
+    );
+}
+
+fn insert_trace_str(row: &mut Map<String, Value>, key: &'static str, value: &'static str) {
+    row.insert(key.to_string(), Value::String(value.to_string()));
+}
+
+fn insert_trace_u64(row: &mut Map<String, Value>, key: &'static str, value: u64) {
+    row.insert(key.to_string(), Value::Number(Number::from(value)));
+}
+
+fn bounded_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 #[derive(Clone, Debug)]
@@ -1614,6 +1958,8 @@ impl LegacyGossipForwarder {
 #[derive(Debug)]
 pub struct LegacyGossipSink {
     inbound_tx: mpsc::Sender<LegacyInboundWork>,
+    outbound: LegacyGossipOutbound,
+    trace: ZakuraTrace,
 }
 
 impl LegacyGossipSink {
@@ -1623,43 +1969,68 @@ impl LegacyGossipSink {
         Inbound: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
         Inbound::Future: Send + 'static,
     {
+        Self::spawn_with_trace(inbound, supervisor, ZakuraTrace::noop())
+    }
+
+    /// Spawn a bounded inbound worker with a trace emitter.
+    pub fn spawn_with_trace<Inbound>(
+        inbound: Inbound,
+        supervisor: ZakuraSupervisorHandle,
+        trace: ZakuraTrace,
+    ) -> Self
+    where
+        Inbound: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
+        Inbound::Future: Send + 'static,
+    {
         let (inbound_tx, inbound_rx) = mpsc::channel(LEGACY_GOSSIP_INBOUND_QUEUE);
         tokio::spawn(legacy_gossip_worker(
             inbound,
             inbound_rx,
-            LegacyGossipForwarder::new(supervisor),
+            LegacyGossipForwarder::new(supervisor.clone()),
+            trace.clone(),
         ));
-        Self { inbound_tx }
+        let outbound = outbound_for_supervisor(&supervisor);
+        Self {
+            inbound_tx,
+            outbound,
+            trace,
+        }
     }
 }
 
-impl InboundSink for LegacyGossipSink {
-    fn deliver(
-        &self,
+impl LegacyGossipSink {
+    fn enqueue_gossip_frame(
+        inbound_tx: &mpsc::Sender<LegacyInboundWork>,
         peer_id: ZakuraPeerId,
-        stream_kind: u16,
         frame: Frame,
-    ) -> Result<(), InboundSinkReject> {
-        if stream_kind != ZAKURA_STREAM_GOSSIP {
-            return Ok(());
-        }
-
-        let frame = LegacyGossipFrame::decode_frame(frame).map_err(InboundSinkReject::protocol)?;
-        match self
-            .inbound_tx
-            .try_send(LegacyInboundWork::Gossip(LegacyGossipInbound {
-                peer_id,
-                frame,
-            })) {
+    ) -> Result<(), SinkReject> {
+        let frame = LegacyGossipFrame::decode_frame(frame).map_err(SinkReject::protocol)?;
+        match inbound_tx.try_send(LegacyInboundWork::Gossip(LegacyGossipInbound {
+            peer_id,
+            frame,
+        })) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Full(_)) => {
                 debug!("legacy gossip inbound queue full: dropping frame");
                 Ok(())
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => Err(InboundSinkReject::local(
-                "legacy gossip inbound queue closed",
-            )),
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                Err(SinkReject::local("legacy gossip inbound queue closed"))
+            }
         }
+    }
+
+    fn deliver(
+        &self,
+        peer_id: ZakuraPeerId,
+        stream_kind: u16,
+        frame: Frame,
+    ) -> Result<(), SinkReject> {
+        if stream_kind != ZAKURA_STREAM_GOSSIP {
+            return Ok(());
+        }
+
+        Self::enqueue_gossip_frame(&self.inbound_tx, peer_id, frame)
     }
 
     fn request<'a>(
@@ -1669,45 +2040,140 @@ impl InboundSink for LegacyGossipSink {
         request_id: u64,
         max_frame_bytes: u32,
         frame: Frame,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Frame>, InboundSinkReject>> + Send + 'a>> {
+    ) -> BoxRunFuture<'a, Result<Vec<Frame>, SinkReject>> {
         Box::pin(async move {
             if stream_kind != ZAKURA_STREAM_LEGACY_REQUESTS {
-                return Err(InboundSinkReject::protocol(
+                return Err(SinkReject::protocol(
                     "unsupported legacy request stream kind",
                 ));
             }
 
-            let frame =
-                LegacyRequestFrame::decode_frame(frame).map_err(InboundSinkReject::protocol)?;
+            let frame = LegacyRequestFrame::decode_frame(frame).map_err(SinkReject::protocol)?;
             let (response_tx, response_rx) = oneshot::channel();
             match self
                 .inbound_tx
                 .try_send(LegacyInboundWork::Request(LegacyRequestInbound {
-                    peer_id,
+                    peer_id: peer_id.clone(),
+                    request_id,
                     frame,
                     response_tx,
                 })) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    return Err(InboundSinkReject::local(
-                        "legacy request inbound queue full",
-                    ));
+                    return Err(SinkReject::local("legacy request inbound queue full"));
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
-                    return Err(InboundSinkReject::local(
-                        "legacy request inbound queue closed",
-                    ));
+                    return Err(SinkReject::local("legacy request inbound queue closed"));
                 }
             }
 
             let response = timeout(LEGACY_REQUEST_TIMEOUT, response_rx)
                 .await
-                .map_err(|_| InboundSinkReject::local("legacy request service timed out"))?
-                .map_err(|_| InboundSinkReject::local("legacy request response dropped"))?
-                .map_err(InboundSinkReject::local)?;
+                .map_err(|_| SinkReject::local("legacy request service timed out"))?
+                .map_err(|_| SinkReject::local("legacy request response dropped"))?
+                .map_err(SinkReject::local)?;
+            trace_legacy_request_response(
+                &self.trace,
+                "inbound.response",
+                Some(&peer_id),
+                request_id,
+                response.command(),
+                &response,
+            );
             LegacyResponseCodec::encode_response(request_id, response, max_frame_bytes)
-                .map_err(InboundSinkReject::local)
+                .map_err(SinkReject::local)
         })
+    }
+}
+
+impl ZakuraService for LegacyGossipSink {
+    fn name(&self) -> &'static str {
+        "legacy-gossip"
+    }
+
+    fn streams(&self) -> &[Stream] {
+        legacy_gossip_streams()
+    }
+
+    fn add_peer(&self, mut peer: Peer) {
+        let Some((mut recv, send)) = peer.take_stream(ZAKURA_STREAM_GOSSIP) else {
+            return;
+        };
+        let outbound = self.outbound.clone();
+        let inbound_tx = self.inbound_tx.clone();
+        let peer_id = peer.id.clone();
+        let cancel_token = peer.cancel_token();
+
+        outbound.insert(peer_id.clone(), send.clone());
+        tokio::spawn({
+            let outbound = outbound.clone();
+            let peer_id = peer_id.clone();
+            async move {
+                if let Err(error) = outbound.replay_latest_block_to_peer(peer_id, send).await {
+                    debug!(?error, "latest Zakura block gossip replay failed");
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            loop {
+                let frame = tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        outbound.remove(&peer_id);
+                        return;
+                    }
+                    frame = recv.recv() => {
+                        let Some(frame) = frame else {
+                            outbound.remove(&peer_id);
+                            return;
+                        };
+                        frame
+                    }
+                };
+
+                match Self::enqueue_gossip_frame(&inbound_tx, peer_id.clone(), frame) {
+                    Ok(()) => {}
+                    Err(SinkReject::Protocol(error)) => {
+                        debug!(
+                            ?error,
+                            ?peer_id,
+                            "legacy gossip stream rejected protocol-invalid frame"
+                        );
+                        cancel_token.cancel();
+                        outbound.remove(&peer_id);
+                        return;
+                    }
+                    Err(SinkReject::Local(error)) => {
+                        debug!(?error, ?peer_id, "legacy gossip inbound queue closed");
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    fn remove_peer(&self, peer: &ZakuraPeerId) {
+        self.outbound.remove(peer);
+    }
+
+    fn deliver_frame(
+        &self,
+        peer_id: ZakuraPeerId,
+        stream_kind: u16,
+        frame: Frame,
+    ) -> Result<(), SinkReject> {
+        self.deliver(peer_id, stream_kind, frame)
+    }
+
+    fn request_frame<'a>(
+        &'a self,
+        peer_id: ZakuraPeerId,
+        stream_kind: u16,
+        request_id: u64,
+        max_frame_bytes: u32,
+        frame: Frame,
+    ) -> BoxRunFuture<'a, Result<Vec<Frame>, SinkReject>> {
+        self.request(peer_id, stream_kind, request_id, max_frame_bytes, frame)
     }
 }
 
@@ -1726,6 +2192,7 @@ struct LegacyGossipInbound {
 #[derive(Debug)]
 struct LegacyRequestInbound {
     peer_id: ZakuraPeerId,
+    request_id: u64,
     frame: LegacyRequestFrame,
     response_tx: oneshot::Sender<Result<Response, BoxError>>,
 }
@@ -1734,6 +2201,7 @@ async fn legacy_gossip_worker<Inbound>(
     mut inbound: Inbound,
     mut inbound_rx: mpsc::Receiver<LegacyInboundWork>,
     forwarder: LegacyGossipForwarder,
+    trace: ZakuraTrace,
 ) where
     Inbound: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
     Inbound::Future: Send + 'static,
@@ -1752,7 +2220,12 @@ async fn legacy_gossip_worker<Inbound>(
                     ));
                     continue;
                 };
-                tokio::spawn(handle_legacy_request(inbound.clone(), request, permit));
+                tokio::spawn(handle_legacy_request(
+                    inbound.clone(),
+                    request,
+                    permit,
+                    trace.clone(),
+                ));
             }
         }
     }
@@ -1799,16 +2272,27 @@ async fn handle_legacy_request<Inbound>(
     mut inbound: Inbound,
     request: LegacyRequestInbound,
     _permit: OwnedSemaphorePermit,
+    trace: ZakuraTrace,
 ) where
     Inbound: Service<Request, Response = Response, Error = BoxError> + Send + 'static,
     Inbound::Future: Send + 'static,
 {
     let command = request.frame.to_string();
+    let peer_id = request.peer_id.clone();
+    let request_kind = request.frame.kind();
     let Some(legacy_request) = request.frame.into_service_request() else {
         // Inbound legacy Ping is handled locally; the requester measures round-trip time.
         let _ = request.response_tx.send(Ok(Response::Pong(Duration::ZERO)));
         return;
     };
+    trace_legacy_request_start(
+        &trace,
+        "inbound.request",
+        Some(&peer_id),
+        request.request_id,
+        request_kind,
+        request_kind.message_type(),
+    );
     let ready = timeout(LEGACY_REQUEST_TIMEOUT, inbound.ready()).await;
     let result = match ready {
         Ok(Ok(service)) => timeout(LEGACY_REQUEST_TIMEOUT, service.call(legacy_request))
@@ -1818,6 +2302,17 @@ async fn handle_legacy_request<Inbound>(
         Ok(Err(error)) => Err(error),
         Err(_) => Err(format!("{command} inbound service readiness timed out").into()),
     };
+
+    if let Err(error) = &result {
+        trace_legacy_request_error(
+            &trace,
+            "inbound.error",
+            Some(&peer_id),
+            request.request_id,
+            request_kind.command(),
+            error.to_string(),
+        );
+    }
 
     if request.response_tx.send(result).is_err() {
         debug!(
@@ -2072,6 +2567,7 @@ mod tests {
         task::{Context, Poll},
     };
 
+    use futures::FutureExt;
     use tokio::sync::mpsc::UnboundedReceiver;
     use tower::ServiceExt;
     use zebra_chain::{
@@ -2082,8 +2578,9 @@ mod tests {
     use zebra_test::vectors::BLOCK_TESTNET_141042_BYTES;
 
     use crate::zakura::{
+        framed_channel,
         testkit::{HostilePeer, ZakuraTestNode},
-        ZakuraOutboundFrame,
+        ZAKURA_CAP_LEGACY_GOSSIP,
     };
 
     fn block_hash(byte: u8) -> block::Hash {
@@ -2410,7 +2907,7 @@ mod tests {
     ) -> Result<(ZakuraTestNode, UnboundedReceiver<Request>), BoxError> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let node = ZakuraTestNode::builder(seed)
-            .inbound_sink_from_supervisor(move |supervisor| {
+            .service_from_supervisor(move |supervisor| {
                 Arc::new(LegacyGossipSink::spawn(RequestRecorder { tx }, supervisor))
             })
             .spawn()
@@ -2420,7 +2917,7 @@ mod tests {
 
     async fn inventory_node(seed: u64, transaction: UnminedTx) -> Result<ZakuraTestNode, BoxError> {
         let node = ZakuraTestNode::builder(seed)
-            .inbound_sink_from_supervisor(move |supervisor| {
+            .service_from_supervisor(move |supervisor| {
                 Arc::new(LegacyGossipSink::spawn(
                     InventoryResponder { transaction },
                     supervisor,
@@ -2436,7 +2933,7 @@ mod tests {
         block: Arc<Block>,
     ) -> Result<ZakuraTestNode, BoxError> {
         let node = ZakuraTestNode::builder(seed)
-            .inbound_sink_from_supervisor(move |supervisor| {
+            .service_from_supervisor(move |supervisor| {
                 Arc::new(LegacyGossipSink::spawn(
                     BlockInventoryResponder { block },
                     supervisor,
@@ -2453,7 +2950,7 @@ mod tests {
     ) -> Result<(ZakuraTestNode, UnboundedReceiver<Request>), BoxError> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let node = ZakuraTestNode::builder(seed)
-            .inbound_sink_from_supervisor(move |supervisor| {
+            .service_from_supervisor(move |supervisor| {
                 Arc::new(LegacyGossipSink::spawn(
                     RecordingInventoryResponder { transaction, tx },
                     supervisor,
@@ -2477,7 +2974,7 @@ mod tests {
     > {
         let (pushed_tx, pushed_rx) = tokio::sync::mpsc::unbounded_channel();
         let node = ZakuraTestNode::builder(seed)
-            .inbound_sink_from_supervisor(move |supervisor| {
+            .service_from_supervisor(move |supervisor| {
                 Arc::new(LegacyGossipSink::spawn(
                     NormalNetworkResponder {
                         block,
@@ -2943,11 +3440,13 @@ mod tests {
             },
             inbound_rx,
             LegacyGossipForwarder::new(supervisor),
+            ZakuraTrace::noop(),
         ));
 
         inbound_tx
             .send(LegacyInboundWork::Request(LegacyRequestInbound {
                 peer_id: peer_id.clone(),
+                request_id: 1,
                 frame: LegacyRequestFrame::BlocksByHash(vec![block_hash(11)]),
                 response_tx: request_tx,
             }))
@@ -3135,35 +3634,30 @@ mod tests {
     async fn saturated_peer_does_not_block_honest_fanout() -> Result<(), BoxError> {
         let saturated_peer = ZakuraPeerId::new(vec![1; 32]).expect("test peer id is within bounds");
         let honest_peer = ZakuraPeerId::new(vec![2; 32]).expect("test peer id is within bounds");
-        let (saturated_tx, _saturated_rx) = mpsc::channel(1);
-        let saturated = ZakuraPeerHandle::new_for_tests(saturated_peer, saturated_tx);
-        let _held_completion =
-            saturated.try_send(ZAKURA_STREAM_GOSSIP, MSG_ADVERTISE_BLOCK, 0, vec![1])?;
+        let (saturated, _saturated_rx) = framed_channel(1);
+        saturated.try_send(Frame {
+            message_type: MSG_ADVERTISE_BLOCK,
+            flags: 0,
+            payload: vec![1],
+        })?;
 
-        let (honest_tx, mut honest_rx) = mpsc::channel(1);
-        let honest = ZakuraPeerHandle::new_for_tests(honest_peer, honest_tx);
+        let (honest, mut honest_rx) = framed_channel(1);
         let frame = Frame {
             message_type: MSG_ADVERTISE_BLOCK,
             flags: 0,
             payload: vec![7],
         };
 
-        let fanout = tokio::spawn(send_to_handles(vec![saturated, honest], frame, None));
+        let result = send_to_senders(
+            vec![(saturated_peer, saturated), (honest_peer, honest)],
+            frame,
+        )
+        .await;
         let outbound = tokio::time::timeout(Duration::from_secs(1), honest_rx.recv())
             .await?
             .expect("honest peer receives fanout");
-        let ZakuraOutboundFrame::Frame {
-            payload,
-            completion,
-            ..
-        } = outbound
-        else {
-            panic!("expected gossip outbound frame");
-        };
-        assert_eq!(payload, vec![7]);
-        let _ = completion.send(Ok(()));
+        assert_eq!(outbound.payload, vec![7]);
 
-        let result = fanout.await.expect("fanout task must not panic");
         assert!(
             result.is_err(),
             "saturated peer failure is reported after honest peer is attempted"
@@ -3172,24 +3666,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn new_peer_receives_latest_block_advertised_before_gossip_stream_ready(
+    ) -> Result<(), BoxError> {
+        let supervisor = ZakuraSupervisorHandle::new(991);
+        let broadcast = ZakuraGossipBroadcast::new(supervisor);
+        let block_hash = block_hash(91);
+
+        broadcast
+            .broadcast(LegacyGossipFrame::AdvertiseBlock(block_hash), None)
+            .await?;
+
+        let peer_id = ZakuraPeerId::new(vec![91; 32]).expect("test peer id is within bounds");
+        let (sender, mut receiver) = framed_channel(1);
+        broadcast.outbound.insert(peer_id.clone(), sender.clone());
+        broadcast
+            .outbound
+            .replay_latest_block_to_peer(peer_id, sender)
+            .await?;
+
+        let replayed = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await?
+            .expect("new peer receives latest block replay");
+        assert_eq!(
+            LegacyGossipFrame::decode_frame(replayed)?,
+            LegacyGossipFrame::AdvertiseBlock(block_hash)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn disconnected_peer_send_returns_error() -> Result<(), BoxError> {
         let peer_id = ZakuraPeerId::new(vec![9; 32]).expect("test peer id is within bounds");
-        let (tx, rx) = mpsc::channel(1);
+        let (disconnected, rx) = framed_channel(1);
         drop(rx);
-        let disconnected = ZakuraPeerHandle::new_for_tests(peer_id, tx);
         let frame = Frame {
             message_type: MSG_ADVERTISE_BLOCK,
             flags: 0,
             payload: vec![8],
         };
 
-        let error = send_to_handles(vec![disconnected], frame, None)
+        let error = send_to_senders(vec![(peer_id, disconnected)], frame)
             .await
             .expect_err("closed outbound queue reports an adapter error");
         assert!(
             error
                 .to_string()
-                .contains("Zakura outbound peer queue unavailable"),
+                .contains("Zakura gossip source queue unavailable"),
             "unexpected error: {error}"
         );
         Ok(())
@@ -3211,6 +3733,7 @@ mod tests {
             },
             inbound_rx,
             LegacyGossipForwarder::new(supervisor),
+            ZakuraTrace::noop(),
         ));
 
         inbound_tx
@@ -3256,7 +3779,11 @@ mod tests {
     #[test]
     fn inbound_queue_full_drops_without_rejecting_peer_but_malformed_rejects() {
         let (inbound_tx, _inbound_rx) = mpsc::channel(1);
-        let sink = LegacyGossipSink { inbound_tx };
+        let sink = LegacyGossipSink {
+            inbound_tx,
+            outbound: LegacyGossipOutbound::default(),
+            trace: ZakuraTrace::noop(),
+        };
         let peer_id = ZakuraPeerId::new(vec![4; 32]).expect("test peer id is within bounds");
         let frame = LegacyGossipFrame::AdvertiseBlock(block_hash(6))
             .encode_frame()
@@ -3742,7 +4269,9 @@ mod tests {
     async fn malformed_inbound_gossip_disconnects_peer() -> Result<(), BoxError> {
         let _guard = zebra_test::init();
         let (node, _rx) = legacy_node(31).await?;
-        let hostile = HostilePeer::connect_native(&node, 32).await?;
+        let hostile =
+            HostilePeer::connect_native_with_capabilities(&node, 32, ZAKURA_CAP_LEGACY_GOSSIP)
+                .await?;
         wait_registered_count(&node, 1).await?;
 
         hostile.send_frame(ZAKURA_STREAM_GOSSIP, vec![1]).await?;
@@ -4023,7 +4552,7 @@ mod tests {
     async fn dual_stack_advertise_fans_out_to_legacy_and_zakura() -> Result<(), BoxError> {
         let _guard = zebra_test::init();
         // node_a originates; node_b records gossip delivered over Zakura.
-        let node_a = ZakuraTestNode::builder(201).spawn().await?;
+        let (node_a, _rx_a) = legacy_node(201).await?;
         let (node_b, mut rx_b) = legacy_node(202).await?;
         node_a
             .connect_native(&node_b, Duration::from_secs(5))

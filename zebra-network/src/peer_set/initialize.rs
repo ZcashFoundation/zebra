@@ -111,6 +111,30 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    let (peer_set, address_book, misbehavior_tx, _zakura_endpoint) =
+        init_with_zakura_endpoint(config, inbound_service, latest_chain_tip, user_agent).await;
+
+    (peer_set, address_book, misbehavior_tx)
+}
+
+/// Initialize a peer set and expose the live Zakura endpoint (used by the
+/// legacy->Zakura upgrade handshake connector).
+async fn init_with_zakura_endpoint<S, C>(
+    config: Config,
+    inbound_service: S,
+    latest_chain_tip: C,
+    user_agent: String,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<(PeerSocketAddr, u32)>,
+    Option<crate::zakura::ZakuraEndpoint>,
+)
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
     let (tcp_listener, listen_addr) = if config.legacy_p2p {
         let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
         (Some(tcp_listener), listen_addr)
@@ -122,14 +146,16 @@ where
     // handshake builder consumes the original below. The factory only runs when
     // `v2_p2p` is enabled; otherwise the endpoint is `None` and the clone drops.
     let inbound_for_zakura_sink = inbound_service.clone();
-    let zakura_endpoint = crate::zakura::spawn_zakura_endpoint(&config, move |supervisor| {
-        Arc::new(crate::zakura::LegacyGossipSink::spawn(
-            inbound_for_zakura_sink,
-            supervisor,
-        )) as Arc<dyn crate::zakura::InboundSink>
-    })
-    .await
-    .expect("Zakura endpoint should start when P2P v2 is enabled");
+    let zakura_endpoint =
+        crate::zakura::spawn_zakura_endpoint(&config, move |supervisor, trace| {
+            Arc::new(crate::zakura::LegacyGossipSink::spawn_with_trace(
+                inbound_for_zakura_sink,
+                supervisor,
+                trace,
+            )) as Arc<dyn crate::zakura::Service>
+        })
+        .await
+        .expect("Zakura endpoint should start when P2P v2 is enabled");
 
     let (
         address_book,
@@ -349,10 +375,11 @@ where
 
     // Capture the supervisor before the endpoint is moved into the keep-alive
     // task, so we can back the dual-stack adapters with the same first-seen cache.
-    let zakura_supervisor = zakura_endpoint
+    let zakura_supervisor_and_trace = zakura_endpoint
         .as_ref()
-        .map(|endpoint| endpoint.supervisor());
+        .map(|endpoint| (endpoint.supervisor(), endpoint.trace()));
 
+    let returned_zakura_endpoint = zakura_endpoint.clone();
     if let Some(zakura_endpoint) = zakura_endpoint {
         task_handles.push(tokio::spawn(async move {
             let _zakura_endpoint = zakura_endpoint;
@@ -366,16 +393,25 @@ where
     // originated gossip and inventory fetches also flow over Zakura. The internal
     // candidate set and crawler keep using the unwrapped legacy peer set above;
     // only the service handed to the syncer/mempool/inbound becomes dual-stack.
-    let peer_set = match zakura_supervisor {
-        Some(supervisor) => {
-            let dual_stack =
-                crate::zakura::ZakuraDualStackService::new(peer_set, supervisor, config.legacy_p2p);
+    let peer_set = match zakura_supervisor_and_trace {
+        Some((supervisor, trace)) => {
+            let dual_stack = crate::zakura::ZakuraDualStackService::new_with_trace(
+                peer_set,
+                supervisor,
+                config.legacy_p2p,
+                trace,
+            );
             Buffer::new(BoxService::new(dual_stack), constants::PEERSET_BUFFER_SIZE)
         }
         None => peer_set,
     };
 
-    (peer_set, address_book, misbehavior_tx)
+    (
+        peer_set,
+        address_book,
+        misbehavior_tx,
+        returned_zakura_endpoint,
+    )
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and

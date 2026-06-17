@@ -172,4 +172,4 @@ zebra-rpc/qa/cache/
 # fuzzing artifacts
 zebra-chain/fuzz/artifacts
 zebra-chain/fuzz/corpus
-
+stako/**/*

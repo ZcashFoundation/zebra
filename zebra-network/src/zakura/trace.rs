@@ -60,6 +60,12 @@ pub const RATELIMIT_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     file_name: "ratelimit.jsonl",
 };
 
+/// Legacy compatibility request/response events.
+pub const LEGACY_REQUEST_TABLE: ZakuraTraceTable = ZakuraTraceTable {
+    table: "legacy_request",
+    file_name: "legacy_request.jsonl",
+};
+
 /// Cloneable Zakura trace emitter.
 #[derive(Clone, Debug)]
 pub struct ZakuraTrace {

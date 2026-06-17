@@ -13,7 +13,10 @@ use std::{
 use super::*;
 use crate::{
     peer_set::ActiveConnectionCounter,
-    zakura::{Frame, InboundSink, InboundSinkReject, ZakuraPeerId, ZakuraUpgradeOutcome},
+    zakura::{
+        Peer as ZakuraServicePeer, Service as ZakuraService, Stream, ZakuraPeerId,
+        ZakuraUpgradeOutcome,
+    },
 };
 use tokio::io::duplex;
 use tower::ServiceExt;
@@ -176,26 +179,29 @@ fn test_handshake_with_connector(
         .unwrap()
 }
 
-/// An inbound sink that drops every delivered frame, used to start a real Zakura
+/// A no-op service used to start a real Zakura
 /// endpoint in tests without wiring an application service.
 #[derive(Debug)]
 struct DropSink;
 
-impl InboundSink for DropSink {
-    fn deliver(
-        &self,
-        _peer_id: ZakuraPeerId,
-        _stream_kind: u16,
-        _frame: Frame,
-    ) -> Result<(), InboundSinkReject> {
-        Ok(())
+impl ZakuraService for DropSink {
+    fn name(&self) -> &'static str {
+        "drop"
     }
+
+    fn streams(&self) -> &[Stream] {
+        &[]
+    }
+
+    fn add_peer(&self, _peer: ZakuraServicePeer) {}
+
+    fn remove_peer(&self, _peer: &ZakuraPeerId) {}
 }
 
 /// Starts a real Zakura endpoint over loopback QUIC for an upgrade test.
 async fn start_test_zakura_endpoint() -> crate::zakura::ZakuraEndpoint {
-    crate::zakura::spawn_zakura_endpoint(&test_config(true), |_supervisor| {
-        Arc::new(DropSink) as Arc<dyn InboundSink>
+    crate::zakura::spawn_zakura_endpoint(&test_config(true), |_supervisor, _trace| {
+        Arc::new(DropSink) as Arc<dyn ZakuraService>
     })
     .await
     .expect("Zakura endpoint starts")

@@ -143,7 +143,8 @@ impl ZakuraNetworkId {
         }
     }
 
-    fn code(self) -> u32 {
+    /// Returns this network id's pinned wire value.
+    pub fn code(self) -> u32 {
         // Safe: `ZakuraNetworkId` has `#[repr(u32)]`, so the cast uses the pinned wire value.
         self as u32
     }
@@ -1566,8 +1567,10 @@ fn validate_initial_limits(
     limits: ZakuraInitialLimits,
     local: &ZakuraHandshakeConfig,
 ) -> Result<(), ZakuraRejectReason> {
+    // This negotiated ceiling is wider than most stream kinds need; per-kind
+    // frame handling applies the effective cap before payload allocation.
     if limits.max_frame_bytes == 0
-        || limits.max_frame_bytes > local.max_control_frame_bytes
+        || limits.max_frame_bytes > local.max_message_bytes
         || limits.max_message_bytes == 0
         || limits.max_message_bytes > local.max_message_bytes
         || limits.max_open_streams == 0
@@ -2155,6 +2158,21 @@ mod tests {
                 Err(ZakuraValidationError::ResourceLimit)
             );
         }
+    }
+
+    #[test]
+    fn initial_limits_allow_application_frames_above_control_cap() {
+        let local = local_config();
+        let limits = ZakuraInitialLimits {
+            max_frame_bytes: local.max_message_bytes,
+            max_message_bytes: local.max_message_bytes,
+            max_open_streams: local.max_open_streams,
+            max_inbound_queue_depth: local.max_inbound_queue_depth,
+            idle_timeout_millis: local.max_idle_timeout_millis,
+        };
+
+        assert_eq!(validate_initial_limits(limits, &local), Ok(()));
+        assert!(limits.max_frame_bytes > local.max_control_frame_bytes);
     }
 
     #[test]

@@ -1,16 +1,18 @@
 //! In-process Zakura test node built from the production handler.
 
-use std::{fmt, sync::Arc, time::Duration};
+use std::{fmt, net::SocketAddr, sync::Arc, time::Duration};
 
-use iroh::{endpoint::TransportConfig, protocol::Router, NodeAddr};
+use iroh::{endpoint::TransportConfig, protocol::Router, NodeAddr, NodeId};
 use tokio::{sync::Mutex, task::JoinHandle};
 use zebra_jsonl_trace::JsonlTracer;
 
 use super::{InboundRecorder, LocalEndpointFactory, WaitError};
 use crate::{
     zakura::{
-        InboundSink, ZakuraEndpoint, ZakuraHandshakeConfig, ZakuraLocalLimits, ZakuraPeerId,
-        ZakuraProtocolHandler, ZakuraSupervisorHandle, ZakuraTrace, P2P_V2_ALPN,
+        discovery::build_discovery_handle, service_registry, DiscoveryService, Service,
+        ZakuraDiscoveryHandle, ZakuraEndpoint, ZakuraHandshakeConfig, ZakuraLocalLimits,
+        ZakuraPeerId, ZakuraProtocolHandler, ZakuraServiceId, ZakuraSupervisorHandle, ZakuraTrace,
+        P2P_V2_ALPN,
     },
     BoxError, Config,
 };
@@ -20,6 +22,7 @@ use crate::{
 pub struct ZakuraTestNode {
     seed: u64,
     endpoint: ZakuraEndpoint,
+    discovery: ZakuraDiscoveryHandle,
     limits: ZakuraLocalLimits,
     recorder: InboundRecorder,
     dial_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -55,6 +58,33 @@ impl ZakuraTestNode {
     /// Bounded inbound recorder.
     pub fn recorder(&self) -> InboundRecorder {
         self.recorder.clone()
+    }
+
+    /// Native discovery runtime handle backing this node's discovery service.
+    pub fn discovery(&self) -> ZakuraDiscoveryHandle {
+        self.discovery.clone()
+    }
+
+    /// Spawn this node's discovery candidate dialer (book-driven outbound dials).
+    pub fn spawn_discovery_dialer(&self) -> JoinHandle<()> {
+        tokio::spawn(crate::zakura::discovery::run_native_discovery_dialer(
+            self.endpoint.clone(),
+            self.discovery.clone(),
+            self.limits.clone(),
+        ))
+    }
+
+    /// Insert `peer` as a trusted static discovery candidate (loopback allowed)
+    /// and teach iroh its route, so the candidate dialer can connect to it.
+    pub async fn insert_static_discovery_candidate(
+        &self,
+        peer: &ZakuraTestNode,
+    ) -> Result<NodeId, BoxError> {
+        let node_addr = peer.node_addr().await;
+        let node_id = node_addr.node_id;
+        self.endpoint.add_node_addr(node_addr.clone())?;
+        self.discovery.insert_static_candidate(node_addr).await?;
+        Ok(node_id)
     }
 
     /// Start a native dial to `peer` and wait until this node registers it.
@@ -138,9 +168,10 @@ pub struct ZakuraTestNodeBuilder {
     transport_config: Option<TransportConfig>,
     legacy_upgrade: bool,
     tracer: JsonlTracer,
-    inbound_sink: Option<Arc<dyn InboundSink>>,
-    inbound_sink_factory:
-        Option<Box<dyn FnOnce(ZakuraSupervisorHandle) -> Arc<dyn InboundSink> + Send>>,
+    service: Option<Arc<dyn Service>>,
+    service_factory: Option<Box<dyn FnOnce(ZakuraSupervisorHandle) -> Arc<dyn Service> + Send>>,
+    discovery_direct_addrs: Vec<SocketAddr>,
+    extra_advertised_services: Vec<ZakuraServiceId>,
 }
 
 impl fmt::Debug for ZakuraTestNodeBuilder {
@@ -152,8 +183,8 @@ impl fmt::Debug for ZakuraTestNodeBuilder {
             .field("legacy_upgrade", &self.legacy_upgrade)
             .field("tracer", &self.tracer)
             .field(
-                "inbound_sink",
-                &(self.inbound_sink.is_some() || self.inbound_sink_factory.is_some()),
+                "service",
+                &(self.service.is_some() || self.service_factory.is_some()),
             )
             .finish()
     }
@@ -173,9 +204,23 @@ impl ZakuraTestNodeBuilder {
             transport_config: None,
             legacy_upgrade: false,
             tracer: JsonlTracer::noop(),
-            inbound_sink: None,
-            inbound_sink_factory: None,
+            service: None,
+            service_factory: None,
+            discovery_direct_addrs: Vec::new(),
+            extra_advertised_services: Vec::new(),
         }
+    }
+
+    /// Advertise these direct addresses in this node's discovery self-record.
+    pub fn discovery_direct_addrs(mut self, direct_addrs: Vec<SocketAddr>) -> Self {
+        self.discovery_direct_addrs = direct_addrs;
+        self
+    }
+
+    /// Advertise an additional service id in this node's discovery self-record.
+    pub fn add_advertised_service(mut self, service: ZakuraServiceId) -> Self {
+        self.extra_advertised_services.push(service);
+        self
     }
 
     /// Override local limits.
@@ -204,18 +249,18 @@ impl ZakuraTestNodeBuilder {
         self
     }
 
-    /// Install a custom inbound sink instead of the default recorder.
-    pub fn inbound_sink(mut self, inbound_sink: Arc<dyn InboundSink>) -> Self {
-        self.inbound_sink = Some(inbound_sink);
+    /// Install a custom service instead of the default recorder.
+    pub fn service(mut self, service: Arc<dyn Service>) -> Self {
+        self.service = Some(service);
         self
     }
 
-    /// Install a custom inbound sink that needs this node's supervisor.
-    pub fn inbound_sink_from_supervisor(
+    /// Install a custom service that needs this node's supervisor.
+    pub fn service_from_supervisor(
         mut self,
-        factory: impl FnOnce(ZakuraSupervisorHandle) -> Arc<dyn InboundSink> + Send + 'static,
+        factory: impl FnOnce(ZakuraSupervisorHandle) -> Arc<dyn Service> + Send + 'static,
     ) -> Self {
-        self.inbound_sink_factory = Some(Box::new(factory));
+        self.service_factory = Some(Box::new(factory));
         self
     }
 
@@ -236,26 +281,44 @@ impl ZakuraTestNodeBuilder {
             .await?;
         let supervisor = ZakuraSupervisorHandle::new(self.limits.max_connections);
         let recorder = InboundRecorder::new(usize::from(self.limits.max_inbound_queue_depth));
-        let inbound_sink = if let Some(factory) = self.inbound_sink_factory {
+        let base_service = if let Some(factory) = self.service_factory {
             factory(supervisor.clone())
         } else {
-            self.inbound_sink
-                .unwrap_or_else(|| Arc::new(recorder.clone()))
+            self.service.unwrap_or_else(|| Arc::new(recorder.clone()))
         };
-        let handler = ZakuraProtocolHandler::new_with_sink_and_trace(
+        let network = Config::default().network;
+        let handshake_config = ZakuraHandshakeConfig::for_network(&network);
+        let mut advertised_services = crate::zakura::discovery::default_advertised_services();
+        advertised_services.extend(self.extra_advertised_services.clone());
+        let discovery = build_discovery_handle(
+            LocalEndpointFactory::secret_key(self.seed),
+            self.discovery_direct_addrs.clone(),
+            advertised_services,
+            &handshake_config,
+            self.limits.max_connections,
+            0,
+            supervisor.subscribe(),
+        )?;
+        let discovery_service =
+            Arc::new(DiscoveryService::new(discovery.clone())) as Arc<dyn Service>;
+        let registry = service_registry(&supervisor, base_service, discovery_service)?;
+        let handler = ZakuraProtocolHandler::new_with_registry_and_trace(
             supervisor.clone(),
-            ZakuraHandshakeConfig::for_network(&Config::default().network),
+            network.clone(),
+            handshake_config,
             self.limits.clone(),
-            inbound_sink,
+            registry,
             ZakuraTrace::new(self.tracer.clone(), seed_label(self.seed)),
         );
         let router = Router::builder(endpoint)
             .accept(P2P_V2_ALPN, handler.clone())
             .spawn();
+        let endpoint = ZakuraEndpoint::from_parts(router, supervisor, handler);
 
         Ok(ZakuraTestNode {
             seed: self.seed,
-            endpoint: ZakuraEndpoint::from_parts(router, supervisor, handler),
+            endpoint,
+            discovery,
             limits: self.limits,
             recorder,
             dial_tasks: Arc::new(Mutex::new(Vec::new())),
