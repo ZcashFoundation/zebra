@@ -1165,6 +1165,11 @@ fn activate_mempool_mainnet() -> Result<()> {
 /// This test might fail or timeout on slow or unreliable networks,
 /// so we don't run it by default. It also takes a lot longer than
 /// our 10 second target time for default tests.
+///
+// TODO: This test depends on real network peers and takes 58s–23min depending
+// on peer availability, causing flaky CI failures. Excluded from the
+// `all-tests` nextest profile; use the dedicated `sync-large-checkpoints-empty`
+// profile instead. Replace with regtest-based variants (#9941).
 #[test]
 #[ignore]
 fn sync_large_checkpoints_empty() -> Result<()> {
