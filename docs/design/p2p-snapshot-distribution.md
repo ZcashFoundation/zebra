@@ -1,8 +1,8 @@
 # P2P Distribution of Known-Hash Chunks, Note Commitment Trees, and the Unspent-Output Set
 
-Status: **DESIGN — implementation in progress.** Architecture and build order
-decided; component detail is being expanded (a parallel design workflow feeds
-this doc). Base: branch `ibd-engine`.
+Status: **IMPLEMENTED (snapshot-consume path dormant pending v2 asset
+re-emission).** Base: branch `ibd-engine`. See §8 for what landed, the remaining
+work, and how to manually test.
 
 ## 0. The architecture decision
 
@@ -243,3 +243,61 @@ set along the same rails.
 - Tree-load-instead-of-fold changes the commit path's trust model (the tree is
   fetched, not derived) — acceptable for checkpoint-verified blocks below
   `H_max`, but the injection point needs review.
+
+## 8. Implementation status, remaining work, and manual testing
+
+### 8.1 What landed (branch `ibd-engine`, committed, build + clippy + tests green)
+- **Network protocol** (`zebra-network`): `ShieldedPool`; internal
+  `Request`/`Response` + external `Message`/codec for ranged known-hash chunks
+  (`KnownHashChunkRange{index,offset,len}`), `NoteCommitmentTree{pool,height}`,
+  and `GetSnapshot` ranges (unspent-output + address-balance sets), all under the
+  2 MiB frame; `connection.rs` wiring; a `PeerServices` capability bit so only
+  supporting Zebra peers are asked; size-checked responses.
+- **State** (`zebra-state`): the `known_hash_chunk` rocksdb CF; chunk-v2 format
+  (`ZKH2`, deterministic-from-state, sparse updating-height roots) + parser; the
+  snapshot-consume write path (`SurvivorSet`, survivor-only `utxo_by_out_loc`
+  elision now crash-safe, H_max bulk-load of value pools + address balances,
+  direct supplied-tree write arm in the disk writer); the checkpoint
+  spend-validation lookup + `PrunedChain` removed; the gated consensus/RPC
+  write-thread split into a second DB.
+- **IBD** (`zebrad`): the engine's `CfHashSource` (chunk fetch → verify SHA vs
+  pinned hash → persist to CF), tree fetch-by-height + root verification +
+  lookahead ahead of the block frontier, snapshot bootstrap; `emit-snapshot` is
+  the release-time constants-updater. All snapshot-consume behavior is gated
+  (default off).
+
+### 8.2 Remaining work
+1. **Supplied-tree write-through (#10) — the throughput win is not yet active.**
+   Trees are fetched, verified, and buffered, but the pipelined checkpoint commit
+   folds the tree via `Chain::push` (in-memory non-finalized) *before* the disk
+   writer's supplied-tree arm, so downloaded trees are not actually used and the
+   state still folds. Wiring this correctly is architectural, not a one-liner,
+   because the in-memory fold also derives **note-commitment subtree** roots
+   (every 2^16 notes, served/checked) that the downloaded frontier blob does not
+   carry. Two viable designs: (a) also supply/serve subtree completions so the
+   injected tree is complete; or (b) commit checkpoint blocks **directly to the
+   finalized state** (the design's "straight to finalized"), bypassing the
+   in-memory fold entirely. Both touch the consensus-adjacent commit path and
+   want review before landing.
+2. **v2 asset re-emission.** The pinned `chunk_hashes` are currently the v1
+   SHA-256 of the bundled `.bin` files; a v2 chunk includes tree roots the v1
+   files lack, so real re-emission from a synced node (`emit-snapshot`) is
+   required to make the content-addressing trust root v2. The
+   `UNSPENT_OUTPUTS_HASH` / `ADDRESS_BALANCES_HASH` (and a value-pool-set hash)
+   constants likewise do not exist until emitted. Until then snapshot-consume is
+   dormant (it is gated on those hashes being `Some`).
+3. Sync-test-gated items: full multi-node P2P sync, split-on RPC parity at scale,
+   and the tree-load-vs-fold / elision throughput comparison.
+
+### 8.3 How to manually test
+- **Default path (unchanged):** a normal known-hash sync (`sync.known_hash_sync`)
+  behaves exactly as before — the snapshot-consume features are gated off. This
+  is directly testable.
+- **`emit-snapshot` constants-updater:** run it against the synced testnet/mainnet
+  state in `~/.cache/zebra` to recompute + edit the pinned constants (it edits
+  source in place, idempotent, prints a diff). This exercises the chunk
+  regeneration + the unspent/balance set hashing end to end against real state.
+- **P2P serve/request + snapshot-consume:** needs (2) above (re-emit so the
+  hashes are `Some`) plus at least one peer serving and a fresh-DB consumer with
+  `state.snapshot_consume` configured; correctness will hold but the tree-load
+  speedup waits on (1).
