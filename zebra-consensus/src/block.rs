@@ -106,6 +106,14 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&zs::KnownBlock> {
+        match self {
+            VerifyBlockError::Commit(commit_err) => commit_err.duplicate_location(),
+            _ => None,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         use VerifyBlockError::*;

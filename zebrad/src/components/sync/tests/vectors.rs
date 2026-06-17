@@ -5,7 +5,10 @@
 use std::{
     collections::{HashMap, HashSet},
     iter,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -18,7 +21,9 @@ use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
+use zebra_consensus::{
+    Config as ConsensusConfig, RouterError, VerifyBlockError, VerifyCheckpointError,
+};
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -1031,6 +1036,130 @@ async fn should_restart_sync_returns_false() {
         !restart,
         "duplicate commit block errors should NOT trigger sync restart"
     );
+}
+
+/// A scratch state can have finalized genesis tip metadata before
+/// `KnownBlock(genesis)` can find a block body. In that state, committing the
+/// downloaded genesis block returns duplicate/finalized; the genesis bootstrap
+/// loop must treat that as success instead of retrying forever.
+#[tokio::test]
+async fn request_genesis_accepts_duplicate_finalized_genesis() -> Result<(), crate::BoxError> {
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let state_requests = Arc::new(AtomicUsize::new(0));
+    let state_requests_in_service = Arc::clone(&state_requests);
+    let state_service = tower::service_fn(move |request| {
+        state_requests_in_service.fetch_add(1, Ordering::SeqCst);
+        async move {
+            assert_eq!(request, zs::Request::KnownBlock(block0_hash));
+            Ok::<_, crate::BoxError>(zs::Response::KnownBlock(None))
+        }
+    });
+
+    let peer_requests = Arc::new(AtomicUsize::new(0));
+    let peer_requests_in_service = Arc::clone(&peer_requests);
+    let peer_block = block0.clone();
+    let peer_set = tower::service_fn(move |request| {
+        peer_requests_in_service.fetch_add(1, Ordering::SeqCst);
+        let peer_block = peer_block.clone();
+        async move {
+            assert_eq!(
+                request,
+                zn::Request::BlocksByHash(iter::once(block0_hash).collect())
+            );
+            Ok::<_, crate::BoxError>(zn::Response::Blocks(vec![Available((peer_block, None))]))
+        }
+    });
+
+    let verifier_requests = Arc::new(AtomicUsize::new(0));
+    let verifier_requests_in_service = Arc::clone(&verifier_requests);
+    let verifier_service = tower::service_fn(move |request| {
+        verifier_requests_in_service.fetch_add(1, Ordering::SeqCst);
+        async move {
+            let zebra_consensus::Request::Commit(block) = request else {
+                unreachable!("no other verifier request is allowed")
+            };
+            assert_eq!(block.hash(), block0_hash);
+
+            let duplicate = zs::CommitBlockError::Duplicate {
+                hash_or_height: None,
+                location: zs::KnownBlock::Finalized,
+            };
+            let duplicate = zs::CommitCheckpointVerifiedError::from(duplicate);
+            let router_error = RouterError::Checkpoint {
+                source: Box::new(VerifyCheckpointError::CommitCheckpointVerified(Box::new(
+                    duplicate,
+                ))),
+            };
+
+            Err::<block::Hash, crate::BoxError>(Box::new(router_error) as crate::BoxError)
+        }
+    });
+
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+    let config = ZebradConfig {
+        consensus: consensus_config,
+        state: state_config,
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        peer_set,
+        verifier_service,
+        state_service,
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    tokio::time::timeout(Duration::from_secs(2), chain_sync.request_genesis())
+        .await
+        .expect("duplicate finalized genesis should not sleep and retry")
+        .expect("duplicate finalized genesis is accepted");
+
+    assert_eq!(state_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(peer_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(verifier_requests.load(Ordering::SeqCst), 1);
+
+    Ok(())
+}
+
+/// In-flight checkpoint downloads can finish after a later contiguous range has
+/// already reached finalized state. Those duplicate/finalized responses are
+/// stale work, not a reason to restart the whole sync loop.
+#[test]
+fn duplicate_finalized_checkpoint_block_does_not_restart_sync() -> Result<(), crate::BoxError> {
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let duplicate = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::Finalized,
+    };
+    let duplicate = zs::CommitCheckpointVerifiedError::from(duplicate);
+    let router_error = RouterError::Checkpoint {
+        source: Box::new(VerifyCheckpointError::CommitCheckpointVerified(Box::new(
+            duplicate,
+        ))),
+    };
+    let err = BlockDownloadVerifyError::Invalid {
+        error: router_error,
+        height: Height(1),
+        hash: block1_hash,
+        advertiser_addr: None,
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&err),
+        "duplicate finalized checkpoint work should not restart sync"
+    );
+
+    Ok(())
 }
 
 /// Verifies fix for GHSA-gvjc-3w7c-92jx: `AboveLookaheadHeightLimit` now has

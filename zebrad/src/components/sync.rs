@@ -1215,6 +1215,14 @@ where
                 Ok(Err(fatal_error)) => Err(fatal_error)?,
                 // Handle timeouts and block errors
                 Err(error) | Ok(Ok(Err(error))) => {
+                    if self.is_duplicate_finalized_genesis_error(&error) {
+                        info!(
+                            ?error,
+                            "genesis block is already finalized, continuing sync"
+                        );
+                        return Ok(());
+                    }
+
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
                         warn!(
@@ -1234,6 +1242,26 @@ where
         }
 
         Ok(())
+    }
+
+    fn is_duplicate_finalized_genesis_error(&self, error: &BlockDownloadVerifyError) -> bool {
+        match error {
+            BlockDownloadVerifyError::Invalid {
+                error,
+                height,
+                hash,
+                ..
+            } => {
+                *height == Height(0)
+                    && *hash == self.genesis_hash
+                    && Self::is_duplicate_finalized_error(error)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_duplicate_finalized_error(error: &zebra_consensus::RouterError) -> bool {
+        error.duplicate_location() == Some(&zs::KnownBlock::Finalized)
     }
 
     /// Try to download and verify the genesis block once.
@@ -1554,6 +1582,15 @@ where
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if Self::is_duplicate_finalized_error(error) =>
+            {
+                debug!(
+                    error = ?e,
+                    "block was already finalized, possibly from a previous sync run, continuing"
+                );
                 false
             }
 

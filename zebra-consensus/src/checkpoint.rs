@@ -1040,6 +1040,17 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns the state location for duplicate commit requests.
+    pub fn duplicate_location(&self) -> Option<&zs::KnownBlock> {
+        match self {
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .and_then(|error| error.duplicate_location()),
+            VerifyCheckpointError::VerifyBlock(block_error) => block_error.duplicate_location(),
+            _ => None,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
