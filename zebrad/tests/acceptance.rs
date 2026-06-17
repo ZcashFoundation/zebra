@@ -1203,9 +1203,11 @@ fn sync_large_checkpoints_empty() -> Result<()> {
     Ok(())
 }
 
-// TODO: We had `sync_large_checkpoints_empty` and `sync_large_checkpoints_mempool_testnet`,
-// but they were removed because the testnet is unreliable (#1222).
-// We should re-add them after we have more testnet instances (#1791).
+// TODO: This test and its removed variants (`sync_large_checkpoints_empty`,
+// `sync_large_checkpoints_mempool_testnet`) depend on real network peers and
+// fail ~15-20% of CI runs (#1222, #1791). This test is excluded from the
+// `all-tests` nextest profile; `activate_mempool_mainnet` covers mempool +
+// checkpoint sync with 1 block. Replace with regtest-based variants (#9941).
 
 /// Test if `zebrad` can run side by side with the mempool.
 /// This is done by running the mempool and syncing some checkpoints.
