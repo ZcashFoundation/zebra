@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-## [Zebra 5.1.2](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.2) - 2026-06-15
+## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-17
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
 against sustained consensus splits.
