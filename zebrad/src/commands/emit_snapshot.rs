@@ -203,7 +203,7 @@ impl EmitSnapshotCmd {
             chunk_hashes.push(hex::encode(Sha256::digest(&bytes)));
         }
 
-        self.correctness_gate(db, &chunk_hashes, num_chunks)?;
+        self.correctness_gate(db, &chunk_hashes)?;
 
         let (unspent_outputs_hash, unspent_outputs_count) = hash_unspent_outputs(db);
         let (address_balances_hash, address_balances_count) = hash_address_balances(db);
@@ -218,63 +218,42 @@ impl EmitSnapshotCmd {
         })
     }
 
-    /// Sanity-checks the recomputed chunk hashes against the bundled spec for
-    /// every span the spec already covers *fully*: a fully-covered span's bytes
-    /// (and therefore its hash) are a deterministic function of the chain only,
-    /// so a mismatch means the local chain disagrees with the pinned list and
-    /// the run must abort rather than overwrite the trust root with bad data.
+    /// Verifies that chunk generation is **deterministic**: each chunk is
+    /// regenerated a second time and its SHA-256 must be byte-identical to the
+    /// first generation. A non-deterministic chunk would make peers produce
+    /// different bytes for the same span, breaking content-addressing, so the run
+    /// aborts rather than pinning an unstable hash.
     ///
-    /// Spans the spec does not yet cover, and the spec's last (partial) span if
-    /// the tip has grown, are *expected* to differ — those are exactly the
-    /// hashes this command updates — so they are skipped here.
-    fn correctness_gate(
-        &self,
-        _db: &ZebraDb,
-        recomputed: &[String],
-        num_chunks: u64,
-    ) -> Result<()> {
-        let Some(spec) =
-            zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(&self.network)
-        else {
-            tracing::warn!(
-                network = %self.network,
-                "no bundled known-hash spec for this network; skipping the correctness gate",
-            );
-            return Ok(());
-        };
-
-        // The spec's last span may be partial (the previous tip mid-chunk), so
-        // only compare spans strictly before the spec's last chunk, and only
-        // those we actually recomputed.
-        let comparable = spec
-            .chunk_hashes
-            .len()
-            .saturating_sub(1)
-            .min(num_chunks as usize);
-
-        let mut matched = 0usize;
-        for (index, (recomputed_hash, pinned_hash)) in recomputed
-            .iter()
-            .zip(spec.chunk_hashes.iter())
-            .take(comparable)
-            .enumerate()
-        {
-            if recomputed_hash != pinned_hash {
+    /// This deliberately does **not** compare the recomputed hashes against the
+    /// currently-pinned `chunk_hashes` constants: those are the chunk **bytes'**
+    /// SHA-256 in whatever format is shipped, and this command's whole purpose is
+    /// to (re-)emit them in the v2 format
+    /// (`docs/design/p2p-snapshot-distribution.md`). The pinned constants may
+    /// still be the legacy v1 SHA-256, against which the v2 recomputation would
+    /// always mismatch; comparing like-for-v1-vs-v2 would falsely block the very
+    /// migration this command performs. Determinism is the property that must
+    /// hold regardless of format, so it is what the gate checks.
+    fn correctness_gate(&self, db: &ZebraDb, recomputed: &[String]) -> Result<()> {
+        for (index, first_hash) in recomputed.iter().enumerate() {
+            // `index` is bounded by the chunk count (derived from a u32 height),
+            // so it fits a u32.
+            let index = index as u32;
+            let bytes = zebra_state::known_hash_chunk_bytes(db, index).ok_or_else(|| {
+                eyre!("chunk {index} could not be regenerated for the determinism check")
+            })?;
+            let second_hash = hex::encode(Sha256::digest(&bytes));
+            if &second_hash != first_hash {
                 return Err(eyre!(
-                    "correctness gate failed for chunk {index}: the local chain regenerates \
-                     {recomputed_hash} but the bundled spec pins {pinned_hash} — the cached \
-                     state disagrees with the pinned known-hash list; refusing to overwrite \
-                     the constants",
+                    "correctness gate failed for chunk {index}: regenerating it produced \
+                     {second_hash} but the first generation was {first_hash} — chunk \
+                     generation is not deterministic, so refusing to pin an unstable hash",
                 ));
             }
-            matched += 1;
         }
 
         tracing::info!(
-            matched,
             total_recomputed = recomputed.len(),
-            "correctness gate passed: recomputed chunk hashes match the pinned spec for all \
-             fully-covered spans",
+            "correctness gate passed: every chunk regenerates byte-identically (deterministic)",
         );
 
         Ok(())
@@ -292,6 +271,19 @@ impl EmitSnapshotCmd {
 
         let mut changes = Vec::new();
 
+        // Decide the single max height to write into BOTH the known-hash spec's
+        // `max_height` and the checkpoint constant, so they never disagree. The
+        // known-hash list's `max_height` must equal the network's max checkpoint
+        // height (enforced by `for_network_coverage`), and the checkpoint
+        // constant is tied to the sparse `*-checkpoints.txt` list, which this
+        // command does not regenerate. So if the synced tip is above the pinned
+        // checkpoint coverage, we clamp the written max height to the current
+        // checkpoint constant (and warn) rather than advancing `max_height` past
+        // a checkpoint list that wasn't extended.
+        let checkpoint_path = src_root.join(CHECKPOINT_CONSTANTS_SRC);
+        let effective_max_height =
+            self.effective_max_height(&checkpoint_path, computed.tip_height, net)?;
+
         // 1. known_hashes.rs: chunk_hashes, max_height, and the two set-hash
         //    constants for the selected network.
         let known_hashes_path = src_root.join(KNOWN_HASHES_SRC);
@@ -305,7 +297,7 @@ impl EmitSnapshotCmd {
         changes.extend(change);
 
         let (s, change) =
-            editor::set_height_field(&source, net.spec_const, "max_height", computed.tip_height.0)?;
+            editor::set_height_field(&source, net.spec_const, "max_height", effective_max_height)?;
         source = s;
         changes.extend(change);
 
@@ -353,40 +345,32 @@ impl EmitSnapshotCmd {
             })?;
         }
 
-        // 2. checkpoint/constants.rs: only flag/handle if the known-hash max
-        //    height grew past the pinned checkpoint max height. The checkpoint
-        //    max-height constant must match the sparse `*-checkpoints.txt` list
-        //    (the `max_checkpoint_height_constants_match_lists` test), which this
-        //    command does NOT regenerate, so we never silently edit it.
-        self.handle_checkpoint_constant(&src_root, computed.tip_height, net, &mut changes)?;
+        // 2. checkpoint/constants.rs: write the same effective max height, so the
+        //    known-hash `max_height` and the checkpoint constant always agree.
+        self.handle_checkpoint_constant(&checkpoint_path, effective_max_height, net, &mut changes)?;
 
         Ok(changes)
     }
 
-    /// Handles the checkpoint max-height constant.
+    /// Returns the max height to write into **both** the known-hash spec's
+    /// `max_height` and the checkpoint constant, so they never disagree.
     ///
-    /// The checkpoint constant is tied to the sparse `*-checkpoints.txt` list,
-    /// not the every-block known-hash list, and the
-    /// `max_checkpoint_height_constants_match_lists` test enforces that tie.
-    /// This command regenerates the known-hash list but not the `.txt`
-    /// checkpoint list, so it must not edit the checkpoint constant past the
-    /// `.txt` coverage. We therefore only edit the checkpoint constant when the
-    /// new tip is **less than or equal to** the current checkpoint constant (a
-    /// no-op or a safe lowering is never needed in practice), and otherwise emit
-    /// a loud, actionable warning telling the maintainer to extend the
-    /// `*-checkpoints.txt` list first.
-    fn handle_checkpoint_constant(
+    /// The checkpoint constant is tied to the sparse `*-checkpoints.txt` list
+    /// (enforced by `max_checkpoint_height_constants_match_lists`), which this
+    /// command does not regenerate, and the known-hash list's `max_height` must
+    /// equal the network's max checkpoint height (`for_network_coverage`). So if
+    /// the synced tip is above the pinned checkpoint coverage, both constants are
+    /// clamped to the current checkpoint constant and a loud, actionable warning
+    /// tells the maintainer to extend the `.txt` list first; otherwise the tip is
+    /// used.
+    fn effective_max_height(
         &self,
-        src_root: &Path,
+        checkpoint_path: &Path,
         tip_height: Height,
         net: NetworkConsts,
-        changes: &mut Vec<Change>,
-    ) -> Result<()> {
-        let path = src_root.join(CHECKPOINT_CONSTANTS_SRC);
-        let source = std::fs::read_to_string(&path)
-            .map_err(|error| eyre!("could not read {}: {error}", path.display()))?;
-
-        // Parse the current checkpoint constant value to compare against the tip.
+    ) -> Result<u32> {
+        let source = std::fs::read_to_string(checkpoint_path)
+            .map_err(|error| eyre!("could not read {}: {error}", checkpoint_path.display()))?;
         let current = read_standalone_height(&source, net.checkpoint_const)?;
 
         if tip_height.0 > current {
@@ -396,22 +380,38 @@ impl EmitSnapshotCmd {
                 checkpoint_const = net.checkpoint_const,
                 "the synced tip is above the pinned checkpoint max height. The checkpoint \
                  constant is tied to the sparse {} list (enforced by \
-                 max_checkpoint_height_constants_match_lists) and is NOT edited here. Extend \
-                 that .txt list (e.g. with `zebra-checkpoints`) and update the constant \
-                 separately before release.",
+                 max_checkpoint_height_constants_match_lists) and is NOT advanced here, so the \
+                 known-hash max_height is clamped to it to keep the two consistent. Extend that \
+                 .txt list (e.g. with `zebra-checkpoints`) and re-run before release.",
                 net.checkpoint_txt,
             );
-            // Do not edit: leaving the constant consistent with the .txt list is
-            // safer than producing a source tree where the test fails.
-            return Ok(());
+            return Ok(current);
         }
 
-        // tip <= current: nothing to grow; set_standalone_height is a no-op when
-        // they already match (the common already-current case).
+        Ok(tip_height.0)
+    }
+
+    /// Writes `max_height` into the checkpoint max-height constant, keeping it in
+    /// lockstep with the known-hash `max_height`.
+    ///
+    /// `max_height` is the [`effective_max_height`](Self::effective_max_height),
+    /// already clamped to the checkpoint `.txt` coverage, so this never advances
+    /// the constant past that list. It is a no-op (no change recorded) when the
+    /// constant already matches.
+    fn handle_checkpoint_constant(
+        &self,
+        path: &Path,
+        max_height: u32,
+        net: NetworkConsts,
+        changes: &mut Vec<Change>,
+    ) -> Result<()> {
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| eyre!("could not read {}: {error}", path.display()))?;
+
         let (edited, change) =
-            editor::set_standalone_height(&source, net.checkpoint_const, tip_height.0)?;
+            editor::set_standalone_height(&source, net.checkpoint_const, max_height)?;
         if let Some(change) = change {
-            std::fs::write(&path, &edited)
+            std::fs::write(path, &edited)
                 .map_err(|error| eyre!("could not write {}: {error}", path.display()))?;
             changes.push(change);
         }

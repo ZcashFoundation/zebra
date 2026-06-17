@@ -701,18 +701,16 @@ fn snapshot_message_round_trip(msg: Message) {
 
 #[test]
 fn getkhchunk_message_round_trip() {
-    snapshot_message_round_trip(Message::GetKnownHashChunk { index: 0x1234_5678 });
-}
-
-#[test]
-fn khchunk_message_round_trip() {
-    // A non-trivial payload, exercising the length-delimited byte encoding.
-    snapshot_message_round_trip(Message::KnownHashChunk {
-        bytes: (0..4096).map(|i| i as u8).collect(),
+    snapshot_message_round_trip(Message::GetKnownHashChunk {
+        index: 0x1234_5678,
+        offset: 0xdead_beef_0000_0001,
+        len: 1_048_576,
     });
-
-    // An empty payload must also round-trip.
-    snapshot_message_round_trip(Message::KnownHashChunk { bytes: Vec::new() });
+    snapshot_message_round_trip(Message::GetKnownHashChunk {
+        index: 0,
+        offset: 0,
+        len: 0,
+    });
 }
 
 #[test]
@@ -794,10 +792,10 @@ fn getnctree_invalid_pool_byte_is_rejected() {
         .expect_err("an invalid ShieldedPool selector byte should be rejected");
 }
 
-/// A `khchunk` message whose length prefix exceeds the codec's maximum body
-/// length must be rejected, not allocated.
+/// A length-delimited snapshot reply (`snap`) whose length prefix exceeds the
+/// codec's maximum body length must be rejected, not allocated.
 #[test]
-fn khchunk_oversized_length_prefix_is_rejected() {
+fn snap_oversized_length_prefix_is_rejected() {
     let _init_guard = zebra_test::init();
 
     let mut codec = Codec::builder()
@@ -807,7 +805,7 @@ fn khchunk_oversized_length_prefix_is_rejected() {
     let mut bytes = BytesMut::new();
     codec
         .encode(
-            Message::KnownHashChunk {
+            Message::Snapshot {
                 bytes: vec![0u8; 16],
             },
             &mut bytes,
@@ -815,7 +813,9 @@ fn khchunk_oversized_length_prefix_is_rejected() {
         .expect("encoding should succeed");
 
     // Overwrite the u32 little-endian length prefix (first 4 body bytes) with a
-    // value larger than the maximum body length, leaving the body short.
+    // value larger than the maximum body length, leaving the body short. The
+    // prefix is bounded by both the codec max and the remaining body, so a tiny
+    // body claiming a huge length is rejected without a large allocation.
     bytes[HEADER_LEN..HEADER_LEN + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     let checksum = sha256d::Checksum::from(&bytes[HEADER_LEN..]);
     bytes[20..24].copy_from_slice(&checksum.0);

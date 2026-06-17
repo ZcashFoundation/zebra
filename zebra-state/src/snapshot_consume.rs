@@ -322,14 +322,47 @@ impl SnapshotConsumeState {
         self.survivor_set.as_ref()
     }
 
+    /// Returns the big-endian block height encoded in the first
+    /// [`HEIGHT_DISK_BYTES`] bytes of an on-disk [`OutputLocation`](crate::OutputLocation).
+    ///
+    /// The on-disk layout is a 3-byte big-endian height, then the transaction
+    /// and output indexes, so the height is the leading 3 bytes. A test
+    /// (`elision_is_bounded_by_h_max`) pins this against the canonical encoding.
+    fn output_location_height(loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> u32 {
+        // 3-byte big-endian height, zero-extended to a `u32`.
+        u32::from_be_bytes([0, loc_bytes[0], loc_bytes[1], loc_bytes[2]])
+    }
+
+    /// Returns `true` if the output at `loc_bytes` was created **above** the
+    /// snapshot height `H_max`.
+    ///
+    /// Such an output cannot appear in the `H_max` survivor set (the snapshot
+    /// was taken before it existed), so a survivor-set miss for it is *not*
+    /// evidence that it is a non-survivor — it just was not yet created. Eliding
+    /// it would drop a live output that sync continuing past `H_max` must keep,
+    /// so elision must be refused for these heights. See finding #6 /
+    /// `docs/design/p2p-snapshot-distribution.md` §3.3.
+    fn created_above_h_max(&self, loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> bool {
+        Self::output_location_height(loc_bytes) > self.h_max.0
+    }
+
     /// Returns whether the RPC **address-index and balance** writes for the
     /// output at `loc_bytes` should be elided.
     ///
     /// This is the unconditionally crash-safe elision: it returns `true` only
-    /// for non-survivor outputs and only when a survivor set is loaded. Those
-    /// column families are never read by spend resolution or consensus.
+    /// for non-survivor outputs created at or below `H_max`, and only when a
+    /// survivor set is loaded. Those column families are never read by spend
+    /// resolution or consensus.
+    ///
+    /// Outputs created **above** `H_max` are never elided: they cannot be in the
+    /// `H_max` survivor set (they did not exist yet), so a survivor-set miss for
+    /// them does not mean "non-survivor" — eliding them would drop live outputs
+    /// of blocks committed after the snapshot.
     pub fn elide_address_index(&self, loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> bool {
         match &self.survivor_set {
+            // An output above `H_max` is out of the survivor set's domain, so its
+            // absence is meaningless; never elide it.
+            Some(_) if self.created_above_h_max(loc_bytes) => false,
             Some(set) => !set.is_survivor_bytes(loc_bytes),
             None => false,
         }
@@ -339,14 +372,53 @@ impl SnapshotConsumeState {
     /// `loc_bytes` should be elided.
     ///
     /// Returns `true` when a survivor set is loaded, the output is a
-    /// non-survivor, **and** [`SnapshotConsumeConfig::elide_utxo_bytes`] is set
-    /// (the default in consume mode). This is crash-safe because the checkpoint
-    /// commit path no longer reads a spent output's value from `utxo_by_out_loc`
-    /// (see [the module docs](crate::snapshot_consume)). With the flag off the
-    /// full UTXO set is kept on disk.
+    /// non-survivor created at or below `H_max`, **and**
+    /// [`SnapshotConsumeConfig::elide_utxo_bytes`] is set (the default in consume
+    /// mode). This is crash-safe because the checkpoint commit path no longer
+    /// reads a spent output's value from `utxo_by_out_loc` (see [the module
+    /// docs](crate::snapshot_consume)). With the flag off the full UTXO set is
+    /// kept on disk. Outputs created above `H_max` are never elided (see
+    /// [`Self::elide_address_index`]).
     pub fn elide_utxo_byte(&self, loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> bool {
         self.elide_utxo_bytes && self.elide_address_index(loc_bytes)
     }
+}
+
+/// Errors loading the snapshot-consume state at database open
+/// ([`SnapshotConsumeState`]).
+#[derive(thiserror::Error, Debug)]
+pub enum SnapshotConsumeLoadError {
+    /// Snapshot-consume sync was configured against a database that already
+    /// holds blocks. AssumeUTXO sync must start from a fresh, from-genesis
+    /// database: a non-empty database may already hold the very outputs the
+    /// survivor set would mark as non-survivors, and after a restart the
+    /// in-memory spend-resolution cache is cold — both unsafe (see
+    /// `docs/design/utxo-elision.md` §4.3).
+    #[error(
+        "snapshot-consume (assumeUTXO) sync is configured, but the state database \
+         at height {tip_height:?} is not empty; it must start from a fresh \
+         from-genesis database (see docs/design/utxo-elision.md)"
+    )]
+    NonEmptyDatabase {
+        /// The finalized tip height of the non-empty database.
+        tip_height: Option<Height>,
+    },
+
+    /// The configured network does not match the database's network.
+    #[error(
+        "snapshot-consume (assumeUTXO) sync is configured for network {configured}, \
+         but the database is for network {database}"
+    )]
+    NetworkMismatch {
+        /// The network the snapshot-consume artifact / config is for.
+        configured: Network,
+        /// The network the database is for.
+        database: Network,
+    },
+
+    /// The configured survivor set could not be loaded or validated.
+    #[error("failed to load the configured snapshot-consume survivor set")]
+    SurvivorSet(#[from] SurvivorSetError),
 }
 
 /// Errors loading or validating a [`SurvivorSet`].
@@ -487,5 +559,49 @@ mod tests {
         let none = SnapshotConsumeState::from_parts(Network::Mainnet, Height(2), true, None);
         assert!(!none.elide_address_index(&non_survivor));
         assert!(!none.elide_utxo_byte(&non_survivor));
+    }
+
+    /// Outputs created above `H_max` are never elided, even though they are
+    /// absent from the survivor set: they did not exist when the snapshot was
+    /// taken, so a survivor-set miss is not evidence they are non-survivors.
+    /// This bounds elision so sync continuing past `H_max` keeps its live
+    /// outputs (finding #6).
+    #[test]
+    fn elision_is_bounded_by_h_max() {
+        let h_max = 100;
+
+        // A survivor at H_max, and a non-survivor created at or below H_max.
+        let survivor = loc(h_max, 0, 0);
+        let non_survivor_below = loc(h_max - 1, 0, 0);
+        // An output created above H_max (a block committed after the snapshot).
+        // It is necessarily absent from the survivor set.
+        let above_h_max = loc(h_max + 1, 0, 0);
+        // An output at exactly H_max that is not a survivor: still elidable.
+        let non_survivor_at_h_max = loc(h_max, 5, 0);
+
+        let bytes: Vec<u8> = survivor.to_vec();
+        let set = Arc::new(SurvivorSet::from_bytes(bytes).expect("single record loads"));
+        let consume =
+            SnapshotConsumeState::from_parts(Network::Mainnet, Height(h_max), true, Some(set));
+
+        // The height extractor matches the canonical on-disk encoding.
+        assert_eq!(
+            SnapshotConsumeState::output_location_height(&above_h_max),
+            h_max + 1,
+        );
+
+        // Survivor: never elided.
+        assert!(!consume.elide_address_index(&survivor));
+        assert!(!consume.elide_utxo_byte(&survivor));
+
+        // Non-survivor at or below H_max: elided (both kinds).
+        assert!(consume.elide_address_index(&non_survivor_below));
+        assert!(consume.elide_utxo_byte(&non_survivor_below));
+        assert!(consume.elide_address_index(&non_survivor_at_h_max));
+        assert!(consume.elide_utxo_byte(&non_survivor_at_h_max));
+
+        // Created above H_max: never elided, despite being absent from the set.
+        assert!(!consume.elide_address_index(&above_h_max));
+        assert!(!consume.elide_utxo_byte(&above_h_max));
     }
 }

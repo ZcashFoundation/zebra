@@ -579,12 +579,12 @@ impl Service<zn::Request> for Inbound {
             // from `zebra_state`. An unavailable or over-limit artifact returns
             // `zn::Response::NotFound`, never an error that would drop the peer.
             // See `docs/design/p2p-snapshot-distribution.md`.
-            zn::Request::KnownHashChunk(index) => {
-                let request = zs::Request::KnownHashChunk(index);
+            zn::Request::KnownHashChunkRange { index, offset, len } => {
+                let request = zs::Request::KnownHashChunkRange { index, offset, len };
                 state.clone().oneshot(request).map_ok(|resp| match resp {
-                    zs::Response::KnownHashChunk(Some(bytes)) => zn::Response::KnownHashChunk(bytes.into()),
-                    zs::Response::KnownHashChunk(None) => zn::Response::NotFound,
-                    _ => unreachable!("zebra-state should always respond to a `KnownHashChunk` request with a `KnownHashChunk` response"),
+                    zs::Response::SnapshotRange(Some(bytes)) => zn::Response::SnapshotRange(bytes.into()),
+                    zs::Response::SnapshotRange(None) => zn::Response::NotFound,
+                    _ => unreachable!("zebra-state should always respond to a `KnownHashChunkRange` request with a `SnapshotRange` response"),
                 })
                     .boxed()
             }

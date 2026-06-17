@@ -157,7 +157,18 @@ impl ZebraDb {
 
         // Resolve every spent output of this block from the consensus database.
         // The block is already durable there, so its inputs' outpoints all
-        // resolve to stored output locations and UTXOs.
+        // resolve to stored output locations and output values.
+        //
+        // The spent output's value is read from the transaction body via
+        // `output_by_location` (which reads `tx_by_loc`), NOT from
+        // `utxo_by_location` (which reads `utxo_by_out_loc`). The consensus
+        // commit deletes spent outputs from `utxo_by_out_loc`, so a cross-block
+        // spend (an output created in an earlier block and spent here) is already
+        // gone from the unspent set by the time this trailing indexer runs; the
+        // transaction body is immutable, so it always resolves. Reading the
+        // unspent set instead would silently drop every cross-block spend, making
+        // the split RPC balances/UTXOs/tx-ids diverge from the single-database
+        // path. See `docs/design/state-write-split.md`.
         let mut spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             HashMap::new();
         let mut out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> =
@@ -180,12 +191,17 @@ impl ZebraDb {
                 // resolved set does.
                 continue;
             };
-            let Some(ordered_utxo) = consensus_db.utxo_by_location(out_loc) else {
+            let Some(output) = consensus_db.output_by_location(&out_loc) else {
                 continue;
             };
-            spent_utxos_by_outpoint.insert(outpoint, ordered_utxo.utxo.clone());
+            // The trailing indexer never reads `Utxo::coinbase`/`height` to build
+            // the transparent index (only the output's value and address), so
+            // reconstruct the UTXO from the output location's height; `coinbase`
+            // does not affect the index bytes.
+            let utxo = transparent::Utxo::new(output, out_loc.height(), false);
+            spent_utxos_by_outpoint.insert(outpoint, utxo.clone());
             out_loc_by_outpoint.insert(outpoint, out_loc);
-            spent_utxos_by_out_loc.insert(out_loc, ordered_utxo.utxo);
+            spent_utxos_by_out_loc.insert(out_loc, utxo);
         }
 
         // The transparent addresses with changed balances/UTXOs.

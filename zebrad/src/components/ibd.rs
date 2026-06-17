@@ -31,7 +31,7 @@ use zebra_chain::{
     block,
     chain_tip::ChainTip,
     parameters::{
-        known_hashes::{KnownHashError, KnownHashList, KnownHashListSpec},
+        known_hashes::{KnownHashError, KnownHashList, KnownHashListSpec, HASHES_PER_CHUNK},
         Network,
     },
 };
@@ -333,7 +333,14 @@ where
             // bundled `.bin` list directly. Both paths run the same generic
             // engine over a `HashSource`.
             let run_result = if self.config.snapshot_consume_sync {
-                let source = CfHashSource::new(spec, list);
+                // The CF-backed source fetches chunks through the peer set and
+                // reads/persists them through the state; it has no v1 `.bin`
+                // fallback (the `list` opened above is unused in this mode — it
+                // carries no per-height tree roots and could silently disagree
+                // with the v2 chunks).
+                let _ = list;
+                let source =
+                    CfHashSource::new(spec, self.peer_set.clone(), self.state.clone());
                 Self::bootstrap_and_run_engine(
                     self.network.clone(),
                     self.peer_set.clone(),
@@ -437,18 +444,19 @@ where
 
     /// Primes the snapshot-consume source and runs the engine.
     ///
-    /// Before syncing, fetches and verifies the known-hash chunks covering the
-    /// active window (so the engine has hashes, size hints, and tree roots for
-    /// the heights it is about to fetch). Each chunk is content-addressed against
-    /// its pinned SHA-256 (design doc `p2p-snapshot-distribution.md`); a chunk
-    /// that no peer can serve, or that fails verification, surfaces as a
-    /// retryable error so the supervisor restarts the bootstrap.
+    /// Before syncing, fetches and verifies the known-hash chunk(s) covering the
+    /// first window (so the engine has hashes, size hints, and tree roots for the
+    /// heights it is about to fetch). Each chunk is content-addressed against its
+    /// pinned SHA-256 and persisted to the `known_hash_chunk` column family
+    /// (design doc `p2p-snapshot-distribution.md`); a chunk that no peer can
+    /// serve, or that fails verification, surfaces as a retryable error so the
+    /// supervisor restarts the bootstrap.
     ///
-    /// The unspent-output and address-balance set downloads (verified against
-    /// their pinned hashes and handed to the state's survivor filter and balance
-    /// loader) and the per-height tree fetch/inject are sequenced by the engine's
-    /// fetch rails; see the stage follow-ups. This priming step covers the chunk
-    /// hashes the engine needs to even issue its first block fetches.
+    /// As the commit frontier advances, the engine re-primes the covering chunks
+    /// itself through [`HashSource::ensure_covers`](engine::HashSource::ensure_covers)
+    /// on each refill pass, so the lookups keep working across chunk boundaries;
+    /// this bootstrap step only primes the very first window so a chunk-unavailable
+    /// failure is surfaced before the engine starts.
     ///
     /// Takes owned service clones (like [`build_and_run_engine`]) so the future
     /// is `Send`.
@@ -463,32 +471,27 @@ where
         cache_dir: PathBuf,
         config: Config,
         next_commit: block::Height,
-        mut source: CfHashSource,
+        mut source: CfHashSource<ZN, ZS>,
     ) -> Result<IbdOutcome, engine::EngineError> {
-        // Prime the chunk covering the first uncommitted height, and the next
-        // one, so the engine's window (which spans at most two chunks, design doc
-        // §6.4) has hashes before any block fetch is issued.
-        let first_index = consume::chunk_index_for_height(next_commit);
-        // `chunk_hashes.len() >= 1` for a valid spec, so the cast and subtraction
-        // are safe; the count is far below u32::MAX.
-        let max_index = source.spec().chunk_hashes.len().saturating_sub(1) as u32;
+        // Prime the chunk(s) covering the first uncommitted height, so the
+        // engine's first window has hashes before any block fetch is issued. The
+        // window spans at most two chunks (design doc §6.4); `ensure_covers`
+        // covers from `next_commit` through the next chunk's first height.
+        let cover_end = block::Height(next_commit.0.saturating_add(HASHES_PER_CHUNK));
 
-        for index in first_index..=max_index.min(first_index + 1) {
-            if let Err(error) = source
-                .ensure_chunk(&peer_set, &state, index, SNAPSHOT_FETCH_ATTEMPTS)
-                .await
-            {
-                // A chunk we cannot fetch or verify is retryable: a peer may
-                // serve it on a later restart, and the bundled `.bin` fallback
-                // still backs `hash`/`size_hint` for cold start.
-                warn!(
-                    %error,
-                    index,
-                    "failed to prime a known-hash chunk for snapshot-consume sync; \
-                     the engine will fall back to the bundled list for cold start",
-                );
-                return Err(engine::EngineError::List(Box::new(error)));
-            }
+        if let Err(error) = source
+            .ensure_covers(next_commit, cover_end, SNAPSHOT_FETCH_ATTEMPTS)
+            .await
+        {
+            // A chunk we cannot fetch or verify is retryable: a peer may serve it
+            // on a later restart.
+            warn!(
+                %error,
+                ?next_commit,
+                "failed to prime a known-hash chunk for snapshot-consume sync; \
+                 the supervisor will restart the bootstrap",
+            );
+            return Err(engine::EngineError::List(Box::new(error)));
         }
 
         Self::build_and_run_engine(

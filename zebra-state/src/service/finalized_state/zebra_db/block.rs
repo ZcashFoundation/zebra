@@ -297,6 +297,36 @@ impl ZebraDb {
             .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
     }
 
+    /// Returns the [`transparent::Output`] stored at `output_location` by reading
+    /// the transaction body from `tx_by_loc`, regardless of whether the output is
+    /// still unspent.
+    ///
+    /// Unlike [`utxo_by_location`](ZebraDb::utxo_by_location), which reads
+    /// `utxo_by_out_loc` and therefore returns `None` once an output is spent
+    /// (the consensus commit deletes the entry), this reads the immutable
+    /// transaction body, so it resolves the output value of any output that has
+    /// ever existed — including one already spent in an earlier committed block.
+    ///
+    /// Used by the trailing RPC indexer (the consensus / RPC write split) to
+    /// resolve a block's spent outputs from the consensus database after that
+    /// database has already deleted those outputs from its unspent set.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn output_by_location(
+        &self,
+        output_location: &OutputLocation,
+    ) -> Option<transparent::Output> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction: Transaction = self
+            .db
+            .zs_get(&tx_by_loc, &output_location.transaction_location())?;
+
+        transaction
+            .outputs()
+            .get(output_location.output_index().as_usize())
+            .cloned()
+    }
+
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
     #[allow(clippy::unwrap_in_result)]
     pub fn transactions_by_height(
@@ -786,7 +816,19 @@ impl DiskWriteBatch {
         // per-block value-pool derivation (it loads the verified final value
         // pools at H_max instead, and the spent values needed to derive them
         // here were not resolved). See `crate::snapshot_consume`.
-        if !skip_value_pool_derivation {
+        //
+        // The per-block `block_info` (block size + value pool) is written in
+        // *both* modes: it is needed by `getblock` RPC and the value-pool
+        // reconstruction reader, and `commit_finalized_direct` must not leave a
+        // hole in the `block_info` column family. In snapshot-consume mode the
+        // per-block value pool cannot be derived (the spends are unresolved), so
+        // `prepare_block_info_only_batch` records the correct block size with a
+        // placeholder (zero) value pool; the authoritative chain value pool is
+        // the single `()`-keyed entry bulk-loaded at `H_max`
+        // (`bulk_load_chain_value_pools`). See `crate::snapshot_consume`.
+        if skip_value_pool_derivation {
+            self.prepare_block_info_only_batch(zebra_db, finalized);
+        } else {
             self.prepare_chain_value_pools_batch(
                 zebra_db,
                 finalized,

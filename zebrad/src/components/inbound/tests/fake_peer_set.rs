@@ -1153,21 +1153,27 @@ async fn inbound_serves_known_hash_chunk() {
     let r = setup_tx.send(setup_data);
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
-    // Chunk 0 is generated from the committed blocks and parses as v2. The
-    // finalized write that durably stores block 1 can lag the chain-tip update,
-    // so retry until the served chunk covers both blocks (bounded by a timeout).
+    // Chunk 0 is generated from the committed blocks and parses as v2. It is
+    // served ranged (a full v2 chunk exceeds the 2 MiB frame), so request a range
+    // that covers the whole small two-block chunk. The finalized write that
+    // durably stores block 1 can lag the chain-tip update, so retry until the
+    // served chunk covers both blocks (bounded by a timeout).
     let mut block_count = 0;
     for _ in 0..50 {
         let response = inbound_service
             .clone()
-            .oneshot(Request::KnownHashChunk(0))
+            .oneshot(Request::KnownHashChunkRange {
+                index: 0,
+                offset: 0,
+                len: zebra_state::MAX_SNAPSHOT_RANGE_BYTES as u32,
+            })
             .await
-            .expect("inbound service responds to a KnownHashChunk request");
+            .expect("inbound service responds to a KnownHashChunkRange request");
 
-        let Response::KnownHashChunk(bytes) = response else {
-            panic!("expected a KnownHashChunk response, got {response:?}");
+        let Response::SnapshotRange(bytes) = response else {
+            panic!("expected a SnapshotRange response, got {response:?}");
         };
-        let parsed = ParsedChunk::parse(&bytes).expect("served chunk parses as v2");
+        let parsed = ParsedChunk::parse(&bytes).expect("served chunk range parses as v2");
         block_count = parsed.block_count();
         if block_count == 2 {
             break;
@@ -1180,9 +1186,13 @@ async fn inbound_serves_known_hash_chunk() {
     // A chunk index above the tip is answered with NotFound, not an error.
     let response = inbound_service
         .clone()
-        .oneshot(Request::KnownHashChunk(u32::MAX))
+        .oneshot(Request::KnownHashChunkRange {
+            index: u32::MAX,
+            offset: 0,
+            len: zebra_state::MAX_SNAPSHOT_RANGE_BYTES as u32,
+        })
         .await
-        .expect("inbound service responds to an above-tip KnownHashChunk request");
+        .expect("inbound service responds to an above-tip KnownHashChunkRange request");
     assert_eq!(
         response,
         Response::NotFound,

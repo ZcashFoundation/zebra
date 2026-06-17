@@ -18,7 +18,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{self, Block},
-    serialization::SerializationError,
+    serialization::{SerializationError, MAX_PROTOCOL_MESSAGE_LEN},
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -51,6 +51,18 @@ mod peer_tx;
 #[cfg(test)]
 mod tests;
 
+/// Whether a snapshot-distribution reply carrying `payload_len` content bytes
+/// fits within the 2 MiB protocol frame once length-delimited.
+///
+/// The wire body is a 4-byte little-endian length prefix followed by the bytes,
+/// so the serialized body is `payload_len + 4`, which must not exceed
+/// [`MAX_PROTOCOL_MESSAGE_LEN`]. Used by the serve path to answer `snapnf`
+/// instead of attempting to encode an over-frame reply (which would error and
+/// drop the peer).
+fn snapshot_payload_fits(payload_len: usize) -> bool {
+    payload_len.saturating_add(4) <= MAX_PROTOCOL_MESSAGE_LEN
+}
+
 #[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
@@ -73,14 +85,13 @@ pub(super) enum Handler {
     },
     MempoolTransactionIds,
 
-    /// Awaiting the bytes (or a not-found reply) for a known-hash chunk request.
-    KnownHashChunk,
-
     /// Awaiting the bytes (or a not-found reply) for a note-commitment-tree request.
     NoteCommitmentTree,
 
-    /// Awaiting the bytes (or a not-found reply) for a snapshot range request
-    /// (the unspent-output set or the address-balance set).
+    /// Awaiting the bytes (or a not-found reply) for a content-addressed snapshot
+    /// range request: a known-hash chunk range, the unspent-output set, or the
+    /// address-balance set. All three reply with a `snap`
+    /// ([`Message::Snapshot`]) message.
     SnapshotRange,
 }
 
@@ -114,7 +125,6 @@ impl fmt::Display for Handler {
             ),
             Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
 
-            Handler::KnownHashChunk => "KnownHashChunk".to_string(),
             Handler::NoteCommitmentTree => "NoteCommitmentTree".to_string(),
             Handler::SnapshotRange => "SnapshotRange".to_string(),
         })
@@ -139,7 +149,6 @@ impl Handler {
 
             Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
 
-            Handler::KnownHashChunk => "KnownHashChunk".into(),
             Handler::NoteCommitmentTree => "NoteCommitmentTree".into(),
             Handler::SnapshotRange => "SnapshotRange".into(),
         }
@@ -445,10 +454,9 @@ impl Handler {
             // Snapshot-distribution responses. Each request maps to exactly one
             // reply message (the bytes) or a `snapnf` not-found. The bytes are
             // content-addressed, so the requester verifies them against the pinned
-            // constants; the connection just delivers them.
-            (Handler::KnownHashChunk, Message::KnownHashChunk { bytes }) => {
-                Handler::Finished(Ok(Response::KnownHashChunk(Bytes::from(bytes))))
-            }
+            // constants; the connection just delivers them. A known-hash chunk
+            // range, the unspent-output set, and the address-balance set all reply
+            // with a `snap` (`Message::Snapshot`) message handled here.
             (Handler::NoteCommitmentTree, Message::NoteCommitmentTree { bytes }) => {
                 Handler::Finished(Ok(Response::NoteCommitmentTree(Bytes::from(bytes))))
             }
@@ -456,7 +464,7 @@ impl Handler {
                 Handler::Finished(Ok(Response::SnapshotRange(Bytes::from(bytes))))
             }
             (
-                Handler::KnownHashChunk | Handler::NoteCommitmentTree | Handler::SnapshotRange,
+                Handler::NoteCommitmentTree | Handler::SnapshotRange,
                 Message::SnapshotNotFound,
             ) => Handler::Finished(Ok(Response::NotFound)),
 
@@ -1227,7 +1235,7 @@ where
             // supports it without taking down this connection.
             (
                 AwaitingRequest,
-                request @ (KnownHashChunk(_)
+                request @ (KnownHashChunkRange { .. }
                 | NoteCommitmentTree { .. }
                 | UnspentOutputs { .. }
                 | AddressBalances { .. }),
@@ -1246,11 +1254,14 @@ where
                 ))))
             }
 
-            (AwaitingRequest, KnownHashChunk(index)) => self
+            (AwaitingRequest, KnownHashChunkRange { index, offset, len }) => self
                 .peer_tx
-                .send(Message::GetKnownHashChunk { index })
+                .send(Message::GetKnownHashChunk { index, offset, len })
                 .await
-                .map(|()| Handler::KnownHashChunk),
+                // A chunk range is a content-addressed byte range, served as a
+                // `snap` (`Message::Snapshot`) reply, so it shares the
+                // `SnapshotRange` handler with the unspent/balance sets.
+                .map(|()| Handler::SnapshotRange),
 
             (AwaitingRequest, NoteCommitmentTree { pool, height }) => self
                 .peer_tx
@@ -1482,7 +1493,9 @@ where
             // Snapshot-distribution get-requests from a peer: map them to internal
             // requests so the inbound service can serve them from finalized state.
             // The reply (or `snapnf`) is produced by `drive_peer_request`.
-            Message::GetKnownHashChunk { index } => Request::KnownHashChunk(index).into(),
+            Message::GetKnownHashChunk { index, offset, len } => {
+                Request::KnownHashChunkRange { index, offset, len }.into()
+            }
             Message::GetNoteCommitmentTree { pool, height } => {
                 Request::NoteCommitmentTree { pool, height }.into()
             }
@@ -1496,8 +1509,7 @@ where
             // `Handler::process_message` while awaiting that response. If we see
             // one here, it was unsolicited or arrived for a canceled request, so
             // ignore it without dropping the connection.
-            Message::KnownHashChunk { .. }
-            | Message::NoteCommitmentTree { .. }
+            Message::NoteCommitmentTree { .. }
             | Message::Snapshot { .. }
             | Message::SnapshotNotFound => {
                 debug!(%msg, "got snapshot-distribution reply unsolicited or from canceled request");
@@ -1710,36 +1722,44 @@ where
             // single matching reply message back to the requesting peer. The bytes
             // are content-addressed, so the requester verifies them; the connection
             // only forwards them. `Response::NotFound` becomes a `snapnf` message.
-            Response::KnownHashChunk(bytes) => {
-                if let Err(e) = self
-                    .peer_tx
-                    .send(Message::KnownHashChunk {
-                        bytes: bytes.to_vec(),
-                    })
-                    .await
-                {
-                    self.fail_with(e).await
-                }
-            }
+            //
+            // Each reply is length-delimited (a 4-byte prefix + the bytes), so the
+            // serialized body is `bytes.len() + 4`. If that exceeds the 2 MiB
+            // protocol frame the codec's `encode` would error and drop the
+            // connection, so size-check first and answer `snapnf` instead — the
+            // inbound serve already bounds ranges under the frame, so this only
+            // ever fires on a serve bug, never on an honest range request.
             Response::NoteCommitmentTree(bytes) => {
-                if let Err(e) = self
-                    .peer_tx
-                    .send(Message::NoteCommitmentTree {
+                let message = if snapshot_payload_fits(bytes.len()) {
+                    Message::NoteCommitmentTree {
                         bytes: bytes.to_vec(),
-                    })
-                    .await
-                {
+                    }
+                } else {
+                    warn!(
+                        bytes = bytes.len(),
+                        "note-commitment-tree response exceeds the protocol frame; \
+                         answering snapnf instead of dropping the peer",
+                    );
+                    Message::SnapshotNotFound
+                };
+                if let Err(e) = self.peer_tx.send(message).await {
                     self.fail_with(e).await
                 }
             }
             Response::SnapshotRange(bytes) => {
-                if let Err(e) = self
-                    .peer_tx
-                    .send(Message::Snapshot {
+                let message = if snapshot_payload_fits(bytes.len()) {
+                    Message::Snapshot {
                         bytes: bytes.to_vec(),
-                    })
-                    .await
-                {
+                    }
+                } else {
+                    warn!(
+                        bytes = bytes.len(),
+                        "snapshot-range response exceeds the protocol frame; \
+                         answering snapnf instead of dropping the peer",
+                    );
+                    Message::SnapshotNotFound
+                };
+                if let Err(e) = self.peer_tx.send(message).await {
                     self.fail_with(e).await
                 }
             }

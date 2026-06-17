@@ -23,6 +23,8 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+use zebra_chain::parallel::tree::NoteCommitmentTrees;
+
 use crate::{
     service::finalized_state::FinalizedState,
     snapshot_consume::{SnapshotConsumeState, SurvivorSet},
@@ -60,7 +62,14 @@ fn fresh_state_with_genesis(network: &Network) -> (FinalizedState, Arc<Block>) {
 }
 
 /// Supplied-tree write round-trip: committing block 1 with its note commitment
-/// trees supplied writes the same on-disk trees as folding them normally.
+/// trees supplied produces the same on-disk trees as folding them normally.
+///
+/// Block 1 is in the pre-Sapling era, where the block header does not pin this
+/// block's note commitment trees, so the supplied trees are *refused* and folded
+/// instead (finding #27) — but the on-disk result is identical, which is what
+/// makes refusing-and-folding safe. The accept-and-verify path (Sapling era) and
+/// the reject-on-mismatch path are covered by
+/// [`super::super::supplied_trees_are_verifiable`]'s unit tests below.
 #[test]
 fn supplied_tree_write_round_trips() {
     let _init_guard = zebra_test::init();
@@ -254,7 +263,7 @@ fn snapshot_consume_h_max_parity() {
         .expect("bulk-load balances");
     consume_state
         .db
-        .bulk_load_chain_value_pools(baseline_pools)
+        .bulk_load_chain_value_pools(baseline_pools, Height(max_height))
         .expect("bulk-load value pools");
 
     // The snapshot-consume state at H_max must be byte-identical to the normal
@@ -277,6 +286,48 @@ fn snapshot_consume_h_max_parity() {
     assert_eq!(
         baseline_balances, consume_balances,
         "address balances are byte-identical at H_max",
+    );
+
+    // `block_info` must exist for every committed block even in snapshot-consume
+    // mode (finding #5): the per-block value-pool *derivation* is skipped, but
+    // the `block_info` entry (carrying the block size) is still written, so
+    // `getblock` RPC and value-pool reconstruction have it. The size must match
+    // the normally-committed block at every height; the tip's value pool is
+    // backfilled to the verified final pool at H_max
+    // (`bulk_load_chain_value_pools`), and sub-tip value pools are placeholders
+    // in consume mode (the already-accepted intermediate-RPC divergence).
+    for height in 0..=max_height {
+        let hash_or_height = crate::HashOrHeight::Height(Height(height));
+        let baseline_info = baseline_state
+            .db
+            .block_info(hash_or_height)
+            .unwrap_or_else(|| panic!("baseline block_info exists at height {height}"));
+        let consume_info = consume_state
+            .db
+            .block_info(hash_or_height)
+            .unwrap_or_else(|| panic!("consume block_info must exist at height {height}"));
+        assert_eq!(
+            baseline_info.size(),
+            consume_info.size(),
+            "block_info size matches at height {height}",
+        );
+    }
+
+    // The tip block's `block_info` value pool is backfilled to the verified
+    // final pool, so it matches the normal node at H_max.
+    let tip = crate::HashOrHeight::Height(Height(max_height));
+    assert_eq!(
+        baseline_state
+            .db
+            .block_info(tip)
+            .expect("baseline tip block_info")
+            .value_pools(),
+        consume_state
+            .db
+            .block_info(tip)
+            .expect("consume tip block_info")
+            .value_pools(),
+        "tip block_info value pool is backfilled to the final pool at H_max",
     );
 }
 
@@ -327,4 +378,59 @@ fn snapshot_consume_elision_never_misses_a_spend() {
             "block {height} must commit with elision on, got {result:?}",
         );
     }
+}
+
+/// Deserializes a mainnet block from its raw bytes.
+fn block_from_bytes(bytes: &[u8]) -> Arc<Block> {
+    bytes
+        .zcash_deserialize_into::<Arc<Block>>()
+        .expect("test vector block deserializes")
+}
+
+/// Supplied trees are only accepted where the block header directly pins them
+/// (the Sapling/Blossom era). For any other era the supplied trees are refused
+/// (`Ok(false)`), so the caller folds instead, and a malicious peer can never
+/// inject an unverified tree (finding #27). In the Sapling era a wrong supplied
+/// Sapling root is rejected with a fatal error.
+#[test]
+fn supplied_trees_are_only_accepted_when_header_pins_them() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // An empty supplied tree set. Its Sapling root is the empty-tree root, which
+    // does not match any real Sapling-era block header.
+    let empty_trees = NoteCommitmentTrees::default();
+
+    // Pre-Sapling (block 1): the header is a reserved field, not a Sapling root,
+    // so supplied trees are refused regardless of their contents.
+    let pre_sapling = block_from_bytes(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_ref());
+    assert!(
+        !FinalizedState::supplied_trees_are_verifiable(&pre_sapling, &empty_trees, &network)
+            .expect("pre-Sapling supplied trees are refused, not an error"),
+        "pre-Sapling supplied trees must be refused (folded), never accepted unverified",
+    );
+
+    // Heartwood (block 903,001): the header commits to the chain-history root,
+    // which does not pin this block's trees, so supplied trees are refused.
+    let heartwood = block_from_bytes(zebra_test::vectors::BLOCK_MAINNET_903001_BYTES.as_ref());
+    assert!(
+        !FinalizedState::supplied_trees_are_verifiable(&heartwood, &empty_trees, &network)
+            .expect("Heartwood supplied trees are refused, not an error"),
+        "Heartwood supplied trees must be refused (folded), never accepted unverified",
+    );
+
+    // Sapling era (block 419,201): the header pins the bare Sapling root, so a
+    // supplied tree whose root does not match is rejected with a fatal error
+    // (this is the injection guard the empty tree triggers).
+    let sapling = block_from_bytes(zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.as_ref());
+    let result = FinalizedState::supplied_trees_are_verifiable(&sapling, &empty_trees, &network);
+    let err =
+        result.expect_err("a Sapling-era supplied tree with the wrong root must be a fatal error");
+    // The inner error field is private, so assert on the `Debug` representation,
+    // which names the `SuppliedSaplingTreeRootMismatch` variant.
+    assert!(
+        format!("{err:?}").contains("SuppliedSaplingTreeRootMismatch"),
+        "the Sapling-era rejection must be a supplied-tree root mismatch, got {err:?}",
+    );
 }

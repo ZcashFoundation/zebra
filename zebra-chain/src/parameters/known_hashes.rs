@@ -85,11 +85,27 @@ const DEV_KNOWN_HASHES_DIR: &str =
 ///
 /// # Chunk file format
 ///
-/// A chunk holding `n` blocks is either `n × 32` bytes (one internal-order
-/// block hash per block), or `n × 33` bytes: the `n` hashes followed by one
-/// size-hint byte per block, in the same height order (design doc §6.2). The
-/// pinned SHA-256 constants distinguish the formats, so hints can ship
-/// per-chunk as size data becomes available.
+/// [`chunk_hashes`](Self::chunk_hashes) is the SHA-256 of each chunk's bytes,
+/// whatever their format: the loader hashes the raw file and compares it to the
+/// pinned constant, so the integrity check is format-agnostic. Two formats are
+/// accepted:
+///
+/// - **v2** ([`chunk_v2`](super::chunk_v2)): a `ZKH2`-prefixed framing carrying
+///   the block hashes, optional per-block size hints, and the sparse
+///   sapling/orchard tree-root updates. This is the **content-addressing trust
+///   root** for P2P distribution — peers regenerate v2 chunks from their state
+///   and downloaders verify them against `chunk_hashes`
+///   (`docs/design/p2p-snapshot-distribution.md`). The `emit-snapshot` command
+///   re-emits both the bundled chunk files and `chunk_hashes` in v2 at release.
+/// - **v1** (legacy): a bare `n × 32` bytes (one internal-order block hash per
+///   block), or `n × 33` bytes (the `n` hashes followed by one size-hint byte
+///   per block, design doc §6.2). The currently-bundled `.bin` files use this
+///   format; the loader still reads them for the bundled-asset known-hash IBD
+///   engine until they are re-emitted as v2.
+///
+/// The loader distinguishes the two by the `ZKH2` magic
+/// ([`chunk_v2::is_v2`](super::chunk_v2::is_v2)), so the same `chunk_hashes`
+/// constant covers whichever format is shipped.
 #[derive(Copy, Clone, Debug)]
 pub struct KnownHashListSpec {
     /// The highest height covered by the list.
@@ -101,7 +117,13 @@ pub struct KnownHashListSpec {
     /// engine's maximum window span to stay below this (design doc §6.4).
     pub chunk_blocks: u32,
 
-    /// SHA-256 of each chunk file, as lowercase hex, in chunk order.
+    /// SHA-256 of each chunk's bytes, as lowercase hex, in chunk order.
+    ///
+    /// The content-addressing trust root: the loader hashes the raw chunk file
+    /// (v1 or v2) and the P2P serve/consume path hashes the regenerated v2 chunk
+    /// bytes, both comparing against this constant. At release `emit-snapshot`
+    /// re-emits these as the SHA-256 of the **v2** chunk bytes (see the type-level
+    /// "Chunk file format" docs).
     pub chunk_hashes: &'static [&'static str],
 
     /// The chunk file name prefix, e.g. `main-known-hashes` for
@@ -300,6 +322,16 @@ pub enum KnownHashError {
         spec_len: u64,
     },
 
+    /// A v2 chunk file failed structural validation.
+    #[error("known-hash chunk {path} is a v2 chunk but failed to parse: {error}")]
+    ChunkV2 {
+        /// The chunk file path.
+        path: PathBuf,
+        /// The structural parse failure.
+        #[source]
+        error: chunk_v2::ChunkV2Error,
+    },
+
     /// The first hash in the list does not match the network genesis hash.
     #[error(
         "known-hash list genesis mismatch: list starts with {list_genesis}, \
@@ -421,11 +453,7 @@ impl KnownHashList {
             let chunk = Self::read_chunk_raw(spec, dir, index)?;
 
             if index == 0 {
-                let list_genesis = block::Hash(
-                    chunk[..HASH_BYTES]
-                        .try_into()
-                        .expect("chunk length is a verified non-zero multiple of HASH_BYTES"),
-                );
+                let list_genesis = block::Hash(Self::chunk_block_hash(&chunk, 0));
                 let network_genesis = network.genesis_hash();
                 if list_genesis != network_genesis {
                     return Err(KnownHashError::GenesisMismatch {
@@ -439,10 +467,39 @@ impl KnownHashList {
         Ok(())
     }
 
-    /// Reads chunk `index`, verifying its length and SHA-256 against the spec.
+    /// Returns the 32-byte block hash at within-chunk offset `rel` from a
+    /// verified chunk's bytes, handling both the v1 and v2 layouts.
     ///
-    /// Accepts both chunk formats: hash-only (32 bytes per block) and with
-    /// embedded size hints (33 bytes per block).
+    /// `chunk` has already passed [`read_chunk_raw`](Self::read_chunk_raw), so it
+    /// is structurally valid and `rel` is within its span.
+    fn chunk_block_hash(chunk: &[u8], rel: usize) -> [u8; HASH_BYTES] {
+        if chunk_v2::is_v2(chunk) {
+            // v2 was validated by ParsedChunk::parse in read_chunk_raw, so it
+            // re-parses infallibly here, and `rel` is within block_count.
+            chunk_v2::ParsedChunk::parse(chunk)
+                .expect("v2 chunk was validated at load")
+                // rel fits a u32: a chunk holds at most HASHES_PER_CHUNK blocks.
+                .block_hash(rel as u32)
+        } else {
+            let offset = rel * HASH_BYTES;
+            chunk[offset..offset + HASH_BYTES]
+                .try_into()
+                .expect("v1 chunk length is a verified multiple of HASH_BYTES")
+        }
+    }
+
+    /// Reads chunk `index`, verifying its structure and SHA-256 against the spec.
+    ///
+    /// Accepts both chunk formats, distinguished by the `ZKH2` magic:
+    ///
+    /// - **v2** ([`chunk_v2`]): validated structurally by
+    ///   [`ParsedChunk::parse`], and its `block_count` must match the spec's
+    ///   chunk length;
+    /// - **v1** (legacy): a bare `n × 32` (hash-only) or `n × 33` (with size
+    ///   hints) byte sequence.
+    ///
+    /// The SHA-256 integrity check is format-agnostic (it hashes the raw file),
+    /// so the same `chunk_hashes` constant covers whichever format is shipped.
     fn read_chunk_raw(
         spec: &KnownHashListSpec,
         dir: &Path,
@@ -455,16 +512,40 @@ impl KnownHashList {
             error,
         })?;
 
-        let expected_len = spec.chunk_len(index) * HASH_BYTES as u64;
-        let expected_len_with_hints = spec.chunk_len(index) * (HASH_BYTES + 1) as u64;
-        if chunk.len() as u64 != expected_len && chunk.len() as u64 != expected_len_with_hints {
-            return Err(KnownHashError::ChunkLength {
-                path,
-                expected: expected_len,
-                expected_with_hints: expected_len_with_hints,
-                actual: chunk.len() as u64,
-                spec_len: spec.len(),
-            });
+        let expected_blocks = spec.chunk_len(index);
+
+        if chunk_v2::is_v2(&chunk) {
+            // v2: the parser validates the full structure; cross-check that the
+            // declared span matches the spec's chunk length, so a truncated or
+            // mis-sized v2 chunk is rejected just like a v1 one.
+            let parsed = chunk_v2::ParsedChunk::parse(&chunk).map_err(|error| {
+                KnownHashError::ChunkV2 {
+                    path: path.clone(),
+                    error,
+                }
+            })?;
+            if u64::from(parsed.block_count()) != expected_blocks {
+                return Err(KnownHashError::ChunkLength {
+                    path,
+                    expected: expected_blocks,
+                    expected_with_hints: expected_blocks,
+                    actual: u64::from(parsed.block_count()),
+                    spec_len: spec.len(),
+                });
+            }
+        } else {
+            // v1: a bare hash sequence, optionally followed by per-block hints.
+            let expected_len = expected_blocks * HASH_BYTES as u64;
+            let expected_len_with_hints = expected_blocks * (HASH_BYTES + 1) as u64;
+            if chunk.len() as u64 != expected_len && chunk.len() as u64 != expected_len_with_hints {
+                return Err(KnownHashError::ChunkLength {
+                    path,
+                    expected: expected_len,
+                    expected_with_hints: expected_len_with_hints,
+                    actual: chunk.len() as u64,
+                    spec_len: spec.len(),
+                });
+            }
         }
 
         let actual = hex::encode(Sha256::digest(&chunk));
@@ -499,13 +580,11 @@ impl KnownHashList {
         }
 
         let chunk_index = (height.0 / self.spec.chunk_blocks) as usize;
-        let offset = (height.0 % self.spec.chunk_blocks) as usize * HASH_BYTES;
+        let rel = (height.0 % self.spec.chunk_blocks) as usize;
 
         let chunk = self.resident_chunk(chunk_index)?;
 
-        let hash = chunk[offset..offset + HASH_BYTES]
-            .try_into()
-            .expect("chunk length is a verified multiple of HASH_BYTES");
+        let hash = Self::chunk_block_hash(chunk, rel);
 
         Ok(Some(block::Hash(hash)))
     }
@@ -540,6 +619,9 @@ impl KnownHashList {
     /// A hint byte `w` in `1..=255` means the block's serialized size is at
     /// most `w` size-hint units. Loads the chunk containing `height` like
     /// [`hash`](Self::hash).
+    // The `expect`s re-parse a v2 chunk already validated at load, an infallible
+    // operation, not a hidden error path.
+    #[allow(clippy::unwrap_in_result)]
     pub fn size_hint(&mut self, height: block::Height) -> Result<Option<u8>, KnownHashError> {
         if height > self.spec.max_height {
             return Ok(None);
@@ -547,17 +629,30 @@ impl KnownHashList {
 
         let chunk_index = (height.0 / self.spec.chunk_blocks) as usize;
         let chunk_blocks = self.spec.chunk_len(chunk_index) as usize;
-        let offset = (height.0 % self.spec.chunk_blocks) as usize;
+        let rel = (height.0 % self.spec.chunk_blocks) as usize;
 
         let chunk = self.resident_chunk(chunk_index)?;
 
-        // Hash-only chunks are `32 × n` bytes; hinted chunks append one hint
+        if chunk_v2::is_v2(chunk) {
+            // v2 was validated at load, so it re-parses infallibly. A hash-only
+            // v2 chunk returns its DEFAULT_SIZE_HINT; map that back to `None` so
+            // callers keep the v1 "no embedded hint" semantics.
+            let parsed = chunk_v2::ParsedChunk::parse(chunk)
+                .expect("v2 chunk was validated at load");
+            if !parsed.has_hints() {
+                return Ok(None);
+            }
+            // rel fits a u32 and is within block_count (verified by parse).
+            return Ok(Some(parsed.size_hint(rel as u32)));
+        }
+
+        // v1: hash-only chunks are `32 × n` bytes; hinted chunks append one hint
         // byte per block after the `32 × n` hash section.
         if chunk.len() == chunk_blocks * HASH_BYTES {
             return Ok(None);
         }
 
-        Ok(Some(chunk[chunk_blocks * HASH_BYTES + offset]))
+        Ok(Some(chunk[chunk_blocks * HASH_BYTES + rel]))
     }
 
     /// Drops resident chunks that only cover heights below `height`.

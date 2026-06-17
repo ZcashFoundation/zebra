@@ -6,8 +6,8 @@
 //!
 //! - **known-hash chunks** ([`CfHashSource`]): the block hashes, size hints, and
 //!   per-height shielded tree roots, read from the `known_hash_chunk` column
-//!   family and fetched from peers on a miss
-//!   ([`Request::KnownHashChunk`](zn::Request::KnownHashChunk));
+//!   family and fetched from peers on a miss as reassembled byte ranges
+//!   ([`Request::KnownHashChunkRange`](zn::Request::KnownHashChunkRange));
 //! - **note commitment trees** ([`fetch_and_verify_tree`]): each block's
 //!   sapling/orchard tree frontier
 //!   ([`Request::NoteCommitmentTree`](zn::Request::NoteCommitmentTree)),
@@ -34,13 +34,16 @@ use zebra_chain::{
     block::{self, Hash},
     parameters::known_hashes::{
         chunk_v2::{self, ParsedChunk},
-        KnownHashList, KnownHashListSpec, HASHES_PER_CHUNK,
+        KnownHashListSpec, HASHES_PER_CHUNK,
     },
 };
 use zebra_network::{self as zn, ShieldedPool};
 use zebra_state::{self as zs, note_commitment_tree_root_from_bytes, MAX_SNAPSHOT_RANGE_BYTES};
 
-use crate::{components::ibd::engine::HashSource, BoxError};
+use crate::{
+    components::ibd::{engine::HashSource, SNAPSHOT_FETCH_ATTEMPTS},
+    BoxError,
+};
 
 /// Errors fetching or verifying snapshot-consume artifacts from peers.
 #[derive(Debug, Error)]
@@ -150,6 +153,22 @@ pub enum ConsumeError {
     SetHashNotPinned {
         /// Which set (`unspent-output` / `address-balance`).
         set: &'static str,
+    },
+
+    /// A snapshot set's caller-supplied total length is above the sanity cap, so
+    /// assembling it would require an unreasonable allocation: refused before any
+    /// network work.
+    #[error(
+        "the {set} set's reported length {total_len} bytes exceeds the {cap}-byte \
+         sanity cap; refusing to assemble it"
+    )]
+    SetTooLarge {
+        /// Which set (`unspent-output` / `address-balance`).
+        set: &'static str,
+        /// The caller-supplied total byte length.
+        total_len: u64,
+        /// The sanity cap on a snapshot set's byte length.
+        cap: u64,
     },
 
     /// The peer set service failed, before any artifact could be fetched.
@@ -306,58 +325,63 @@ pub fn chunk_index_for_height(height: block::Height) -> u32 {
     height.0 / HASHES_PER_CHUNK
 }
 
-/// A [`HashSource`] backed by the `known_hash_chunk` column family, with a
-/// bundled `.bin` fallback for cold start.
+/// A [`HashSource`] backed by the `known_hash_chunk` column family.
 ///
 /// `hash` and `size_hint` are synchronous (the engine queries them inside its
 /// refill step), so they read from the in-memory cache of verified chunks
-/// populated by [`ensure_chunk`](Self::ensure_chunk). A cold-start request that
-/// has no resident chunk falls back to the bundled list, which the loader
-/// already verified against the pinned hashes at open.
+/// populated by [`ensure_chunk`](Self::ensure_chunk). There is no bundled
+/// `.bin` fallback: the v1 `.bin` list carries no per-height tree roots, so it
+/// cannot be reconciled with the v2 chunks the cache stores, and a v1/v2
+/// disagreement at a chunk boundary would be invisible to the synchronous
+/// lookups. Instead every height is served from a v2 chunk that
+/// [`ensure_covers`](Self::ensure_covers) has primed (fetched-and-verified, or
+/// read back from the CF) before the height is queried; a height with no
+/// resident covering chunk is an engine error, surfaced as a retryable failure,
+/// rather than a silently divergent fallback.
 ///
 /// Fetching a missing chunk from a peer is inherently asynchronous, so it is not
-/// done from `hash`: the engine's bootstrap calls [`ensure_chunk`](Self::ensure_chunk)
-/// for the active window before the heights it covers are needed. A chunk fetched
-/// from a peer is verified against the pinned hash before it is cached.
-pub struct CfHashSource {
+/// done from `hash`: the engine primes the active window via
+/// [`ensure_covers`](Self::ensure_covers) — at bootstrap and again as the commit
+/// frontier advances across chunk boundaries — before the heights it covers are
+/// needed. A chunk fetched from a peer is verified against the pinned hash, then
+/// persisted to the CF (so a restart does not re-fetch it) before it is cached.
+///
+/// Holds clones of the network and state services so it is self-sufficient for
+/// fetching, reading the CF, and persisting verified chunks.
+pub struct CfHashSource<ZN, ZS> {
     /// The pinned spec (trust root): max height, per-chunk SHA-256s.
     spec: &'static KnownHashListSpec,
 
-    /// The bundled `.bin` list, used as the cold-start fallback for `hash` /
-    /// `size_hint` before any chunk is fetched into the cache.
-    ///
-    /// `None` when no bundled assets are present: a pure-P2P snapshot-consume
-    /// node relies on [`ensure_chunk`](Self::ensure_chunk) priming the CF/RAM
-    /// cache before any height is queried, so a cold-start fallback miss is an
-    /// engine error rather than a silent gap.
-    fallback: Option<KnownHashList>,
-
-    /// Verified, peer-fetched chunks, keyed by chunk index. Each entry's bytes
-    /// hashed to the pinned `chunk_hashes[index]` constant before it was
-    /// inserted, so they are fully trusted. Re-parsed on lookup (cheap: a bounds
-    /// and structure check over a borrowed slice).
+    /// Verified chunks, keyed by chunk index. Each entry's bytes hashed to the
+    /// pinned `chunk_hashes[index]` constant before it was inserted, so they are
+    /// fully trusted. Re-parsed on lookup (cheap: a bounds and structure check
+    /// over a borrowed slice).
     chunks: HashMap<u32, Vec<u8>>,
+
+    /// The network service, used to fetch chunks ranged from peers.
+    peer_set: ZN,
+
+    /// The state service, used to read chunks from the local
+    /// `known_hash_chunk` column family and to persist verified chunks back into
+    /// it.
+    state: ZS,
 }
 
-impl CfHashSource {
-    /// Returns a new CF-backed hash source over `spec`, with `fallback` as the
-    /// bundled cold-start list.
-    pub fn new(spec: &'static KnownHashListSpec, fallback: KnownHashList) -> Self {
+impl<ZN, ZS> CfHashSource<ZN, ZS>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
+    ZN::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Clone,
+    ZS::Future: Send,
+{
+    /// Returns a new CF-backed hash source over `spec`, fetching chunks through
+    /// `peer_set` and reading/persisting them through `state`.
+    pub fn new(spec: &'static KnownHashListSpec, peer_set: ZN, state: ZS) -> Self {
         Self {
             spec,
-            fallback: Some(fallback),
             chunks: HashMap::new(),
-        }
-    }
-
-    /// Returns a new CF-backed hash source over `spec` with no bundled
-    /// cold-start fallback: every height must be served from a chunk primed into
-    /// the cache by [`ensure_chunk`](Self::ensure_chunk).
-    pub fn without_fallback(spec: &'static KnownHashListSpec) -> Self {
-        Self {
-            spec,
-            fallback: None,
-            chunks: HashMap::new(),
+            peer_set,
+            state,
         }
     }
 
@@ -386,32 +410,53 @@ impl CfHashSource {
         self.chunks.contains_key(&index)
     }
 
+    /// Ensures every chunk covering `[start, end]` (inclusive heights) is
+    /// resident, priming each missing one via [`ensure_chunk`](Self::ensure_chunk).
+    ///
+    /// Called at bootstrap for the first window and again as the commit frontier
+    /// advances, so the synchronous [`hash`](HashSource::hash) /
+    /// [`size_hint`](HashSource::size_hint) / tree-root lookups always find a
+    /// resident chunk — including after the frontier crosses a chunk boundary
+    /// (every `HASHES_PER_CHUNK` heights). A chunk index past the end of the
+    /// pinned list is skipped (there is nothing to fetch there); any other
+    /// failure propagates so the supervisor can restart the bootstrap.
+    pub async fn ensure_covers(
+        &mut self,
+        start: block::Height,
+        end: block::Height,
+        attempts: u32,
+    ) -> Result<(), ConsumeError> {
+        let first_index = chunk_index_for_height(start);
+        let last_index = chunk_index_for_height(end);
+        // `chunk_hashes.len() >= 1` for a valid spec; the count is far below
+        // `u32::MAX`, so this cast never truncates.
+        let max_index = self.spec.chunk_hashes.len().saturating_sub(1) as u32;
+
+        for index in first_index..=last_index.min(max_index) {
+            self.ensure_chunk(index, attempts).await?;
+        }
+
+        Ok(())
+    }
+
     /// Ensures the chunk at `index` is resident: returns immediately if it is
-    /// already cached or already stored in the `known_hash_chunk` column family,
-    /// otherwise fetches it from a peer, verifies it against the pinned hash, and
-    /// caches it.
+    /// already cached, otherwise reuses a chunk already stored in the
+    /// `known_hash_chunk` column family, or fetches it from a peer, verifies it
+    /// against the pinned hash, persists it to the CF, and caches it.
     ///
     /// `attempts` peers are tried before giving up with
     /// [`ConsumeError::Unavailable`]; a chunk that arrives but fails
-    /// verification is discarded and the next peer is tried. A verified chunk is
-    /// cached in RAM for the synchronous `hash` / `size_hint` lookups, and (when
-    /// it came from a peer) is the exact content-addressed bytes that may also be
-    /// written back to the CF for re-serving.
+    /// verification is discarded and the next peer is tried, and a transient
+    /// peer-set or state-service failure on one attempt is tolerated — it is
+    /// logged and the next peer is tried — so one flaky peer does not abort the
+    /// whole prime. A verified peer chunk is the exact content-addressed bytes,
+    /// persisted to the CF so a restart (or a peer requesting the chunk) reads it
+    /// back without a network round-trip.
     ///
-    /// The `state` read service is consulted first so a chunk persisted by a
-    /// previous run (or generated by an already-synced state) is reused without a
-    /// network round-trip.
-    pub async fn ensure_chunk<ZN, ZS>(
-        &mut self,
-        peer_set: &ZN,
-        state: &ZS,
-        index: u32,
-        attempts: u32,
-    ) -> Result<(), ConsumeError>
-    where
-        ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
-        ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Clone,
-    {
+    /// The state CF is consulted first so a chunk persisted by a previous run (or
+    /// present because this node is partly synced) is reused without any network
+    /// work.
+    pub async fn ensure_chunk(&mut self, index: u32, attempts: u32) -> Result<(), ConsumeError> {
         if self.chunks.contains_key(&index) {
             return Ok(());
         }
@@ -426,24 +471,58 @@ impl CfHashSource {
 
         // Reuse a chunk already in the local CF (persisted by a previous run, or
         // present because this node is partly synced). It is still verified
-        // against the pinned hash before it is trusted.
-        if let Some(bytes) = self.read_local_chunk(state, index).await? {
-            if let Ok(verified) = verify_chunk_bytes(self.spec, index, bytes) {
-                self.chunks.insert(index, verified);
-                return Ok(());
+        // against the pinned hash before it is trusted. A transient state-service
+        // error here is not fatal: fall through to a peer fetch.
+        match self.read_local_chunk(index).await {
+            Ok(Some(bytes)) => {
+                if let Ok(verified) = verify_chunk_bytes(self.spec, index, bytes) {
+                    self.chunks.insert(index, verified);
+                    return Ok(());
+                }
+                // A locally-stored chunk that fails verification is corrupt; fall
+                // through to a peer fetch rather than trusting it.
             }
-            // A locally-stored chunk that fails verification is corrupt; fall
-            // through to a peer fetch rather than trusting it.
+            Ok(None) => {}
+            Err(error) => {
+                debug!(
+                    %error,
+                    index,
+                    "reading a known-hash chunk from the local state failed; fetching from peers",
+                );
+            }
         }
 
-        for _ in 0..attempts {
-            let bytes = match self.fetch_chunk_from_peer(peer_set, index).await? {
-                Some(bytes) => bytes,
-                None => continue,
+        for attempt in 0..attempts {
+            // A transient peer-set failure on this attempt is tolerated: log it
+            // and try another peer, rather than aborting the whole prime.
+            let bytes = match self.fetch_chunk_from_peer(index).await {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => continue,
+                Err(error) => {
+                    debug!(
+                        %error,
+                        index,
+                        attempt,
+                        "a peer chunk fetch failed transiently; trying another peer",
+                    );
+                    continue;
+                }
             };
 
             match verify_chunk_bytes(self.spec, index, bytes) {
                 Ok(verified) => {
+                    // Persist the verified bytes so a restart (or a peer
+                    // requesting this chunk) reads them back without re-fetching.
+                    // A persist failure is not fatal — the chunk is already
+                    // trusted in RAM — so it is logged and the prime succeeds.
+                    if let Err(error) = self.persist_chunk(index, &verified).await {
+                        warn!(
+                            %error,
+                            index,
+                            "failed to persist a verified known-hash chunk to the state; \
+                             it is cached in RAM but a restart will re-fetch it",
+                        );
+                    }
                     self.chunks.insert(index, verified);
                     return Ok(());
                 }
@@ -461,16 +540,10 @@ impl CfHashSource {
     }
 
     /// Reads the chunk at `index` from the local `known_hash_chunk` column
-    /// family via the state read service, or `None` if it is not stored.
-    async fn read_local_chunk<ZS>(
-        &self,
-        state: &ZS,
-        index: u32,
-    ) -> Result<Option<Vec<u8>>, ConsumeError>
-    where
-        ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Clone,
-    {
-        let response = state
+    /// family via the state service, or `None` if it is not stored.
+    async fn read_local_chunk(&self, index: u32) -> Result<Option<Vec<u8>>, ConsumeError> {
+        let response = self
+            .state
             .clone()
             .oneshot(zs::Request::KnownHashChunk(index))
             .await
@@ -482,33 +555,134 @@ impl CfHashSource {
         }
     }
 
-    /// Fetches the chunk at `index` from a single peer, or `None` if the peer
-    /// answered `NotFound` (it lacks the chunk).
-    async fn fetch_chunk_from_peer<ZN>(
-        &self,
-        peer_set: &ZN,
-        index: u32,
-    ) -> Result<Option<Vec<u8>>, ConsumeError>
-    where
-        ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
-    {
-        let response = peer_set
+    /// Persists the verified chunk `bytes` at `index` into the local
+    /// `known_hash_chunk` column family via the state service.
+    ///
+    /// The caller verifies `bytes` against the pinned hash before calling this,
+    /// so the state stores them content-addressed.
+    async fn persist_chunk(&self, index: u32, bytes: &[u8]) -> Result<(), ConsumeError> {
+        self.state
             .clone()
-            .oneshot(zn::Request::KnownHashChunk(index))
+            .oneshot(zs::Request::WriteKnownHashChunk {
+                index,
+                bytes: bytes.to_vec(),
+            })
             .await
             .map_err(ConsumeError::PeerSet)?;
 
-        match response {
-            zn::Response::KnownHashChunk(bytes) => Ok(Some(bytes.to_vec())),
-            zn::Response::NotFound => Ok(None),
-            // Any other response is a peer/protocol bug; treat it as a miss so
-            // the caller tries another peer.
-            _ => Ok(None),
+        Ok(())
+    }
+
+    /// Fetches the whole chunk at `index` from peers by reassembling its
+    /// `MAX_SNAPSHOT_RANGE_BYTES` ranges, or `None` if a range could not be
+    /// served (so the caller tries the next attempt).
+    ///
+    /// A full v2 chunk (~4.72 MiB) exceeds `MAX_PROTOCOL_MESSAGE_LEN`, so it is
+    /// transferred ranged like the snapshot sets. Unlike the snapshot sets the
+    /// total chunk length is not known a priori, so this fetches ascending
+    /// ranges until a peer returns a short (or empty) range, marking the chunk's
+    /// end; the caller verifies the reassembled bytes' SHA-256 against the pinned
+    /// `chunk_hashes[index]` constant, which catches any disagreement on length
+    /// or content between peers, so a single adversarial range cannot corrupt the
+    /// chunk undetected.
+    ///
+    /// Bounded: each range is `≤ MAX_SNAPSHOT_RANGE_BYTES`, and the reassembled
+    /// chunk is bounded by the maximum v2 chunk size (a function of
+    /// `HASHES_PER_CHUNK`), so a peer cannot grow the buffer without bound. A
+    /// transient peer-set failure returns `Err`, which the caller tolerates as a
+    /// single failed attempt.
+    async fn fetch_chunk_from_peer(&self, index: u32) -> Result<Option<Vec<u8>>, ConsumeError> {
+        let mut assembled: Vec<u8> = Vec::new();
+        let mut offset: u64 = 0;
+
+        loop {
+            // The reassembled chunk can never exceed the maximum v2 chunk size; a
+            // peer that keeps returning full ranges past that bound is feeding us
+            // junk, so stop and let the caller try another attempt. The SHA-256
+            // check would reject it anyway; this just bounds the memory first.
+            if assembled.len() as u64 > MAX_V2_CHUNK_BYTES {
+                return Ok(None);
+            }
+
+            // `MAX_SNAPSHOT_RANGE_BYTES` fits a u32 (it is 1 MiB), so the cast
+            // never truncates.
+            let len = MAX_SNAPSHOT_RANGE_BYTES as u32;
+
+            let response = self
+                .peer_set
+                .clone()
+                .oneshot(zn::Request::KnownHashChunkRange { index, offset, len })
+                .await
+                .map_err(ConsumeError::PeerSet)?;
+
+            let range = match response {
+                zn::Response::SnapshotRange(bytes) => bytes,
+                // The peer can't serve this range (unknown/above-tip chunk, or an
+                // offset past its chunk end): treat the whole fetch as a miss so
+                // the caller tries another peer/attempt.
+                zn::Response::NotFound => return Ok(None),
+                // Any other response is a peer/protocol bug; treat it as a miss.
+                _ => return Ok(None),
+            };
+
+            // A short or empty range marks the chunk's end (the peer has no more
+            // bytes at this offset). Stop and return what we assembled; the
+            // caller's SHA-256 check validates the full chunk.
+            let is_final = (range.len() as u64) < u64::from(len);
+            offset += range.len() as u64;
+            assembled.extend_from_slice(&range);
+
+            if is_final {
+                return Ok(Some(assembled));
+            }
         }
     }
 }
 
-impl HashSource for CfHashSource {
+/// The maximum serialized size of a v2 known-hash chunk, used to bound chunk
+/// reassembly from untrusted peer ranges.
+///
+/// A full chunk holds `HASHES_PER_CHUNK` blocks. The v2 layout is the 16-byte
+/// header, `n × 32` hashes, `n × 1` size hints, then two tree-root sections.
+/// Each tree section has at most one record per height (`4 + 32` bytes), giving a
+/// generous upper bound of `16 + n × (32 + 1) + 2 × (4 + n × 36)`. Rounded up to
+/// a clean ceiling so an honest chunk always fits and a malicious peer cannot
+/// grow the buffer past it.
+const MAX_V2_CHUNK_BYTES: u64 = 16
+    + HASHES_PER_CHUNK as u64 * (HASH_BYTES_U64 + 1)
+    + 2 * (4 + HASHES_PER_CHUNK as u64 * (4 + HASH_BYTES_U64));
+
+/// The byte length of a single 32-byte hash, as a `u64`, for the
+/// [`MAX_V2_CHUNK_BYTES`] bound.
+const HASH_BYTES_U64: u64 = 32;
+
+/// The sanity cap on a downloadable snapshot set's total byte length, used to
+/// bound the up-front assembly buffer in [`fetch_and_verify_set`] against a
+/// caller-supplied `total_len`.
+///
+/// The unspent-output and address-balance sets at `H_max` are at most a few
+/// hundred MiB on Mainnet today; 8 GiB is far above any plausible real set
+/// (leaving headroom for chain growth) while still refusing an adversarial
+/// length that would otherwise drive a huge reservation. The assembled bytes are
+/// content-addressed against the pinned hash regardless, so this only guards the
+/// allocation, not correctness.
+const MAX_SNAPSHOT_SET_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+impl<ZN, ZS> HashSource for CfHashSource<ZN, ZS>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZS::Future: Send,
+{
     fn max_height(&self) -> block::Height {
         self.spec.max_height
     }
@@ -531,18 +705,16 @@ impl HashSource for CfHashSource {
             return Ok(Some(Hash(hash_bytes)));
         }
 
-        // Cold start: fall back to the bundled list, which the loader verified
-        // against the pinned hashes at open. With no fallback, the chunk for
-        // `height` was not primed: the caller must `ensure_chunk` first.
-        match &mut self.fallback {
-            Some(fallback) => Ok(KnownHashList::hash(fallback, height)?),
-            None => Err(format!(
-                "no known-hash chunk is resident for {height:?} and no bundled \
-                 fallback is configured; the snapshot-consume bootstrap must \
-                 fetch the covering chunk before this height is requested"
-            )
-            .into()),
-        }
+        // The covering chunk was not primed. There is no v1 `.bin` fallback (it
+        // carries no tree roots and could silently disagree with the v2 chunks):
+        // every height is served from a v2 chunk that `ensure_covers` primed, so
+        // a miss here is an engine error the supervisor retries, not a divergent
+        // fallback.
+        Err(format!(
+            "no known-hash chunk is resident for {height:?}; the snapshot-consume \
+             engine must `ensure_covers` the height before it is requested"
+        )
+        .into())
     }
 
     fn size_hint(&mut self, height: block::Height) -> u8 {
@@ -559,26 +731,29 @@ impl HashSource for CfHashSource {
             }
         }
 
-        // Cold-start fallback: the bundled list's hint, or the conservative
-        // default on a chunk read error or with no fallback (the hint only sizes
-        // fetch batches, so a default is always safe).
-        match &mut self.fallback {
-            Some(fallback) => match KnownHashList::size_hint(fallback, height) {
-                Ok(Some(hint)) => hint.max(1),
-                Ok(None) | Err(_) => chunk_v2::DEFAULT_SIZE_HINT,
-            },
-            None => chunk_v2::DEFAULT_SIZE_HINT,
-        }
+        // No resident chunk for this height (it has not been primed yet): the
+        // conservative default. The hint only sizes fetch batches, so a default
+        // is always safe; the `hash` lookup for the same height surfaces the
+        // missing-chunk error.
+        chunk_v2::DEFAULT_SIZE_HINT
     }
 
     fn release_below(&mut self, height: block::Height) {
-        // Drop verified chunks whose whole span is below `height`, and release
-        // the bundled fallback's resident chunks too.
+        // Drop verified chunks whose whole span is below `height`.
         let index = chunk_index_for_height(height);
         self.chunks.retain(|&chunk_index, _| chunk_index >= index);
-        if let Some(fallback) = &mut self.fallback {
-            KnownHashList::release_below(fallback, height);
-        }
+    }
+
+    fn ensure_covers(
+        &mut self,
+        start: block::Height,
+        end: block::Height,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), BoxError>> + Send + '_>> {
+        Box::pin(async move {
+            CfHashSource::ensure_covers(self, start, end, SNAPSHOT_FETCH_ATTEMPTS)
+                .await
+                .map_err(|error| Box::new(error) as BoxError)
+        })
     }
 
     fn tree_updates_in(
@@ -701,12 +876,26 @@ pub async fn fetch_and_verify_tree<ZN>(
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
 {
-    for _ in 0..attempts {
-        let response = peer_set
+    for attempt in 0..attempts {
+        // A transient peer-set failure on this attempt is tolerated: log it and
+        // try another peer, rather than aborting the whole fetch.
+        let response = match peer_set
             .clone()
             .oneshot(zn::Request::NoteCommitmentTree { pool, height })
             .await
-            .map_err(ConsumeError::PeerSet)?;
+        {
+            Ok(response) => response,
+            Err(error) => {
+                debug!(
+                    %error,
+                    ?pool,
+                    ?height,
+                    attempt,
+                    "a peer tree fetch failed transiently; trying another peer",
+                );
+                continue;
+            }
+        };
 
         let bytes = match response {
             zn::Response::NoteCommitmentTree(bytes) => bytes.to_vec(),
@@ -731,12 +920,17 @@ where
     })
 }
 
-/// Fetches a whole snapshot set in `MAX_SNAPSHOT_RANGE_BYTES` ranges, assembles
-/// it, and verifies it against the pinned SHA-256 constant for `set`.
+/// Fetches a whole snapshot set in record-aligned ranges, assembles it, and
+/// verifies it against the pinned SHA-256 constant for `set`.
 ///
 /// `total_len` is the set's full byte length (known from the snapshot metadata
-/// or discovered by fetching until a short range). `make_request` builds the
-/// per-range network request for the set
+/// or discovered by fetching until a short range). `record_len` is the set's
+/// fixed record size (8 bytes for the unspent-output set, 45 bytes for the
+/// address-balance set); ranges are aligned to it so the serve path — which
+/// requires record-aligned `offset`/`len`
+/// ([`zebra_state::unspent_outputs_range`] /
+/// [`zebra_state::address_balances_range`]) — accepts every request.
+/// `make_request` builds the per-range network request
 /// ([`Request::UnspentOutputs`](zn::Request::UnspentOutputs) or
 /// [`Request::AddressBalances`](zn::Request::AddressBalances)). Returns the
 /// verified set bytes.
@@ -749,6 +943,7 @@ pub async fn fetch_and_verify_set<ZN, F>(
     spec: &KnownHashListSpec,
     set: &'static str,
     total_len: u64,
+    record_len: u64,
     attempts: u32,
     make_request: F,
 ) -> Result<Vec<u8>, ConsumeError>
@@ -759,14 +954,39 @@ where
     // Fail before any network work if the set cannot be verified at all.
     pinned_set_hash(spec, set)?;
 
+    // `total_len` is caller-supplied (it comes from snapshot metadata, not a
+    // pinned constant), so an over-large value must not drive an unbounded
+    // up-front allocation. A set larger than the sanity cap can never be a real
+    // snapshot, so refuse it before allocating; the assembled bytes are
+    // content-addressed afterwards either way.
+    if total_len > MAX_SNAPSHOT_SET_BYTES {
+        return Err(ConsumeError::SetTooLarge {
+            set,
+            total_len,
+            cap: MAX_SNAPSHOT_SET_BYTES,
+        });
+    }
+
+    // The per-range length must be a multiple of `record_len`, since the serve
+    // path rejects misaligned `offset`/`len`. Floor `MAX_SNAPSHOT_RANGE_BYTES`
+    // to the largest record-aligned length that still fits the frame; the offset
+    // stays record-aligned because every range is record-aligned and `total_len`
+    // is a multiple of `record_len`.
+    let record_len = record_len.max(1);
+    let aligned_range = (MAX_SNAPSHOT_RANGE_BYTES / record_len * record_len).max(record_len);
+
+    // `total_len` is bounded by `MAX_SNAPSHOT_SET_BYTES` (checked above), which
+    // fits a `usize` on all supported platforms, so the cast never truncates.
+    // The Vec still grows naturally if a peer over-delivers; the cap only bounds
+    // the up-front reservation.
     let mut assembled: Vec<u8> = Vec::with_capacity(total_len as usize);
     let mut offset: u64 = 0;
 
     while offset < total_len {
-        // `MAX_SNAPSHOT_RANGE_BYTES` fits a u32, and the remaining length is at
-        // most `total_len`, so this min fits a u32 too.
+        // `aligned_range` is `<= MAX_SNAPSHOT_RANGE_BYTES` (1 MiB), and the
+        // remaining length is at most `total_len`, so this min fits a u32.
         let remaining = total_len - offset;
-        let len = remaining.min(MAX_SNAPSHOT_RANGE_BYTES) as u32;
+        let len = remaining.min(aligned_range) as u32;
 
         let range = fetch_range(peer_set, &make_request, offset, len, set, attempts).await?;
 
@@ -796,12 +1016,22 @@ where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
     F: Fn(u64, u32) -> zn::Request,
 {
-    for _ in 0..attempts {
-        let response = peer_set
-            .clone()
-            .oneshot(make_request(offset, len))
-            .await
-            .map_err(ConsumeError::PeerSet)?;
+    for attempt in 0..attempts {
+        // A transient peer-set failure on this attempt is tolerated: log it and
+        // try another peer, rather than aborting the whole set assembly.
+        let response = match peer_set.clone().oneshot(make_request(offset, len)).await {
+            Ok(response) => response,
+            Err(error) => {
+                debug!(
+                    %error,
+                    set,
+                    offset,
+                    attempt,
+                    "a peer snapshot-range fetch failed transiently; trying another peer",
+                );
+                continue;
+            }
+        };
 
         match response {
             zn::Response::SnapshotRange(bytes) => return Ok(bytes.to_vec()),

@@ -369,43 +369,71 @@ impl FinalizedState {
         self.db.network()
     }
 
-    /// Verifies a supplied (downloaded) sapling note commitment tree against the
-    /// `block` header's `hashFinalSaplingRoot`, where the header commits to it
-    /// directly (the Sapling/Blossom era).
+    /// Decides whether a supplied (downloaded) note commitment tree set can be
+    /// written directly for `block`, verifying it against the block header where
+    /// the header pins it.
     ///
-    /// For Heartwood-onward blocks, the header commitment is the chain-history
-    /// root rather than the bare sapling root, so the supplied sapling and
-    /// orchard trees are instead validated transitively by the existing
-    /// `block_commitment_is_valid_for_chain_history` check downstream (which is
-    /// computed from the supplied roots). This function only performs the direct
-    /// check when it applies, and is a no-op otherwise.
-    fn verify_supplied_sapling_tree(
+    /// Returns:
+    /// - `Ok(true)` — the supplied trees are directly verifiable and verified:
+    ///   the header's `hashFinalSaplingRoot` commits to the bare Sapling root
+    ///   (the Sapling/Blossom era), the supplied Sapling root matches it, and
+    ///   there is no Orchard tree yet (Orchard activates at NU5, well after
+    ///   Blossom), so the whole supplied set is pinned by the header.
+    /// - `Ok(false)` — the supplied trees are **not** directly verifiable at this
+    ///   layer, so they must be **refused** (the caller folds the block's own
+    ///   note commitments instead, which is always correct).
+    /// - `Err(..)` — the supplied trees *are* directly verifiable but the
+    ///   supplied Sapling root does not match the header (a malicious or corrupt
+    ///   tree): a fatal commit error.
+    ///
+    /// # Security
+    ///
+    /// For Heartwood onward, the header commitment is the chain-history root
+    /// (`ChainHistoryRoot`) or the NU5+ block-commitments hash
+    /// (`ChainHistoryBlockTxAuthCommitment`). Neither commits to *this* block's
+    /// Sapling/Orchard roots: `block_commitment_is_valid_for_chain_history` (run
+    /// downstream by the caller) checks the header against the **parent's**
+    /// history tree root, which is independent of the trees supplied for this
+    /// block. So a supplied tree for a Heartwood-onward block is **unverifiable
+    /// against the block alone** — accepting it would let a malicious peer inject
+    /// a wrong tree (whose wrong root would only surface later, as a cascading
+    /// failure, after corrupting the history tree). We therefore refuse supplied
+    /// trees outside the era where the header directly pins them. The
+    /// design-intended verification (against the chunk's recorded per-height
+    /// roots) is the way to safely accept them later; until those roots are
+    /// threaded to this layer, refusing-and-folding is the safe behaviour. See
+    /// finding #27 and `docs/design/p2p-snapshot-distribution.md` §3.2.
+    fn supplied_trees_are_verifiable(
         block: &Arc<block::Block>,
         supplied: &NoteCommitmentTrees,
         network: &Network,
-    ) -> Result<(), CommitCheckpointVerifiedError> {
+    ) -> Result<bool, CommitCheckpointVerifiedError> {
         let height = block
             .coinbase_height()
             .expect("committed blocks always have a coinbase height");
 
-        // The header commitment only equals the bare sapling root in the
-        // Sapling/Blossom era; later eras fold it into the chain history tree,
-        // which is checked downstream against the supplied roots.
-        if let Ok(block::Commitment::FinalSaplingRoot(expected_root)) =
-            block.header.commitment(network, height)
-        {
-            let supplied_root = supplied.sapling.root();
-            if supplied_root != expected_root {
-                return Err(ValidateContextError::SuppliedSaplingTreeRootMismatch {
-                    supplied: supplied_root.into(),
-                    expected: expected_root.into(),
-                    height,
+        // The header commitment only equals the bare Sapling root in the
+        // Sapling/Blossom era. Orchard does not activate until NU5 (after
+        // Blossom), so in this era the supplied Orchard tree is necessarily empty
+        // and is pinned together with the Sapling root by an exact header match.
+        match block.header.commitment(network, height) {
+            Ok(block::Commitment::FinalSaplingRoot(expected_root)) => {
+                let supplied_root = supplied.sapling.root();
+                if supplied_root != expected_root {
+                    return Err(ValidateContextError::SuppliedSaplingTreeRootMismatch {
+                        supplied: supplied_root.into(),
+                        expected: expected_root.into(),
+                        height,
+                    }
+                    .into());
                 }
-                .into());
+                Ok(true)
             }
+            // Pre-Sapling there is no Sapling root to pin against (and no shielded
+            // outputs), and Heartwood-onward the header does not pin this block's
+            // trees: refuse the supplied trees and fold instead.
+            _ => Ok(false),
         }
-
-        Ok(())
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -482,12 +510,27 @@ impl FinalizedState {
                         .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
                     // Update the note commitment trees, or use the supplied trees
-                    // directly in snapshot-consume mode (verified below).
-                    let note_commitment_trees = match supplied_trees {
-                        Some(supplied) => {
-                            Self::verify_supplied_sapling_tree(&block, &supplied, &self.network())?;
-                            supplied
+                    // directly in snapshot-consume mode — but only if the supplied
+                    // trees are verifiable against the block header. A supplied
+                    // tree that can't be verified at this layer (Heartwood onward,
+                    // where the header does not pin this block's trees) is refused
+                    // and the block's note commitments are folded instead, so a
+                    // malicious peer can never inject an unverified tree (finding
+                    // #27, see `supplied_trees_are_verifiable`).
+                    let verified_supplied_trees = match supplied_trees {
+                        Some(supplied)
+                            if Self::supplied_trees_are_verifiable(
+                                &block,
+                                &supplied,
+                                &self.network(),
+                            )? =>
+                        {
+                            Some(supplied)
                         }
+                        _ => None,
+                    };
+                    let note_commitment_trees = match verified_supplied_trees {
+                        Some(supplied) => supplied,
                         None => {
                             let mut note_commitment_trees = prev_note_commitment_trees.clone();
                             note_commitment_trees

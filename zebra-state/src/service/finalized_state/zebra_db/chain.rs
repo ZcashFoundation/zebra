@@ -181,7 +181,8 @@ impl ZebraDb {
     }
 
     /// Writes the verified final chain value pools directly into the
-    /// `chain_value_pools` column family, for snapshot-consume (assumeUTXO) sync.
+    /// `chain_value_pools` column family, and backfills the tip block's
+    /// per-block `block_info` value pool, for snapshot-consume (assumeUTXO) sync.
     ///
     /// Used at `H_max` to load the authoritative final chain value pools instead
     /// of deriving them per block (the per-block spent-value resolution is
@@ -189,19 +190,44 @@ impl ZebraDb {
     /// caller is responsible for verifying `value_pool` against its pinned hash
     /// before calling this.
     ///
-    /// The single `()`-keyed value pool entry is the consensus value-pool state
-    /// at the tip; writing the snapshot's final value here makes the finalized
-    /// state's chain value pools byte-identical to a normally-synced node at
-    /// `H_max`.
+    /// Two writes, in one atomic batch:
+    /// - the single `()`-keyed value pool entry — the consensus value-pool state
+    ///   at the tip, read on the handoff / non-finalized-init path
+    ///   ([`Self::finalized_value_pool`]); and
+    /// - the `block_info` entry for `tip_height`, rewritten to carry this final
+    ///   value pool while preserving the block size already recorded for it
+    ///   during the consume-phase commit (see
+    ///   [`DiskWriteBatch::prepare_block_info_only_batch`]).
+    ///
+    /// This makes the finalized state's chain value pools and the tip block's
+    /// `block_info` value pool byte-identical to a normally-synced node at
+    /// `H_max`. Per-block `block_info` value pools *below* the tip remain
+    /// placeholders for the consume phase (their deltas were never resolved) —
+    /// the already-accepted assumeUTXO intermediate-RPC divergence
+    /// (`docs/design/p2p-snapshot-distribution.md` §3.3).
     pub fn bulk_load_chain_value_pools(
         &self,
         value_pool: ValueBalance<NonNegative>,
+        tip_height: Height,
     ) -> Result<(), rocksdb::Error> {
         let mut batch = DiskWriteBatch::new();
         let _ = self
             .chain_value_pools_cf()
             .with_batch_for_writing(&mut batch)
             .zs_insert(&(), &value_pool);
+
+        // Preserve the block size already stored for the tip; default to 0 only
+        // if no entry exists (should not happen — every committed block writes
+        // its `block_info`).
+        let tip_size = self
+            .block_info(HashOrHeight::Height(tip_height))
+            .map(|info| info.size())
+            .unwrap_or(0);
+        let _ = self
+            .block_info_cf()
+            .with_batch_for_writing(&mut batch)
+            .zs_insert(&tip_height, &BlockInfo::new(value_pool, tip_size));
+
         self.write_batch(batch)
     }
 
@@ -311,17 +337,54 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
+        // Store the per-block `BlockInfo` with the derived value pool.
+        self.prepare_block_info_batch(db, finalized, new_value_pool);
+
+        Ok(())
+    }
+
+    /// Prepares a database batch writing only the per-block [`BlockInfo`] with a
+    /// **placeholder (zero) value pool**, for snapshot-consume (assumeUTXO) sync.
+    ///
+    /// In snapshot-consume mode the per-block chain value pool cannot be derived
+    /// (the block's spent values are not resolved, see
+    /// [`crate::snapshot_consume`]), so the authoritative chain value pool is the
+    /// single `()`-keyed entry bulk-loaded at `H_max`
+    /// ([`ZebraDb::bulk_load_chain_value_pools`]). The per-block `block_info`
+    /// entry must still exist — `getblock` RPC and the value-pool-reconstruction
+    /// reader look it up by height, and the commit path must not leave a hole in
+    /// the column family — so this records the correct block **size** with a zero
+    /// value pool. The intermediate-height per-block value-pool RPC delta is
+    /// therefore incomplete during the consume phase, which is the already-accepted
+    /// assumeUTXO RPC divergence (`docs/design/p2p-snapshot-distribution.md` §3.3).
+    ///
+    /// The batch is modified by this method and written by the caller.
+    pub fn prepare_block_info_only_batch(&mut self, db: &ZebraDb, finalized: &FinalizedBlock) {
+        self.prepare_block_info_batch(db, finalized, ValueBalance::zero());
+    }
+
+    /// Prepares the per-block [`BlockInfo`] write (block size + `value_pools`)
+    /// into the batch. Shared by the value-pool-deriving and the
+    /// snapshot-consume (placeholder value pool) paths.
+    ///
+    /// The batch is modified by this method and written by the caller.
+    fn prepare_block_info_batch(
+        &mut self,
+        db: &ZebraDb,
+        finalized: &FinalizedBlock,
+        value_pools: ValueBalance<NonNegative>,
+    ) {
         // Get the block size to store with the BlockInfo. This is a bit wasteful
         // since the block header and txs were serialized previously when writing
         // them to the DB, and we could get the size if we modified the database
         // code to return the size of data written; but serialization should be cheap.
         let block_size = finalized.block.zcash_serialized_size();
 
+        // The cast is safe: a block is at most `MAX_BLOCK_BYTES` (2 MB), which is
+        // far below `u32::MAX`.
         let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
             &finalized.height,
-            &BlockInfo::new(new_value_pool, block_size as u32),
+            &BlockInfo::new(value_pools, block_size as u32),
         );
-
-        Ok(())
     }
 }

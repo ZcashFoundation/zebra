@@ -26,7 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    snapshot_consume::SnapshotConsumeState,
+    snapshot_consume::{SnapshotConsumeLoadError, SnapshotConsumeState},
     write_database_format_version_to_disk, BoxError, Config,
 };
 
@@ -191,8 +191,18 @@ impl ZebraDb {
         }
 
         // Load the optional snapshot-consume state, if configured. This is done
-        // after the database is open so the fresh-DB guard can read the tip.
-        db.snapshot_consume = db.load_snapshot_consume(config, network);
+        // after the database is open so the fresh-DB guard can read the tip. A
+        // misconfigured assumeUTXO sync is a fatal startup error with an
+        // actionable message (a clean typed error rather than a raw panic),
+        // because continuing would silently corrupt the finalized state.
+        db.snapshot_consume = db
+            .load_snapshot_consume(config, network)
+            .unwrap_or_else(|error| {
+                // The snapshot-consume safety guards must hold before any block
+                // is committed; failing them is unrecoverable, so stop startup
+                // with the typed error's actionable message.
+                panic!("cannot enable snapshot-consume (assumeUTXO) sync: {error}");
+            });
 
         let zero_location_utxos =
             db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
@@ -345,6 +355,14 @@ impl ZebraDb {
         self.db.cf_handle(cf_name).is_none()
     }
 
+    /// Returns the inner low-level [`DiskDb`] handle, for tests that drive the
+    /// `&DiskDb`-taking batch builders directly (e.g. the write-split spend
+    /// resolution test).
+    #[cfg(test)]
+    pub(crate) fn disk_db_for_test(&self) -> &DiskDb {
+        &self.db
+    }
+
     /// Sets the snapshot-consume state directly, for tests.
     ///
     /// Bypasses loading from a survivor-set file so tests can drive the
@@ -356,51 +374,57 @@ impl ZebraDb {
 
     /// Loads the optional snapshot-consume state from `config` for `network`.
     ///
-    /// Returns `None` if snapshot-consume is not configured. Panics with an
-    /// actionable message if it is configured but can't be loaded or fails a
-    /// safety guard, so a misconfigured assumeUTXO sync fails fast at startup
-    /// rather than silently corrupting state.
+    /// Returns `Ok(None)` if snapshot-consume is not configured. Returns a clean,
+    /// typed [`SnapshotConsumeLoadError`] (never a panic) if it is configured but
+    /// fails a safety guard or can't be loaded, so a misconfigured assumeUTXO
+    /// sync fails fast at startup with an actionable error rather than silently
+    /// corrupting state. The caller turns the error into a fatal startup failure.
     ///
     /// # Guards
     ///
     /// - **Network match.** The configured network must match this database's
-    ///   network.
-    /// - **Fresh DB only.** Survivor-set elision is only loaded against an
-    ///   empty database (a from-genesis sync). Loading it against a non-empty
-    ///   database could elide outputs the database already holds, or rely on an
-    ///   in-memory cache that is cold after a restart — both unsafe (see
+    ///   network; a per-network artifact applied to the wrong chain would mark
+    ///   the wrong outputs.
+    /// - **Fresh DB only.** Snapshot-consume is only loaded against an empty
+    ///   database (a from-genesis sync). Loading it against a non-empty database
+    ///   could elide outputs the database already holds, or rely on an in-memory
+    ///   spend-resolution cache that is cold after a restart — both unsafe (see
     ///   `docs/design/utxo-elision.md` §4.3). The other consume behaviours
-    ///   (direct tree writes, skipping per-block balances) carry no survivor
-    ///   set, so they are also only enabled on a fresh database for simplicity
-    ///   and to keep the snapshot's `H_max` meaningful.
+    ///   (direct tree writes, skipping per-block balances) are also only enabled
+    ///   on a fresh database for simplicity and to keep the snapshot's `H_max`
+    ///   meaningful. Resuming an in-progress assumeUTXO sync is a recorded
+    ///   follow-up (it needs the deferred-durability machinery to be
+    ///   restart-safe).
     fn load_snapshot_consume(
         &self,
         config: &Config,
         network: &Network,
-    ) -> Option<Arc<SnapshotConsumeState>> {
-        let consume_config = config.snapshot_consume.as_ref()?;
+    ) -> Result<Option<Arc<SnapshotConsumeState>>, SnapshotConsumeLoadError> {
+        let Some(consume_config) = config.snapshot_consume.as_ref() else {
+            return Ok(None);
+        };
+
+        // Network match: a per-network artifact applied to the wrong chain marks
+        // the wrong outputs.
+        let db_network = self.network();
+        if &db_network != network {
+            return Err(SnapshotConsumeLoadError::NetworkMismatch {
+                configured: network.clone(),
+                database: db_network,
+            });
+        }
 
         // Fresh DB only: refuse to enable any snapshot-consume behaviour against
         // a database that already holds blocks. A normal resync from genesis
         // creates a fresh database, so this is the expected state for assumeUTXO
-        // sync; resuming an in-progress assumeUTXO sync is a recorded follow-up
-        // (it needs the deferred-durability machinery to be restart-safe).
+        // sync.
         if !self.is_empty() {
-            panic!(
-                "snapshot-consume (assumeUTXO) sync is configured, but the state database at \
-                 height {:?} is not empty. Snapshot consume must start from a fresh \
-                 database (a from-genesis sync); see docs/design/utxo-elision.md.",
-                self.finalized_tip_height(),
-            );
+            return Err(SnapshotConsumeLoadError::NonEmptyDatabase {
+                tip_height: self.finalized_tip_height(),
+            });
         }
 
-        let consume_state =
-            SnapshotConsumeState::load(consume_config, network).unwrap_or_else(|error| {
-                panic!(
-                    "failed to load the configured snapshot-consume survivor set: {error}. \
-                     Check [state.snapshot_consume] survivor_set_path / h_max."
-                )
-            });
+        let consume_state = SnapshotConsumeState::load(consume_config, network)?;
 
         tracing::info!(
             h_max = ?consume_state.h_max(),
@@ -409,7 +433,7 @@ impl ZebraDb {
             "loaded snapshot-consume (assumeUTXO) state",
         );
 
-        Some(Arc::new(consume_state))
+        Ok(Some(Arc::new(consume_state)))
     }
 
     /// Returns the configured database kind for this database.
@@ -651,5 +675,125 @@ impl ZebraDb {
 impl Drop for ZebraDb {
     fn drop(&mut self) {
         self.shutdown(false);
+    }
+}
+
+#[cfg(test)]
+mod load_snapshot_consume_tests {
+    use std::sync::Arc;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+
+    use crate::{
+        service::finalized_state::FinalizedState,
+        snapshot_consume::{SnapshotConsumeConfig, SnapshotConsumeLoadError},
+        CheckpointVerifiedBlock, Config,
+    };
+
+    /// `load_snapshot_consume` returns a clean typed error (never panics
+    /// internally) when assumeUTXO sync is configured against a database that
+    /// already holds blocks (finding #4). The caller (`ZebraDb::new`) turns the
+    /// error into a fatal startup failure with an actionable message.
+    #[test]
+    fn refuses_non_empty_database_with_clean_error() {
+        let _init_guard = zebra_test::init();
+
+        let network = Network::Mainnet;
+
+        // A fresh state, made non-empty by committing genesis.
+        let mut state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        );
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .expect("genesis deserializes");
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(genesis).into(),
+                None,
+                "load_snapshot_consume non-empty-db test",
+            )
+            .expect("genesis commits");
+
+        // A config that enables snapshot-consume (no survivor set needed: the
+        // fresh-DB guard runs before the survivor set is loaded).
+        let config = Config {
+            snapshot_consume: Some(SnapshotConsumeConfig::default()),
+            ..Config::ephemeral()
+        };
+
+        let result = state.db.load_snapshot_consume(&config, &network);
+        assert!(
+            matches!(
+                result,
+                Err(SnapshotConsumeLoadError::NonEmptyDatabase { .. })
+            ),
+            "a non-empty database must be a clean NonEmptyDatabase error, got {result:?}",
+        );
+    }
+
+    /// `load_snapshot_consume` returns a clean typed error on a network mismatch
+    /// between the configured network and the database's network (finding #4).
+    #[test]
+    fn refuses_network_mismatch_with_clean_error() {
+        let _init_guard = zebra_test::init();
+
+        // An empty Mainnet database.
+        let state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &Network::Mainnet,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        );
+
+        let config = Config {
+            snapshot_consume: Some(SnapshotConsumeConfig::default()),
+            ..Config::ephemeral()
+        };
+
+        // Asking to consume a Testnet snapshot against a Mainnet database is a
+        // clean error, not a panic.
+        let result = state
+            .db
+            .load_snapshot_consume(&config, &Network::new_default_testnet());
+        assert!(
+            matches!(
+                result,
+                Err(SnapshotConsumeLoadError::NetworkMismatch { .. })
+            ),
+            "a network mismatch must be a clean NetworkMismatch error, got {result:?}",
+        );
+    }
+
+    /// With snapshot-consume not configured, the loader returns `Ok(None)` on any
+    /// database (the normal-sync path).
+    #[test]
+    fn unconfigured_returns_none() {
+        let _init_guard = zebra_test::init();
+
+        let network = Network::Mainnet;
+        let state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        );
+
+        let result = state
+            .db
+            .load_snapshot_consume(&Config::ephemeral(), &network);
+        assert!(
+            matches!(result, Ok(None)),
+            "unconfigured snapshot-consume returns Ok(None), got {result:?}",
+        );
     }
 }

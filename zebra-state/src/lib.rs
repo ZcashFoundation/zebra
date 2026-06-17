@@ -71,7 +71,8 @@ pub use service::{
     ADDRESS_BALANCE_RECORD_LEN, MAX_SNAPSHOT_RANGE_BYTES, UNSPENT_OUTPUT_RECORD_LEN,
 };
 pub use snapshot_consume::{
-    SnapshotConsumeConfig, SnapshotConsumeState, SurvivorSet, SurvivorSetError,
+    SnapshotConsumeConfig, SnapshotConsumeLoadError, SnapshotConsumeState, SurvivorSet,
+    SurvivorSetError,
 };
 
 // Allow use in the scanner and external tests

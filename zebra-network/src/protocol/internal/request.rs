@@ -226,7 +226,7 @@ pub enum Request {
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
 
-    /// Request a known-hash chunk by its chunk index.
+    /// Request a byte range of a known-hash chunk's deterministic bytes.
     ///
     /// A chunk is a deterministic, content-addressed encoding of a span of
     /// blocks (block hashes, size hints, and shielded tree roots). The peer
@@ -234,12 +234,25 @@ pub enum Request {
     /// produces byte-identical output that hashes to the pinned
     /// `chunk_hashes[index]` constant. See `docs/design/p2p-snapshot-distribution.md`.
     ///
+    /// A full v2 chunk (~4.72 MiB) exceeds `MAX_PROTOCOL_MESSAGE_LEN` (2 MiB), so
+    /// chunks are transferred in `≤ 1 MiB` ranges like the snapshot sets; the
+    /// requester reassembles the full chunk from its ranges and verifies its
+    /// SHA-256 against `chunk_hashes[index]`.
+    ///
     /// # Returns
     ///
-    /// Returns [`Response::KnownHashChunk`](super::Response::KnownHashChunk) if
-    /// the chunk is available, or [`Response::NotFound`](super::Response::NotFound)
-    /// if the chunk index is unknown or above the peer's tip.
-    KnownHashChunk(u32),
+    /// Returns [`Response::SnapshotRange`](super::Response::SnapshotRange) with
+    /// the requested bytes, or [`Response::NotFound`](super::Response::NotFound)
+    /// if the chunk index is unknown/above the peer's tip, the offset is past the
+    /// chunk end, or the length exceeds the per-request limit.
+    KnownHashChunkRange {
+        /// The chunk index.
+        index: u32,
+        /// The byte offset into the deterministic chunk bytes.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
 
     /// Request the serialized note commitment tree of a shielded pool, as of a
     /// given block height.
@@ -329,7 +342,9 @@ impl fmt::Display for Request {
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
 
-            Request::KnownHashChunk(index) => format!("KnownHashChunk({index})"),
+            Request::KnownHashChunkRange { index, offset, len } => {
+                format!("KnownHashChunkRange {{ index: {index}, offset: {offset}, len: {len} }}")
+            }
             Request::NoteCommitmentTree { pool, height } => {
                 format!(
                     "NoteCommitmentTree {{ pool: {pool:?}, height: {} }}",
@@ -365,7 +380,7 @@ impl Request {
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
 
-            Request::KnownHashChunk(_) => "KnownHashChunk",
+            Request::KnownHashChunkRange { .. } => "KnownHashChunkRange",
             Request::NoteCommitmentTree { .. } => "NoteCommitmentTree",
             Request::UnspentOutputs { .. } => "UnspentOutputs",
             Request::AddressBalances { .. } => "AddressBalances",

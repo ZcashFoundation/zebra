@@ -393,6 +393,7 @@ async fn fetch_and_verify_set_assembles_and_verifies() {
         spec,
         "unspent-output",
         set_bytes.len() as u64,
+        zs::UNSPENT_OUTPUT_RECORD_LEN,
         3,
         |offset, len| zn::Request::UnspentOutputs { offset, len },
     )
@@ -435,6 +436,7 @@ async fn fetch_and_verify_set_rejects_tampered_assembly() {
         spec,
         "unspent-output",
         set_bytes.len() as u64,
+        zs::UNSPENT_OUTPUT_RECORD_LEN,
         3,
         |offset, len| zn::Request::UnspentOutputs { offset, len },
     )
@@ -442,6 +444,45 @@ async fn fetch_and_verify_set_rejects_tampered_assembly() {
     .expect_err("a tampered set must be rejected");
     assert!(
         matches!(error, ConsumeError::SetHashMismatch { .. }),
+        "got {error:?}"
+    );
+}
+
+/// `fetch_and_verify_set` refuses an over-large caller-supplied `total_len`
+/// before allocating or doing any network work.
+#[tokio::test]
+async fn fetch_and_verify_set_rejects_oversized_total_len() {
+    let _init = zebra_test::init();
+
+    let spec: &'static KnownHashListSpec = Box::leak(Box::new(KnownHashListSpec {
+        max_height: Height(0),
+        chunk_blocks: HASHES_PER_CHUNK,
+        file_prefix: "synthetic-known-hashes",
+        chunk_hashes: Box::leak(Box::new(["00"])),
+        unspent_outputs_hash: Some("00"),
+        address_balances_hash: None,
+    }));
+
+    // The peer set must never be asked: the oversized length is refused first.
+    let peer_set = service_fn(|_req: zn::Request| {
+        panic!("the peer set must not be asked for an oversized set");
+        #[allow(unreachable_code)]
+        ready(Ok::<_, BoxError>(zn::Response::NotFound))
+    });
+
+    let error = fetch_and_verify_set(
+        &peer_set,
+        spec,
+        "unspent-output",
+        u64::MAX,
+        zs::UNSPENT_OUTPUT_RECORD_LEN,
+        3,
+        |offset, len| zn::Request::UnspentOutputs { offset, len },
+    )
+    .await
+    .expect_err("an over-large total_len must be refused before allocating");
+    assert!(
+        matches!(error, ConsumeError::SetTooLarge { .. }),
         "got {error:?}"
     );
 }
@@ -454,8 +495,6 @@ async fn ensure_chunk_uses_local_cf_when_present() {
 
     let chunk = build_chunk(4, &[], &[]);
     let spec = leak_spec_for(&chunk, 3);
-
-    let mut source = CfHashSource::without_fallback(spec);
 
     // The state serves the chunk from its CF; the peer set must never be called.
     let stored = chunk.clone();
@@ -470,8 +509,10 @@ async fn ensure_chunk_uses_local_cf_when_present() {
         ready(Ok::<_, BoxError>(zn::Response::NotFound))
     });
 
+    let mut source = CfHashSource::new(spec, peer_set, state);
+
     source
-        .ensure_chunk(&peer_set, &state, 0, 3)
+        .ensure_chunk(0, 3)
         .await
         .expect("a locally-stored, valid chunk is accepted");
     assert!(
@@ -480,7 +521,8 @@ async fn ensure_chunk_uses_local_cf_when_present() {
     );
 }
 
-/// `ensure_chunk` fetches from a peer and verifies when the CF lacks the chunk.
+/// `ensure_chunk` fetches from a peer, verifies, persists, and caches when the
+/// CF lacks the chunk.
 #[tokio::test]
 async fn ensure_chunk_fetches_and_verifies_from_peer() {
     let _init = zebra_test::init();
@@ -488,30 +530,199 @@ async fn ensure_chunk_fetches_and_verifies_from_peer() {
     let chunk = build_chunk(4, &[], &[]);
     let spec = leak_spec_for(&chunk, 3);
 
-    let mut source = CfHashSource::without_fallback(spec);
-
-    // The state has no stored chunk; the peer serves the matching one.
-    let state = service_fn(|_req: zs::Request| {
-        ready(Ok::<_, BoxError>(zs::Response::KnownHashChunk(None)))
+    // The state has no stored chunk on read, and accepts (and records) the
+    // persist write. The verified chunk must be persisted back into the CF.
+    let persisted = std::sync::Arc::new(std::sync::Mutex::new(None::<Vec<u8>>));
+    let persisted_in_service = persisted.clone();
+    let state = service_fn(move |req: zs::Request| {
+        let response = match req {
+            zs::Request::KnownHashChunk(_) => zs::Response::KnownHashChunk(None),
+            zs::Request::WriteKnownHashChunk { index, bytes } => {
+                assert_eq!(index, 0);
+                *persisted_in_service.lock().unwrap() = Some(bytes);
+                zs::Response::WroteKnownHashChunk
+            }
+            other => panic!("unexpected state request {other:?}"),
+        };
+        ready(Ok::<_, BoxError>(response))
     });
     let served = chunk.clone();
     let peer_set = service_fn(move |req: zn::Request| {
-        assert!(matches!(req, zn::Request::KnownHashChunk(0)));
-        let bytes = served.clone();
-        ready(Ok::<_, BoxError>(zn::Response::KnownHashChunk(
-            bytes.into(),
-        )))
+        // The chunk is fetched ranged; serve the requested byte window of the
+        // deterministic chunk bytes (the whole small chunk fits one range, so a
+        // single offset-0 request returns a short final range).
+        let zn::Request::KnownHashChunkRange { index, offset, len } = req else {
+            panic!("expected a KnownHashChunkRange request, got {req:?}");
+        };
+        assert_eq!(index, 0);
+        let start = offset as usize;
+        let end = (offset.saturating_add(u64::from(len)) as usize).min(served.len());
+        let range = served.get(start..end).unwrap_or_default().to_vec();
+        ready(Ok::<_, BoxError>(zn::Response::SnapshotRange(range.into())))
     });
 
+    let mut source = CfHashSource::new(spec, peer_set, state);
+
     source
-        .ensure_chunk(&peer_set, &state, 0, 3)
+        .ensure_chunk(0, 3)
         .await
         .expect("a verified peer chunk is accepted");
     assert!(source.has_chunk(0), "the peer chunk is cached");
 
+    // The verified bytes were persisted back into the CF.
+    assert_eq!(
+        persisted.lock().unwrap().as_deref(),
+        Some(chunk.as_slice()),
+        "the verified peer chunk is persisted to the state CF",
+    );
+
     // The cached chunk now backs the synchronous hash lookup.
     let hash = HashSource::hash(&mut source, Height(0)).expect("hash lookup succeeds");
     assert!(hash.is_some(), "the cached chunk serves height 0's hash");
+}
+
+/// `ensure_chunk` tolerates a transient peer-set failure on one attempt and
+/// keeps trying other peers up to the attempt cap.
+#[tokio::test]
+async fn ensure_chunk_tolerates_transient_peer_failure() {
+    let _init = zebra_test::init();
+
+    let chunk = build_chunk(4, &[], &[]);
+    let spec = leak_spec_for(&chunk, 3);
+
+    // The state has no stored chunk and accepts the persist.
+    let state = service_fn(|req: zs::Request| {
+        let response = match req {
+            zs::Request::KnownHashChunk(_) => zs::Response::KnownHashChunk(None),
+            zs::Request::WriteKnownHashChunk { .. } => zs::Response::WroteKnownHashChunk,
+            other => panic!("unexpected state request {other:?}"),
+        };
+        ready(Ok::<_, BoxError>(response))
+    });
+
+    // The first peer-set call fails outright (a transient peer-set error); the
+    // second serves the matching chunk. A single transient failure must not
+    // abort the whole prime.
+    let served = chunk.clone();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let peer_set = service_fn(move |req: zn::Request| {
+        let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let zn::Request::KnownHashChunkRange { offset, len, .. } = req else {
+            panic!("expected a KnownHashChunkRange request, got {req:?}");
+        };
+        if n == 0 {
+            return ready(Err::<zn::Response, BoxError>("transient peer-set failure".into()));
+        }
+        let start = offset as usize;
+        let end = (offset.saturating_add(u64::from(len)) as usize).min(served.len());
+        let range = served.get(start..end).unwrap_or_default().to_vec();
+        ready(Ok::<_, BoxError>(zn::Response::SnapshotRange(range.into())))
+    });
+
+    let mut source = CfHashSource::new(spec, peer_set, state);
+
+    source
+        .ensure_chunk(0, 4)
+        .await
+        .expect("a transient peer failure is tolerated and a later peer succeeds");
+    assert!(
+        source.has_chunk(0),
+        "the chunk is cached after retrying past the transient failure",
+    );
+}
+
+/// `ensure_covers` primes every chunk covering the window, including a second
+/// chunk the frontier has advanced into — so the synchronous `hash` lookup keeps
+/// working across a chunk boundary (the #11 regression).
+#[tokio::test]
+async fn ensure_covers_primes_across_chunk_boundary() {
+    use crate::components::ibd::engine::HashSource;
+
+    let _init = zebra_test::init();
+
+    // Two full chunks: index 0 covers [0, HASHES_PER_CHUNK), index 1 covers
+    // [HASHES_PER_CHUNK, 2*HASHES_PER_CHUNK). Distinct contents so each has a
+    // distinct pinned hash.
+    let chunk_0 = build_chunk(HASHES_PER_CHUNK, &[], &[]);
+    let mut chunk_1 = build_chunk(HASHES_PER_CHUNK, &[], &[]);
+    // Perturb chunk 1's first hash byte so it differs from chunk 0.
+    chunk_1[16] ^= 0x5A;
+
+    let hash_0: &'static str = Box::leak(hex::encode(Sha256::digest(&chunk_0)).into_boxed_str());
+    let hash_1: &'static str = Box::leak(hex::encode(Sha256::digest(&chunk_1)).into_boxed_str());
+
+    let spec: &'static KnownHashListSpec = Box::leak(Box::new(KnownHashListSpec {
+        max_height: Height(2 * HASHES_PER_CHUNK - 1),
+        chunk_blocks: HASHES_PER_CHUNK,
+        file_prefix: "synthetic-known-hashes",
+        chunk_hashes: Box::leak(Box::new([hash_0, hash_1])),
+        unspent_outputs_hash: None,
+        address_balances_hash: None,
+    }));
+
+    // The state has no stored chunks and accepts persists; peers serve the
+    // requested chunk's ranges by index.
+    let state = service_fn(|req: zs::Request| {
+        let response = match req {
+            zs::Request::KnownHashChunk(_) => zs::Response::KnownHashChunk(None),
+            zs::Request::WriteKnownHashChunk { .. } => zs::Response::WroteKnownHashChunk,
+            other => panic!("unexpected state request {other:?}"),
+        };
+        ready(Ok::<_, BoxError>(response))
+    });
+    let served_0 = chunk_0.clone();
+    let served_1 = chunk_1.clone();
+    let peer_set = service_fn(move |req: zn::Request| {
+        let zn::Request::KnownHashChunkRange { index, offset, len } = req else {
+            panic!("expected a KnownHashChunkRange request, got {req:?}");
+        };
+        let served: &[u8] = match index {
+            0 => &served_0,
+            1 => &served_1,
+            other => panic!("unexpected chunk index {other}"),
+        };
+        let start = offset as usize;
+        let end = (offset.saturating_add(u64::from(len)) as usize).min(served.len());
+        let range = served.get(start..end).unwrap_or_default().to_vec();
+        ready(Ok::<_, BoxError>(zn::Response::SnapshotRange(range.into())))
+    });
+
+    let mut source = CfHashSource::new(spec, peer_set, state);
+
+    // Prime only the first chunk (the bootstrap window).
+    source
+        .ensure_covers(Height(0), Height(0), 3)
+        .await
+        .expect("the first chunk primes");
+    assert!(source.has_chunk(0), "chunk 0 is primed");
+    assert!(!source.has_chunk(1), "chunk 1 is not yet primed");
+
+    // A height in chunk 1 has no resident chunk: the synchronous lookup errors
+    // (no v1 fallback), which is the condition the engine re-primes against.
+    assert!(
+        HashSource::hash(&mut source, Height(HASHES_PER_CHUNK)).is_err(),
+        "a height in the unprimed chunk 1 errors before re-priming",
+    );
+
+    // As the frontier advances into chunk 1, `ensure_covers` over the new window
+    // primes chunk 1 too.
+    source
+        .ensure_covers(Height(HASHES_PER_CHUNK), Height(HASHES_PER_CHUNK), 3)
+        .await
+        .expect("the second chunk primes as the frontier advances");
+    assert!(source.has_chunk(1), "chunk 1 is primed after ensure_covers");
+
+    // The lookup now works for the height in chunk 1.
+    let hash = HashSource::hash(&mut source, Height(HASHES_PER_CHUNK))
+        .expect("the lookup succeeds after re-priming")
+        .expect("chunk 1 covers this height");
+    assert_eq!(
+        hash.0,
+        ParsedChunk::parse(&chunk_1)
+            .expect("chunk 1 parses")
+            .block_hash(0),
+        "the re-primed chunk 1 serves the correct hash across the boundary",
+    );
 }
 
 #[test]
@@ -528,21 +739,29 @@ fn chunk_index_and_span_base_round_trip() {
 }
 
 /// Primes a chunk into a `CfHashSource`'s cache from already-verified bytes, for
-/// the tree-lookahead source tests, without a network or state round-trip.
-async fn primed_source(chunk_bytes: Vec<u8>, max_height: u32) -> CfHashSource {
+/// the tree-lookahead source tests, without a network round-trip (the chunk is
+/// served from the local "CF"). Returns the primed source as an `impl
+/// HashSource`, since the tests only exercise the trait methods.
+async fn primed_source(chunk_bytes: Vec<u8>, max_height: u32) -> impl HashSource {
     let spec = leak_spec_for(&chunk_bytes, max_height);
-    let mut source = CfHashSource::without_fallback(spec);
 
-    // Serve the chunk from the local "CF" so `ensure_chunk` caches it.
+    // Serve the chunk from the local "CF" so `ensure_chunk` caches it; the
+    // persist write is accepted but ignored.
     let stored = chunk_bytes.clone();
-    let state = service_fn(move |_req: zs::Request| {
-        let bytes = stored.clone();
-        ready(Ok::<_, BoxError>(zs::Response::KnownHashChunk(Some(bytes))))
+    let state = service_fn(move |req: zs::Request| {
+        let response = match req {
+            zs::Request::KnownHashChunk(_) => zs::Response::KnownHashChunk(Some(stored.clone())),
+            zs::Request::WriteKnownHashChunk { .. } => zs::Response::WroteKnownHashChunk,
+            other => panic!("unexpected state request {other:?}"),
+        };
+        ready(Ok::<_, BoxError>(response))
     });
     let peer_set = service_fn(|_req: zn::Request| ready(Ok::<_, BoxError>(zn::Response::NotFound)));
 
+    let mut source = CfHashSource::new(spec, peer_set, state);
+
     source
-        .ensure_chunk(&peer_set, &state, 0, 1)
+        .ensure_chunk(0, 1)
         .await
         .expect("the primed chunk is cached");
     source

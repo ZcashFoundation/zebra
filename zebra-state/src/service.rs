@@ -1313,6 +1313,29 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Persists a verified known-hash chunk into the `known_hash_chunk`
+            // column family. This is a content-addressed side-index write
+            // (verified by the caller before issuance) that is independent of
+            // the block-commit ordering, so it writes its own atomic batch
+            // directly through the shared `ZebraDb` rather than going through the
+            // block write task.
+            Request::WriteKnownHashChunk { index, bytes } => {
+                let db = self.read_service.db.clone();
+
+                async move {
+                    // The write touches RocksDB, so it runs on a blocking thread
+                    // instead of the async runtime.
+                    tokio::task::spawn_blocking(move || db.write_known_hash_chunk(index, &bytes))
+                        .await
+                        .map_err(BoxError::from)?
+                        .map_err(BoxError::from)?;
+
+                    Ok(Response::WroteKnownHashChunk)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
             // Runs concurrently using the ReadStateService
             Request::Tip
             | Request::Depth(_)
@@ -1331,6 +1354,7 @@ impl Service<Request> for StateService {
             | Request::CheckBestChainTipNullifiersAndAnchors(_)
             | Request::CheckBlockProposalValidity(_)
             | Request::KnownHashChunk(_)
+            | Request::KnownHashChunkRange { .. }
             | Request::NoteCommitmentTreeBytes { .. }
             | Request::UnspentOutputsRange { .. }
             | Request::AddressBalancesRange { .. } => {
@@ -1806,6 +1830,12 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::KnownHashChunk(index) => Ok(ReadResponse::KnownHashChunk(
                 read::known_hash_chunk_bytes(&state.db, index),
             )),
+
+            ReadRequest::KnownHashChunkRange { index, offset, len } => {
+                Ok(ReadResponse::SnapshotRange(read::known_hash_chunk_range(
+                    &state.db, index, offset, len,
+                )))
+            }
 
             ReadRequest::NoteCommitmentTreeBytes { pool, height } => {
                 Ok(ReadResponse::NoteCommitmentTreeBytes(

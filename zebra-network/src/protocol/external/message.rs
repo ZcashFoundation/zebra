@@ -296,26 +296,23 @@ pub enum Message {
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterClear,
 
-    /// A `getkhchunk` message: request a known-hash chunk by index.
+    /// A `getkhchunk` message: request a byte range of a known-hash chunk.
     ///
     /// This is a Zebra-specific extension for P2P distribution of known-hash
     /// snapshot data. See `docs/design/p2p-snapshot-distribution.md`.
     ///
-    /// The peer responds with a [`Self::KnownHashChunk`] message carrying the
-    /// chunk bytes, or with [`Self::SnapshotNotFound`] if the chunk is
-    /// unavailable.
+    /// A full v2 chunk exceeds `MAX_PROTOCOL_MESSAGE_LEN`, so chunks are
+    /// transferred in `≤ 1 MiB` ranges over the deterministic chunk bytes. The
+    /// peer responds with a [`Self::Snapshot`] message carrying the range bytes
+    /// (a chunk range is a content-addressed byte range, like the snapshot sets),
+    /// or with [`Self::SnapshotNotFound`] if the range is unavailable.
     GetKnownHashChunk {
         /// The chunk index to fetch.
         index: u32,
-    },
-
-    /// A `khchunk` message: the bytes of a requested known-hash chunk.
-    ///
-    /// Length-delimited so the codec knows how many bytes to read; the byte
-    /// count is bounded by `MAX_PROTOCOL_MESSAGE_LEN`.
-    KnownHashChunk {
-        /// The verified, content-addressed chunk bytes.
-        bytes: Vec<u8>,
+        /// The byte offset into the deterministic chunk bytes.
+        offset: u64,
+        /// The number of bytes to return.
+        len: u32,
     },
 
     /// A `getnctree` message: request the serialized note commitment tree of a
@@ -620,11 +617,8 @@ impl fmt::Display for Message {
             Message::FilterAdd { .. } => "filteradd".to_string(),
             Message::FilterClear => "filterclear".to_string(),
 
-            Message::GetKnownHashChunk { index } => {
-                format!("getkhchunk {{ index: {index} }}")
-            }
-            Message::KnownHashChunk { bytes } => {
-                format!("khchunk {{ bytes: {} }}", bytes.len())
+            Message::GetKnownHashChunk { index, offset, len } => {
+                format!("getkhchunk {{ index: {index}, offset: {offset}, len: {len} }}")
             }
             Message::GetNoteCommitmentTree { pool, height } => {
                 format!("getnctree {{ pool: {pool:?}, height: {} }}", height.0)
@@ -665,7 +659,6 @@ impl Message {
             Message::FilterAdd { .. } => "filteradd",
             Message::FilterClear => "filterclear",
             Message::GetKnownHashChunk { .. } => "getkhchunk",
-            Message::KnownHashChunk { .. } => "khchunk",
             Message::GetNoteCommitmentTree { .. } => "getnctree",
             Message::NoteCommitmentTree { .. } => "nctree",
             Message::GetSnapshot { .. } => "getsnap",

@@ -1474,6 +1474,20 @@ impl Chain {
         let mut tree_result = None;
         let mut partial_result = None;
 
+        // TODO(known-hash-ibd #10): in snapshot-consume (assumeUTXO) mode, accept
+        // a pre-fetched, verified note commitment tree set supplied by the IBD
+        // engine (`IbdBlock.supplied_trees`, threaded through
+        // `CommitCheckpointVerifiedBlock` → the write worker → here) and write it
+        // directly instead of folding via `update_trees_parallel`. This is the
+        // in-memory-commit half of the "tree supplied by download" path
+        // (`docs/design/p2p-snapshot-distribution.md` §3.2); the finalized-commit
+        // half already exists (`commit_finalized_direct_with_trees`). It must also
+        // reproduce the sapling/orchard subtree tracking this fold performs (the
+        // supplied tree blob does not carry it), with bit-identical roots and
+        // frontiers — deferred because it is a consensus-critical hot-path change,
+        // and the engine does not populate `supplied_trees` yet, so today every
+        // block folds (correct, just not accelerated).
+
         // Run 4 tasks in parallel:
         // - sprout, sapling, and orchard tree updates and root calculations
         // - the rest of the Chain updates

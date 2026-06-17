@@ -172,7 +172,6 @@ impl Encoder<Message> for Codec {
             FilterAdd { .. } => b"filteradd\0\0\0",
             FilterClear => b"filterclear\0",
             GetKnownHashChunk { .. } => b"getkhchunk\0\0",
-            KnownHashChunk { .. } => b"khchunk\0\0\0\0\0",
             GetNoteCommitmentTree { .. } => b"getnctree\0\0\0",
             NoteCommitmentTree { .. } => b"nctree\0\0\0\0\0\0",
             GetSnapshot { .. } => b"getsnap\0\0\0\0\0",
@@ -341,11 +340,10 @@ impl Codec {
                 writer.write_all(data)?;
             }
             Message::FilterClear => { /* Empty payload -- no-op */ }
-            Message::GetKnownHashChunk { index } => {
+            Message::GetKnownHashChunk { index, offset, len } => {
                 writer.write_u32::<LittleEndian>(*index)?;
-            }
-            Message::KnownHashChunk { bytes } => {
-                Self::write_length_delimited_bytes(&mut writer, bytes)?;
+                writer.write_u64::<LittleEndian>(*offset)?;
+                writer.write_u32::<LittleEndian>(*len)?;
             }
             Message::GetNoteCommitmentTree { pool, height } => {
                 writer.write_u8(shielded_pool_to_byte(*pool))?;
@@ -538,11 +536,10 @@ impl Decoder for Codec {
                     b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
                     b"filterclear\0" => self.read_filterclear(&mut body_reader),
                     b"getkhchunk\0\0" => self.read_getkhchunk(&mut body_reader),
-                    b"khchunk\0\0\0\0\0" => self.read_khchunk(&mut body_reader),
                     b"getnctree\0\0\0" => self.read_getnctree(&mut body_reader),
-                    b"nctree\0\0\0\0\0\0" => self.read_nctree(&mut body_reader),
+                    b"nctree\0\0\0\0\0\0" => self.read_nctree(&mut body_reader, body_len),
                     b"getsnap\0\0\0\0\0" => self.read_getsnap(&mut body_reader),
-                    b"snap\0\0\0\0\0\0\0\0" => self.read_snap(&mut body_reader),
+                    b"snap\0\0\0\0\0\0\0\0" => self.read_snap(&mut body_reader, body_len),
                     b"snapnf\0\0\0\0\0\0" => self.read_snapnf(&mut body_reader),
                     _ => {
                         let command_string = String::from_utf8_lossy(&command);
@@ -859,21 +856,31 @@ impl Codec {
 
     /// Read a `u32` little-endian length prefix and then that many bytes.
     ///
-    /// The length is bounded by the codec's configured maximum body length
-    /// (at most `MAX_PROTOCOL_MESSAGE_LEN`), so a malicious peer cannot use the
-    /// prefix to force an unbounded allocation.
-    fn read_length_delimited_bytes<R: Read>(&self, mut reader: R) -> Result<Vec<u8>, Error> {
+    /// `body_len` is the full declared length of the message body (already
+    /// `<= max_len` from the header check). The prefix is bounded by **both** the
+    /// codec's maximum body length and the bytes that can actually remain in this
+    /// body (`body_len - 4` for the prefix itself), so a lying prefix can neither
+    /// force an unbounded allocation nor a 2 MiB allocation from a tiny body.
+    fn read_length_delimited_bytes<R: Read>(
+        &self,
+        mut reader: R,
+        body_len: usize,
+    ) -> Result<Vec<u8>, Error> {
         let len = reader.read_u32::<LittleEndian>()? as usize;
 
         // # Memory Denial of Service
         //
-        // The length prefix is attacker-controlled, so bound it by the codec's
-        // maximum body length before allocating. The body has already passed the
-        // header `body_len <= max_len` check, so a well-formed message's prefix
-        // cannot exceed this, and a lying prefix is rejected here.
-        if len > self.builder.max_len {
+        // The length prefix is attacker-controlled, so bound it before
+        // allocating. The body has already passed the header `body_len <= max_len`
+        // check; the only bytes that can follow the 4-byte prefix are the
+        // `body_len - 4` body remainder, so any prefix larger than that is a lie.
+        // Bounding by the remainder (not just `max_len`) stops a tiny body from
+        // forcing a near-2-MiB upfront allocation in
+        // `zcash_deserialize_bytes_external_count`.
+        let max_payload = self.builder.max_len.min(body_len.saturating_sub(4));
+        if len > max_payload {
             return Err(Error::Parse(
-                "snapshot message byte length exceeds maximum body length",
+                "snapshot message byte length exceeds the remaining message body",
             ));
         }
 
@@ -883,12 +890,8 @@ impl Codec {
     fn read_getkhchunk<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::GetKnownHashChunk {
             index: reader.read_u32::<LittleEndian>()?,
-        })
-    }
-
-    fn read_khchunk<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::KnownHashChunk {
-            bytes: self.read_length_delimited_bytes(reader)?,
+            offset: reader.read_u64::<LittleEndian>()?,
+            len: reader.read_u32::<LittleEndian>()?,
         })
     }
 
@@ -898,9 +901,9 @@ impl Codec {
         Ok(Message::GetNoteCommitmentTree { pool, height })
     }
 
-    fn read_nctree<R: Read>(&self, reader: R) -> Result<Message, Error> {
+    fn read_nctree<R: Read>(&self, reader: R, body_len: usize) -> Result<Message, Error> {
         Ok(Message::NoteCommitmentTree {
-            bytes: self.read_length_delimited_bytes(reader)?,
+            bytes: self.read_length_delimited_bytes(reader, body_len)?,
         })
     }
 
@@ -915,9 +918,9 @@ impl Codec {
         Ok(Message::GetSnapshot { set, offset, len })
     }
 
-    fn read_snap<R: Read>(&self, reader: R) -> Result<Message, Error> {
+    fn read_snap<R: Read>(&self, reader: R, body_len: usize) -> Result<Message, Error> {
         Ok(Message::Snapshot {
-            bytes: self.read_length_delimited_bytes(reader)?,
+            bytes: self.read_length_delimited_bytes(reader, body_len)?,
         })
     }
 

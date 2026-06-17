@@ -180,11 +180,18 @@ impl ZebraDb {
     /// family, for tests (e.g. to bulk-load a snapshot's final balances).
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn all_address_balances(&self) -> Vec<(transparent::Address, AddressBalanceLocation)> {
+        // The `balance_by_transparent_addr` column family lives in the RPC index
+        // database when the split is on, so iterate that database, not `self.db`:
+        // a RocksDB column-family handle is bound to the database it came from.
+        // `address_balance_cf` and `rpc_index_or_self` both resolve to that same
+        // database, keeping the handle and the iterator consistent.
+        let rpc_db = self.rpc_index_or_self();
         let balance_by_transparent_addr = self.address_balance_cf();
 
-        self.db
+        rpc_db
+            .db
             .zs_forward_range_iter::<_, transparent::Address, AddressBalanceLocation, _>(
-                &balance_by_transparent_addr,
+                balance_by_transparent_addr,
                 ..,
             )
             .collect()
@@ -281,6 +288,62 @@ impl ZebraDb {
         }
     }
 
+    /// Streams up to `take` unspent-output-location records, in ascending order,
+    /// starting from the `skip`-th record (0-based), to `f`.
+    ///
+    /// Returns:
+    /// - `None` if the iterator stopped early because the `take`-record window
+    ///   filled (so the request was in-bounds; the total set size is not needed
+    ///   and not computed), or
+    /// - `Some(total)` if the iterator reached the end of the set before filling
+    ///   the window, where `total` is the full record count — the caller uses it
+    ///   to tell an in-bounds short/empty final range (`skip <= total`) from an
+    ///   out-of-bounds start (`skip > total`).
+    ///
+    /// # Performance
+    ///
+    /// `OutputLocation` keys are not dense indexes, so a record at a given index
+    /// cannot be seeked directly; this advances the RocksDB iterator `skip` times
+    /// to reach the window start (an `O(skip)` walk, not the full `O(N)` set). It
+    /// stops as soon as `take` records are emitted, so the rest of the set is
+    /// never scanned. Streaming the whole set in `MAX_SNAPSHOT_RANGE_BYTES` ranges
+    /// is therefore `O(N² / range)`, which is acceptable for the
+    /// snapshot-distribution serve path (one untrusted range per request, the
+    /// per-request limit caps the work) and documented as the cost of indexing a
+    /// non-dense key space by record offset.
+    // The `cf_handle().unwrap()` relies on the column family always existing,
+    // which is an open-time invariant, not a hidden error path.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn for_each_unspent_output_location_bytes_range(
+        &self,
+        skip: u64,
+        take: u64,
+        mut f: impl FnMut(&[u8]),
+    ) -> Option<u64> {
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
+
+        let mut index: u64 = 0;
+        for (output_location, _output) in self
+            .db
+            .zs_forward_range_iter::<_, OutputLocation, transparent::Output, _>(
+                &utxo_by_out_loc,
+                ..,
+            )
+        {
+            if index >= skip {
+                if index - skip >= take {
+                    // The window is full: the request was in-bounds, so the
+                    // total count is not needed.
+                    return None;
+                }
+                f(output_location.as_bytes().as_ref());
+            }
+            index += 1;
+        }
+        // Reached the end of the set: `index` is the total record count.
+        Some(index)
+    }
+
     /// Streams the canonical on-disk bytes of every address-balance record to
     /// `f`, in ascending address (key) order: the 21-byte
     /// [`transparent::Address`] key, then its 32-byte [`AddressBalanceLocation`]
@@ -296,14 +359,59 @@ impl ZebraDb {
     /// are deterministic ([`IntoDisk`] serialization), so every honest node
     /// produces a byte-identical set.
     pub fn for_each_address_balance_bytes(&self, mut f: impl FnMut(&[u8], &[u8])) {
+        // The `balance_by_transparent_addr` column family lives in the RPC index
+        // database when the split is on, so iterate that database, not `self.db`:
+        // a RocksDB column-family handle is bound to the database it came from.
+        // `address_balance_cf` and `rpc_index_or_self` both resolve to that same
+        // database, keeping the handle and the iterator consistent.
+        let rpc_db = self.rpc_index_or_self();
         let balance_by_transparent_addr = self.address_balance_cf();
 
-        for (address_bytes, value_bytes) in self
+        for (address_bytes, value_bytes) in rpc_db
             .db
             .zs_forward_full_bytes_iter(balance_by_transparent_addr)
         {
             f(&address_bytes, &value_bytes);
         }
+    }
+
+    /// Streams up to `take` address-balance records, in ascending key order,
+    /// starting from the `skip`-th record (0-based), to `f` as
+    /// `(address_bytes, value_bytes)`.
+    ///
+    /// Returns `None` when the `take`-record window filled (in-bounds), or
+    /// `Some(total)` with the full record count when the iterator reached the end
+    /// first; see
+    /// [`for_each_unspent_output_location_bytes_range`](Self::for_each_unspent_output_location_bytes_range)
+    /// for the return-value contract and the `O(skip)` cost.
+    pub fn for_each_address_balance_bytes_range(
+        &self,
+        skip: u64,
+        take: u64,
+        mut f: impl FnMut(&[u8], &[u8]),
+    ) -> Option<u64> {
+        // The `balance_by_transparent_addr` column family lives in the RPC index
+        // database when the split is on, so iterate that database, not `self.db`:
+        // a RocksDB column-family handle is bound to the database it came from.
+        // `address_balance_cf` and `rpc_index_or_self` both resolve to that same
+        // database, keeping the handle and the iterator consistent.
+        let rpc_db = self.rpc_index_or_self();
+        let balance_by_transparent_addr = self.address_balance_cf();
+
+        let mut index: u64 = 0;
+        for (address_bytes, value_bytes) in rpc_db
+            .db
+            .zs_forward_full_bytes_iter(balance_by_transparent_addr)
+        {
+            if index >= skip {
+                if index - skip >= take {
+                    return None;
+                }
+                f(&address_bytes, &value_bytes);
+            }
+            index += 1;
+        }
+        Some(index)
     }
 
     /// Bulk-loads a verified address-balance set into
@@ -323,24 +431,28 @@ impl ZebraDb {
         balances: impl IntoIterator<Item = (transparent::Address, AddressBalanceLocation)>,
         batch_size: usize,
     ) -> Result<(), rocksdb::Error> {
+        // `balance_by_transparent_addr` lives in the RPC index database when the
+        // split is on, so the handle, the batch's CF, and the write must all
+        // target that database (a column-family handle is bound to its database).
+        let rpc_db = self.rpc_index_or_self();
+
         let batch_size = batch_size.max(1);
         let mut batch = DiskWriteBatch::new();
         let mut pending = 0usize;
 
         for (address, balance) in balances {
-            let balance_by_transparent_addr =
-                self.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
-            batch.zs_insert(&balance_by_transparent_addr, address, balance);
+            let balance_by_transparent_addr = self.address_balance_cf();
+            batch.zs_insert(balance_by_transparent_addr, address, balance);
             pending += 1;
 
             if pending >= batch_size {
-                self.write_batch(std::mem::take(&mut batch))?;
+                rpc_db.write_batch(std::mem::take(&mut batch))?;
                 pending = 0;
             }
         }
 
         if pending > 0 {
-            self.write_batch(batch)?;
+            rpc_db.write_batch(batch)?;
         }
 
         Ok(())

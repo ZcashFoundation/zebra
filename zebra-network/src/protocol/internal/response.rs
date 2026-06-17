@@ -94,19 +94,6 @@ pub enum Response {
     // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
     Transactions(Vec<InventoryResponse<(UnminedTx, Option<PeerSocketAddr>), UnminedTxId>>),
 
-    /// The verified bytes of a known-hash chunk, in response to
-    /// [`Request::KnownHashChunk`](super::Request::KnownHashChunk).
-    ///
-    /// The bytes are content-addressed: the requester verifies their SHA-256
-    /// against the pinned `chunk_hashes[index]` constant before trusting them.
-    KnownHashChunk(
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "arbitrary_bytes()")
-        )]
-        Bytes,
-    ),
-
     /// The serialized note commitment tree for a shielded pool at a height, in
     /// response to [`Request::NoteCommitmentTree`](super::Request::NoteCommitmentTree).
     ///
@@ -120,14 +107,17 @@ pub enum Response {
         Bytes,
     ),
 
-    /// A byte range of a snapshot set (the unspent-output set or the
-    /// address-balance set), in response to
-    /// [`Request::UnspentOutputs`](super::Request::UnspentOutputs) or
+    /// A content-addressed byte range, in response to any of the ranged
+    /// snapshot-distribution requests:
+    /// [`Request::KnownHashChunkRange`](super::Request::KnownHashChunkRange),
+    /// [`Request::UnspentOutputs`](super::Request::UnspentOutputs), or
     /// [`Request::AddressBalances`](super::Request::AddressBalances).
     ///
-    /// This single variant serves both range requests because both are opaque
-    /// content-addressed byte ranges from the requester's point of view; the
-    /// request type determines which set the bytes belong to.
+    /// This single variant serves all three because each is an opaque
+    /// content-addressed byte range from the requester's point of view; the
+    /// request type determines which artifact the bytes belong to. The requester
+    /// reassembles the ranges and verifies the whole artifact's SHA-256 against
+    /// its pinned constant.
     SnapshotRange(
         #[cfg_attr(
             any(test, feature = "proptest-impl"),
@@ -189,9 +179,6 @@ impl fmt::Display for Response {
                 transactions.iter().filter(|r| r.is_missing()).count()
             ),
 
-            Response::KnownHashChunk(bytes) => {
-                format!("KnownHashChunk {{ bytes: {} }}", bytes.len())
-            }
             Response::NoteCommitmentTree(bytes) => {
                 format!("NoteCommitmentTree {{ bytes: {} }}", bytes.len())
             }
@@ -220,7 +207,6 @@ impl Response {
             Response::Blocks(_) => "Blocks",
             Response::Transactions(_) => "Transactions",
 
-            Response::KnownHashChunk(_) => "KnownHashChunk",
             Response::NoteCommitmentTree(_) => "NoteCommitmentTree",
             Response::SnapshotRange(_) => "SnapshotRange",
             Response::NotFound => "NotFound",

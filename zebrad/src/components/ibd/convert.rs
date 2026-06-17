@@ -559,19 +559,22 @@ where
         // `NoteCommitmentTrees` directly (verifying the supplied sapling root
         // against the header's `hashFinalSaplingRoot`) instead of folding.
         //
-        // The remaining gap is engine-coupled and intentionally deferred: the
-        // pipelined checkpoint worker commits each block to the in-memory
-        // non-finalized state first (`commit_checkpoint_block`), which folds the
-        // trees inside `Chain::push` and produces the `Contextual` finalizable
-        // block the disk writer commits — so the disk writer never reaches the
-        // supplied-tree checkpoint arm for pipelined blocks. Using a supplied
-        // tree there requires `commit_checkpoint_block` to accept it and bypass
-        // the in-memory fold (replacing `Chain::push`'s `update_trees_parallel`,
-        // including the sapling/orchard subtree tracking the frontier blob does
-        // not carry). That is a separate hot-path change, tracked as a follow-up;
-        // the engine does not populate `supplied_trees` yet, so today every block
-        // folds (correct, just not yet accelerated). The metric makes the
-        // supplied-vs-folded ratio observable once the engine wires it.
+        // The remaining gap is engine-coupled and intentionally deferred
+        // (finding #10): the pipelined checkpoint worker commits each block to
+        // the in-memory non-finalized state first (`commit_checkpoint_block`),
+        // which folds the trees inside `Chain::push` and produces the
+        // `Contextual` finalizable block the disk writer commits — so the disk
+        // writer never reaches the supplied-tree checkpoint arm for pipelined
+        // blocks. Using a supplied tree there requires `commit_checkpoint_block`
+        // to accept it and bypass the in-memory fold (replacing `Chain::push`'s
+        // `update_trees_parallel`, including the sapling/orchard subtree tracking
+        // the frontier blob does not carry). That is a separate hot-path change,
+        // anchored by the `TODO(known-hash-ibd #10)` at the `Chain::push` fold
+        // site in `zebra_state`'s `update_chain_tip_with_block`; the engine does
+        // not populate `supplied_trees` yet, so today every block folds (correct,
+        // just not yet accelerated). `supplied_trees` is dropped here on purpose
+        // until that wiring lands. The metric makes the supplied-vs-folded ratio
+        // observable once the engine wires it.
         if supplied_trees.as_ref().is_some_and(SuppliedTrees::is_some) {
             metrics::counter!("ibd.tree.supplied.count").increment(1);
         } else {

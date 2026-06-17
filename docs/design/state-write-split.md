@@ -125,6 +125,18 @@ the write pipeline only when `separate_rpc_index_db` is on:
   `prepare_transparent_transaction_batch` code, reading prior balances from the
   RPC index DB, and writes it plus the advanced `rpc_index_tip` in one atomic
   RPC-index-DB batch.
+- **Spend resolution must not read the consensus unspent set.** The consensus
+  commit *deletes* every spent output from `utxo_by_out_loc`, so by the time T3
+  (or the catch-up walk) indexes a block, a cross-block spend's output is already
+  gone from the unspent set. T3 therefore resolves each spent output's value from
+  the **transaction body** (`output_by_location`, reading the immutable
+  `tx_by_loc`), and only its *location* from `output_location` — never from
+  `utxo_by_location` / `utxo_by_out_loc`. The transaction body is never deleted,
+  so this resolves both live-channel and crash-catch-up indexing identically;
+  reading the unspent set instead would silently drop every cross-block spend and
+  diverge the split RPC balances / UTXOs / tx-ids from the single-DB path. The
+  index passes never read `Utxo::height` / `Utxo::coinbase`, so reconstructing the
+  `Utxo` from the output location's height is sufficient.
 - **The consensus thread never blocks on T3 for correctness** — only the
   bounded-channel backpressure couples them, and the channel is sized so that
   coupling is loose. If T3 panics, the channel closes; the consensus side logs

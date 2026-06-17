@@ -114,6 +114,11 @@ pub enum Response {
     /// `None` if the chunk index is entirely above the finalized tip.
     KnownHashChunk(Option<Vec<u8>>),
 
+    /// Response to [`Request::WriteKnownHashChunk`], acknowledging that the
+    /// verified chunk bytes were persisted to the `known_hash_chunk` column
+    /// family.
+    WroteKnownHashChunk,
+
     /// Response to [`Request::NoteCommitmentTreeBytes`] with the serialized tree
     /// bytes, or `None` if the height is above the finalized tip.
     NoteCommitmentTreeBytes(Option<Vec<u8>>),

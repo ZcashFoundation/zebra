@@ -329,6 +329,28 @@ pub trait HashSource: Send + 'static {
     /// Drops source resources that only cover heights below `height`.
     fn release_below(&mut self, _height: block::Height) {}
 
+    /// Ensures the source can serve [`hash`](Self::hash) /
+    /// [`size_hint`](Self::size_hint) / tree-root lookups for every height in
+    /// `[start, end]` (inclusive), fetching whatever backing data it needs.
+    ///
+    /// Called by the run loop before each refill pass, so a source that loads its
+    /// data on demand (the CF-backed snapshot-consume [`CfHashSource`], whose
+    /// chunks cover `HASHES_PER_CHUNK` heights each) can prime the chunk(s)
+    /// covering the active window — at bootstrap and again as the commit frontier
+    /// crosses a chunk boundary. Returns an error the run loop treats as
+    /// retryable [`EngineError::List`].
+    ///
+    /// The default is a no-op: the bundled `.bin` [`KnownHashList`] loads its
+    /// chunks synchronously inside `hash`, so it has nothing to prime ahead of
+    /// time.
+    fn ensure_covers(
+        &mut self,
+        _start: block::Height,
+        _end: block::Height,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + '_>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
     /// Returns the heights in `[start, end]` (inclusive, absolute) that update a
     /// note commitment tree, paired with the pool that updated, in ascending
     /// `(height, pool)` order.
@@ -866,6 +888,15 @@ where
                 return Ok(IbdOutcome::Completed { final_height: end });
             }
 
+            // Prime the source's backing data for the active window before the
+            // refill queries it synchronously. For the CF-backed snapshot-consume
+            // source this fetches+verifies (and persists) the chunk(s) covering
+            // the window, so `hash`/`size_hint`/tree-root lookups keep working as
+            // the commit frontier crosses chunk boundaries (every
+            // HASHES_PER_CHUNK heights). For the bundled `.bin` list it is a
+            // no-op. A priming failure is retryable: the supervisor restarts.
+            self.ensure_source_coverage(end).await?;
+
             let now = Instant::now();
             let mut next_wake: Option<Instant> = None;
 
@@ -952,6 +983,30 @@ where
         }
 
         Ok(())
+    }
+
+    /// Primes the source's backing data for the active window
+    /// ([`HashSource::ensure_covers`]) before the refill queries it
+    /// synchronously.
+    ///
+    /// Covers `[base, base + lookahead]`, clamped to `end`, where `lookahead` is
+    /// the larger of the block fetch-ahead cap ([`IBD_WINDOW_MAX_BLOCKS`]) and
+    /// the tree-fetch margin — so both the block hashes and the tree roots the
+    /// upcoming refill and tree-scheduling steps need are resident. For the
+    /// bundled `.bin` list this is a no-op; for the CF-backed snapshot-consume
+    /// source it fetches+verifies+persists the covering chunk(s), which keeps the
+    /// lookups working across chunk boundaries. A failure is retryable.
+    async fn ensure_source_coverage(&mut self, end: block::Height) -> Result<(), EngineError> {
+        // `IBD_WINDOW_MAX_BLOCKS` fits a u32; the tree margin is already clamped
+        // to `TREE_LOOKAHEAD_MAX`. `base + lookahead` cannot overflow a real
+        // height (both are far below u32::MAX); saturate to fail safe.
+        let lookahead = (IBD_WINDOW_MAX_BLOCKS as u32).max(self.tree_lookahead_margin);
+        let cover_end = block::Height(self.base.0.saturating_add(lookahead)).min(end);
+
+        self.list
+            .ensure_covers(self.base, cover_end)
+            .await
+            .map_err(EngineError::List)
     }
 
     /// Refills the window, lowest-missing-first, with auto-scaled lookahead
