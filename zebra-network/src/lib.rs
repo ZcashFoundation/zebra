@@ -186,7 +186,10 @@ pub use crate::{
     config::{CacheDir, Config},
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
-    peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
+    peer::{
+        Client, ConnectedAddr, ConnectionInfo, HandshakeError, NotFoundClass, PeerError,
+        SharedPeerError,
+    },
     peer_set::init,
     policies::RetryLimit,
     protocol::{

@@ -166,26 +166,57 @@ pub enum BlockDownloadVerifyError {
     Timeout,
 }
 
+/// The kind of network `notfound` failure for a block download.
+///
+/// These map to the two ways a `BlocksByHash` download can fail to find a block, and they call for
+/// different recovery: a single peer not having the block is transient and retryable against other
+/// peers, whereas the peer set's inventory routing reporting that *all* ready peers lack the block
+/// means it can't be served by the currently connected peers.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum NotFoundKind {
+    /// A specific peer responded `notfound` for the block (`PeerError::NotFoundResponse`).
+    ///
+    /// Other peers may still have it, and the peer set marks the responding peer as missing the
+    /// hash, so a retry routes to a different peer. Retryable while keeping the pipeline alive.
+    Response,
+
+    /// The peer set's inventory routing found every ready peer is marked as missing the block
+    /// (`PeerError::NotFoundRegistry`), so it can't be served by the current peers.
+    ///
+    /// Usually means we're following a bad tip; recover by obtaining fresh tips and peers.
+    Registry,
+}
+
 impl BlockDownloadVerifyError {
     /// Returns the missing block hash for network `notfound` download failures.
     pub(super) fn not_found_download_hash(&self) -> Option<block::Hash> {
+        self.not_found_download().map(|(hash, _kind)| hash)
+    }
+
+    /// Returns the missing block hash and the [`NotFoundKind`] for network `notfound` download
+    /// failures, or `None` for other errors.
+    ///
+    /// Uses the [`SharedPeerError`](zn::SharedPeerError) classification computed at construction
+    /// rather than matching on `Debug` output, so a variant rename can't silently disable these
+    /// retry paths.
+    pub(super) fn not_found_download(&self) -> Option<(block::Hash, NotFoundKind)> {
         match self {
-            BlockDownloadVerifyError::DownloadFailed { error, hash }
-                if error
-                    .downcast_ref::<zn::SharedPeerError>()
-                    .is_some_and(shared_peer_error_is_not_found) =>
-            {
-                Some(*hash)
+            BlockDownloadVerifyError::DownloadFailed { error, hash } => {
+                let class = error
+                    .downcast_ref::<zn::SharedPeerError>()?
+                    .not_found_class()?;
+
+                let kind = match class {
+                    zn::NotFoundClass::Response => NotFoundKind::Response,
+                    zn::NotFoundClass::Registry => NotFoundKind::Registry,
+                    zn::NotFoundClass::Other => return None,
+                };
+
+                Some((*hash, kind))
             }
             _ => None,
         }
     }
-}
-
-fn shared_peer_error_is_not_found(error: &zn::SharedPeerError) -> bool {
-    let inner = error.inner_debug();
-
-    inner.contains("NotFoundResponse") || inner.contains("NotFoundRegistry")
 }
 
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {

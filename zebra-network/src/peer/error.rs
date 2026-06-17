@@ -10,16 +10,52 @@ use zebra_chain::serialization::SerializationError;
 use crate::protocol::external::InventoryHash;
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
-#[derive(Error, Debug, Clone)]
-#[error(transparent)]
-pub struct SharedPeerError(Arc<TracedError<PeerError>>);
+///
+/// The second field is a [`NotFoundClass`] discriminant computed at construction, so callers can
+/// branch on the `notfound` kind without string-matching `Debug` output (which a variant rename
+/// would silently break, disabling the syncer's retry paths).
+#[derive(Debug, Clone)]
+pub struct SharedPeerError(Arc<TracedError<PeerError>>, NotFoundClass);
+
+/// Typed classification of `notfound`-style peer errors, computed when a [`SharedPeerError`] is
+/// constructed (the only construction path is the `From` impl below, so this stays in sync with
+/// [`PeerError`] — a new or renamed variant is a compile error here, not a silent regression).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum NotFoundClass {
+    /// [`PeerError::NotFoundResponse`] — a specific peer lacked the item; retry on another peer.
+    Response,
+    /// [`PeerError::NotFoundRegistry`] — no ready peer has it; needs fresh tips/peers.
+    Registry,
+    /// Any other error (not a `notfound`-style failure).
+    Other,
+}
+
+impl std::fmt::Display for SharedPeerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Preserves the previous `#[error(transparent)]` Display.
+        std::fmt::Display::fmt(self.0.as_ref(), f)
+    }
+}
+
+impl std::error::Error for SharedPeerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Preserves the previous `#[error(transparent)]` source chain.
+        std::error::Error::source(self.0.as_ref())
+    }
+}
 
 impl<E> From<E> for SharedPeerError
 where
     PeerError: From<E>,
 {
     fn from(source: E) -> Self {
-        Self(Arc::new(TracedError::from(PeerError::from(source))))
+        let inner = PeerError::from(source);
+        let class = match &inner {
+            PeerError::NotFoundResponse(_) => NotFoundClass::Response,
+            PeerError::NotFoundRegistry(_) => NotFoundClass::Registry,
+            _ => NotFoundClass::Other,
+        };
+        Self(Arc::new(TracedError::from(inner)), class)
     }
 }
 
@@ -29,6 +65,13 @@ impl SharedPeerError {
     /// Unfortunately, [`TracedError`] makes it impossible to get a reference to the original error.
     pub fn inner_debug(&self) -> String {
         format!("{:?}", self.0.as_ref())
+    }
+
+    /// The `notfound`-style classification of this error, computed at construction.
+    ///
+    /// Returns `None` for errors that aren't a `notfound`-style failure.
+    pub fn not_found_class(&self) -> Option<NotFoundClass> {
+        (self.1 != NotFoundClass::Other).then_some(self.1)
     }
 }
 
@@ -267,5 +310,37 @@ pub enum HandshakeError {
 impl From<tokio::time::error::Elapsed> for HandshakeError {
     fn from(_source: tokio::time::error::Elapsed) -> Self {
         HandshakeError::Timeout
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NotFoundClass, PeerError, SharedPeerError};
+    use crate::protocol::external::InventoryHash;
+    use zebra_chain::block;
+
+    fn block_inv() -> Vec<InventoryHash> {
+        vec![InventoryHash::Block(block::Hash([0; 32]))]
+    }
+
+    /// The `notfound` classification is computed from the `PeerError` variant at construction, so
+    /// `not_found_class()` must stay in lock-step with the variants and never fall back to
+    /// `Debug`-string matching (which a rename would silently break, disabling the syncer's retry
+    /// paths).
+    #[test]
+    fn not_found_class_matches_peer_error_variant() {
+        assert_eq!(
+            SharedPeerError::from(PeerError::NotFoundResponse(block_inv())).not_found_class(),
+            Some(NotFoundClass::Response),
+        );
+        assert_eq!(
+            SharedPeerError::from(PeerError::NotFoundRegistry(block_inv())).not_found_class(),
+            Some(NotFoundClass::Registry),
+        );
+        // An unrelated peer error is not a `notfound`-style failure.
+        assert_eq!(
+            SharedPeerError::from(PeerError::NoReadyPeers).not_found_class(),
+            None,
+        );
     }
 }

@@ -46,7 +46,7 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::{AlwaysHedge, Downloads};
+use downloads::{AlwaysHedge, Downloads, NotFoundKind};
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
@@ -67,12 +67,37 @@ const FANOUT: usize = 3;
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
-/// Controls how many times the syncer requeues a required block hash after
-/// exhausting the network service's block download retries with a `notfound`.
+/// Controls how many times the syncer requeues a required block hash after a peer responds
+/// `notfound` (`NotFoundKind::Response`), before giving up on the round and obtaining fresh tips.
 ///
-/// This retry happens at the sync queue level, so it can run after other peer
-/// requests finish and newly ready peers become available.
-const MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
+/// This retry happens at the sync queue level, so it can run after other peer requests finish and
+/// newly ready peers become available. Each requeue routes to a different peer (the peer set marks
+/// the responding peer as missing the hash), so the retries are peer-diverse and normally converge
+/// to either a successful download or a `NotFoundKind::Registry` miss (no current peer has it).
+///
+/// The retries keep the in-flight download/verify pipeline alive — only an exhausted budget or a
+/// registry-wide miss restarts the round. The budget is mainly a safety bound against a peer that
+/// repeatedly advertises a hash via `FindBlocks` and then `notfound`s the download; peer
+/// accountability in `zebra-network` disconnects such peers so this bound is rarely reached.
+const MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 8;
+
+/// Controls how many times the syncer retries a required block that the peer set reports as missing
+/// from *all* current peers (`NotFoundKind::Registry`) before giving up on the round.
+///
+/// Unlike a single-peer `notfound`, a registry-wide miss can't be resolved by routing to another
+/// currently-connected peer — it needs the peer crawler to find a peer that has the block, or the
+/// inventory marks to expire. So we retry with a backoff (keeping the in-flight pipeline and its
+/// already-downloaded blocks alive) for up to roughly [`REGISTRY_MISS_RETRY_BACKOFF`] ×
+/// this many attempts, rather than discarding the whole round every time the head-of-line block is
+/// temporarily unavailable. Only a genuinely stuck block (e.g. a bad tip) exhausts this and restarts.
+const MISSING_BLOCK_REGISTRY_RETRY_LIMIT: usize = 60;
+
+/// Backoff between retries of a block missing from all current peers (`NotFoundKind::Registry`).
+///
+/// Long enough to avoid hot-looping on the synchronous `NotFoundRegistry` routing error and to let
+/// the peer crawler connect new peers / inventory marks expire, short enough that the pipeline
+/// resumes promptly once a peer that has the block appears.
+const REGISTRY_MISS_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -96,6 +121,9 @@ const MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
+///
+/// Set to a few checkpoints' worth of blocks so the download pipeline can stay full while the
+/// checkpoint verifier drains completed ranges, keeping the equihash-bound verifier continuously fed.
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
@@ -203,7 +231,7 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 /// This should be long enough for peers to respond to tip requests on a thin or
 /// flaky peer set. Shorter values can cause Zebra to loop on `obtain_tips`
 /// timeouts without making progress.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(30);
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(45);
 
 /// Controls how long the syncer sleeps between sync runs before obtaining new
 /// tips and restarting downloads.
@@ -391,8 +419,15 @@ where
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
 
-    /// Queue-level retry counts for block hashes whose download failed with `notfound`.
+    /// Queue-level retry counts for block hashes whose download failed with a single-peer
+    /// `notfound` ([`NotFoundKind::Response`]). Bounded by [`MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT`].
     missing_block_retry_counts: HashMap<block::Hash, usize>,
+
+    /// Queue-level retry counts for block hashes missing from *all* current peers
+    /// ([`NotFoundKind::Registry`]). Kept separate from [`Self::missing_block_retry_counts`] so the
+    /// larger registry budget ([`MISSING_BLOCK_REGISTRY_RETRY_LIMIT`]) isn't defeated by an
+    /// occasional single-peer `notfound` for the same hash sharing the smaller budget's count.
+    registry_miss_retry_counts: HashMap<block::Hash, usize>,
 
     /// Receiver that is `true` when the downloader is past the lookahead limit.
     /// This is based on the downloaded block height and the state tip height.
@@ -535,6 +570,7 @@ where
             prospective_tips: HashSet::new(),
             recent_syncs,
             missing_block_retry_counts: HashMap::new(),
+            registry_miss_retry_counts: HashMap::new(),
             past_lookahead_limit_receiver,
             misbehavior_sender,
         };
@@ -586,6 +622,7 @@ where
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
         self.missing_block_retry_counts.clear();
+        self.registry_miss_retry_counts.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -628,6 +665,9 @@ where
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, Report> {
+        // The reserve of discovered-but-not-yet-dispatched hashes at the start of this iteration.
+        metrics::gauge!("sync.reserve.depth").set(extra_hashes.len() as f64);
+
         // Check whether any block tasks are currently ready.
         while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
             // Some temporary errors are ignored, and syncing continues with other blocks.
@@ -689,6 +729,7 @@ where
                 e
             })?;
         }
+        metrics::gauge!("sync.reserve.depth").set(extra_hashes.len() as f64);
         self.update_metrics();
 
         Ok(extra_hashes)
@@ -1194,53 +1235,119 @@ where
 
     /// Handles a downloaded block response, requeueing required missing block hashes.
     ///
-    /// The block download service already retries each `BlocksByHash` request and
-    /// may hedge it to another peer. If all those attempts fail with `notfound`,
-    /// the syncer gives the required hash a small number of urgent queue-level
-    /// retries before restarting the sync round.
+    /// The block download service already retries each `BlocksByHash` request and may hedge it to
+    /// another peer. If a peer still responds `notfound` ([`NotFoundKind::Response`]), the syncer
+    /// requeues the required hash — which routes to a different peer, since the peer set now marks
+    /// the responding peer as missing it — and keeps the in-flight download/verify pipeline alive,
+    /// rather than discarding the whole round. The requeues are bounded by
+    /// [`MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT`].
+    ///
+    /// A [`NotFoundKind::Registry`] miss means the peer set found that *every* ready peer is marked
+    /// missing the block, so it can't be served by the current peers (usually a bad tip). That,
+    /// and an exhausted retry budget, fall through to [`Self::handle_block_response`], which
+    /// restarts the round to obtain fresh tips and peers.
     async fn handle_block_response_with_missing_retry(
         &mut self,
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
     ) -> Result<(), Report> {
         if let Ok((_height, hash)) = response.as_ref() {
             self.missing_block_retry_counts.remove(hash);
+            self.registry_miss_retry_counts.remove(hash);
         }
 
-        if let Some(hash) = response
+        if let Some((hash, kind)) = response
             .as_ref()
             .err()
-            .and_then(BlockDownloadVerifyError::not_found_download_hash)
+            .and_then(BlockDownloadVerifyError::not_found_download)
         {
-            let retry_count = self.missing_block_retry_counts.entry(hash).or_default();
+            match kind {
+                // A single peer didn't have the block, but others may. Requeue (routing to a
+                // different peer) and keep the rest of the pipeline running. Only an exhausted
+                // budget restarts the round.
+                NotFoundKind::Response => {
+                    let retry_count = self.missing_block_retry_counts.entry(hash).or_default();
 
-            if *retry_count < MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT {
-                *retry_count += 1;
+                    if *retry_count < MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT {
+                        *retry_count += 1;
 
-                info!(
-                    ?hash,
-                    retry_attempt = *retry_count,
-                    retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
-                    "missing sync block download failed, retrying required block"
-                );
-                metrics::counter!("sync.missing.block.requeued.count").increment(1);
+                        info!(
+                            ?hash,
+                            retry_attempt = *retry_count,
+                            retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
+                            "missing sync block download failed, retrying required block"
+                        );
+                        metrics::counter!("sync.missing.block.requeued.count").increment(1);
 
-                match self.downloads.download_and_verify(hash).await {
-                    Ok(()) => return Ok(()),
-                    Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                        match self.downloads.download_and_verify(hash).await {
+                            Ok(()) => return Ok(()),
+                            Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload {
+                                ..
+                            }) => {
+                                return Ok(());
+                            }
+                            Err(error) => self.handle_block_response(Err(error))?,
+                        }
+
                         return Ok(());
                     }
-                    Err(error) => self.handle_block_response(Err(error))?,
-                }
-            } else {
-                self.missing_block_retry_counts.remove(&hash);
 
-                warn!(
-                    ?hash,
-                    retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
-                    error = ?response.as_ref().expect_err("checked for notfound error"),
-                    "missing sync block retry limit exhausted, restarting sync"
-                );
-                metrics::counter!("sync.missing.block.retry.limit.count").increment(1);
+                    self.missing_block_retry_counts.remove(&hash);
+
+                    warn!(
+                        ?hash,
+                        retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
+                        "missing sync block retry budget exhausted, restarting sync"
+                    );
+                    metrics::counter!("sync.missing.block.retry.limit.count").increment(1);
+                }
+
+                // No currently-connected peer has the block. Routing to another connected peer
+                // won't help, but discarding the whole round (and its already-downloaded blocks)
+                // every time the head-of-line block is briefly unavailable is wasteful — it just
+                // re-downloads the same range once the peer crawler finds a peer that has it.
+                //
+                // Instead, keep the in-flight pipeline alive and retry the block after a backoff,
+                // giving the crawler time to connect new peers / inventory marks time to expire.
+                // Only a block that stays missing for the whole budget (e.g. a bad tip) restarts.
+                NotFoundKind::Registry => {
+                    metrics::counter!("sync.missing.block.registry.miss.count").increment(1);
+
+                    let retry_count = self.registry_miss_retry_counts.entry(hash).or_default();
+
+                    if *retry_count < MISSING_BLOCK_REGISTRY_RETRY_LIMIT {
+                        *retry_count += 1;
+
+                        debug!(
+                            ?hash,
+                            retry_attempt = *retry_count,
+                            retry_limit = MISSING_BLOCK_REGISTRY_RETRY_LIMIT,
+                            "required sync block is missing from all current peers, retrying after backoff"
+                        );
+                        metrics::counter!("sync.missing.block.registry.retry.count").increment(1);
+
+                        sleep(REGISTRY_MISS_RETRY_BACKOFF).await;
+
+                        match self.downloads.download_and_verify(hash).await {
+                            Ok(()) => return Ok(()),
+                            Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload {
+                                ..
+                            }) => {
+                                return Ok(());
+                            }
+                            Err(error) => self.handle_block_response(Err(error))?,
+                        }
+
+                        return Ok(());
+                    }
+
+                    self.registry_miss_retry_counts.remove(&hash);
+
+                    warn!(
+                        ?hash,
+                        retry_limit = MISSING_BLOCK_REGISTRY_RETRY_LIMIT,
+                        "required sync block missing from all peers past retry budget, restarting sync"
+                    );
+                }
             }
         }
 
