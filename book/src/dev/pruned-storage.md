@@ -94,10 +94,11 @@ The one-way transition is tracked by a single progress marker stored in the
   pruned-configured databases that have not yet reached the retention boundary.
 - For compatibility with older databases, a _missing_ `pruning_metadata` column
   family is treated the same as a missing marker: not pruned.
-- The marker is **written only when pruning actually deletes data** — not when
-  pruned mode is merely configured. A node configured as `pruned` that has not yet
-  synced past its retention window has no marker, and can still be switched back to
-  archive.
+- The marker is **written only when raw transaction history has actually become
+  unavailable** — either because pruning deleted it, or because checkpoint sync
+  intentionally skipped storing raw transactions below the checkpoint retention
+  floor. A node configured as `pruned` that has not yet reached either condition
+  has no marker, and can still be switched back to archive.
 
 The `pruning_metadata` column family is created lazily on any writable database,
 archive included (where it stays empty). Adding it is a minor database format
@@ -132,6 +133,19 @@ state. This rides the existing single-writer block-write path — there is no
 separate background prune task, by design.
 
 The genesis block (height 0) is never pruned.
+
+### Archive-to-pruned checkpoint sync
+
+Checkpoint sync in pruned mode can skip writing raw transaction bytes below the
+checkpoint retention floor, because those blocks are already outside the retained
+window relative to the known final checkpoint target.
+
+If an archive database is reopened in pruned mode partway through checkpoint
+sync, older archive-era raw transactions can still exist below that floor. In
+that case Zebra temporarily keeps writing raw transaction bytes for new
+checkpoint blocks and uses the per-block write batch to drain the archive-era
+backlog in bounded chunks. Once no raw transaction bytes remain below the skipped
+checkpoint height, checkpoint sync resumes the normal marker-only skip path.
 
 ### First online prune and marker catch-up
 
@@ -224,6 +238,10 @@ a summary including the finalized tip, the retention window, the previous and ne
 lowest retained heights, and the pruned height range and count. After a successful
 prune the database carries the pruning marker and is subject to the one-way
 archive restriction described above.
+
+The offline tool also scans the raw transaction column directly, so it can clean
+up databases created by older Zebra versions where the pruning marker is already
+ahead of raw transaction data left below the retained boundary.
 
 ## RPC behavior on a pruned node
 

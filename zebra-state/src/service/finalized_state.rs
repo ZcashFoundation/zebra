@@ -16,7 +16,10 @@
 
 use std::{
     io::{stderr, stdout, Write},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
@@ -137,6 +140,19 @@ pub struct FinalizedState {
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 
+    /// The lowest checkpoint-verified block height whose raw transaction bytes
+    /// should be retained during checkpoint sync in pruned mode.
+    checkpoint_raw_tx_retention_floor: Option<block::Height>,
+
+    /// `true` if raw transactions from an archive-mode sync may still exist
+    /// below `checkpoint_raw_tx_retention_floor`.
+    ///
+    /// Shared via `Arc<AtomicBool>` because [`FinalizedState`] is `Clone` and the
+    /// commit path mutates this flag (clearing it once the archive backlog is
+    /// drained), so per the shared-state invariant below it must be shared across
+    /// clones rather than an owned `bool`.
+    checkpoint_raw_tx_archive_backlog: Arc<AtomicBool>,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -186,9 +202,53 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
     ) -> Self {
+        Self::new_with_debug_and_storage_validation(
+            config,
+            network,
+            debug_skip_format_upgrades,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            read_only,
+            true,
+        )
+    }
+
+    /// Returns an on-disk database instance with storage mode validation disabled.
+    ///
+    /// This method is intended for tests that use intentionally invalid storage
+    /// configuration values to exercise lower-level pruning behavior.
+    #[cfg(test)]
+    pub(crate) fn new_with_debug_without_storage_validation(
+        config: &Config,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+        read_only: bool,
+    ) -> Self {
+        Self::new_with_debug_and_storage_validation(
+            config,
+            network,
+            debug_skip_format_upgrades,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            read_only,
+            false,
+        )
+    }
+
+    fn new_with_debug_and_storage_validation(
+        config: &Config,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+        read_only: bool,
+        validate_storage_mode: bool,
+    ) -> Self {
         // Fail fast on an invalid storage configuration, before opening the database.
-        if let Err(error) = config.validate_storage_mode(network) {
-            panic!("{error}");
+        if validate_storage_mode {
+            if let Err(error) = config.validate_storage_mode(network) {
+                panic!("{error}");
+            }
         }
 
         #[cfg(feature = "elasticsearch")]
@@ -234,6 +294,8 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            checkpoint_raw_tx_retention_floor: None,
+            checkpoint_raw_tx_archive_backlog: Arc::new(AtomicBool::new(false)),
             db,
             elastic_db,
             elastic_blocks: vec![],
@@ -242,6 +304,8 @@ impl FinalizedState {
         #[cfg(not(feature = "elasticsearch"))]
         let new_state = Self {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            checkpoint_raw_tx_retention_floor: None,
+            checkpoint_raw_tx_archive_backlog: Arc::new(AtomicBool::new(false)),
             db,
         };
 
@@ -294,6 +358,49 @@ impl FinalizedState {
         }
 
         new_state
+    }
+
+    /// Configure checkpoint raw transaction retention for pruned checkpoint sync.
+    ///
+    /// Checkpoint-verified blocks below the configured floor can skip `tx_by_loc`
+    /// writes, because they are outside the retention window relative to the
+    /// known final checkpoint target.
+    pub(crate) fn with_checkpoint_raw_tx_retention(
+        mut self,
+        max_checkpoint_height: block::Height,
+        config: &Config,
+    ) -> Self {
+        self.checkpoint_raw_tx_retention_floor = config.pruning_config().and_then(|pruning| {
+            compute_checkpoint_raw_tx_retention_floor(max_checkpoint_height, pruning.tx_retention)
+        });
+
+        let has_archive_backlog = config.pruning_config().is_some()
+            && self.checkpoint_raw_tx_retention_floor.is_some_and(|floor| {
+                let prune_from = self.db.lowest_retained_height().unwrap_or(block::Height(1));
+
+                self.db.raw_transactions_exist_in_range(prune_from, floor)
+            });
+
+        self.checkpoint_raw_tx_archive_backlog
+            .store(has_archive_backlog, Ordering::Relaxed);
+
+        self
+    }
+
+    /// Returns `true` when raw transaction bytes should be stored for a
+    /// checkpoint-verified block at `height`.
+    fn store_checkpoint_raw_transactions(&self, height: block::Height) -> bool {
+        height.is_min()
+            || self
+                .checkpoint_raw_tx_retention_floor
+                .is_none_or(|floor| height >= floor)
+    }
+
+    /// Returns `true` if the cached archive raw transaction backlog flag is set.
+    #[cfg(test)]
+    pub(crate) fn has_checkpoint_raw_tx_archive_backlog(&self) -> bool {
+        self.checkpoint_raw_tx_archive_backlog
+            .load(Ordering::Relaxed)
     }
 
     /// Returns the configured network for this database.
@@ -359,7 +466,14 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
+        let (
+            height,
+            hash,
+            finalized,
+            prev_note_commitment_trees,
+            store_raw_transactions,
+            checkpoint_prune_range,
+        ) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
@@ -420,11 +534,35 @@ impl FinalizedState {
                     history_tree,
                 };
 
+                let height = checkpoint_verified.height;
+                let hash = checkpoint_verified.hash;
+                let store_raw_transactions = self.store_checkpoint_raw_transactions(height);
+                let checkpoint_prune_range = if store_raw_transactions
+                    || !self
+                        .checkpoint_raw_tx_archive_backlog
+                        .load(Ordering::Relaxed)
+                {
+                    None
+                } else {
+                    let skipped_until =
+                        (height + 1).expect("checkpoint block height plus one is valid");
+
+                    self.db
+                        .checkpoint_raw_transaction_prune_range(skipped_until)
+                };
+                let store_raw_transactions = store_raw_transactions
+                    || checkpoint_prune_range_retains_current_height(
+                        height,
+                        checkpoint_prune_range,
+                    );
+
                 (
-                    checkpoint_verified.height,
-                    checkpoint_verified.hash,
+                    height,
+                    hash,
                     FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
                     Some(prev_note_commitment_trees),
+                    store_raw_transactions,
+                    checkpoint_prune_range,
                 )
             }
             FinalizableBlock::Contextual {
@@ -435,6 +573,8 @@ impl FinalizedState {
                 contextually_verified.hash,
                 FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
                 prev_note_commitment_trees,
+                true,
+                None,
             ),
         };
 
@@ -474,9 +614,18 @@ impl FinalizedState {
             prev_note_commitment_trees,
             &self.network(),
             source,
+            store_raw_transactions,
+            checkpoint_prune_range,
         );
 
         if result.is_ok() {
+            if checkpoint_prune_range.is_some_and(|(_, prune_until)| {
+                prune_until == (height + 1).expect("checkpoint block height plus one is valid")
+            }) {
+                self.checkpoint_raw_tx_archive_backlog
+                    .store(false, Ordering::Relaxed);
+            }
+
             // Save blocks to elasticsearch if the feature is enabled.
             #[cfg(feature = "elasticsearch")]
             self.elasticsearch(&finalized_inner_block);
@@ -629,4 +778,23 @@ impl FinalizedState {
         // This is okay for now because this is test-only code
         std::process::exit(0);
     }
+}
+
+/// Returns `true` when archive-backlog pruning does not prune the current
+/// checkpoint block, so its raw transactions still need to be written.
+fn checkpoint_prune_range_retains_current_height(
+    height: block::Height,
+    checkpoint_prune_range: Option<(block::Height, block::Height)>,
+) -> bool {
+    checkpoint_prune_range.is_some_and(|(_, prune_until)| prune_until <= height)
+}
+
+/// Returns the lowest checkpoint height whose raw transactions should be kept.
+fn compute_checkpoint_raw_tx_retention_floor(
+    max_checkpoint_height: block::Height,
+    tx_retention: u32,
+) -> Option<block::Height> {
+    let max_skipped_height = max_checkpoint_height.0.checked_sub(tx_retention)?;
+
+    max_skipped_height.checked_add(1).map(block::Height)
 }

@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   exercise pruning without a 10_000-block chain. This is a one-way mode: a pruned
   database cannot be reopened in archive mode.
   Historical RPC queries such as `getrawtransaction` for pruned transactions
-  return a not-found error. The default remains `archive` (keep all data).
+  return a not-found error. During checkpoint bootstrap, pruned nodes can also be
+  missing raw transaction data near their current tip until sync passes the
+  retention floor, so `getrawtransaction` and verbose `getblock` can fail for
+  recent-looking heights. The default remains `archive` (keep all data).
 - Offline pruning tooling (`zebrad prune-state` and the standalone
   `zebra-prune-state` binary) to reclaim historical raw transaction data from an
   existing database in a single pass, including data left intact when pruning is

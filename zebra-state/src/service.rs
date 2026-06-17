@@ -330,7 +330,8 @@ impl StateService {
                     &network,
                     #[cfg(feature = "elasticsearch")]
                     true,
-                );
+                )
+                .with_checkpoint_raw_tx_retention(max_checkpoint_height, &config);
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
