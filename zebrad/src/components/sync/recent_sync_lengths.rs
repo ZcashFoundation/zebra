@@ -65,10 +65,10 @@ impl RecentSyncLengths {
         self.update(sync_length)
     }
 
-    /// Insert a sync length from [`ChainSync::extend_tips`] at the front of the
+    /// Insert a sync length from [`ChainSync::build_extend`] at the front of the
     /// list.
     ///
-    /// [`ChainSync::extend_tips`]: super::ChainSync::extend_tips
+    /// [`ChainSync::build_extend`]: super::ChainSync::build_extend
     #[instrument(skip(self), fields(self.recent_lengths))]
     pub fn push_extend_tips_length(&mut self, sync_length: usize) {
         self.update(sync_length)

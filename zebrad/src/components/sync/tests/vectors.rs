@@ -2,10 +2,16 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{collections::HashMap, iter, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    iter,
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::Report;
 use futures::{Future, FutureExt};
+use tower::timeout::Timeout;
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -1238,6 +1244,107 @@ async fn not_found_download_restarts_sync() {
         restart,
         "notfound block downloads should restart sync after queue retries"
     );
+}
+
+/// Unit test for the refactored [`ChainSync::build_extend`]: it must *discover* the next batch of
+/// download hashes from a prospective tip, performing the FindBlocks fan-out and parsing the
+/// response, **without** dispatching any block downloads or otherwise touching syncer state.
+///
+/// This is the core property the continuous-refill `sync_round` `select!` loop relies on: discovery
+/// (`build_extend`) runs concurrently as a `self`-free future, while dispatch happens separately via
+/// the reserve.
+#[tokio::test]
+async fn build_extend_discovers_hashes_without_dispatching() -> Result<(), crate::BoxError> {
+    let (
+        _chain_sync,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        _state_service,
+        _mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block2_hash = block2.hash();
+    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
+    let block3_hash = block3.hash();
+    let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
+    let block4_hash = block4.hash();
+    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
+    let block5_hash = block5.hash();
+
+    // A single prospective tip: peers are asked to extend `block1`, expecting `block2` next.
+    let tip = sync::CheckedTip {
+        tip: block1_hash,
+        expected_next: block2_hash,
+    };
+    let tips: HashSet<_> = iter::once(tip).collect();
+
+    // `build_extend` owns a clone of the tip network so it can run without borrowing `self`.
+    let tip_network = Timeout::new(peer_set.clone(), sync::TIPS_RESPONSE_TIMEOUT);
+    let extend_handle = tokio::spawn(TestChainSync::build_extend(tip_network, tips));
+
+    // One peer extends the tip. The response starts with the expected hash (the match anchor) and
+    // ends with a possibly-incorrect trailing hash that the syncer discards.
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block1_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // expected_next (match anchor, not downloaded)
+            block3_hash,
+            block4_hash,
+            block5_hash, // (discarded - last hash, possibly incorrect)
+        ]));
+
+    // The remaining fan-out requests fail and are ignored.
+    for _ in 0..(sync::FANOUT - 1) {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block1_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
+    }
+
+    let (download_set, prospective_tips, discovered) = extend_handle
+        .await
+        .expect("build_extend task should not panic")?;
+
+    // Discovery: blocks 3 & 4 are queued for download, in response order. Block 2 is the match
+    // anchor and block 5 is the discarded trailing hash, so neither is downloaded.
+    assert_eq!(
+        download_set.into_iter().collect::<Vec<_>>(),
+        vec![block3_hash, block4_hash],
+        "build_extend should discover the inner hashes in response order",
+    );
+    assert_eq!(
+        discovered, 2,
+        "discovered count should match the download set length",
+    );
+
+    // The new prospective tip extends from block3, expecting block4 next.
+    let expected_tip = sync::CheckedTip {
+        tip: block3_hash,
+        expected_next: block4_hash,
+    };
+    assert_eq!(
+        prospective_tips,
+        iter::once(expected_tip).collect(),
+        "build_extend should return the next prospective tip",
+    );
+
+    // The key property: discovery dispatched no downloads and verified nothing. Only the FindBlocks
+    // fan-out was sent — no `BlocksByHash`, no verifier requests.
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    Ok(())
 }
 
 fn setup() -> (

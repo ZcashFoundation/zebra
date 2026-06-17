@@ -6,13 +6,17 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     convert,
+    future::Future,
     pin::Pin,
     task::Poll,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    future::OptionFuture,
+    stream::{FuturesUnordered, StreamExt},
+};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -141,6 +145,14 @@ pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
+
+/// Start asking peers for more block hashes before we run out of hashes to download.
+///
+/// The syncer keeps a list of block hashes it has learned from `FindBlocks`
+/// responses but has not yet requested as full blocks. When that list drops
+/// below one typical `FindBlocks` response, start one background extension
+/// request so downloads can continue without waiting for another peer round trip.
+const MIN_UNREQUESTED_HASHES_BEFORE_EXTEND: usize = MAX_TIPS_RESPONSE_HASH_COUNT;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -628,7 +640,7 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
+        let extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
             .await
             .map_err(Into::into)
             // TODO: replace with flatten() when it stabilises (#70142)
@@ -639,100 +651,162 @@ where
             })?;
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
-                .await
-                .map_err(Into::into)
-                // TODO: replace with flatten() when it stabilises (#70142)
-                .and_then(convert::identity)?;
-        }
+        self.sync_round(extra_hashes).await?;
 
         info!("exhausted prospective tip set");
 
         Ok(())
     }
 
-    /// Tries to synchronize the chain once, using the existing `extra_hashes`.
+    /// Drives one sync round to completion: dispatches downloads, drains completed blocks, and
+    /// continuously refills the hash reserve by extending tips *concurrently* with draining and
+    /// dispatch.
     ///
-    /// Tries to extend the existing tips and download the missing blocks.
+    /// `reserve` is the set of discovered-but-not-yet-dispatched block hashes (initially the
+    /// leftovers from `obtain_tips`).
     ///
-    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
-    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary.
-    #[instrument(skip(self, extra_hashes))]
-    async fn try_to_sync_once(
-        &mut self,
-        mut extra_hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, Report> {
-        // The reserve of discovered-but-not-yet-dispatched hashes at the start of this iteration.
-        metrics::gauge!("sync.reserve.depth").set(extra_hashes.len() as f64);
+    /// Returns `Ok(())` once the round is exhausted: nothing in flight, nothing queued, and no tips
+    /// left to extend. Returns `Err` if an unrecoverable error means the sync should restart.
+    #[instrument(skip(self, reserve))]
+    async fn sync_round(&mut self, mut reserve: IndexSet<block::Hash>) -> Result<(), Report> {
+        // The type of the in-flight tip-extension future.
+        type ExtendOutput = Result<(IndexSet<block::Hash>, HashSet<CheckedTip>, usize), Report>;
 
-        // Check whether any block tasks are currently ready.
-        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-            // Some temporary errors are ignored, and syncing continues with other blocks.
-            // If it turns out they were actually important, syncing will run out of blocks, and
-            // the syncer will reset itself.
-            self.handle_block_response_with_missing_retry(rsp).await?;
-        }
-        self.update_metrics();
-
-        // Pause new downloads while the syncer or downloader are past their lookahead limits.
+        // The currently running request for more block hashes, if any.
         //
-        // To avoid a deadlock or long waits for blocks to expire, we ignore the download
-        // lookahead limit when there are only a small number of blocks waiting.
-        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                && self.past_lookahead_limit_receiver.cloned_watch_data())
-        {
-            trace!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "waiting for pending blocks",
-            );
+        // This future only asks peers for hashes. It does not request or verify
+        // full blocks. We keep at most one extension request in flight so the
+        // syncer cannot build up an unbounded backlog of undispatched hashes.
+        let mut extend: Option<Pin<Box<dyn Future<Output = ExtendOutput> + Send>>> = None;
 
-            let response = self.downloads.next().await.expect("downloads is nonempty");
+        // The last time this sync round made observable progress.
+        //
+        // Progress means a block finished verification, a background hash
+        // extension finished, or more full-block downloads were queued. If none
+        // of those happen for `BLOCK_VERIFY_TIMEOUT`, restart the round.
+        let mut last_progress = Instant::now();
 
-            self.handle_block_response_with_missing_retry(response)
-                .await?;
+        loop {
+            // Opportunistically handle any block tasks that are already finished, without blocking.
+            while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+                // Handle completed block tasks. Missing blocks may be requeued; duplicate,
+                // cancelled, behind-tip, above-lookahead, and no-height blocks are treated as
+                // non-fatal. Other download or verification errors restart this sync round.
+                self.handle_block_response_with_missing_retry(rsp).await?;
+                last_progress = Instant::now();
+            }
+            metrics::gauge!("sync.reserve.depth").set(reserve.len() as f64);
             self.update_metrics();
+
+            // Ask for more block hashes while we still have some left to download.
+            //
+            // Waiting until the undispatched hash list is empty would leave the
+            // downloader idle while peers respond to `FindBlocks`. Starting the
+            // next extension early lets downloads keep running during that round
+            // trip.
+            if extend.is_none()
+                && reserve.len() < MIN_UNREQUESTED_HASHES_BEFORE_EXTEND
+                && !self.prospective_tips.is_empty()
+            {
+                debug!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    reserve = reserve.len(),
+                    "prefetching more tip hashes",
+                );
+
+                let tip_network = self.tip_network.clone();
+                let tips = std::mem::take(&mut self.prospective_tips);
+                extend = Some(Box::pin(Self::build_extend(tip_network, tips)));
+            }
+
+            // Dispatch from the reserve while we're below the lookahead limit.
+            //
+            // We pause new downloads once the syncer or downloader are past their lookahead limits.
+            // To avoid a deadlock or long waits for blocks to expire, we ignore the lookahead limit
+            // when there are only a small number of blocks waiting.
+            let lookahead_limit = self.lookahead_limit(reserve.len());
+            let past_lookahead = self.downloads.in_flight() >= lookahead_limit
+                || (self.downloads.in_flight() >= lookahead_limit / 2
+                    && self.past_lookahead_limit_receiver.cloned_watch_data());
+
+            if !past_lookahead && !reserve.is_empty() {
+                debug!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    reserve = reserve.len(),
+                    lookahead_limit,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "requesting more blocks",
+                );
+
+                let response = timeout(
+                    BLOCK_VERIFY_TIMEOUT,
+                    self.request_blocks(std::mem::take(&mut reserve)),
+                )
+                .await
+                .map_err(Report::from)?;
+                reserve = Self::handle_hash_response(response)?;
+                last_progress = Instant::now();
+                continue;
+            }
+
+            // The round is exhausted once there's nothing in flight, nothing queued, and nothing
+            // left to discover.
+            if self.downloads.in_flight() == 0
+                && reserve.is_empty()
+                && extend.is_none()
+                && self.prospective_tips.is_empty()
+            {
+                break;
+            }
+
+            // Wait for the next bit of progress: a completed block or a finished tip extension
+            // overlapping the two. At least one arm is always enabled here: if nothing is in
+            // flight, then, given the dispatch and termination checks above, an extension must be
+            // running. A stall (neither arm makes progress within the timeout) restarts the round.
+            let has_inflight = self.downloads.in_flight() > 0;
+            let step = timeout(BLOCK_VERIFY_TIMEOUT, async {
+                tokio::select! {
+                    biased;
+
+                    rsp = self.downloads.next(), if has_inflight => {
+                        let rsp = rsp.expect("downloads is nonempty");
+                        self.handle_block_response_with_missing_retry(rsp).await?;
+                        last_progress = Instant::now();
+                        self.update_metrics();
+                    }
+
+                    extended = OptionFuture::from(extend.as_mut()), if extend.is_some() => {
+                        let (download_set, new_tips, discovered) =
+                            extended.expect("only polled while an extension is in flight")?;
+                        self.prospective_tips = new_tips;
+                        // security: use the actual number of new downloads from all peers, so the
+                        // last peer to respond can't toggle our mempool.
+                        self.recent_syncs.push_extend_tips_length(discovered);
+                        reserve.extend(download_set);
+                        extend = None;
+                        last_progress = Instant::now();
+                    }
+                }
+
+                Ok::<(), Report>(())
+            })
+            .await;
+
+            match step {
+                Ok(result) => result?,
+                Err(_elapsed) => {
+                    if last_progress.elapsed() >= BLOCK_VERIFY_TIMEOUT {
+                        return Err(eyre!(
+                            "sync round stalled: no block completed or tips extended within timeout"
+                        ));
+                    }
+                }
+            }
         }
 
-        // Once we're below the lookahead limit, we can request more blocks or hashes.
-        if !extra_hashes.is_empty() {
-            debug!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "requesting more blocks",
-            );
-
-            let response = self.request_blocks(extra_hashes).await;
-            extra_hashes = Self::handle_hash_response(response)?;
-        } else {
-            info!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "extending tips",
-            );
-
-            extra_hashes = self.extend_tips().await.map_err(|e| {
-                info!("temporary error extending tips: {:#}", e);
-                e
-            })?;
-        }
-        metrics::gauge!("sync.reserve.depth").set(extra_hashes.len() as f64);
-        self.update_metrics();
-
-        Ok(extra_hashes)
+        Ok(())
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -916,12 +990,22 @@ where
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
-    async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+    /// Asks peers to extend the given prospective `tips`, returning the newly discovered block
+    /// hashes in download order (the `download_set`), the new prospective tip set, and the count of
+    /// discovered hashes — *without* dispatching anything or touching `self`.
+    ///
+    /// Self-contained (owns a clone of the tip network and the taken tips) so the caller can poll it
+    /// concurrently with draining completed downloads and dispatching new ones, overlapping the
+    /// FindBlocks round-trip with the still-draining download buffer instead of stalling the
+    /// pipeline once the reserve empties.
+    #[instrument(skip_all)]
+    async fn build_extend(
+        mut tip_network: Timeout<ZN>,
+        tips: HashSet<CheckedTip>,
+    ) -> Result<(IndexSet<block::Hash>, HashSet<CheckedTip>, usize), Report> {
         let stage_start = std::time::Instant::now();
 
-        let tips = std::mem::take(&mut self.prospective_tips);
-
+        let mut prospective_tips: HashSet<CheckedTip> = HashSet::new();
         let mut download_set = IndexSet::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
@@ -935,7 +1019,7 @@ where
                     tokio::task::yield_now().await;
                 }
 
-                let ready_tip_network = self.tip_network.ready().await;
+                let ready_tip_network = tip_network.ready().await;
                 responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
                     zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],
@@ -1015,9 +1099,8 @@ where
                         if !download_set.contains(&new_tip.expected_next) {
                             debug!(?new_tip,
                                             "adding new prospective tip, and removing any existing tips in the new block hash list");
-                            self.prospective_tips
-                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                            self.prospective_tips.insert(new_tip);
+                            prospective_tips.retain(|t| !unknown_hashes.contains(&t.expected_next));
+                            prospective_tips.insert(new_tip);
                         } else {
                             debug!(
                                 ?new_tip,
@@ -1044,19 +1127,15 @@ where
         }
 
         let new_downloads = download_set.len();
-        debug!(new_downloads, "queueing new downloads");
+        debug!(new_downloads, "discovered new hashes to download");
         metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
-
-        // security: use the actual number of new downloads from all peers,
-        // so the last peer to respond can't toggle our mempool
-        self.recent_syncs.push_extend_tips_length(new_downloads);
-
-        let response = self.request_blocks(download_set).await;
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
             .record(stage_start.elapsed().as_secs_f64());
 
-        Self::handle_hash_response(response).map_err(Into::into)
+        // The caller records `new_downloads` via `recent_syncs.push_extend_tips_length` on
+        // write-back, preserving the "last peer can't toggle our mempool" security property.
+        Ok((download_set, prospective_tips, new_downloads))
     }
 
     /// Download and verify the genesis block, if it isn't currently known to
