@@ -30,6 +30,8 @@ filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=de
 # TODO: We need a better test architecture to run all non-stateful
 [profile.all-tests]
 failure-output = "immediate"
+slow-timeout = { period = "5m", terminate-after = 4 }
+
 default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and not test(=activate_mempool_mainnet)"
 
 # --- Individual Test Profiles ---
@@ -130,3 +132,21 @@ default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
 [profile.rpc-z-getsubtreesbyindex-snapshot]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
+
+# --- Flaky test overrides for the all-tests profile ---
+# These tests occasionally hang on CI due to async deadlocks or network
+# issues.  The timeouts are based on measured passing durations (see PR).
+
+# peer_set vector tests: pass in 9-16ms, but occasionally deadlock forever
+# due to tokio::time::pause() + timer auto-advance interactions.
+# 60s (= 30s × terminate-after 2) is 4000× their normal runtime.
+[[profile.all-tests.overrides]]
+filter = "test(~peer_set_ready) or test(=peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set_route_inv_advertised_registry)"
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# disconnects_from_misbehaving_peers: passes in 223-300s, but has no overall
+# timeout and can hang indefinitely if an RPC call blocks.
+# 10min (= 5m × terminate-after 2) gives 2-3× headroom.
+[[profile.all-tests.overrides]]
+filter = "test(=disconnects_from_misbehaving_peers)"
+slow-timeout = { period = "5m", terminate-after = 2 }
