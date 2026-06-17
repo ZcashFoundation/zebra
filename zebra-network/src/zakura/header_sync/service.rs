@@ -1,16 +1,14 @@
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex as StdMutex},
-};
+use std::sync::Arc;
 
 use tokio::{sync::mpsc, task};
 use tokio_util::sync::CancellationToken;
 
-use super::{events::*, validation::*, wire::*, *};
+use super::{events::*, pipe::*, wire::*, *};
 use crate::zakura::{
-    BoxRunFuture, Frame, FramedRecv, FramedSend, OrderedSendError, Peer, PeerStreamSession,
-    Service, ServicePeerDirection, Sink, SinkReject, Stream, StreamMode, ZakuraPeerId,
-    ZakuraSupervisorHandle, ZAKURA_CAP_HEADER_SYNC,
+    handle_pipe_exit, spawn_supervised_pipe, BoxRunFuture, Flow, Frame, FramedRecv, FramedSend,
+    OrderedSendError, Peer, PeerStreamSession, Pipe, Service, ServicePeerDirection, SessionGuard,
+    Sink, SinkReject, Stream, StreamMode, ZakuraPeerId, ZakuraSupervisorHandle,
+    ZAKURA_CAP_HEADER_SYNC,
 };
 
 const HEADER_SYNC_SERVICE_STREAMS: [Stream; 1] = [Stream {
@@ -42,16 +40,21 @@ pub struct HeaderSyncPeerSession {
 struct HeaderSyncPeerSessionInner {
     send: FramedSend,
     cancel_token: CancellationToken,
-    expected_headers: StdMutex<VecDeque<ExpectedHeadersResponse>>,
+    commands: Option<mpsc::UnboundedSender<HeaderSyncPeerCommand>>,
 }
 
 impl HeaderSyncPeerSession {
-    pub(crate) fn new(session: &PeerStreamSession, direction: ServicePeerDirection) -> Self {
-        Self::from_parts_with_direction(
+    fn new_with_commands(
+        session: &PeerStreamSession,
+        direction: ServicePeerDirection,
+        commands: mpsc::UnboundedSender<HeaderSyncPeerCommand>,
+    ) -> Self {
+        Self::from_parts_with_direction_and_commands(
             session.peer_id().clone(),
             direction,
             session.sender(),
             session.cancel_token(),
+            Some(commands),
         )
     }
 
@@ -71,23 +74,16 @@ impl HeaderSyncPeerSession {
         send: FramedSend,
         cancel_token: CancellationToken,
     ) -> Self {
-        Self {
-            peer_id,
-            direction,
-            inner: Arc::new(HeaderSyncPeerSessionInner {
-                send,
-                cancel_token,
-                expected_headers: StdMutex::new(VecDeque::new()),
-            }),
-        }
+        Self::from_parts_with_direction_and_commands(peer_id, direction, send, cancel_token, None)
     }
 
-    #[cfg(not(test))]
-    fn from_parts_with_direction(
+    #[cfg(test)]
+    fn from_parts_with_direction_and_commands(
         peer_id: ZakuraPeerId,
         direction: ServicePeerDirection,
         send: FramedSend,
         cancel_token: CancellationToken,
+        commands: Option<mpsc::UnboundedSender<HeaderSyncPeerCommand>>,
     ) -> Self {
         Self {
             peer_id,
@@ -95,7 +91,26 @@ impl HeaderSyncPeerSession {
             inner: Arc::new(HeaderSyncPeerSessionInner {
                 send,
                 cancel_token,
-                expected_headers: StdMutex::new(VecDeque::new()),
+                commands,
+            }),
+        }
+    }
+
+    #[cfg(not(test))]
+    fn from_parts_with_direction_and_commands(
+        peer_id: ZakuraPeerId,
+        direction: ServicePeerDirection,
+        send: FramedSend,
+        cancel_token: CancellationToken,
+        commands: Option<mpsc::UnboundedSender<HeaderSyncPeerCommand>>,
+    ) -> Self {
+        Self {
+            peer_id,
+            direction,
+            inner: Arc::new(HeaderSyncPeerSessionInner {
+                send,
+                cancel_token,
+                commands,
             }),
         }
     }
@@ -128,17 +143,20 @@ impl HeaderSyncPeerSession {
     ) -> Result<(), OrderedSendError> {
         let expected = ExpectedHeadersResponse::new(start_height, count)
             .map_err(|error| OrderedSendError::Encode(Box::new(error)))?;
-        let mut expected_headers = self
-            .inner
-            .expected_headers
-            .lock()
-            .map_err(|_| OrderedSendError::Closed)?;
+        if let Some(commands) = &self.inner.commands {
+            self.try_send_message(HeaderSyncMessage::GetHeaders {
+                start_height,
+                count,
+            })?;
+            return commands
+                .send(HeaderSyncPeerCommand::RecordExpectedHeaders(expected))
+                .map_err(|_| OrderedSendError::Closed);
+        }
+
         self.try_send_message(HeaderSyncMessage::GetHeaders {
             start_height,
             count,
-        })?;
-        expected_headers.push_back(expected);
-        Ok(())
+        })
     }
 
     /// Send a typed header range response.
@@ -177,14 +195,13 @@ impl HeaderSyncPeerSession {
             Err(mpsc::error::TrySendError::Closed(_frame)) => Err(OrderedSendError::Closed),
         }
     }
+}
 
-    fn pop_expected_headers_response(&self) -> Option<ExpectedHeadersResponse> {
-        self.inner
-            .expected_headers
-            .lock()
-            .expect("header-sync expected-response mutex is never poisoned")
-            .pop_front()
-    }
+/// Commands from shared scheduling state into one peer-owned header-sync pipe.
+#[derive(Debug)]
+pub(super) enum HeaderSyncPeerCommand {
+    /// Record an expected `Headers` response after `GetHeaders` was queued.
+    RecordExpectedHeaders(ExpectedHeadersResponse),
 }
 
 /// Pump actor actions that can be satisfied at the transport/service seam.
@@ -307,22 +324,68 @@ impl Service for HeaderSyncService {
             send,
             peer.service_cancel_token(),
         );
+        // The sink loop parks on the service token (a child of the connection
+        // token) exactly as the old `HeaderSyncSink::run` select did. The
+        // connection token is cancelled only on a protocol reject below, never on
+        // a normal/parked exit — parking one service must not tear down the
+        // shared connection that other services (discovery, block-sync) ride on.
         let service_cancel_token = session.cancel_token();
         let connection_cancel_token = peer.cancel_token();
-        let header_sync_session = HeaderSyncPeerSession::new(&session, peer.direction);
+        let (commands_tx, commands_rx) = mpsc::unbounded_channel();
+        let header_sync_session =
+            HeaderSyncPeerSession::new_with_commands(&session, peer.direction, commands_tx);
 
         let _ = self
             .header_sync
             .send_lifecycle(HeaderSyncEvent::PeerConnected(header_sync_session.clone()));
 
-        spawn_header_sync_sink(
-            peer_id,
-            session,
-            header_sync_session,
-            self.header_sync.clone(),
-            service_cancel_token,
-            connection_cancel_token,
+        let (_session_peer, _stream_kind, recv, _send, _session_cancel) = session.into_parts();
+
+        // Phase 2 keeps request/response correlation in `HsLocal`: after the
+        // session queues an outbound `GetHeaders`, the peer-owned pipe records
+        // the expected `Headers` response in plain local state.
+        let pipe = Pipe::new(
+            peer_id.clone(),
+            HsLocal::new(commands_rx, DEFAULT_HS_INBOUND_NEW_BLOCK_MIN_INTERVAL),
+            HsEnv::new(self.header_sync.clone()),
+            SessionGuard::oversize_only(header_sync_guard_max_bytes()),
+            run_inbound,
+            &PIPE_SHAPE,
         );
+        // The pipe future reproduces the old sink's connection handling: a
+        // protocol reject (the only way `run_peer` returns `Err`, since
+        // `run_inbound` maps a closed-queue `Local` to a benign continue)
+        // cancels the *connection*, matching the old
+        // `connection_cancel_token.cancel()` on `SinkReject::Protocol`. A normal
+        // or parked exit leaves the connection alone.
+        let pipe_cancel_token = service_cancel_token.clone();
+        let protocol_connection_cancel_token = connection_cancel_token.clone();
+        let pipe = async move {
+            handle_pipe_exit(
+                "header-sync",
+                &protocol_connection_cancel_token,
+                run_peer(pipe, recv, pipe_cancel_token).await,
+            );
+        };
+
+        // The supervised teardown runs on every exit path — normal return,
+        // protocol reject, or panic. It cancels this peer's *service* token
+        // (idempotent; already cancelled on a park/protocol exit) and sends
+        // `PeerDisconnected`. Sending it from teardown is the latent-bug fix: the
+        // old sink only sent `PeerDisconnected` on the normal return path, so a
+        // panicking task leaked the peer's reactor state.
+        let teardown_handle = self.header_sync.clone();
+        let teardown_peer = peer_id.clone();
+        let on_teardown = move || {
+            let _ =
+                teardown_handle.send_lifecycle(HeaderSyncEvent::PeerDisconnected(teardown_peer));
+        };
+        let panic_connection_cancel_token = connection_cancel_token.clone();
+        let on_panic = move || panic_connection_cancel_token.cancel();
+
+        // Reuse the single supervised launcher; let the returned handle drop to
+        // detach the task (the `PipeTeardown` still runs on every exit path).
+        spawn_supervised_pipe(peer_id, service_cancel_token, on_teardown, on_panic, pipe);
     }
 
     fn remove_peer(&self, peer: &ZakuraPeerId) {
@@ -341,8 +404,28 @@ impl Service for HeaderSyncService {
             return Ok(());
         }
 
-        deliver_header_sync_frame(&self.header_sync, None, peer_id, frame)
+        // The test/recorder path has no peer session, so a `Headers` response
+        // with no outstanding request is rejected as `UnsolicitedHeaders`. A
+        // `Local` reject (closed reactor queue) is surfaced to the registry
+        // exactly as the old `deliver_header_sync_frame` returned it.
+        match deliver(&self.header_sync, None, peer_id, frame) {
+            Flow::Continue(()) | Flow::Done => Ok(()),
+            Flow::Reject(reject) => Err(reject),
+        }
     }
+}
+
+/// Service-level oversize cap for the header-sync guard.
+///
+/// Matches the decode stage's `MAX_HS_MESSAGE_BYTES` threshold so the guard
+/// rejects nothing the decode stage would have admitted; the transport already
+/// caps frames at this payload size before they reach the service, so this is a
+/// defense-in-depth bound that never changes which events fire.
+fn header_sync_guard_max_bytes() -> u32 {
+    // `MAX_HS_MESSAGE_BYTES` is a 2 MiB protocol constant that fits in `u32`;
+    // the `const` assertion in `wire.rs` keeps it below the local message cap.
+    u32::try_from(MAX_HS_MESSAGE_BYTES)
+        .expect("MAX_HS_MESSAGE_BYTES is a 2 MiB constant that fits in u32")
 }
 
 /// Testkit/no-reactor mode records stream-5 inbound frames without running header sync.
@@ -424,91 +507,6 @@ impl Service for HeaderSyncPassthroughService {
     }
 }
 
-fn spawn_header_sync_sink(
-    peer_id: ZakuraPeerId,
-    session: PeerStreamSession,
-    header_sync_session: HeaderSyncPeerSession,
-    header_sync: HeaderSyncHandle,
-    service_cancel_token: CancellationToken,
-    connection_cancel_token: CancellationToken,
-) {
-    task::spawn(async move {
-        let (_session_peer, _stream_kind, recv, _send, _session_cancel) = session.into_parts();
-        let sink = Box::new(HeaderSyncSink {
-            peer_id: peer_id.clone(),
-            header_sync: header_sync.clone(),
-            session: header_sync_session,
-            cancel_token: service_cancel_token.clone(),
-        });
-
-        let result = sink.run(recv).await;
-
-        match result {
-            Ok(()) => {}
-            Err(SinkReject::Protocol(error)) => {
-                tracing::debug!(
-                    ?error,
-                    ?peer_id,
-                    "header-sync stream rejected protocol-invalid frame"
-                );
-                connection_cancel_token.cancel();
-            }
-            Err(SinkReject::Local(error)) => {
-                tracing::debug!(
-                    ?error,
-                    ?peer_id,
-                    "header-sync stream could not deliver frame locally"
-                );
-            }
-        }
-
-        let _ = header_sync.send_lifecycle(HeaderSyncEvent::PeerDisconnected(peer_id));
-    });
-}
-
-#[derive(Debug)]
-struct HeaderSyncSink {
-    peer_id: ZakuraPeerId,
-    header_sync: HeaderSyncHandle,
-    session: HeaderSyncPeerSession,
-    cancel_token: CancellationToken,
-}
-
-impl Sink for HeaderSyncSink {
-    fn run(self: Box<Self>, mut recv: FramedRecv) -> BoxRunFuture<'static, Result<(), SinkReject>> {
-        Box::pin(async move {
-            loop {
-                let frame = tokio::select! {
-                    _ = self.cancel_token.cancelled() => return Ok(()),
-                    frame = recv.recv() => {
-                        let Some(frame) = frame else {
-                            return Ok(());
-                        };
-                        frame
-                    }
-                };
-
-                match deliver_header_sync_frame(
-                    &self.header_sync,
-                    Some(&self.session),
-                    self.peer_id.clone(),
-                    frame,
-                ) {
-                    Ok(()) => {}
-                    Err(SinkReject::Protocol(error)) => return Err(SinkReject::Protocol(error)),
-                    Err(SinkReject::Local(error)) => {
-                        tracing::debug!(
-                            ?error,
-                            peer_id = ?self.peer_id,
-                            "header-sync stream could not deliver frame locally"
-                        );
-                    }
-                }
-            }
-        })
-    }
-}
-
 #[derive(Debug)]
 struct HeaderSyncPassthroughSink {
     peer_id: ZakuraPeerId,
@@ -548,72 +546,4 @@ impl Sink for HeaderSyncPassthroughSink {
             }
         })
     }
-}
-
-fn deliver_header_sync_frame(
-    header_sync: &HeaderSyncHandle,
-    session: Option<&HeaderSyncPeerSession>,
-    peer_id: ZakuraPeerId,
-    frame: Frame,
-) -> Result<(), SinkReject> {
-    if u8::try_from(frame.message_type).ok() == Some(MSG_HS_HEADERS) {
-        let Some(expected) = session.and_then(HeaderSyncPeerSession::pop_expected_headers_response)
-        else {
-            let error = Arc::new(HeaderSyncWireError::UnsolicitedHeaders);
-            let _ = header_sync.try_send(HeaderSyncEvent::WireProtocolFailure {
-                peer: peer_id.clone(),
-                reason: HeaderSyncMisbehavior::UnsolicitedHeaders,
-                error: error.clone(),
-            });
-            let protocol_error =
-                std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string());
-            return Err(SinkReject::protocol(protocol_error));
-        };
-
-        let msg = match HeaderSyncMessage::decode_frame(
-            frame,
-            HeaderSyncDecodeContext::for_headers_response(expected, expected.count),
-        ) {
-            Ok(msg) => msg,
-            Err(error) => {
-                let protocol_error =
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string());
-                let _ = header_sync.try_send(HeaderSyncEvent::WireProtocolFailure {
-                    peer: peer_id.clone(),
-                    reason: HeaderSyncMisbehavior::MalformedMessage,
-                    error: Arc::new(error),
-                });
-                return Err(SinkReject::protocol(protocol_error));
-            }
-        };
-
-        return header_sync
-            .try_send(HeaderSyncEvent::WireMessage { peer: peer_id, msg })
-            .map_err(|error| SinkReject::local(format!("header-sync queue closed: {error}")));
-    }
-
-    let msg = match decode_header_sync_frame(frame) {
-        Ok(msg) => msg,
-        Err(error) => {
-            let protocol_error =
-                std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string());
-            let _ = header_sync.try_send(HeaderSyncEvent::WireDecodeFailed {
-                peer: peer_id,
-                error: Arc::new(error),
-            });
-            return Err(SinkReject::protocol(protocol_error));
-        }
-    };
-
-    header_sync
-        .try_send(HeaderSyncEvent::WireMessage { peer: peer_id, msg })
-        .map_err(|error| SinkReject::local(format!("header-sync queue closed: {error}")))
-}
-
-fn decode_header_sync_frame(frame: Frame) -> Result<HeaderSyncMessage, HeaderSyncWireError> {
-    if u8::try_from(frame.message_type).ok() == Some(MSG_HS_HEADERS) {
-        return Err(HeaderSyncWireError::UnsolicitedHeaders);
-    }
-
-    HeaderSyncMessage::decode_frame(frame, HeaderSyncDecodeContext::control())
 }

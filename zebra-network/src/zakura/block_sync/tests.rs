@@ -2269,6 +2269,130 @@ async fn reactor_rejects_block_hash_mismatch_without_hard_drop_for_size_mismatch
     reactor_task.abort();
 }
 
+// SECURITY AUDIT (candidate claude-block-sync-source-task-unwired /
+// trace-block-sync-source-task-unwired-source-task /
+// subset-panic-runtime-containment-block-sync-idle-source-task): SR-4
+// cleanup/anti-drift for the outbound block-sync send path.
+//
+// Production block-sync scheduling sends outbound `GetBlocks` *directly* through
+// `BlockSyncPeerSession` (`reactor::schedule` -> `try_send_get_blocks`). The
+// per-peer `BlockSyncSource` action pump (`BlockSyncPeerRecord::actions`) is
+// test-only scaffolding with no production producer, and
+// `drive_block_sync_actions` deliberately ignores the reactor's duplicate
+// `SendMessage` action to avoid double-sending. The audit flagged the risk that
+// the per-peer source is dead production scaffolding (per-peer overhead) and a
+// latent double-send footgun if it were ever wired naively.
+//
+// This production-shaped scheduling test locks in the single-sourced outbound
+// contract: one scheduled request yields EXACTLY ONE outbound `GetBlocks` frame
+// (the authoritative direct session send), never a second copy from a per-peer
+// source pump. It proves the outbound behavior is unchanged by the source task
+// being idle/test-only, and guards against a future double-send regression.
+#[tokio::test]
+async fn scheduled_get_blocks_is_sent_once_via_session_not_duplicated_by_source() {
+    let config = ZakuraBlockSyncConfig::default();
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Admit a peer through the production `add_peer` path with an observable
+    // outbound transport channel.
+    let peer = peer(57);
+    let (inbound_tx, inbound_rx) = framed_channel(16);
+    let (outbound_tx, mut outbound_rx) = framed_channel(16);
+    let streams = HashMap::from([(ZAKURA_STREAM_BLOCK_SYNC, (inbound_rx, outbound_tx))]);
+    service.add_peer(Peer::new_with_direction(
+        peer.clone(),
+        None,
+        ZAKURA_CAP_BLOCK_SYNC,
+        ServicePeerDirection::Outbound,
+        streams,
+        CancellationToken::new(),
+    ));
+
+    // The peer can serve exactly one block above our tip; publish the header tip
+    // and the needed metadata so the reactor schedules exactly one request.
+    inbound_tx
+        .send(
+            BlockSyncMessage::Status(BlockSyncStatus {
+                servable_low: block::Height(1),
+                servable_high: block::Height(1),
+                tip_hash: block::Hash([9; 32]),
+                max_blocks_per_response: 4,
+                max_inflight_requests: 1,
+                max_response_bytes: MAX_BS_RESPONSE_BYTES,
+            })
+            .encode_frame()
+            .expect("status encodes"),
+        )
+        .await
+        .expect("status queues");
+    tip_tx
+        .send((block::Height(1), block::Hash([9; 32])))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
+            height: block::Height(1),
+            hash: block::Hash([9; 32]),
+            size: BlockSizeEstimate::Advertised(1),
+        }]))
+        .await
+        .expect("needed metadata queues");
+    // The reactor emits the duplicate `SendMessage` action on the global channel
+    // (which the production driver ignores). Wait for it so we know the
+    // authoritative direct send through `BlockSyncPeerSession` already happened.
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::SendMessage {
+            msg: BlockSyncMessage::GetBlocks { .. },
+            ..
+        }
+    ) {}
+
+    // Drain the outbound stream for a bounded idle window and count `GetBlocks`
+    // frames. A single scheduled request must produce exactly one outbound
+    // `GetBlocks` (the direct session send); a second copy would mean the
+    // per-peer source action pump is also (double-)sending on the wire.
+    let mut get_blocks = 0usize;
+    let mut frames = 0usize;
+    while frames < 16 {
+        match tokio::time::timeout(Duration::from_millis(300), outbound_rx.recv()).await {
+            Ok(Some(frame)) => {
+                frames += 1;
+                if matches!(
+                    BlockSyncMessage::decode_frame(frame).expect("outbound frame decodes"),
+                    BlockSyncMessage::GetBlocks { .. }
+                ) {
+                    get_blocks += 1;
+                }
+            }
+            _ => break,
+        }
+    }
+    assert_eq!(
+        get_blocks, 1,
+        "one scheduled request must produce exactly one outbound GetBlocks via \
+         BlockSyncPeerSession; a different count means the per-peer source pump is \
+         (double-)sending in addition to the authoritative direct path",
+    );
+
+    reactor_task.abort();
+}
+
 #[tokio::test]
 async fn reactor_scores_header_valid_merkle_invalid_body_and_accepts_clean_peer() {
     let request_bytes: u32 = 10_000;
@@ -3013,6 +3137,188 @@ async fn reactor_reports_size_mismatch_softly_and_still_submits_valid_block() {
             action => panic!("unexpected action during size mismatch test: {action:?}"),
         }
     }
+
+    reactor_task.abort();
+}
+
+// SECURITY AUDIT (candidate claude-block-sync-unsolicited-blocksdone-not-rejected /
+// codex-blocksync-unsolicited-blocksdone-not-rejected): SR-6/SR-7 response
+// correlation + fail-closed.
+//
+// `handle_blocks_done` reports `UnsolicitedDone` only when the peer is *unknown*.
+// For a known, active peer that sends a valid `BlocksDone` with no matching
+// outstanding request, the `if let Some(index)` body is skipped and the reactor
+// falls through to `schedule()` with no `else` reporting `UnsolicitedDone`.
+// `UnsolicitedDone` is a *hard* block-sync misbehavior (`block_sync_misbehavior_is_hard`
+// in zebrad start.rs), so the production driver `drive_block_sync_actions`
+// disconnects on the first offense -- but this branch never emits it, so an
+// admitted peer can stream uncorrelated response terminators forever and stay
+// connected.
+//
+// This test asserts the SAFE behavior (the reactor must report `UnsolicitedDone`).
+// It currently FAILS, which is the reproduction. Do not weaken it to pass; the
+// fix is to add the missing `else` branch in `handle_blocks_done`.
+#[tokio::test]
+async fn reactor_known_peer_unsolicited_blocks_done_is_reported_as_misbehavior() {
+    let config = ZakuraBlockSyncConfig::default();
+    let blocks = mainnet_blocks_1_to_3();
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(1), blocks[0].hash()));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(1),
+            verified_block_hash: blocks[0].hash(),
+        },
+        (block::Height(1), blocks[0].hash()),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Connect a peer that advertises no downloadable work (servable_high == our
+    // verified tip), so the reactor never schedules a GetBlocks and the peer has
+    // zero outstanding requests. The peer is known/active (received_status=true).
+    let (peer_id, inbound_tx, _outbound_rx) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        63,
+        block::Height(1),
+        blocks[0].hash(),
+        1,
+        MAX_BS_RESPONSE_BYTES,
+    )
+    .await;
+
+    // Surprising/hostile input: a valid `BlocksDone` terminator with a start
+    // height that matches no outstanding request (there are none).
+    inbound_tx
+        .send(
+            BlockSyncMessage::BlocksDone {
+                start_height: block::Height(7),
+                returned: 1,
+            }
+            .encode_frame()
+            .expect("BlocksDone frame encodes"),
+        )
+        .await
+        .expect("BlocksDone frame queues");
+
+    // Expected safe behavior: the reactor reports `UnsolicitedDone` for this peer
+    // (which the production driver maps to a hard disconnect). Collect actions for
+    // a bounded window and assert it appears.
+    let mut saw_unsolicited_done = false;
+    while let Ok(Some(action)) =
+        tokio::time::timeout(Duration::from_millis(300), actions.recv()).await
+    {
+        if let BlockSyncAction::Misbehavior { peer, reason } = action {
+            if peer == peer_id && reason == BlockSyncMisbehavior::UnsolicitedDone {
+                saw_unsolicited_done = true;
+                break;
+            }
+        }
+    }
+
+    assert!(
+        saw_unsolicited_done,
+        "a known peer's unsolicited BlocksDone with no matching outstanding request \
+         must be reported as Misbehavior::UnsolicitedDone (SR-6/SR-7), but the reactor \
+         silently tolerated it and kept the peer connected",
+    );
+
+    reactor_task.abort();
+}
+
+/// Regression for `claude-sync-reactor-action-backpressure-stalls-disconnect` in
+/// the block-sync reactor: when the bounded 128-slot action channel is saturated
+/// and the action driver is stalled, awaiting `actions.send` for `Misbehavior`
+/// wedged the reactor, so it could no longer reach its own disconnect path. The
+/// reactor must instead enqueue misbehavior non-blockingly and stay live — here,
+/// live enough to still tear down a soft offender once it crosses the
+/// disconnect threshold.
+#[tokio::test]
+async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated() {
+    let config = ZakuraBlockSyncConfig::default();
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config,
+    );
+    // `_actions` is held but never drained: the production action driver is
+    // "stalled".
+    let (handle, _actions, reactor_task) = spawn_block_sync_reactor(startup);
+
+    // Connect the probe peer with a session whose cancellation token we keep, so
+    // we can observe the local disconnect. A bare session (no supervised pipe)
+    // means the cancel is observable without removing the peer from the reactor.
+    let probe = peer(7);
+    let probe_cancel = CancellationToken::new();
+    let (_inbound_tx, inbound_rx) = framed_channel(4);
+    let (outbound_tx, _outbound_rx) = framed_channel(4);
+    let session = PeerStreamSession::new(
+        probe.clone(),
+        ZAKURA_STREAM_BLOCK_SYNC,
+        inbound_rx,
+        outbound_tx,
+        probe_cancel.clone(),
+    );
+    handle
+        .send(BlockSyncEvent::PeerConnected(BlockSyncPeerSession::new(
+            &session,
+            ServicePeerDirection::Outbound,
+        )))
+        .await
+        .expect("probe peer connects");
+
+    // Saturate the bounded 128-slot action channel. Malformed-frame events from
+    // an unknown filler peer enqueue `Misbehavior` actions until the channel is
+    // full. A per-send timeout keeps the test from hanging if the (unfixed)
+    // reactor wedges on a blocking `actions.send` and stops draining events.
+    let filler = peer(200);
+    let decode_error = Arc::new(BlockSyncWireError::TrailingBytes);
+    for _ in 0..400 {
+        let send = handle.send(BlockSyncEvent::WireDecodeFailed {
+            peer: filler.clone(),
+            error: decode_error.clone(),
+        });
+        if tokio::time::timeout(Duration::from_millis(200), send)
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+
+    // Drive the connected probe peer past the soft-misbehavior disconnect
+    // threshold (3) while the action channel is saturated. A reactor wedged on a
+    // blocking misbehavior send can never process these events, so it never
+    // reaches the threshold cancel; a non-blocking reactor does.
+    for _ in 0..4 {
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
+            handle.send(BlockSyncEvent::WireMessage {
+                peer: probe.clone(),
+                msg: BlockSyncMessage::RangeUnavailable {
+                    start_height: block::Height(1),
+                    count: 1,
+                },
+            }),
+        )
+        .await;
+    }
+
+    tokio::time::timeout(Duration::from_secs(1), probe_cancel.cancelled())
+        .await
+        .expect(
+            "a repeatedly-misbehaving block-sync peer must still be disconnected when the action \
+             channel is saturated and the action driver is stalled",
+        );
 
     reactor_task.abort();
 }

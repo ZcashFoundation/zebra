@@ -291,6 +291,41 @@ impl ZakuraHandshakeConnector {
         if !endpoint.ensure_upgrade_native_dial(node_addr) {
             return false;
         }
+        if wait_for_zakura_peer(&mut registered, peer_id, ZAKURA_LIVENESS_APPEAR_TIMEOUT).await {
+            return true;
+        }
+
+        // The hand-off did not complete within the wait window. The dial spawned
+        // by `ensure_upgrade_native_dial` uses `RedialPolicy::maintain`, so it
+        // would keep redialing this peer-supplied address forever and retain its
+        // `upgrade_dials` entry. Unless the peer registered in the meantime
+        // (keep its maintained dial as the recovery path), cancel the dial and
+        // drop the entry so a malicious legacy responder cannot leak unbounded
+        // maintained dials and outbound QUIC traffic by repeating failed
+        // upgrades with distinct node ids.
+        if !registered.borrow().iter().any(|id| id == peer_id) {
+            endpoint.cancel_upgrade_native_dial(peer_id);
+        }
+        false
+    }
+
+    /// Wait until the upgraded peer's inbound native QUIC connection registers
+    /// with the local supervisor.
+    ///
+    /// Used by the inbound legacy responder, which does not dial: after sending
+    /// `Accept` the remote peer is expected to dial our advertised Zakura
+    /// endpoint, and our iroh router registers that connection separately. The
+    /// outer handshake drops the legacy TCP connection once the upgrade is
+    /// reported, so the responder must confirm a usable Zakura replacement
+    /// exists first. Returns `false` (keep legacy) if the peer never registers
+    /// within [`ZAKURA_LIVENESS_APPEAR_TIMEOUT`] or this node has no live
+    /// endpoint, so a peer that sends a valid `Init` and then never completes
+    /// the native dial cannot make us silently drop a working legacy peer.
+    pub(crate) async fn wait_for_zakura_registration(&self, peer_id: &ZakuraPeerId) -> bool {
+        let Some(endpoint) = self.endpoint.as_ref() else {
+            return false;
+        };
+        let mut registered = endpoint.supervisor().subscribe();
         wait_for_zakura_peer(&mut registered, peer_id, ZAKURA_LIVENESS_APPEAR_TIMEOUT).await
     }
 

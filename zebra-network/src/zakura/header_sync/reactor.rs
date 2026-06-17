@@ -4,6 +4,14 @@ use crate::zakura::{
     ZakuraHeaderSyncCandidateState,
 };
 
+/// Upper bound on how long the reactor will wait to enqueue a data-plane action
+/// before abandoning it. The bounded `actions` channel is normally drained by
+/// the action driver almost immediately; this deadline only trips when that
+/// driver is genuinely stalled on backend/verifier work, and it keeps a stalled
+/// driver from wedging the reactor's control plane — peer-lifecycle draining,
+/// request timeouts, and above all misbehavior disconnects.
+const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Spawn a header-sync reactor and return its handle plus action stream.
 pub fn spawn_header_sync_reactor(
     startup: HeaderSyncStartup,
@@ -15,7 +23,7 @@ pub fn spawn_header_sync_reactor(
     ),
     HeaderSyncStartError,
 > {
-    let state = HeaderSyncState::new(&startup)?;
+    let state = HeaderSyncCore::new(&startup)?;
     let (events_tx, events_rx) = mpsc::channel(128);
     let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
     let (actions_tx, actions_rx) = mpsc::channel(128);
@@ -52,7 +60,7 @@ pub fn spawn_header_sync_reactor(
 #[derive(Debug)]
 pub(super) struct HeaderSyncReactor {
     startup: HeaderSyncStartup,
-    state: HeaderSyncState,
+    state: HeaderSyncCore,
     events: mpsc::Receiver<HeaderSyncEvent>,
     lifecycle: mpsc::UnboundedReceiver<HeaderSyncEvent>,
     actions: mpsc::Sender<HeaderSyncAction>,
@@ -65,12 +73,10 @@ impl HeaderSyncReactor {
     async fn run(mut self) {
         if self.startup.range_state_actions_enabled {
             let _ = self
-                .actions
-                .send(HeaderSyncAction::QueryBestHeaderTip)
+                .dispatch_action(HeaderSyncAction::QueryBestHeaderTip)
                 .await;
             let _ = self
-                .actions
-                .send(HeaderSyncAction::QueryMissingBlockBodies {
+                .dispatch_action(HeaderSyncAction::QueryMissingBlockBodies {
                     from: next_height(self.state.verified_block_tip)
                         .unwrap_or(self.state.verified_block_tip),
                     limit: DEFAULT_HS_RANGE,
@@ -632,7 +638,8 @@ impl HeaderSyncReactor {
                     return;
                 };
                 let advances_advertised_tip = status.tip_height > peer_state.advertised_tip;
-                let status_token_available = peer_state.inbound_status.try_take(Instant::now());
+                let status_token_available =
+                    peer_state.meters.inbound_status.try_take(Instant::now());
                 if !advances_advertised_tip && !status_token_available {
                     self.report_misbehavior(peer, HeaderSyncMisbehavior::StatusSpam)
                         .await;
@@ -705,15 +712,13 @@ impl HeaderSyncReactor {
             return;
         }
 
-        if self
-            .actions
-            .send(HeaderSyncAction::QueryHeadersByHeightRange {
+        if !self
+            .dispatch_action(HeaderSyncAction::QueryHeadersByHeightRange {
                 peer: peer.clone(),
                 start: start_height,
                 count,
             })
             .await
-            .is_err()
         {
             if let Some(peer_state) = self.state.peers.get_mut(&peer) {
                 peer_state.finish_serving_headers();
@@ -755,6 +760,7 @@ impl HeaderSyncReactor {
             .peers
             .get_mut(&peer)
             .expect("peer exists because it was checked before validation")
+            .meters
             .inbound_new_block
             .try_take(Instant::now())
         {
@@ -785,16 +791,14 @@ impl HeaderSyncReactor {
         let inserted = self.state.pending_new_blocks.insert(hash);
         debug_assert!(inserted, "pending acceptance was checked before insert");
 
-        if self
-            .actions
-            .send(HeaderSyncAction::NewBlockReceived {
+        if !self
+            .dispatch_action(HeaderSyncAction::NewBlockReceived {
                 peer,
                 height,
                 hash,
                 block,
             })
             .await
-            .is_err()
         {
             self.state.pending_new_blocks.remove(&hash);
         }
@@ -980,8 +984,7 @@ impl HeaderSyncReactor {
             outstanding.range,
         );
         let _ = self
-            .actions
-            .send(HeaderSyncAction::CommitHeaderRange {
+            .dispatch_action(HeaderSyncAction::CommitHeaderRange {
                 peer,
                 anchor: outstanding.range.anchor_hash,
                 start_height: outstanding.range.start_height,
@@ -1136,7 +1139,12 @@ impl HeaderSyncReactor {
             .state
             .peers
             .iter_mut()
-            .filter_map(|(peer_id, peer)| peer.unsolicited.try_take(now).then(|| peer_id.clone()))
+            .filter_map(|(peer_id, peer)| {
+                peer.meters
+                    .unsolicited
+                    .try_take(now)
+                    .then(|| peer_id.clone())
+            })
             .collect();
 
         for peer in peer_ids {
@@ -1166,8 +1174,7 @@ impl HeaderSyncReactor {
                 .set(count_between(from, self.state.best_header_tip) as f64);
             self.trace_missing_bodies(from, self.state.best_header_tip);
             let _ = self
-                .actions
-                .send(HeaderSyncAction::BodyGaps {
+                .dispatch_action(HeaderSyncAction::BodyGaps {
                     from,
                     to: self.state.best_header_tip,
                 })
@@ -1175,17 +1182,47 @@ impl HeaderSyncReactor {
         }
     }
 
+    /// Hand a data-plane action to the action driver without letting a slow or
+    /// stalled driver wedge the reactor. A full channel is awaited only up to
+    /// [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the reactor
+    /// keeps draining peer-lifecycle events, request timeouts, and misbehavior
+    /// disconnects. Returns `true` only if the action was accepted.
+    async fn dispatch_action(&self, action: HeaderSyncAction) -> bool {
+        match time::timeout(ACTION_SEND_TIMEOUT, self.actions.send(action)).await {
+            Ok(Ok(())) => true,
+            // Receiver dropped: the driver is gone, treat like a send failure.
+            Ok(Err(_)) => false,
+            // Driver stalled past the deadline: drop the action and stay live.
+            Err(_) => {
+                metrics::counter!("sync.header.action.send_timeout").increment(1);
+                false
+            }
+        }
+    }
+
     async fn report_misbehavior(&mut self, peer: ZakuraPeerId, reason: HeaderSyncMisbehavior) {
         if let Some(peer_state) = self.state.peers.get_mut(&peer) {
             peer_state.misbehavior = peer_state.misbehavior.saturating_add(1);
+            // Prioritized, non-blocking disconnect: tear down the offending
+            // peer's header-sync session locally so a saturated or stalled
+            // action channel can never delay it. The supervised session
+            // teardown also emits a `PeerDisconnected` lifecycle event that
+            // cleans up this reactor's per-peer state.
+            peer_state.session.cancel_token().cancel();
         }
         metrics::counter!("sync.header.peer.disconnect").increment(1);
         self.trace_peer_violation(&peer, reason);
         self.trace_peer_disconnect_requested(&peer, reason);
-        let _ = self
+        // Best-effort supervisor notification for cross-service scoring/full
+        // disconnect. Never block the reactor waiting for channel capacity: the
+        // local session cancel above already removed the peer from this service.
+        if self
             .actions
-            .send(HeaderSyncAction::Misbehavior { peer, reason })
-            .await;
+            .try_send(HeaderSyncAction::Misbehavior { peer, reason })
+            .is_err()
+        {
+            metrics::counter!("sync.header.peer.disconnect.action_dropped").increment(1);
+        }
     }
 
     fn trace_status_sent(&self, peer: &ZakuraPeerId, status: HeaderSyncStatus) {

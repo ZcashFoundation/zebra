@@ -7,7 +7,10 @@ use thiserror::Error;
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
-use crate::{protocol::external::InventoryHash, zakura::ZakuraUpgradeError};
+use crate::{
+    protocol::external::InventoryHash,
+    zakura::{ZakuraProtocolError, ZakuraUpgradeError},
+};
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 ///
@@ -311,6 +314,17 @@ pub enum HandshakeError {
     /// The Zakura upgrade hook returned an error.
     #[error("Zakura P2P v2 upgrade failed: {0}")]
     ZakuraUpgrade(#[from] ZakuraUpgradeError),
+    /// A mutually P2P-v2-capable peer framed a Zakura upgrade prelude whose
+    /// payload failed to decode.
+    ///
+    /// The peer advertised `NODE_P2P_V2` and sent a `p2pv2up` message, but its
+    /// bytes were malformed (oversized, trailing, truncated, or a bad
+    /// discriminator). This is a protocol violation, so we disconnect the peer
+    /// on the first offense (SR-7 fail-closed) instead of silently falling back
+    /// to legacy, which a peer could otherwise use to force a downgrade. Unlike
+    /// the neutral upgrade outcomes, this is a real peer failure.
+    #[error("Malformed Zakura P2P v2 upgrade prelude: {0}")]
+    ZakuraUpgradePreludeMalformed(#[source] ZakuraProtocolError),
 }
 
 impl HandshakeError {

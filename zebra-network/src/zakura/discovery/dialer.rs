@@ -11,13 +11,17 @@ use crate::zakura::{
 };
 
 /// Spawn supervised dials for configured native bootstrap peers.
+///
+/// Returns one task handle per configured peer so the caller can track them
+/// under the endpoint shutdown owner; each maintained dial also observes the
+/// endpoint shutdown token directly via [`native_dial_supervised`].
 pub(crate) fn spawn_native_bootstrap_dialer(
     endpoint: ZakuraEndpoint,
     bootstrap_peers: Vec<String>,
     limits: ZakuraLocalLimits,
-) {
+) -> Vec<tokio::task::JoinHandle<()>> {
     if bootstrap_peers.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // Configured bootstrap peers are maintained: keep re-dialing forever so a
@@ -30,16 +34,18 @@ pub(crate) fn spawn_native_bootstrap_dialer(
         DEFAULT_ZAKURA_REDIAL_MAX_BACKOFF,
     );
 
+    let mut tasks = Vec::with_capacity(bootstrap_peers.len());
     for entry in bootstrap_peers {
         let endpoint = endpoint.clone();
         let limits = limits.clone();
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             match parse_bootstrap_peer(&entry) {
                 Ok(node_addr) => native_dial_supervised(endpoint, node_addr, limits, policy).await,
                 Err(error) => tracing::warn!(?error, ?entry, "invalid Zakura bootstrap peer"),
             }
-        });
+        }));
     }
+    tasks
 }
 
 pub(crate) async fn native_bootstrap_dial(

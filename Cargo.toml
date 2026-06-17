@@ -187,7 +187,15 @@ allow-branch = ["main"]
 # Compilation settings
 
 [profile.dev]
-panic = "abort"
+# panic = "unwind" (NOT "abort") is REQUIRED for Zakura peer-pipe panic
+# containment: a panicking peer task must be caught and disconnect only that
+# peer, never abort the whole node (a trivial remote DoS otherwise). Because we
+# now unwind, every shared/consensus-state critical section must stay panic-free
+# (no `.await`/`.expect()`/`.unwrap()`/indexing under a lock) — a panic mid-
+# mutation would unwind through it instead of aborting. zebra-network enforces
+# unwind with a `#[cfg(panic = "abort")] compile_error!`. See
+# security_requirements.md SR-1 and SR-2.
+panic = "unwind"
 
 # Speed up tests by optimizing performance-critical crates. The parameters
 # values are the ones from the `release` profile
@@ -308,7 +316,10 @@ incremental = false
 codegen-units = 16
 
 [profile.release]
-panic = "abort"
+# See [profile.dev]: panic = "unwind" is required for peer-pipe panic containment
+# (security_requirements.md SR-1); do not set "abort". Enforced by a
+# compile_error guard in zebra-network.
+panic = "unwind"
 
 # Speed up release builds and sync tests using link-time optimization.
 # Some of Zebra's code is CPU-intensive, and needs extra optimizations for peak performance.

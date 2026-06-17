@@ -96,8 +96,9 @@ pub(crate) async fn native_dial_supervised(
         return;
     };
 
+    let shutdown = endpoint.background_shutdown_token();
     let registered = endpoint.supervisor().subscribe();
-    run_dial_supervisor(peer_id, registered, policy, move || {
+    let supervised = run_dial_supervisor(peer_id, registered, policy, move || {
         let endpoint = endpoint.clone();
         let node_addr = node_addr.clone();
         let limits = limits.clone();
@@ -114,8 +115,18 @@ pub(crate) async fn native_dial_supervised(
                 }
             }
         }) as Pin<Box<dyn Future<Output = DialResult> + Send>>
-    })
-    .await;
+    });
+
+    // Endpoint shutdown cancels this token; stop maintaining the dial promptly
+    // rather than looping on against a torn-down router. A `maintain` policy
+    // never exits on its own (no max attempts), and the supervisor registration
+    // watch stays open while this task holds an endpoint clone, so this is the
+    // only signal that reliably ends the loop at teardown.
+    tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => {}
+        _ = supervised => {}
+    }
 }
 
 /// Retry/backoff loop shared by configured bootstrap peers and the upgrade dial.

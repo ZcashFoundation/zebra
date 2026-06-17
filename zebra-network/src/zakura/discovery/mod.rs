@@ -2,6 +2,7 @@
 
 mod candidate_dialer;
 mod dialer;
+mod pipe;
 mod protocol;
 mod redial;
 mod runtime;

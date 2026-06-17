@@ -38,12 +38,15 @@ struct DiscoveryDialWorkerResult {
 }
 
 /// Spawn the long-lived discovery candidate dialer for `endpoint`.
+///
+/// Returns the task handle so the caller can track it under the endpoint
+/// shutdown owner; the loop also observes the endpoint shutdown token directly.
 pub(crate) fn spawn_native_discovery_dialer(
     endpoint: ZakuraEndpoint,
     discovery: ZakuraDiscoveryHandle,
     limits: ZakuraLocalLimits,
-) {
-    tokio::spawn(run_native_discovery_dialer(endpoint, discovery, limits));
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(run_native_discovery_dialer(endpoint, discovery, limits))
 }
 
 /// Seed the discovery book with the configured bootstrap peers as trusted static
@@ -72,12 +75,17 @@ pub(crate) async fn run_native_discovery_dialer(
     discovery: ZakuraDiscoveryHandle,
     limits: ZakuraLocalLimits,
 ) {
+    let shutdown = endpoint.background_shutdown_token();
     let mut registered = endpoint.supervisor().subscribe();
     let mut in_flight = HashSet::new();
     let mut in_flight_by_ip = HashMap::new();
     let mut workers = JoinSet::new();
 
     loop {
+        if shutdown.is_cancelled() {
+            return;
+        }
+
         spawn_discovery_dial_candidates(
             &endpoint,
             &discovery,
@@ -89,6 +97,11 @@ pub(crate) async fn run_native_discovery_dialer(
         .await;
 
         tokio::select! {
+            biased;
+            // Endpoint shutdown cancels this token. The dialer holds an endpoint
+            // clone, so the supervisor registration watch never closes on its
+            // own; this is the only reliable teardown signal.
+            _ = shutdown.cancelled() => return,
             joined = workers.join_next(), if !workers.is_empty() => {
                 match joined {
                     Some(Ok(worker_result)) => {

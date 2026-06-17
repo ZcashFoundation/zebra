@@ -5,11 +5,15 @@ use std::{
     fmt,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
+    path::Path,
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
 
 use indexmap::IndexSet;
+use iroh::SecretKey;
+use rand::rngs::OsRng;
 use serde::{de, Deserialize, Deserializer, Serializer};
 use tokio::fs;
 
@@ -72,6 +76,14 @@ impl serde::Serialize for ZakuraNodeSecretKey {
     {
         serializer.serialize_str("[redacted]")
     }
+}
+
+/// An error that can occur while resolving the Zakura node secret key.
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum ZakuraSecretKeyError {
+    /// The configured `zakura_node_secret_key` is not a valid iroh secret key.
+    #[error("configured zakura_node_secret_key is not a valid iroh secret key")]
+    InvalidConfigured,
 }
 
 /// The number of times Zebra will retry each initial peer's DNS resolution,
@@ -606,6 +618,108 @@ impl Config {
             Err(error) => Err(error.error),
         }
     }
+
+    /// Resolves the Zakura native iroh [`SecretKey`] for this node, persisting a
+    /// freshly generated key on first use so the node keeps a stable
+    /// [`NodeId`](iroh::NodeId) across restarts.
+    ///
+    /// Resolution order:
+    /// 1. If [`zakura_node_secret_key`](Self::zakura_node_secret_key) is configured,
+    ///    it is parsed and used verbatim. An unparseable value is a hard error.
+    /// 2. Otherwise, if [`cache_dir`](Self::cache_dir) is enabled, the persisted key
+    ///    file is loaded; when it is missing or unreadable a fresh key is generated
+    ///    and written atomically with owner-only (`0o600`) permissions, so every
+    ///    later startup reuses the same identity.
+    /// 3. If the cache dir is disabled, an ephemeral key is generated for this run.
+    ///
+    /// # Security
+    ///
+    /// The persisted key file is the node's long-term private identity. It is
+    /// written beside the peer cache and restricted to owner read/write on Unix.
+    pub fn zakura_secret_key(&self) -> Result<SecretKey, ZakuraSecretKeyError> {
+        if let Some(secret) = &self.zakura_node_secret_key {
+            return SecretKey::from_str(secret.expose_secret())
+                .map_err(|_| ZakuraSecretKeyError::InvalidConfigured);
+        }
+
+        match self.cache_dir.zakura_node_secret_key_file_path(&self.network) {
+            Some(key_file) => Ok(load_or_generate_zakura_secret_key(&key_file)),
+            // The cache dir is disabled, so there is nowhere to persist a stable
+            // key: fall back to an ephemeral identity for this run.
+            None => Ok(SecretKey::generate(OsRng)),
+        }
+    }
+}
+
+/// Loads a persisted Zakura secret key from `key_file`, or generates, persists, and
+/// returns a fresh key when the file is absent or cannot be parsed.
+///
+/// I/O failures are logged and downgraded to an ephemeral key for this run, so a
+/// read-only or full cache directory never prevents the node from starting.
+fn load_or_generate_zakura_secret_key(key_file: &Path) -> SecretKey {
+    match std::fs::read_to_string(key_file) {
+        Ok(contents) => match SecretKey::from_str(contents.trim()) {
+            Ok(secret_key) => return secret_key,
+            Err(_) => warn!(
+                ?key_file,
+                "ignoring unparseable Zakura node secret key file; regenerating a new identity"
+            ),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => warn!(
+            ?error,
+            ?key_file,
+            "could not read Zakura node secret key file; regenerating a new identity"
+        ),
+    }
+
+    let secret_key = SecretKey::generate(OsRng);
+    persist_zakura_secret_key(key_file, &secret_key);
+    secret_key
+}
+
+/// Atomically writes `secret_key` to `key_file` as lowercase hex and restricts the
+/// file to owner-only access. Persistence failures are logged but not fatal.
+fn persist_zakura_secret_key(key_file: &Path, secret_key: &SecretKey) {
+    let encoded = hex::encode(secret_key.to_bytes());
+
+    match atomic_write(key_file.to_path_buf(), encoded.as_bytes()) {
+        Ok(Ok(path)) => {
+            if let Err(error) = restrict_secret_key_file_permissions(&path) {
+                warn!(
+                    ?error,
+                    ?path,
+                    "persisted Zakura node secret key but could not restrict its permissions"
+                );
+            } else {
+                info!(?path, "persisted a new Zakura node secret key");
+            }
+        }
+        Ok(Err(error)) => warn!(
+            ?error,
+            ?key_file,
+            "could not persist Zakura node secret key; using an ephemeral identity this run"
+        ),
+        Err(error) => warn!(
+            ?error,
+            ?key_file,
+            "could not persist Zakura node secret key; using an ephemeral identity this run"
+        ),
+    }
+}
+
+/// Restricts the persisted secret key file to owner read/write (`0o600`) on Unix.
+#[cfg(unix)]
+fn restrict_secret_key_file_permissions(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+/// File permissions are not restricted on non-Unix platforms.
+#[cfg(not(unix))]
+fn restrict_secret_key_file_permissions(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 impl Default for Config {

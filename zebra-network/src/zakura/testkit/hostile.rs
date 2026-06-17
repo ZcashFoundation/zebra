@@ -353,10 +353,107 @@ impl HostilePeer {
         let mut reader = std::io::Cursor::new(&header);
         let _message_type = reader.read_u16::<LittleEndian>()?;
         let _flags = reader.read_u16::<LittleEndian>()?;
-        let payload_len = reader.read_u32::<LittleEndian>()?;
-        let mut payload = vec![0; usize::try_from(payload_len)?];
+        let payload_len = usize::try_from(reader.read_u32::<LittleEndian>()?)?;
+        // Mirror production `read_frame`/`Frame::decode`: reject a declared frame
+        // larger than the cap BEFORE allocating the payload buffer. Without this
+        // a malicious or fuzzed responder can declare a huge payload_len and force
+        // an unbounded allocation (OOM/hang) in the harness response reader before
+        // the bounded `Frame::decode` rejection is ever reached.
+        let frame_len = FRAME_HEADER_BYTES.saturating_add(payload_len);
+        if frame_len > usize::try_from(max_frame_bytes)? {
+            return Err(format!(
+                "frame payload length {payload_len} exceeds max_frame_bytes {max_frame_bytes}"
+            )
+            .into());
+        }
+        let mut payload = vec![0; payload_len];
         recv.read_exact(&mut payload).await?;
         header.extend_from_slice(&payload);
         Ok(Frame::decode(&header, max_frame_bytes)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    use iroh::protocol::{AcceptError, ProtocolHandler, Router};
+
+    const TEST_ALPN: &[u8] = b"/zakura/testkit/hostile-read-frame/0";
+    const MAX_FRAME_BYTES: u32 = 4096;
+    /// Declared payload length far exceeding the cap. The unfixed reader
+    /// allocates this many bytes (then blocks reading a payload that never
+    /// arrives) before the `max_frame_bytes` check; a correct reader rejects on
+    /// the declared length first and never allocates it.
+    const DECLARED_PAYLOAD_LEN: u32 = 64 * 1024 * 1024;
+
+    /// Malicious responder: opens a stream, writes only a frame header that
+    /// declares a payload far larger than the receiver's cap, then holds the
+    /// stream open without ever sending the payload.
+    #[derive(Clone, Debug)]
+    struct OversizeResponder;
+
+    impl ProtocolHandler for OversizeResponder {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            if let Ok((mut send, _recv)) = connection.open_bi().await {
+                let mut header = Vec::with_capacity(FRAME_HEADER_BYTES);
+                header.extend_from_slice(&1u16.to_le_bytes()); // message_type
+                header.extend_from_slice(&0u16.to_le_bytes()); // flags
+                header.extend_from_slice(&DECLARED_PAYLOAD_LEN.to_le_bytes()); // payload_len
+                let _ = send.write_all(&header).await;
+                // Never send the declared payload; keep the stream open so a
+                // reader that allocates/reads the payload before the cap check
+                // blocks here.
+                tokio::time::sleep(Duration::from_secs(8)).await;
+            }
+            Ok(())
+        }
+    }
+
+    /// `read_frame` must reject a frame whose declared length exceeds
+    /// `max_frame_bytes` BEFORE allocating/reading the payload, so a malicious or
+    /// fuzzed responder cannot drive an unbounded allocation (or block) in the
+    /// harness response reader.
+    #[tokio::test]
+    async fn read_frame_rejects_oversize_declared_len_before_allocating_payload(
+    ) -> Result<(), BoxError> {
+        let server = LocalEndpointFactory::new().endpoint(4040).await?;
+        let router = Router::builder(server)
+            .accept(TEST_ALPN, OversizeResponder)
+            .spawn();
+        let server_addr = LocalEndpointFactory::node_addr(router.endpoint()).await;
+
+        let client = LocalEndpointFactory::new().endpoint(4041).await?;
+        client.add_node_addr(server_addr.clone())?;
+        let connection = client.connect(server_addr, TEST_ALPN).await?;
+
+        let (_send, mut recv) = connection.accept_bi().await?;
+
+        // A correct reader compares the declared length to `max_frame_bytes` and
+        // rejects before allocating/reading the payload, so this returns promptly.
+        // The unfixed reader allocates `DECLARED_PAYLOAD_LEN` bytes and then blocks
+        // reading a payload the responder never sends, so it times out here.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            HostilePeer::read_frame(&mut recv, MAX_FRAME_BYTES),
+        )
+        .await
+        .expect(
+            "read_frame must reject the oversize declared length before allocating/reading the \
+             payload; a timeout here means payload_len was allocated/read before the \
+             max_frame_bytes check",
+        );
+
+        let err = outcome.expect_err("oversize declared frame length must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains("max_frame_bytes"),
+            "expected a max_frame_bytes rejection, got: {message}",
+        );
+
+        connection.close(0u32.into(), b"done");
+        client.close().await;
+        Ok(())
     }
 }

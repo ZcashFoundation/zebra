@@ -26,6 +26,7 @@ use super::{Frame, ServicePeerDirection, ServicePeerLimits, ZakuraPeerId};
 mod config;
 mod error;
 mod events;
+mod pipe;
 mod reactor;
 mod reorder;
 mod scheduler;

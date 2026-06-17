@@ -966,6 +966,7 @@ where
     let outcome = if connected_addr.is_inbound() {
         run_responder_upgrade(
             peer_conn,
+            &connector,
             &config,
             nonces,
             local_node_id,
@@ -1089,8 +1090,10 @@ where
     peer_conn.send(Message::P2pV2Upgrade(init_bytes)).await?;
 
     let Some(P2pV2Upgrade::Accept(accept)) = read_upgrade_prelude(peer_conn).await? else {
-        // A reject, an unexpected variant, a malformed payload, or a closed
-        // upgrade window: keep the legacy connection.
+        // A well-formed reject, an unexpected variant, or no prelude within the
+        // skip window: keep the legacy connection. A malformed prelude is not
+        // reached here; `read_upgrade_prelude` disconnects on the first
+        // malformed upgrade message instead of falling back.
         return Ok(neutral_upgrade_fallback());
     };
 
@@ -1126,6 +1129,7 @@ where
 /// can dial us. Our iroh router accepts that inbound dial separately.
 async fn run_responder_upgrade<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
+    connector: &ZakuraHandshakeConnector,
     config: &ZakuraHandshakeConfig,
     nonces: ZakuraLegacyNonces,
     local_node_id: Vec<u8>,
@@ -1134,6 +1138,10 @@ async fn run_responder_upgrade<PeerTransport>(
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    // A well-formed unexpected variant or no prelude within the skip window: send
+    // a neutral reject and keep legacy. A malformed prelude is not reached here;
+    // `read_upgrade_prelude` disconnects on the first malformed upgrade message
+    // instead of replying with a neutral reject and falling back.
     let Some(P2pV2Upgrade::Init(init)) = read_upgrade_prelude(peer_conn).await? else {
         send_upgrade_reject(peer_conn, config).await?;
         return Ok(neutral_upgrade_fallback());
@@ -1177,6 +1185,18 @@ where
         return Ok(neutral_upgrade_fallback());
     };
 
+    // The peer dials our advertised Zakura endpoint over QUIC after receiving
+    // `Accept`, and our iroh router registers that inbound connection
+    // separately. Wait for that native registration before reporting the
+    // upgrade: the outer handshake drops the legacy TCP connection on
+    // `Upgraded`, so without this wait an inbound peer that sends a valid `Init`
+    // and then never completes the native dial would make us discard a working
+    // legacy connection with no Zakura replacement. This mirrors the initiator's
+    // `spawn_zakura_dial_to_hints_and_wait` hand-off wait.
+    if !connector.wait_for_zakura_registration(&peer_id).await {
+        return Ok(neutral_upgrade_fallback());
+    }
+
     Ok(ZakuraUpgradeOutcome::Upgraded { peer_id })
 }
 
@@ -1204,8 +1224,18 @@ where
 ///
 /// Skips a small bounded number of unrelated messages (the overall handshake
 /// timeout also applies), so a peer cannot stall the upgrade by streaming other
-/// messages. Returns `Ok(None)` if the prelude is malformed or no prelude
-/// arrives within the skip bound, so the caller falls back to legacy.
+/// messages.
+///
+/// Returns `Ok(None)` only when no prelude arrives within the skip bound: a peer
+/// that advertised `NODE_P2P_V2` but never frames a `p2pv2up` message is treated
+/// as a neutral legacy fallback (compatibility).
+///
+/// In contrast, a peer that *does* frame a `p2pv2up` message whose payload fails
+/// to decode has violated the upgrade protocol, so this returns
+/// [`HandshakeError::ZakuraUpgradePreludeMalformed`] rather than erasing the
+/// decode error to `None`. Erasing it would let a peer force a downgrade to
+/// legacy by sending malformed upgrade bytes (SR-7 fail-closed); surfacing it
+/// disconnects the peer on the first malformed upgrade message.
 async fn read_upgrade_prelude<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
 ) -> Result<Option<P2pV2Upgrade>, HandshakeError>
@@ -1221,7 +1251,13 @@ where
             .await
             .ok_or(HandshakeError::ConnectionClosed)??;
         if let Message::P2pV2Upgrade(payload) = message {
-            return Ok(P2pV2Upgrade::decode(&payload).ok());
+            return match P2pV2Upgrade::decode(&payload) {
+                Ok(prelude) => Ok(Some(prelude)),
+                Err(error) => {
+                    metrics::counter!("zakura.p2p.upgrade.prelude.malformed").increment(1);
+                    Err(HandshakeError::ZakuraUpgradePreludeMalformed(error))
+                }
+            };
         }
     }
 
@@ -1347,7 +1383,8 @@ where
                         HandshakeError::ObsoleteVersion(_) => "obsolete_version",
                         HandshakeError::Timeout => "timeout",
                         HandshakeError::ZakuraUpgradeSelected
-                        | HandshakeError::ZakuraUpgrade(_) => {
+                        | HandshakeError::ZakuraUpgrade(_)
+                        | HandshakeError::ZakuraUpgradePreludeMalformed(_) => {
                             unreachable!("negotiate_version returns before Zakura upgrade routing")
                         }
                     };

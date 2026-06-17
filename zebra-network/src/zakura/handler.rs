@@ -4,9 +4,8 @@ use std::{
     collections::{HashMap, HashSet},
     future,
     io::{Cursor, Read},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
-    str::FromStr,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex as StdMutex,
@@ -17,15 +16,17 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use iroh::Watcher as _;
 use iroh::{
-    endpoint::{Connection, RecvStream, SendStream, TransportConfig, VarInt},
+    endpoint::{
+        Connection, ConnectionType, Endpoint, RecvStream, SendStream, TransportConfig, VarInt,
+    },
     protocol::{AcceptError, ProtocolHandler, Router},
-    NodeAddr, SecretKey,
+    NodeAddr, NodeId, SecretKey,
 };
 use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot, watch, Mutex, OwnedSemaphorePermit, Semaphore},
-    task::{JoinHandle, JoinSet},
+    task::{AbortHandle, JoinHandle, JoinSet},
     time::{timeout, Instant},
 };
 use tokio_util::sync::CancellationToken;
@@ -58,9 +59,9 @@ use crate::{
         ZakuraLimits, ZakuraPeerId, ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason,
         ZakuraUpgradeOutcome, CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC, CONTROL_VERSION,
         FRAME_HEADER_BYTES, LOCAL_MAX_CONTROL_FRAME_BYTES, MAX_BS_FRAME_BYTES,
-        MAX_HS_MESSAGE_BYTES, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC, TRANSCRIPT_HASH_BYTES,
-        ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_PROTOCOL_VERSION_1, ZAKURA_STREAM_BLOCK_SYNC,
-        ZAKURA_STREAM_HEADER_SYNC,
+        MAX_CONTROL_PAYLOAD_BYTES, MAX_HS_MESSAGE_BYTES, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC,
+        TRANSCRIPT_HASH_BYTES, ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_PROTOCOL_VERSION_1,
+        ZAKURA_STREAM_BLOCK_SYNC, ZAKURA_STREAM_HEADER_SYNC,
     },
 };
 use crate::{BoxError, Config, MAX_TX_INV_IN_SENT_MESSAGE};
@@ -150,6 +151,20 @@ const LEGACY_COMPACT_SIZE_PREFIX_BYTES: usize = 9;
 const LEGACY_BLOCK_HASH_BYTES: usize = 32;
 const LEGACY_INVENTORY_HASH_BYTES: usize = 36;
 const LEGACY_RESPONSE_MAX_FRAMES_PER_ITEM: usize = 8;
+/// Maximum cumulative response payload bytes the requester will retain in the
+/// accepted-frame `Vec` before `decode_response` consumes it.
+///
+/// `LegacyResponseBudget::from_request` otherwise derives the per-response byte
+/// budget for Blocks/Transactions as `item_count * max_message_bytes`, so a
+/// request naming the protocol-max inventory count (`MAX_TX_INV_IN_SENT_MESSAGE`)
+/// would let a hostile responder fill ~`25_000 * MAX_PROTOCOL_MESSAGE_LEN` (tens
+/// of GiB) of validated frames before any decode begins. The inbound responder
+/// already caps a single response's cumulative payload at the same value
+/// (`legacy_gossip::LEGACY_RESPONSE_MAX_AGGREGATE_BYTES`), so an honest peer
+/// never sends more than this; clamping the requester budget to the same
+/// operational aggregate is the symmetric requester-side mirror.
+const LEGACY_RESPONSE_MAX_AGGREGATE_BYTES: usize =
+    8 * zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
 const _: () = assert!(LEGACY_GOSSIP_STREAM_KIND == super::legacy_gossip::ZAKURA_STREAM_GOSSIP);
 const _: () =
     assert!(LEGACY_REQUEST_STREAM_KIND == super::legacy_gossip::ZAKURA_STREAM_LEGACY_REQUESTS);
@@ -211,12 +226,14 @@ pub struct ZakuraConfig {
     pub bootstrap_peers: Vec<String>,
     /// Address the native Zakura QUIC endpoint binds to.
     ///
-    /// When unset the endpoint binds an OS-assigned ephemeral port on the
-    /// unspecified address, which is fine for a node that only dials out. Set a
-    /// fixed address to give this node a stable, advertisable Zakura endpoint so
-    /// other nodes can list it in their [`bootstrap_peers`](Self::bootstrap_peers)
-    /// — required for a node that acts as a Zakura seed, since relays and
-    /// discovery are disabled.
+    /// When unset the endpoint binds an OS-assigned ephemeral port on loopback
+    /// only (`127.0.0.1` and `::1`), which is fine for a node that only dials
+    /// out and keeps the experimental native P2P_V2_ALPN surface off all
+    /// non-loopback interfaces. Set a fixed address to give this node a stable,
+    /// advertisable Zakura endpoint so other nodes can list it in their
+    /// [`bootstrap_peers`](Self::bootstrap_peers) — required for a node that acts
+    /// as a Zakura seed or otherwise accepts inbound native connections, since
+    /// relays and discovery are disabled.
     pub listen_addr: Option<SocketAddr>,
     /// Total concurrent Zakura connections, inbound plus outbound.
     pub max_connections: usize,
@@ -399,7 +416,11 @@ pub struct ZakuraEndpoint {
     header_sync_tasks: Option<Arc<HeaderSyncBackgroundTasks>>,
     header_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<HeaderSyncAction>>>>>,
     block_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<BlockSyncAction>>>>>,
-    upgrade_dials: Arc<StdMutex<HashSet<ZakuraPeerId>>>,
+    /// Maintained native dials started by the legacy->Zakura upgrade hand-off,
+    /// keyed by the advertised peer id. The [`AbortHandle`] lets a failed
+    /// hand-off cancel its maintain-forever dial instead of leaking it; see
+    /// [`Self::ensure_upgrade_native_dial`] and [`Self::cancel_upgrade_native_dial`].
+    upgrade_dials: Arc<StdMutex<HashMap<ZakuraPeerId, AbortHandle>>>,
 }
 
 #[derive(Debug)]
@@ -481,6 +502,22 @@ impl ZakuraEndpoint {
             .map(|tasks| tasks.shutdown.clone())
     }
 
+    /// The endpoint-wide background-task shutdown token, cancelled by
+    /// [`ZakuraEndpoint::shutdown`].
+    ///
+    /// Detached dial/discovery loops observe this so they stop promptly at
+    /// teardown instead of running on against a torn-down router. They each hold
+    /// an endpoint clone, which keeps the supervisor registration watch open, so
+    /// watch closure is *not* a reliable exit signal for them; this token is.
+    /// Falls back to an un-cancelled token for endpoints built without a
+    /// background-task owner (recorder-only test nodes).
+    pub(crate) fn background_shutdown_token(&self) -> CancellationToken {
+        self.header_sync_tasks
+            .as_ref()
+            .map(|tasks| tasks.shutdown.clone())
+            .unwrap_or_default()
+    }
+
     /// Track a header-sync integration task under the endpoint shutdown owner.
     pub async fn push_header_sync_task(&self, task: JoinHandle<()>) {
         if let Some(tasks) = self.header_sync_tasks.as_ref() {
@@ -538,14 +575,17 @@ impl ZakuraEndpoint {
             return false;
         };
 
-        {
-            let mut upgrade_dials = self
-                .upgrade_dials
-                .lock()
-                .expect("Zakura upgrade dial registry mutex is never poisoned");
-            if !upgrade_dials.insert(peer_id.clone()) {
-                return true;
-            }
+        // Hold the registry lock across the spawn so the dedup check and the
+        // abort-handle insert are atomic against a concurrent upgrade to the
+        // same peer. `tokio::spawn` does not await, and the spawned task only
+        // re-locks after its (non-instant) dial returns, so this cannot
+        // deadlock or `.await` under the lock.
+        let mut upgrade_dials = self
+            .upgrade_dials
+            .lock()
+            .expect("Zakura upgrade dial registry mutex is never poisoned");
+        if upgrade_dials.contains_key(&peer_id) {
+            return true;
         }
 
         let endpoint = self.clone();
@@ -554,15 +594,39 @@ impl ZakuraEndpoint {
             DEFAULT_ZAKURA_REDIAL_INITIAL_BACKOFF,
             DEFAULT_ZAKURA_REDIAL_MAX_BACKOFF,
         );
-        tokio::spawn(async move {
+        let task_peer_id = peer_id.clone();
+        let dial = tokio::spawn(async move {
             native_dial_supervised(endpoint.clone(), node_addr, limits, policy).await;
             endpoint
                 .upgrade_dials
                 .lock()
                 .expect("Zakura upgrade dial registry mutex is never poisoned")
-                .remove(&peer_id);
+                .remove(&task_peer_id);
         });
+        upgrade_dials.insert(peer_id, dial.abort_handle());
         true
+    }
+
+    /// Cancel and forget the maintained native dial started by the legacy
+    /// upgrade hand-off for `peer_id`, if this node still owns one.
+    ///
+    /// Called when the upgrade hand-off wait times out without the peer
+    /// registering: the maintained dial uses [`RedialPolicy::maintain`], so it
+    /// would otherwise redial a peer-supplied, possibly unreachable address
+    /// forever and keep its `upgrade_dials` entry. Repeating the failed upgrade
+    /// with distinct node ids would then grow maintained dial tasks and
+    /// outbound QUIC traffic without bound. A no-op if the peer already
+    /// registered (its entry is reclaimed only when the maintained dial ends on
+    /// shutdown) or if another upgrade owns the dedup slot.
+    pub(crate) fn cancel_upgrade_native_dial(&self, peer_id: &ZakuraPeerId) {
+        let handle = self
+            .upgrade_dials
+            .lock()
+            .expect("Zakura upgrade dial registry mutex is never poisoned")
+            .remove(peer_id);
+        if let Some(handle) = handle {
+            handle.abort();
+        }
     }
 
     /// Returns whether the local admission semaphore has a free permit, i.e.
@@ -604,7 +668,7 @@ impl ZakuraEndpoint {
             header_sync_tasks: None,
             header_sync_actions: None,
             block_sync_actions: None,
-            upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
+            upgrade_dials: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 
@@ -630,7 +694,7 @@ impl ZakuraEndpoint {
             })),
             header_sync_actions: actions.map(|actions| Arc::new(Mutex::new(Some(actions)))),
             block_sync_actions: None,
-            upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
+            upgrade_dials: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 }
@@ -805,15 +869,27 @@ impl ZakuraSupervisorHandle {
         accepted_capabilities: u64,
     ) -> ZakuraRegistration {
         let mut state = self.inner.lock().await;
+        // A re-registration for a peer id that is already active is a duplicate
+        // redial, not a new connection: the incumbent already holds the per-IP
+        // slot, and the duplicate branch below either keeps the incumbent and
+        // closes the newcomer or evicts a stale incumbent in its place, so it
+        // never consumes an additional per-IP slot. Exempting duplicates from the
+        // per-IP cap precheck lets a same-peer redial from an IP already at the cap
+        // reach the stale-incumbent eviction path instead of being rejected as a
+        // resource limit, so a dead incumbent is evicted in milliseconds rather
+        // than blocking the peer until the QUIC idle timeout (~150s).
+        let is_duplicate_redial = state.active_by_peer.contains_key(&peer_id);
         if let Some(remote_ip) = remote_ip {
-            let ip_count = state
-                .active_by_ip
-                .get(&remote_ip)
-                .copied()
-                .unwrap_or_default();
-            if ip_count >= state.max_connections_per_ip {
-                metrics::counter!("zakura.p2p.conn.rejected.admission").increment(1);
-                return ZakuraRegistration::Rejected(ZakuraRejectReason::ResourceLimit);
+            if !is_duplicate_redial {
+                let ip_count = state
+                    .active_by_ip
+                    .get(&remote_ip)
+                    .copied()
+                    .unwrap_or_default();
+                if ip_count >= state.max_connections_per_ip {
+                    metrics::counter!("zakura.p2p.conn.rejected.admission").increment(1);
+                    return ZakuraRegistration::Rejected(ZakuraRejectReason::ResourceLimit);
+                }
             }
         }
 
@@ -1146,6 +1222,45 @@ pub struct ZakuraProtocolHandler {
     admission: Arc<Semaphore>,
     pending_handshakes: Arc<Semaphore>,
     shutdown: CancellationToken,
+    // Bound iroh endpoint, used to recover the inbound peer's UDP source IP so
+    // the per-IP admission cap applies to Router-accepted connections. Iroh's
+    // Router consumes the `Incoming` (which carries the address) before
+    // `ProtocolHandler::accept` hands us the established `Connection`, so the
+    // address is looked up from the endpoint's node map instead. `None` for
+    // unit tests that drive the handler without a bound endpoint, in which case
+    // inbound accepts fall back to the previous `remote_ip = None` behaviour.
+    endpoint: Option<Endpoint>,
+}
+
+/// Resolve the inbound peer's UDP source IP from the endpoint's node map so the
+/// per-IP connection cap can be enforced for Router-accepted connections.
+///
+/// Iroh exposes the peer address on `Incoming`, which the Router consumes before
+/// `ProtocolHandler::accept`. After the native control handshake the connection
+/// has exchanged real QUIC payload over its direct path, so the endpoint's node
+/// map knows the peer's UDP address: prefer the connection's confirmed current
+/// path (`conn_type`), then fall back to the direct address that most recently
+/// delivered payload from this peer. Relay-only paths have no single
+/// attributable source IP, so they correctly yield `None` (the global
+/// connection cap still bounds them).
+fn inbound_remote_ip(endpoint: &Endpoint, node_id: NodeId) -> Option<IpAddr> {
+    if let Some(mut conn_type) = endpoint.conn_type(node_id) {
+        match conn_type.get() {
+            ConnectionType::Direct(addr) | ConnectionType::Mixed(addr, _) => {
+                return Some(addr.ip())
+            }
+            ConnectionType::Relay(_) | ConnectionType::None => {}
+        }
+    }
+    endpoint.remote_info(node_id).and_then(|info| {
+        info.addrs
+            .into_iter()
+            .filter(|addr| addr.last_payload.is_some())
+            // Smallest elapsed-since-last-payload is the path actively carrying
+            // this connection's traffic, i.e. the real inbound source address.
+            .min_by_key(|addr| addr.last_payload)
+            .map(|addr| addr.addr.ip())
+    })
 }
 
 impl ZakuraProtocolHandler {
@@ -1205,7 +1320,15 @@ impl ZakuraProtocolHandler {
             pending_handshakes: Arc::new(Semaphore::new(limits.max_pending_handshakes)),
             shutdown: CancellationToken::new(),
             limits,
+            endpoint: None,
         }
+    }
+
+    /// Attach the bound iroh endpoint so inbound Router-accepted connections can
+    /// resolve the peer's UDP source IP and enforce the per-IP connection cap.
+    pub fn with_endpoint(mut self, endpoint: Endpoint) -> Self {
+        self.endpoint = Some(endpoint);
+        self
     }
 
     async fn accept_connection(&self, connection: Connection) -> Result<(), AcceptError> {
@@ -1242,12 +1365,18 @@ impl ZakuraProtocolHandler {
         };
 
         let conn_limits = self.limits.clamp(&negotiated.limits);
-        // Iroh's Router hands ProtocolHandler only the established Connection.
-        // In iroh 0.92.0 the peer UDP address is exposed on Incoming, which the
-        // Router consumes before this point, not on Connection/Connecting. The
-        // inbound per-IP cap therefore remains deferred while 01.a keeps Router
-        // ownership. Native outbound dials still pass the configured direct IP.
-        let remote_ip = None;
+        // Iroh's Router hands ProtocolHandler only the established Connection;
+        // the peer UDP address lives on Incoming, which the Router consumes
+        // before this point. Recover it from the endpoint's node map so the
+        // per-IP admission cap applies to inbound accepts and a single source
+        // IP cannot fill the global connection budget with distinct node ids.
+        // The handshake above has already exchanged QUIC payload over the
+        // direct path, so the node map knows the peer's address. Native
+        // outbound dials still pass the configured direct IP.
+        let remote_ip = self
+            .endpoint
+            .as_ref()
+            .and_then(|endpoint| inbound_remote_ip(endpoint, remote_node_id));
         self.register_and_serve(
             connection,
             remote_peer_id,
@@ -1791,6 +1920,23 @@ impl ZakuraProtocolHandler {
             return None;
         };
 
+        // Charge the per-connection stream-open rate token immediately after
+        // acquiring a concurrency permit, before parsing the prelude or running
+        // the kind/capability/mode checks below. Each of those rejections resets
+        // the stream only and keeps the connection, so charging the token here is
+        // what bounds protocol-invalid stream churn (bad prelude, unknown kind,
+        // unnegotiated capability): otherwise an authenticated peer could open
+        // such streams indefinitely without ever spending open-rate budget.
+        if !admission.open_limiter.try_take() {
+            let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_RATE_LIMIT));
+            metrics::counter!("zakura.p2p.stream.rejected.open_rate").increment(1);
+            admission.trace.emit(
+                STREAM_TABLE,
+                admission.event("rejected.open_rate", stream_id),
+            );
+            return None;
+        }
+
         let prelude = match read_stream_prelude(&mut recv, admission.limits.prelude_timeout).await {
             Ok(prelude) => prelude,
             Err(error) => {
@@ -1874,18 +2020,6 @@ impl ZakuraProtocolHandler {
                 STREAM_TABLE,
                 admission
                     .event("rejected.request_without_id", stream_id)
-                    .stream_kind(stream_kind),
-            );
-            return None;
-        }
-
-        if !admission.open_limiter.try_take() {
-            let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_RATE_LIMIT));
-            metrics::counter!("zakura.p2p.stream.rejected.open_rate").increment(1);
-            admission.trace.emit(
-                STREAM_TABLE,
-                admission
-                    .event("rejected.open_rate", stream_id)
                     .stream_kind(stream_kind),
             );
             return None;
@@ -2081,6 +2215,35 @@ impl ProtocolHandler for ZakuraProtocolHandler {
     }
 }
 
+/// Loopback IPv4 address the native Zakura endpoint binds to when no
+/// `zakura.listen_addr` is configured, so the unset (dial-out-only) state does
+/// not expose the P2P_V2_ALPN surface on all interfaces.
+const ZAKURA_LOOPBACK_BIND_V4: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
+/// Loopback IPv6 counterpart of [`ZAKURA_LOOPBACK_BIND_V4`].
+const ZAKURA_LOOPBACK_BIND_V6: SocketAddrV6 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+
+/// Applies the native endpoint bind-address selection to `builder`.
+///
+/// When `listen_addr` is set, the endpoint binds exactly that address so the
+/// node has a stable, advertisable Zakura endpoint. When it is unset, the
+/// endpoint binds loopback-only for **both** IPv4 and IPv6 rather than relying
+/// on iroh's default unspecified bind (`0.0.0.0:0` / `[::]:0`). Without the
+/// explicit loopback bind the unconfigured / dial-out-only case silently exposes
+/// the experimental native P2P_V2_ALPN handshake/session surface on every
+/// interface on an OS-assigned ephemeral port.
+fn bind_native_endpoint(
+    builder: iroh::endpoint::Builder,
+    listen_addr: Option<SocketAddr>,
+) -> iroh::endpoint::Builder {
+    match listen_addr {
+        Some(SocketAddr::V4(addr)) => builder.bind_addr_v4(addr),
+        Some(SocketAddr::V6(addr)) => builder.bind_addr_v6(addr),
+        None => builder
+            .bind_addr_v4(ZAKURA_LOOPBACK_BIND_V4)
+            .bind_addr_v6(ZAKURA_LOOPBACK_BIND_V6),
+    }
+}
+
 /// Start a Zakura endpoint and router when P2P v2 is enabled.
 pub async fn spawn_zakura_endpoint(
     config: &Config,
@@ -2103,15 +2266,12 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
     validate_idle_invariant(&limits)?;
     let secret_key = zakura_secret_key(config)?;
     let discovery_secret_key = secret_key.clone();
-    let mut builder =
+    let builder =
         direct_endpoint_builder(secret_key).transport_config(limits.transport_config());
     // Bind a fixed address when configured so this node has a stable, advertisable
-    // Zakura endpoint; otherwise iroh assigns an ephemeral port (dial-out only).
-    match config.zakura.listen_addr {
-        Some(SocketAddr::V4(addr)) => builder = builder.bind_addr_v4(addr),
-        Some(SocketAddr::V6(addr)) => builder = builder.bind_addr_v6(addr),
-        None => {}
-    }
+    // Zakura endpoint; otherwise bind loopback-only so the unset (dial-out-only)
+    // case does not expose the native P2P_V2_ALPN surface on all interfaces.
+    let builder = bind_native_endpoint(builder, config.zakura.listen_addr);
     let endpoint = builder.bind().await?;
     let supervisor = ZakuraSupervisorHandle::new(config.max_connections_per_ip);
     let tracer = config
@@ -2223,7 +2383,10 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         limits.clone(),
         registry,
         trace,
-    );
+    )
+    // Give the handler the bound endpoint so inbound accepts can resolve the
+    // peer's source IP and enforce the per-IP connection cap.
+    .with_endpoint(endpoint.clone());
     let router = Router::builder(endpoint)
         .accept(P2P_V2_ALPN, handler.clone())
         .spawn();
@@ -2236,25 +2399,34 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         header_sync_tasks: Some(header_sync_tasks),
         header_sync_actions,
         block_sync_actions,
-        upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
+        upgrade_dials: Arc::new(StdMutex::new(HashMap::new())),
     };
 
     // Log our own dial address once iroh has resolved it, so operators can hand
     // out `<node_id>@<direct_addr>` for other nodes' `zakura.bootstrap_peers`.
+    // Tracked under the endpoint shutdown owner and shutdown-aware so it cannot
+    // outlive endpoint teardown while awaiting address resolution.
     {
-        let endpoint = endpoint.clone();
-        tokio::spawn(async move {
-            let node_addr = endpoint.node_addr().await;
-            let direct_addresses: Vec<String> = node_addr
-                .direct_addresses()
-                .map(|addr| addr.to_string())
-                .collect();
-            info!(
-                node_id = %node_addr.node_id,
-                ?direct_addresses,
-                "Zakura P2P endpoint ready; advertise <node_id>@<direct_addr> as a bootstrap peer",
-            );
+        let shutdown = endpoint.background_shutdown_token();
+        let log_endpoint = endpoint.clone();
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => {}
+                node_addr = log_endpoint.node_addr() => {
+                    let direct_addresses: Vec<String> = node_addr
+                        .direct_addresses()
+                        .map(|addr| addr.to_string())
+                        .collect();
+                    info!(
+                        node_id = %node_addr.node_id,
+                        ?direct_addresses,
+                        "Zakura P2P endpoint ready; advertise <node_id>@<direct_addr> as a bootstrap peer",
+                    );
+                }
+            }
         });
+        endpoint.push_header_sync_task(task).await;
     }
 
     super::discovery::insert_static_bootstrap_candidates(
@@ -2262,12 +2434,21 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         &config.zakura.bootstrap_peers,
     )
     .await;
-    spawn_native_bootstrap_dialer(
+    // Track the maintained bootstrap redial tasks and the discovery candidate
+    // dialer under the endpoint shutdown owner so `ZakuraEndpoint::shutdown`
+    // drains them. Previously their handles were dropped, leaving detached loops
+    // that kept retrying dials against a torn-down router while holding endpoint
+    // clones past teardown.
+    for task in spawn_native_bootstrap_dialer(
         endpoint.clone(),
         config.zakura.bootstrap_peers.clone(),
         limits.clone(),
-    );
-    super::discovery::spawn_native_discovery_dialer(endpoint.clone(), discovery, limits);
+    ) {
+        endpoint.push_header_sync_task(task).await;
+    }
+    let discovery_dialer =
+        super::discovery::spawn_native_discovery_dialer(endpoint.clone(), discovery, limits);
+    endpoint.push_header_sync_task(discovery_dialer).await;
     Ok(Some(endpoint))
 }
 
@@ -2490,7 +2671,7 @@ async fn persistent_stream_worker(
             }
             frame = read_frame(
                 &mut recv,
-                app_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
+                inbound_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
                 context.limits.idle_timeout,
             ) => {
                 match frame {
@@ -2566,7 +2747,7 @@ async fn request_stream_worker(
         _ = context.connection_token.cancelled() => return,
         frame = read_frame(
             &mut recv,
-            app_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
+            inbound_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
             context.limits.idle_timeout,
         ) => frame,
     };
@@ -2604,6 +2785,7 @@ async fn request_stream_worker(
             prelude.stream_kind,
             request_id,
             app_frame_cap_for_stream_kind(&context.limits, prelude.stream_kind),
+            context.limits.max_message_bytes,
             frame,
         )
         .await
@@ -2742,6 +2924,15 @@ async fn read_control_payload(
     max_bytes: u32,
     read_timeout: Duration,
 ) -> Result<Vec<u8>, ZakuraHandlerError> {
+    // Control payloads (Hello/Ack) carry a hard 16 KiB cap that is otherwise only
+    // enforced later in ZakuraControlHello/Ack::decode. Clamp the caller-supplied
+    // frame cap (the configured `max_control_frame_bytes`, 1 MiB by default) to it
+    // here so a peer cannot make us allocate/read a payload up to the much larger
+    // frame cap before decode rejects it as oversized.
+    //
+    // `MAX_CONTROL_PAYLOAD_BYTES` (16 KiB) is a small compile-time constant, so the
+    // cast to u32 cannot truncate; `.min` also preserves any tighter negotiated cap.
+    let max_bytes = max_bytes.min(MAX_CONTROL_PAYLOAD_BYTES as u32);
     let mut len_bytes = [0; CONTROL_LENGTH_BYTES];
     timeout(read_timeout, recv.read_exact(&mut len_bytes))
         .await
@@ -2780,6 +2971,20 @@ async fn write_ordered_frame(
     limits: ZakuraConnectionLimits,
     stream_kind: u16,
 ) -> Result<(), BoxError> {
+    // Mirror `write_response_frame`: a persistent ordered-stream frame whose
+    // payload exceeds the peer's negotiated `max_message_bytes` would be
+    // rejected by the peer as oversize, so reject it locally before wasting
+    // encode/write work rather than writing a frame the peer cannot accept. The
+    // handshake clamps `max_frame_bytes` and `max_message_bytes` independently,
+    // so the frame cap alone does not bound this.
+    if frame.payload.len() > limits.max_message_bytes as usize {
+        return Err(format!(
+            "Zakura outbound ordered frame payload {} exceeds negotiated max_message_bytes {}",
+            frame.payload.len(),
+            limits.max_message_bytes,
+        )
+        .into());
+    }
     let frame = frame.encode(app_frame_cap_for_stream_kind(&limits, stream_kind))?;
     timeout(OUTBOUND_STREAM_WRITE_TIMEOUT, send.write_all(&frame))
         .await
@@ -2983,6 +3188,16 @@ impl LegacyResponseBudget {
                 (1, 1, LEGACY_RESPONSE_REQUEST_ID_BYTES)
             }
         };
+
+        // Clamp the retained-frame byte budget to a fixed operational aggregate
+        // cap. For Blocks/Transactions the derived `max_bytes` scales with the
+        // requested inventory count (`item_count * max_message_bytes`), so a
+        // request naming the protocol-max inventory count would otherwise let a
+        // hostile responder accumulate tens of GiB of validated frames in the
+        // accepted-frame `Vec` before `decode_response` runs. The inbound
+        // responder already bounds a single response to the same aggregate, so
+        // this only rejects responses an honest peer would never send.
+        let max_bytes = max_bytes.min(LEGACY_RESPONSE_MAX_AGGREGATE_BYTES);
 
         Ok(Self {
             kind,
@@ -3210,18 +3425,35 @@ impl LegacyResponseReadState {
         self.add_items(1)
     }
 
-    /// Accept a `MSG_RESPONSE_NIL` empty-result sentinel for any request kind.
+    /// Validate a `MSG_RESPONSE_NIL` empty-result sentinel against the request kind.
     ///
-    /// The inbound service answers an empty `FindBlocks`/`FindHeaders`/
+    /// NIL is the empty-result sentinel only for chain-discovery and mempool
+    /// queries: the inbound service answers an empty `FindBlocks`/`FindHeaders`/
     /// `MempoolTransactionIds` (and a queued `PushTransaction`) with
-    /// `Response::Nil`, so a lone nil frame is a valid empty response for every
-    /// request kind, not just `PushTransaction`. The kind-specific empty
-    /// `Response` is produced later by `LegacyResponseCodec::decode_response`.
+    /// `Response::Nil`. Inventory fetches (`BlocksByHash`/`TransactionsById`) and
+    /// `Ping` must never receive a bare NIL, so reject it as `Fatal` for those
+    /// kinds — fail closed and let the request stream worker disconnect the peer,
+    /// matching `LegacyResponseCodec::decode_response`, which rejects NIL for the
+    /// same kinds. The kind-specific empty `Response` is produced later by
+    /// `decode_response`.
     fn validate_nil(
         &mut self,
         request_id: u64,
         payload: &[u8],
     ) -> Result<(), OutboundRequestError> {
+        match self.budget.kind {
+            LegacyResponseKind::BlockHashes
+            | LegacyResponseKind::BlockHeaders
+            | LegacyResponseKind::TransactionIds
+            | LegacyResponseKind::Nil => {}
+            LegacyResponseKind::Blocks
+            | LegacyResponseKind::Transactions
+            | LegacyResponseKind::Pong => {
+                return Err(OutboundRequestError::Fatal(
+                    "unexpected legacy nil response for inventory or ping request".into(),
+                ));
+            }
+        }
         if self.active_chunk_type.is_some() {
             return Err(OutboundRequestError::Fatal(
                 "legacy nil response interleaved with response chunk".into(),
@@ -3414,12 +3646,11 @@ fn validate_idle_invariant(limits: &ZakuraLocalLimits) -> Result<(), ZakuraHandl
 }
 
 fn zakura_secret_key(config: &Config) -> Result<SecretKey, ZakuraHandlerError> {
-    if let Some(secret) = &config.zakura_node_secret_key {
-        return SecretKey::from_str(secret.expose_secret())
-            .map_err(|_| ZakuraHandlerError::InvalidSecretKey);
-    }
-
-    Ok(SecretKey::generate(OsRng))
+    // Loads the configured key, or loads/generates+persists a stable key under the
+    // cache dir so the node keeps a consistent NodeId across restarts.
+    config
+        .zakura_secret_key()
+        .map_err(|_| ZakuraHandlerError::InvalidSecretKey)
 }
 
 fn stream_kind_label(stream_kind: u16) -> &'static str {
@@ -3447,6 +3678,25 @@ fn app_frame_cap_for_stream_kind(limits: &ZakuraConnectionLimits, stream_kind: u
         _ => limits.max_frame_bytes.min(LOCAL_MAX_CONTROL_FRAME_BYTES),
     }
     .max(1)
+}
+
+/// Frame cap for reading on an admitted inbound stream, never larger than the
+/// message cap allows.
+///
+/// On an admitted ordered/request stream a frame payload *is* the message, so
+/// `admit_inbound_message` rejects any payload over `max_message_bytes`. A peer
+/// can negotiate `max_frame_bytes > max_message_bytes` (the two caps are clamped
+/// independently in `ZakuraLocalLimits::clamp`), so the cap handed to
+/// `read_frame` must also be limited to the message size. Otherwise a frame whose
+/// `payload_len` falls between the two limits is allocated and read in full by
+/// `read_frame` before `admit_inbound_message` rejects it as oversize, letting a
+/// peer force per-frame allocation/I/O up to the larger frame cap across many
+/// streams.
+fn inbound_frame_cap_for_stream_kind(limits: &ZakuraConnectionLimits, stream_kind: u16) -> u32 {
+    let frame_header_bytes =
+        u32::try_from(FRAME_HEADER_BYTES).expect("frame header byte count fits in u32");
+    app_frame_cap_for_stream_kind(limits, stream_kind)
+        .min(limits.max_message_bytes.saturating_add(frame_header_bytes))
 }
 
 fn per_stream_inbound_queue_depth(
@@ -3650,6 +3900,33 @@ mod tests {
         transaction::{self, UnminedTxId},
     };
     use zebra_test::vectors::BLOCK_TESTNET_141042_BYTES;
+
+    /// With no configured `zakura.listen_addr`, the native endpoint must bind
+    /// loopback-only. Otherwise iroh's default bind (`0.0.0.0:0` / `[::]:0`)
+    /// exposes the experimental P2P_V2_ALPN handshake/session surface on every
+    /// interface on an OS-assigned ephemeral port, even though the unset state is
+    /// documented as dial-out only.
+    #[tokio::test]
+    async fn unset_listen_addr_binds_loopback_not_unspecified() {
+        let builder = direct_endpoint_builder(SecretKey::generate(OsRng));
+        let builder = bind_native_endpoint(builder, None);
+        let endpoint = builder.bind().await.expect("loopback bind should succeed");
+
+        let sockets = endpoint.bound_sockets();
+        assert!(
+            !sockets.is_empty(),
+            "endpoint should bind at least one socket"
+        );
+        for socket in &sockets {
+            assert!(
+                socket.ip().is_loopback(),
+                "unset listen_addr must bind loopback only, but bound {socket} \
+                 (exposes P2P_V2_ALPN on all interfaces)"
+            );
+        }
+
+        endpoint.close().await;
+    }
 
     #[derive(Debug, Clone)]
     struct CaptureConnection {
@@ -3956,6 +4233,144 @@ mod tests {
         Ok(())
     }
 
+    /// A maintained native dial loop (shared by configured bootstrap peers, the
+    /// legacy->Zakura upgrade hand-off, and `spawn_native_dial`) targets an
+    /// unreachable peer, so its `maintain` policy retries forever and never
+    /// exits on its own. `ZakuraEndpoint::shutdown` must still stop it: the task
+    /// holds an endpoint clone, so the supervisor registration watch stays open
+    /// and only the endpoint shutdown token can end the loop. Without that
+    /// signal the detached loop outlives shutdown and keeps dialing.
+    #[tokio::test]
+    async fn endpoint_shutdown_stops_maintained_native_dial_loop() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let endpoint = spawn_zakura_endpoint(&Config::default(), |_supervisor, _trace| {
+            Arc::new(NoopService) as Arc<dyn Service>
+        })
+        .await?
+        .expect("v2_p2p is enabled by default");
+
+        // 192.0.2.0/24 is TEST-NET-1 (RFC 5737): guaranteed unreachable, so the
+        // maintained loop stays in connect/backoff and never finishes on its own.
+        let unreachable_addr: SocketAddr = "192.0.2.1:65535".parse().expect("valid test address");
+        let unreachable = NodeAddr::new(LocalEndpointFactory::secret_key(987_654).public())
+            .with_direct_addresses([unreachable_addr]);
+        let dial = endpoint.spawn_native_dial(unreachable);
+
+        // Let the maintained loop start before tearing the endpoint down.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !dial.is_finished(),
+            "maintained dial loop to an unreachable peer should still be running"
+        );
+
+        endpoint.shutdown().await;
+
+        tokio::time::timeout(Duration::from_secs(5), dial)
+            .await
+            .expect("maintained native dial loop must exit after endpoint shutdown")
+            .expect("native dial task must not panic");
+        Ok(())
+    }
+
+    /// The discovery candidate dialer is a long-lived loop that holds an
+    /// endpoint clone, so its supervisor registration watch never closes on its
+    /// own. `ZakuraEndpoint::shutdown` must still stop it via the endpoint
+    /// shutdown token; otherwise it outlives teardown, polling the discovery
+    /// book and attempting dials against a torn-down router.
+    #[tokio::test]
+    async fn endpoint_shutdown_stops_discovery_candidate_dialer() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let config = Config::default();
+        let endpoint = spawn_zakura_endpoint(&config, |_supervisor, _trace| {
+            Arc::new(NoopService) as Arc<dyn Service>
+        })
+        .await?
+        .expect("v2_p2p is enabled by default");
+
+        let limits = ZakuraLocalLimits::from_config(&config);
+        let handshake = ZakuraHandshakeConfig::for_network(&config.network);
+        let discovery = crate::zakura::discovery::build_discovery_handle(
+            SecretKey::generate(OsRng),
+            Vec::new(),
+            crate::zakura::discovery::default_advertised_services(),
+            &handshake,
+            limits.max_connections,
+            0,
+            endpoint.supervisor().subscribe(),
+        )?;
+        let dialer = crate::zakura::discovery::spawn_native_discovery_dialer(
+            endpoint.clone(),
+            discovery,
+            limits,
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !dialer.is_finished(),
+            "discovery candidate dialer should still be running"
+        );
+
+        endpoint.shutdown().await;
+
+        tokio::time::timeout(Duration::from_secs(5), dialer)
+            .await
+            .expect("discovery candidate dialer must exit after endpoint shutdown")
+            .expect("discovery dialer task must not panic");
+        Ok(())
+    }
+
+    /// A malicious legacy responder can return a syntactically valid
+    /// `P2pV2UpgradeAccept` (a unique, real iroh node id with a parseable but
+    /// unreachable direct address) that never completes native Zakura
+    /// registration. After the upgrade hand-off wait times out, no
+    /// maintain-forever native dial task or `upgrade_dials` entry may survive;
+    /// otherwise repeating the failed upgrade with distinct node ids grows
+    /// maintained dials and outbound QUIC traffic without bound.
+    ///
+    /// Regression test for `claude-legacy-upgrade-maintained-dial-leak`. Uses a
+    /// paused clock so the 15s appear-timeout elapses without real waiting; the
+    /// dial target is RFC 5737 TEST-NET-1, which never connects.
+    #[tokio::test(start_paused = true)]
+    async fn failed_legacy_upgrade_does_not_leak_maintained_dial() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let endpoint = spawn_zakura_endpoint(&Config::default(), |_supervisor, _trace| {
+            Arc::new(NoopService) as Arc<dyn Service>
+        })
+        .await?
+        .expect("v2_p2p is enabled by default");
+
+        // The Accept the attacker would advertise: a real 32-byte iroh node id
+        // (so `node_addr_from_hints` builds a `NodeAddr` and the dial spawns)
+        // pointing at an unreachable address that never registers.
+        let node_id = LocalEndpointFactory::secret_key(0x0BAD_C0DE)
+            .public()
+            .as_bytes()
+            .to_vec();
+        let peer_id = ZakuraPeerId::new(node_id.clone()).expect("32-byte node id is valid");
+        let direct_addresses = vec![b"192.0.2.1:1".to_vec()];
+
+        let connector = crate::zakura::ZakuraHandshakeConnector::new_with_endpoint(endpoint.clone());
+        let upgraded = connector
+            .spawn_zakura_dial_to_hints_and_wait(&peer_id, &node_id, &direct_addresses)
+            .await;
+
+        assert!(
+            !upgraded,
+            "an unreachable upgrade peer must not report a completed hand-off",
+        );
+        assert!(
+            endpoint
+                .upgrade_dials
+                .lock()
+                .expect("Zakura upgrade dial registry mutex is never poisoned")
+                .is_empty(),
+            "a failed legacy upgrade leaked a maintained native dial / upgrade_dials entry",
+        );
+
+        endpoint.shutdown().await;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn registry_routes_legacy_and_header_sync_and_drops_unknown() -> Result<(), BoxError> {
         let _guard = zebra_test::init();
@@ -4050,6 +4465,7 @@ mod tests {
                 peer,
                 HEADER_SYNC_STREAM_KIND,
                 99,
+                LOCAL_MAX_CONTROL_FRAME_BYTES,
                 LOCAL_MAX_CONTROL_FRAME_BYTES,
                 Frame {
                     message_type: 1,
@@ -4507,6 +4923,81 @@ mod tests {
         Ok(())
     }
 
+    // SECURITY AUDIT (candidate claude-per-ip-cap-blocks-stale-duplicate-eviction /
+    // codex-ip-cap-blocks-stale-duplicate-eviction /
+    // subset-admission-identity-state-ip-cap-blocks-stale-duplicate-eviction):
+    // SR-4 liveness.
+    //
+    // Outbound/native-direct dials register with `remote_ip = Some(ip)`, so the
+    // per-IP cap precheck runs. A same-peer redial from an IP already at the cap
+    // must NOT be rejected as a resource limit before the duplicate stale-eviction
+    // path runs: the incumbent already occupies the only per-IP slot, so a duplicate
+    // for the same identity cannot consume an additional slot. If the precheck
+    // rejects it first, a dead incumbent keeps its own peer blocked until the QUIC
+    // idle timeout (~150s) instead of being evicted in milliseconds.
+    #[tokio::test(start_paused = true)]
+    async fn same_peer_duplicate_at_per_ip_cap_still_evicts_stale_incumbent(
+    ) -> Result<(), BoxError> {
+        async fn register_from_ip(
+            supervisor: &ZakuraSupervisorHandle,
+            peer: &ZakuraPeerId,
+            ip: IpAddr,
+            token: CancellationToken,
+        ) -> ZakuraRegistration {
+            let (outbound_tx, _outbound_rx) = mpsc::channel(1);
+            let outbound_handle = ZakuraPeerHandle::new_for_tests(peer.clone(), outbound_tx);
+            supervisor
+                .register(
+                    peer.clone(),
+                    Some(ip),
+                    [peer.as_bytes()[0]; TRANSCRIPT_HASH_BYTES],
+                    outbound_handle,
+                    token,
+                    ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                )
+                .await
+        }
+
+        let supervisor = ZakuraSupervisorHandle::new(1);
+        let ip: IpAddr = "203.0.113.9".parse().expect("test ip parses");
+        let peer = test_peer(42);
+
+        // Incumbent: a native-direct dial registers from the IP and fills the
+        // cap-1 per-IP slot.
+        let incumbent = CancellationToken::new();
+        let registration = register_from_ip(&supervisor, &peer, ip, incumbent.clone()).await;
+        assert!(
+            matches!(registration, ZakuraRegistration::Registered { .. }),
+            "the first connection from the IP registers",
+        );
+
+        // The incumbent ages past the stale-eviction threshold: it is now a likely
+        // dead connection left behind by a peer restart.
+        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+
+        // The same peer redials from the same IP. The IP is already at cap 1, but
+        // the duplicate must still reach the stale-eviction path and cancel the dead
+        // incumbent so the redial reclaims the slot in milliseconds.
+        let newcomer = CancellationToken::new();
+        let registration = register_from_ip(&supervisor, &peer, ip, newcomer.clone()).await;
+        assert!(
+            matches!(registration, ZakuraRegistration::Duplicate { .. }),
+            "a same-peer redial from a capped IP must reach duplicate handling, not be \
+             rejected as a resource limit before stale eviction can run",
+        );
+        assert!(
+            incumbent.is_cancelled(),
+            "the stale incumbent must be evicted so the restarted peer's redial reclaims \
+             the slot in milliseconds instead of waiting for the QUIC idle timeout",
+        );
+        assert!(
+            !newcomer.is_cancelled(),
+            "the rejected newcomer's token is never registered, so it is left to redial",
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn header_sync_misbehavior_action_disconnects_peer() -> Result<(), BoxError> {
         let _guard = zebra_test::init();
@@ -4657,6 +5148,472 @@ mod tests {
             .expect("capture handler sends the sibling stream");
 
         client_conn.close(0u32.into(), b"done");
+        client.close().await;
+        router.shutdown().await?;
+        Ok(())
+    }
+
+    /// Regression for `claude-outbound-write-ignores-message-cap` (persistent
+    /// ordered-stream facet).
+    ///
+    /// `write_ordered_frame` sized outbound persistent-stream frames against the
+    /// negotiated frame cap only. The handshake clamps `max_frame_bytes` and
+    /// `max_message_bytes` independently, so a peer can negotiate a small message
+    /// cap with a large frame cap. A persistent service that queues a frame
+    /// larger than that message cap then has it encoded and written, and the peer
+    /// rejects it as oversize and disconnects us, wasting the encode/write.
+    /// `write_ordered_frame` must mirror `write_response_frame` and reject an
+    /// over-message-cap frame locally before encoding/writing it, while still
+    /// writing frames within the cap.
+    #[tokio::test]
+    async fn write_ordered_frame_rejects_payload_over_message_cap() -> Result<(), BoxError> {
+        const ALPN: &[u8] = b"/zakura/testkit/ordered-message-cap/0";
+
+        let _guard = zebra_test::init();
+        let server = LocalEndpointFactory::new().endpoint(74).await?;
+        let (conn_tx, _conn_rx) = mpsc::channel(1);
+        let (stream_tx, _stream_rx) = mpsc::channel(2);
+        let router = Router::builder(server)
+            .accept(
+                ALPN,
+                CaptureConnection {
+                    connection_tx: conn_tx,
+                    stream_tx,
+                },
+            )
+            .spawn();
+        let client = LocalEndpointFactory::new().endpoint(75).await?;
+        let server_addr = router.endpoint().node_addr().initialized().await;
+        client.add_node_addr(server_addr.clone())?;
+
+        let client_conn = timeout(Duration::from_secs(10), client.connect(server_addr, ALPN))
+            .await
+            .expect("client connects to the ordered-message-cap endpoint")?;
+        let (mut send, _recv) = timeout(Duration::from_secs(1), client_conn.open_bi())
+            .await
+            .expect("client opens an ordered stream")?;
+
+        // A small negotiated message cap with a large frame cap, as the handshake
+        // permits.
+        let mut limits = test_connection_limits();
+        limits.max_message_bytes = 256;
+        let stream_kind = DISCOVERY_STREAM_KIND;
+
+        // A payload above the message cap but well within the frame cap, so only
+        // the message cap can reject it.
+        let oversized = Frame {
+            message_type: 1,
+            flags: 0,
+            payload: vec![0xab; 4096],
+        };
+        assert!(
+            oversized.payload.len()
+                <= app_frame_cap_for_stream_kind(&limits, stream_kind) as usize,
+            "test payload must fit the frame cap so only the message cap can reject it"
+        );
+
+        let result = write_ordered_frame(&mut send, oversized, limits, stream_kind).await;
+        assert!(
+            result.is_err(),
+            "write_ordered_frame must reject a payload over the negotiated max_message_bytes \
+             before encoding/writing it, mirroring write_response_frame; got {result:?}"
+        );
+
+        // A payload within the negotiated message cap must still be written.
+        let within_cap = Frame {
+            message_type: 1,
+            flags: 0,
+            payload: vec![0xcd; 128],
+        };
+        write_ordered_frame(&mut send, within_cap, limits, stream_kind)
+            .await
+            .expect("a frame within the negotiated message cap must still be written");
+
+        client_conn.close(0u32.into(), b"done");
+        client.close().await;
+        router.shutdown().await?;
+        Ok(())
+    }
+
+    // Regression for `claude-control-payload-late-hard-cap`: the native control
+    // hello/ack reads passed the configured `max_control_frame_bytes` (1 MiB
+    // default) to `read_control_payload`, so a peer could force allocation/read
+    // of a control payload between the 16 KiB hard cap and 1 MiB before
+    // ZakuraControlHello/Ack::decode rejected it. The reader must instead reject
+    // an oversized control length on the length prefix alone, before reading the
+    // body, while still accepting payloads within the 16 KiB hard cap.
+    #[tokio::test]
+    async fn read_control_payload_enforces_hard_cap_before_reading_body() -> Result<(), BoxError> {
+        const ALPN: &[u8] = b"/zakura/testkit/control-hard-cap/0";
+
+        let _guard = zebra_test::init();
+        let server = LocalEndpointFactory::new().endpoint(70).await?;
+        let (conn_tx, _conn_rx) = mpsc::channel(1);
+        let (stream_tx, mut stream_rx) = mpsc::channel(2);
+        let router = Router::builder(server)
+            .accept(
+                ALPN,
+                CaptureConnection {
+                    connection_tx: conn_tx,
+                    stream_tx,
+                },
+            )
+            .spawn();
+        let client = LocalEndpointFactory::new().endpoint(71).await?;
+        let server_addr = router.endpoint().node_addr().initialized().await;
+        client.add_node_addr(server_addr.clone())?;
+
+        let client_conn = timeout(Duration::from_secs(10), client.connect(server_addr, ALPN))
+            .await
+            .expect("client connects to the control-hard-cap endpoint")?;
+
+        // A control length above the 16 KiB hard cap but below the 1 MiB frame
+        // cap the production responder/initiator pass. The body is never sent: a
+        // correct reader must reject on the length prefix alone.
+        let oversized_len =
+            u32::try_from(MAX_CONTROL_PAYLOAD_BYTES + 1).expect("control hard cap + 1 fits in u32");
+        let (mut over_send, _over_recv) = timeout(Duration::from_secs(1), client_conn.open_bi())
+            .await
+            .expect("client opens the oversized control stream")?;
+        timeout(
+            Duration::from_secs(1),
+            over_send.write_all(&oversized_len.to_le_bytes()),
+        )
+        .await
+        .expect("client writes the oversized control length")?;
+        let _ = over_send.finish();
+
+        let (_over_server_send, mut over_server_recv) =
+            timeout(Duration::from_secs(1), stream_rx.recv())
+                .await
+                .expect("server accepts the oversized control stream")
+                .expect("capture handler forwards the oversized control stream");
+
+        // Pass exactly what production passes: the configured frame cap (1 MiB),
+        // NOT the 16 KiB hard cap. The fix clamps internally to the hard cap.
+        let oversized = read_control_payload(
+            &mut over_server_recv,
+            LOCAL_MAX_CONTROL_FRAME_BYTES,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(
+            matches!(oversized, Err(ZakuraHandlerError::Oversize)),
+            "a control length over the 16 KiB hard cap must be rejected as Oversize \
+             on the length prefix, before the body is read; got {oversized:?}"
+        );
+
+        // A control payload within the hard cap must still be read normally, so
+        // the clamp does not break legitimate sub-16 KiB control frames.
+        let valid_body = vec![0xa5u8; 128];
+        let valid_len = u32::try_from(valid_body.len()).expect("128 fits in u32");
+        let (mut ok_send, _ok_recv) = timeout(Duration::from_secs(1), client_conn.open_bi())
+            .await
+            .expect("client opens the in-cap control stream")?;
+        timeout(
+            Duration::from_secs(1),
+            ok_send.write_all(&valid_len.to_le_bytes()),
+        )
+        .await
+        .expect("client writes the in-cap control length")?;
+        timeout(Duration::from_secs(1), ok_send.write_all(&valid_body))
+            .await
+            .expect("client writes the in-cap control body")?;
+        let _ = ok_send.finish();
+
+        let (_ok_server_send, mut ok_server_recv) =
+            timeout(Duration::from_secs(1), stream_rx.recv())
+                .await
+                .expect("server accepts the in-cap control stream")
+                .expect("capture handler forwards the in-cap control stream");
+        let read_back = read_control_payload(
+            &mut ok_server_recv,
+            LOCAL_MAX_CONTROL_FRAME_BYTES,
+            Duration::from_secs(2),
+        )
+        .await
+        .expect("a control payload within the hard cap is read");
+        assert_eq!(
+            read_back, valid_body,
+            "an in-cap control payload must round-trip unchanged"
+        );
+
+        client_conn.close(0u32.into(), b"done");
+        client.close().await;
+        router.shutdown().await?;
+        Ok(())
+    }
+
+    // claude-late-message-cap-allocation: read_frame checks only
+    // frame_len > max_frame_bytes before `vec![0; payload_len]`, while the smaller
+    // max_message_bytes is enforced later in admit_inbound_message. A peer can
+    // negotiate max_frame_bytes > max_message_bytes (the caps are clamped
+    // independently), so on every admitted ordered/request stream it could force
+    // read_frame to allocate and read a payload between the two limits before the
+    // message cap rejects it. The inbound read path must instead be handed a cap
+    // already limited to the message size, so an over-message frame is rejected on
+    // its header alone, before the payload is allocated and read.
+    #[tokio::test]
+    async fn inbound_frame_cap_rejects_over_message_frame_before_reading_payload(
+    ) -> Result<(), BoxError> {
+        const ALPN: &[u8] = b"/zakura/testkit/late-message-cap/0";
+        // The negotiated frame cap is far larger than the message cap: exactly the
+        // precondition the finding requires (caps allowed to diverge).
+        const MAX_FRAME_BYTES: u32 = 64 * 1024;
+        const MAX_MESSAGE_BYTES: u32 = 1024;
+        // A payload between the message cap and the frame cap. admit_inbound_message
+        // would reject it, but only after read_frame allocated and read it.
+        const OVER_MESSAGE_PAYLOAD_LEN: u32 = 2048;
+        let stream_kind = LEGACY_GOSSIP_STREAM_KIND;
+
+        let limits = ZakuraConnectionLimits {
+            max_frame_bytes: MAX_FRAME_BYTES,
+            max_message_bytes: MAX_MESSAGE_BYTES,
+            ..test_connection_limits()
+        };
+        // Production now passes the message-limited inbound cap; the raw
+        // application cap (what the unfixed read path used) stays at the frame cap.
+        let inbound_cap = inbound_frame_cap_for_stream_kind(&limits, stream_kind);
+        let raw_cap = app_frame_cap_for_stream_kind(&limits, stream_kind);
+        assert!(
+            inbound_cap < raw_cap,
+            "the inbound cap must be tighter than the raw frame cap when the caps diverge \
+             (inbound_cap={inbound_cap}, raw_cap={raw_cap})"
+        );
+
+        let _guard = zebra_test::init();
+        let server = LocalEndpointFactory::new().endpoint(72).await?;
+        let (conn_tx, _conn_rx) = mpsc::channel(2);
+        let (stream_tx, mut stream_rx) = mpsc::channel(4);
+        let router = Router::builder(server)
+            .accept(
+                ALPN,
+                CaptureConnection {
+                    connection_tx: conn_tx,
+                    stream_tx,
+                },
+            )
+            .spawn();
+        let client = LocalEndpointFactory::new().endpoint(73).await?;
+        let server_addr = router.endpoint().node_addr().initialized().await;
+        client.add_node_addr(server_addr.clone())?;
+
+        // A frame header (message_type, flags, payload_len) with no payload bytes.
+        let frame_header = |payload_len: u32| -> Vec<u8> {
+            let mut header = Vec::with_capacity(FRAME_HEADER_BYTES);
+            header.extend_from_slice(&0u16.to_le_bytes());
+            header.extend_from_slice(&0u16.to_le_bytes());
+            header.extend_from_slice(&payload_len.to_le_bytes());
+            header
+        };
+
+        // CaptureConnection forwards at most two streams per connection, so the
+        // two oversized streams share one connection and the in-cap stream uses
+        // another.
+        let conn_a = timeout(
+            Duration::from_secs(10),
+            client.connect(server_addr.clone(), ALPN),
+        )
+        .await
+        .expect("client connects for the oversized streams")?;
+
+        // Stream 1: oversized header read with the message-limited inbound cap.
+        // The fix rejects it as Oversize from the header alone, before allocating.
+        let (mut over_send, _over_recv) =
+            timeout(Duration::from_secs(1), conn_a.open_bi())
+                .await
+                .expect("client opens the oversized inbound-cap stream")?;
+        timeout(
+            Duration::from_secs(1),
+            over_send.write_all(&frame_header(OVER_MESSAGE_PAYLOAD_LEN)),
+        )
+        .await
+        .expect("client writes the oversized frame header")?;
+        let _ = over_send.finish();
+        let (_s1_send, mut s1_recv) = timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the oversized inbound-cap stream")
+            .expect("capture handler forwards the oversized inbound-cap stream");
+        let rejected = read_frame(&mut s1_recv, inbound_cap, Duration::from_secs(2)).await;
+        assert!(
+            matches!(rejected, Err(ZakuraHandlerError::Oversize)),
+            "a frame whose payload exceeds max_message_bytes must be rejected as Oversize \
+             on the header alone with the inbound (message-limited) cap, before the payload \
+             is allocated and read; got {rejected:?}"
+        );
+
+        // Stream 2: the SAME oversized header read with the raw frame cap an
+        // unfixed path used. It passes the frame-cap size check, so read_frame
+        // allocates `vec![0; payload_len]` and reads the body (failing only because
+        // the body was never sent) -- i.e. NOT rejected as Oversize. This is the
+        // allocate-before-reject amplification the fix removes.
+        let (mut raw_send, _raw_recv) = timeout(Duration::from_secs(1), conn_a.open_bi())
+            .await
+            .expect("client opens the oversized raw-cap stream")?;
+        timeout(
+            Duration::from_secs(1),
+            raw_send.write_all(&frame_header(OVER_MESSAGE_PAYLOAD_LEN)),
+        )
+        .await
+        .expect("client writes the oversized frame header again")?;
+        let _ = raw_send.finish();
+        let (_s2_send, mut s2_recv) = timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the oversized raw-cap stream")
+            .expect("capture handler forwards the oversized raw-cap stream");
+        let allocated = read_frame(&mut s2_recv, raw_cap, Duration::from_secs(2)).await;
+        assert!(
+            allocated.is_err() && !matches!(allocated, Err(ZakuraHandlerError::Oversize)),
+            "with the raw frame cap the same oversized frame passes the size check and \
+             read_frame proceeds to allocate/read the payload (it is not rejected as \
+             Oversize), proving the message cap is enforced too late; got {allocated:?}"
+        );
+
+        // Stream 3 (fresh connection): a frame within the message cap must still
+        // round-trip with the inbound cap, so the clamp rejects nothing legitimate.
+        let conn_b = timeout(Duration::from_secs(10), client.connect(server_addr, ALPN))
+            .await
+            .expect("client connects for the in-cap stream")?;
+        let valid_payload = vec![0x5au8; (MAX_MESSAGE_BYTES / 2) as usize];
+        let mut valid_bytes =
+            frame_header(u32::try_from(valid_payload.len()).expect("in-cap payload len fits u32"));
+        valid_bytes.extend_from_slice(&valid_payload);
+        let (mut ok_send, _ok_recv) = timeout(Duration::from_secs(1), conn_b.open_bi())
+            .await
+            .expect("client opens the in-cap stream")?;
+        timeout(Duration::from_secs(1), ok_send.write_all(&valid_bytes))
+            .await
+            .expect("client writes the in-cap frame")?;
+        let _ = ok_send.finish();
+        let (_s3_send, mut s3_recv) = timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the in-cap stream")
+            .expect("capture handler forwards the in-cap stream");
+        let frame = read_frame(&mut s3_recv, inbound_cap, Duration::from_secs(2))
+            .await
+            .expect("a frame within the message cap is read with the inbound cap");
+        assert_eq!(
+            frame.payload, valid_payload,
+            "an in-cap frame payload must round-trip unchanged"
+        );
+
+        conn_a.close(0u32.into(), b"done");
+        conn_b.close(0u32.into(), b"done");
+        client.close().await;
+        router.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_prelude_stream_churn_charges_open_rate_token() -> Result<(), BoxError> {
+        // claude-invalid-stream-prelude-churn-bypasses-open-rate: a peer that
+        // opens a stream naming an unregistered kind is reset stream-only and the
+        // connection is kept. The per-connection stream-open rate token MUST be
+        // charged for that protocol-invalid open; otherwise an authenticated peer
+        // could churn bad-prelude/unknown-kind/unnegotiated stream opens forever
+        // without ever spending open-rate budget. This drives admit_bi_stream
+        // over a real Iroh transport and asserts the token was consumed even
+        // though the stream itself was rejected as unknown-kind.
+        const ALPN: &[u8] = b"/zakura/testkit/open-rate-churn/0";
+
+        let _guard = zebra_test::init();
+        let server = LocalEndpointFactory::new().endpoint(90).await?;
+        let (conn_tx, _conn_rx) = mpsc::channel(1);
+        let (stream_tx, mut stream_rx) = mpsc::channel(2);
+        let router = Router::builder(server)
+            .accept(
+                ALPN,
+                CaptureConnection {
+                    connection_tx: conn_tx,
+                    stream_tx,
+                },
+            )
+            .spawn();
+        let client = LocalEndpointFactory::new().endpoint(91).await?;
+        let server_addr = router.endpoint().node_addr().initialized().await;
+        client.add_node_addr(server_addr.clone())?;
+        let client_conn = timeout(Duration::from_secs(10), client.connect(server_addr, ALPN))
+            .await
+            .expect("client connects to the open-rate-churn endpoint")?;
+
+        // A well-formed prelude that names an unregistered stream kind. It parses
+        // cleanly, so admission reaches the unknown-kind reject (a stream-only
+        // reset that keeps the connection) rather than the bad-prelude path.
+        let prelude = StreamPrelude {
+            magic: STREAM_PRELUDE_MAGIC,
+            stream_kind: 9,
+            stream_version: 1,
+            request_id: None,
+            max_frame_bytes: 1024,
+        };
+        let (mut client_send, _client_recv) =
+            timeout(Duration::from_secs(1), client_conn.open_bi())
+                .await
+                .expect("client opens the unknown-kind stream")?;
+        timeout(
+            Duration::from_secs(1),
+            client_send.write_all(&prelude.encode()?),
+        )
+        .await
+        .expect("client writes the unknown-kind prelude")?;
+        let _ = client_send.finish();
+
+        let (server_send, server_recv) = timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the unknown-kind stream")
+            .expect("capture handler forwards the unknown-kind stream");
+
+        let supervisor = ZakuraSupervisorHandle::new(16);
+        let handler = ZakuraProtocolHandler::new(
+            supervisor,
+            Network::Mainnet,
+            ZakuraHandshakeConfig::for_network(&Network::Mainnet),
+            ZakuraLocalLimits::from_config(&Config::default()),
+        );
+
+        let peer_id = test_peer(9);
+        let stream_sem = Arc::new(Semaphore::new(16));
+        // A full bucket with a known capacity so the token charge is observable
+        // as an exact decrement.
+        let mut open_limiter = TokenBucket::new(4);
+        let mut message_buckets = MessageRateBuckets::new();
+        let mut workers = JoinSet::new();
+        let connection_token = CancellationToken::new();
+        let (freshness_tx, _freshness_rx) = watch::channel(Instant::now());
+
+        let mut admission = StreamAdmission {
+            trace: handler.trace.clone(),
+            conn: ZakuraConnTrace::placeholder(),
+            peer_id: &peer_id,
+            stream_sem: &stream_sem,
+            open_limiter: &mut open_limiter,
+            message_buckets: &mut message_buckets,
+            workers: &mut workers,
+            limits: test_connection_limits(),
+            accepted_capabilities: 0,
+            connection_token: connection_token.clone(),
+            freshness_tx,
+        };
+
+        let admitted = handler
+            .admit_bi_stream(server_send, server_recv, &mut admission, 16)
+            .await;
+
+        assert!(
+            admitted.is_none(),
+            "an unknown-kind stream must be rejected, not admitted"
+        );
+        assert!(
+            !connection_token.is_cancelled(),
+            "an unknown-kind stream is reset stream-only and must keep the connection alive"
+        );
+        assert_eq!(
+            admission.open_limiter.tokens, 3,
+            "the protocol-invalid stream open must spend exactly one open-rate token \
+             (capacity 4 -> 3); before the fix the unknown-kind reject returned before \
+             reaching the limiter, leaving the bucket full at 4"
+        );
+
         client.close().await;
         router.shutdown().await?;
         Ok(())
@@ -4959,8 +5916,12 @@ mod tests {
             limits,
         )
         .map_err(|error| -> BoxError { format!("{error:?}").into() })?;
-        let frames =
-            LegacyResponseCodec::encode_response(request_id, response, limits.max_frame_bytes)?;
+        let frames = LegacyResponseCodec::encode_response(
+            request_id,
+            response,
+            limits.max_frame_bytes,
+            limits.max_message_bytes,
+        )?;
         LegacyResponseCodec::decode_response(request_id, request_kind, frames.clone())?;
 
         let mut state = LegacyResponseReadState::new(budget);
@@ -5116,5 +6077,355 @@ mod tests {
             (limits.initial_limits().idle_timeout_millis as u128)
                 < limits.quic_idle_timeout.as_millis()
         );
+    }
+
+    // SECURITY AUDIT (candidate claude-legacy-requester-response-frame-growth /
+    // trace-gossip-response-reassembler-frame-vector-growth): SR-4 amplification.
+    //
+    // `write_outbound_request_frame_inner` accumulates every validated response
+    // Frame into a `Vec<Frame>` until the responder closes the stream, then hands
+    // the whole vector to `decode_response`. The only thing bounding how much it
+    // retains is `LegacyResponseBudget::max_bytes`, which `validate_frame` checks
+    // as a cumulative byte budget. For Blocks/Transactions that budget was
+    // derived as `item_count * max_message_bytes`, so a request naming the
+    // protocol-max inventory count (`MAX_TX_INV_IN_SENT_MESSAGE` = 25_000) handed
+    // a hostile responder a ~50 GiB retained-frame budget before any decode.
+    //
+    // The inbound responder already caps a single response's cumulative payload
+    // at `LEGACY_RESPONSE_MAX_AGGREGATE_BYTES` (8 * MAX_PROTOCOL_MESSAGE_LEN), so
+    // an honest peer never sends more than that. The requester must clamp its
+    // retained-frame budget to the same operational aggregate. This test asserts
+    // the budget is bounded regardless of requested item count; it FAILS before
+    // the fix (budget ~= 50 GiB) and passes after. Do not weaken it to pass.
+    #[test]
+    fn requester_response_budget_is_capped_for_large_inventory_request() {
+        let limits = test_connection_limits();
+        assert_eq!(
+            limits.max_message_bytes as usize, MAX_PROTOCOL_MESSAGE_LEN,
+            "fixture should negotiate the protocol-max message cap so the unclamped \
+             budget is maximal",
+        );
+
+        let max_items =
+            usize::try_from(MAX_TX_INV_IN_SENT_MESSAGE).expect("inventory cap fits in usize");
+
+        // A BlocksByHash request naming the protocol-max inventory count must not
+        // grant a retained-frame byte budget above the operational aggregate cap.
+        let blocks = LegacyRequestFrame::BlocksByHash(vec![block_hash(7); max_items])
+            .encode_frame()
+            .expect("max-inventory blocks request encodes");
+        let blocks_budget =
+            LegacyResponseBudget::from_request(blocks.message_type, &blocks.payload, limits)
+                .expect("budget derives from a max-inventory blocks request");
+        assert!(
+            blocks_budget.max_bytes <= LEGACY_RESPONSE_MAX_AGGREGATE_BYTES,
+            "BlocksByHash retained-frame budget {} must be clamped to the aggregate cap {}",
+            blocks_budget.max_bytes,
+            LEGACY_RESPONSE_MAX_AGGREGATE_BYTES,
+        );
+
+        // The transaction-fetch path scales identically and must be clamped too.
+        let txs = LegacyRequestFrame::TransactionsById(vec![legacy_tx_id(7); max_items])
+            .encode_frame()
+            .expect("max-inventory transactions request encodes");
+        let txs_budget = LegacyResponseBudget::from_request(txs.message_type, &txs.payload, limits)
+            .expect("budget derives from a max-inventory transactions request");
+        assert!(
+            txs_budget.max_bytes <= LEGACY_RESPONSE_MAX_AGGREGATE_BYTES,
+            "TransactionsById retained-frame budget {} must be clamped to the aggregate cap {}",
+            txs_budget.max_bytes,
+            LEGACY_RESPONSE_MAX_AGGREGATE_BYTES,
+        );
+
+        // The clamp must only remove the unbounded tail: a modest request still
+        // has to accept at least one full negotiated message, otherwise we would
+        // wrongly reject honest single-item responses.
+        let small = LegacyRequestFrame::BlocksByHash(vec![block_hash(1)])
+            .encode_frame()
+            .expect("single-item blocks request encodes");
+        let small_budget =
+            LegacyResponseBudget::from_request(small.message_type, &small.payload, limits)
+                .expect("budget derives from a single-item blocks request");
+        assert!(
+            small_budget.max_bytes >= limits.max_message_bytes as usize,
+            "a single-item request must still permit one full response message; budget was {}",
+            small_budget.max_bytes,
+        );
+        assert!(
+            small_budget.max_bytes <= LEGACY_RESPONSE_MAX_AGGREGATE_BYTES,
+            "even a single-item budget stays within the aggregate cap",
+        );
+    }
+
+    // SECURITY AUDIT (candidate claude-legacy-nil-response-nonfatal /
+    // subset-response-correlation-gossip-nil-response-nonfatal): SR-7 fail-closed.
+    //
+    // The outbound request stream worker decides connection-fatality from
+    // `LegacyResponseReadState::validate_frame`: `Fatal` => connection.close() +
+    // connection_token.cancel() (the peer is disconnected); `Ok`/`Local` => the
+    // peer stays connected and the request just returns an error. `validate_nil`
+    // accepts a `MSG_RESPONSE_NIL` sentinel for *every* request kind, so a peer
+    // that answers an inventory fetch (BlocksByHash / TransactionsById) or a Ping
+    // with a correct-id NIL passes the transport budget layer (worker returns
+    // Ok(frames)) and is NOT disconnected. Only the later `decode_response` layer
+    // rejects NIL for these kinds -- as an ordinary request-local error. The two
+    // layers disagree, so an unexpected/unsolicited response is tolerated instead
+    // of failing closed.
+    //
+    // This test asserts the SAFE behavior (the transport budget layer must reject
+    // NIL for inventory/Ping kinds as `Fatal`, so the worker disconnects). It
+    // currently FAILS, which is the reproduction. Do not weaken it to pass.
+    #[test]
+    fn nil_response_to_inventory_or_ping_request_is_not_fail_closed() {
+        let limits = test_connection_limits();
+        let request_id = 99;
+
+        let cases: [(LegacyRequestFrame, LegacyRequestKind); 3] = [
+            (
+                LegacyRequestFrame::BlocksByHash(vec![block_hash(1)]),
+                LegacyRequestKind::Blocks,
+            ),
+            (
+                LegacyRequestFrame::TransactionsById(vec![legacy_tx_id(2)]),
+                LegacyRequestKind::Transactions,
+            ),
+            (LegacyRequestFrame::Ping, LegacyRequestKind::Ping),
+        ];
+
+        for (request, request_kind) in cases {
+            let request_frame = request.encode_frame().expect("request frame encodes");
+            let budget = LegacyResponseBudget::from_request(
+                request_frame.message_type,
+                &request_frame.payload,
+                limits,
+            )
+            .expect("budget derives from request");
+
+            // A hostile/buggy responder serializes Response::Nil with the real
+            // codec, addressed to our request id.
+            let nil_frames = LegacyResponseCodec::encode_response(
+                request_id,
+                Response::Nil,
+                limits.max_frame_bytes,
+                limits.max_message_bytes,
+            )
+            .expect("nil response encodes");
+
+            // The higher decode layer DOES reject NIL for these kinds...
+            let decoded =
+                LegacyResponseCodec::decode_response(request_id, request_kind, nil_frames.clone());
+            assert!(
+                decoded.is_err(),
+                "decode_response must reject a bare NIL for {request_kind:?}",
+            );
+
+            // ...but the transport budget layer -- the one that drives the
+            // fail-closed disconnect in the request stream worker -- must ALSO
+            // reject it as Fatal. It currently accepts it.
+            let mut state = LegacyResponseReadState::new(budget);
+            let mut validate = Ok(());
+            for frame in &nil_frames {
+                validate = state.validate_frame(request_id, frame);
+                if validate.is_err() {
+                    break;
+                }
+            }
+            let validate = validate.and_then(|()| state.finish());
+            assert!(
+                matches!(validate, Err(OutboundRequestError::Fatal(_))),
+                "transport must fail closed (Fatal) on a NIL answer to {request_kind:?} so the \
+                 request stream worker disconnects the peer; got {validate:?}",
+            );
+        }
+    }
+
+    // SECURITY AUDIT (candidate claude-inbound-per-ip-cap-bypassed /
+    // codex-inbound-per-ip-cap-bypass): SR-4 admission.
+    //
+    // `accept_connection` used to register every inbound peer with
+    // `remote_ip = None`, and `register` only consults `active_by_ip` when
+    // `remote_ip` is `Some`, so the per-IP connection cap was enforced for native
+    // outbound dials (which pass a real IP) but entirely bypassed for inbound
+    // Router accepts: one source IP could authenticate as many distinct iroh node
+    // ids and fill the global connection budget despite `max_connections_per_ip`
+    // (default 1). The fix resolves the inbound peer's UDP source IP from the
+    // endpoint's node map at the accept site and passes it into `register`, so the
+    // per-IP cap now applies to Router-accepted connections too.
+    //
+    // This guard drives the real production `ProtocolHandler::accept` over a
+    // loopback iroh transport: two distinct authenticated identities dial from the
+    // same source IP (127.0.0.1) through the full native handshake. The per-IP cap
+    // is 1 while global admission keeps its default (well above 1), so the second
+    // identity can only be turned away by the per-IP cap, not the global gate.
+    // Before the fix both identities registered; now the second is rejected and
+    // its connection is closed, leaving exactly one registered peer.
+    #[tokio::test]
+    async fn inbound_accept_enforces_per_ip_cap() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+
+        // The register-level invariant the accept path now relies on: with a real
+        // source IP, the per-IP cap rejects a second distinct identity with
+        // `ResourceLimit`.
+        async fn try_register(
+            supervisor: &ZakuraSupervisorHandle,
+            peer: &ZakuraPeerId,
+            remote_ip: Option<IpAddr>,
+        ) -> ZakuraRegistration {
+            let (outbound_tx, _outbound_rx) = mpsc::channel(1);
+            let outbound_handle = ZakuraPeerHandle::new_for_tests(peer.clone(), outbound_tx);
+            supervisor
+                .register(
+                    peer.clone(),
+                    remote_ip,
+                    [peer.as_bytes()[0]; TRANSCRIPT_HASH_BYTES],
+                    outbound_handle,
+                    CancellationToken::new(),
+                    ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                )
+                .await
+        }
+        let ip: IpAddr = "203.0.113.7".parse().expect("test ip parses");
+        let supervisor = ZakuraSupervisorHandle::new(1);
+        assert!(
+            matches!(
+                try_register(&supervisor, &test_peer(1), Some(ip)).await,
+                ZakuraRegistration::Registered { .. }
+            ),
+            "first identity from the IP registers",
+        );
+        assert!(
+            matches!(
+                try_register(&supervisor, &test_peer(2), Some(ip)).await,
+                ZakuraRegistration::Rejected(ZakuraRejectReason::ResourceLimit)
+            ),
+            "a second distinct identity from the same IP must be Rejected(ResourceLimit) at cap 1",
+        );
+
+        // End-to-end: drive the production accept path with a per-IP cap of 1 and a
+        // strictly larger global cap so per-IP admission is what turns away the
+        // second same-IP identity. Wire the bound endpoint so the accept path can
+        // resolve the inbound source IP.
+        let limits = ZakuraLocalLimits::from_config(&Config::default());
+        assert!(
+            limits.max_connections > 1,
+            "global admission cap must exceed the per-IP cap so the second same-IP identity is \
+             turned away by the per-IP cap rather than the global gate",
+        );
+        let server_ep = LocalEndpointFactory::with_transport_config(limits.transport_config())
+            .endpoint(880)
+            .await?;
+        let supervisor = ZakuraSupervisorHandle::new(1);
+        let handler = ZakuraProtocolHandler::new(
+            supervisor.clone(),
+            Network::Mainnet,
+            ZakuraHandshakeConfig::for_network(&Network::Mainnet),
+            limits.clone(),
+        )
+        .with_endpoint(server_ep.clone());
+        let router = Router::builder(server_ep)
+            .accept(P2P_V2_ALPN, handler)
+            .spawn();
+        // Iroh also binds a default IPv6 socket, so an unrestricted node address
+        // lets the two clients reach the server over different paths (e.g. one
+        // IPv4 loopback, one global IPv6) and therefore present different source
+        // IPs. Pin both dials to the server's IPv4 loopback address so they share
+        // one source IP (127.0.0.1) -- the single-source-IP shape of the finding.
+        let full_addr = router.endpoint().node_addr().initialized().await;
+        let loopback_addr = NodeAddr::new(full_addr.node_id).with_direct_addresses(
+            full_addr
+                .direct_addresses()
+                .copied()
+                .filter(|addr| addr.is_ipv4() && addr.ip().is_loopback()),
+        );
+        assert!(
+            loopback_addr.direct_addresses().next().is_some(),
+            "server must advertise an IPv4 loopback direct address",
+        );
+        let server_addr = loopback_addr;
+
+        // Establish the QUIC connection only; the native handshake is driven
+        // separately so a per-IP rejection mid-handshake (the second identity)
+        // can be observed instead of aborting the test.
+        async fn connect_native(
+            server_addr: &NodeAddr,
+            seed: u64,
+            limits: &ZakuraLocalLimits,
+        ) -> Result<(Endpoint, Connection), BoxError> {
+            let endpoint = LocalEndpointFactory::with_transport_config(limits.transport_config())
+                .endpoint(seed)
+                .await?;
+            endpoint.add_node_addr(server_addr.clone())?;
+            let connection = endpoint.connect(server_addr.clone(), P2P_V2_ALPN).await?;
+            Ok((endpoint, connection))
+        }
+        async fn run_handshake(
+            endpoint: &Endpoint,
+            connection: &Connection,
+            limits: &ZakuraLocalLimits,
+        ) -> Result<(), BoxError> {
+            let config = ZakuraHandshakeConfig::for_network(&Config::default().network);
+            let local_peer_id = ZakuraPeerId::new(endpoint.node_id().as_bytes().to_vec())?;
+            run_native_initiator_handshake_without_trace(
+                connection,
+                limits,
+                &config,
+                &local_peer_id,
+            )
+            .await?;
+            Ok(())
+        }
+
+        // First identity registers and claims the only per-IP slot. Hold the
+        // endpoint/connection so the peer stays registered for the second dial.
+        let (_ep1, _conn1) = connect_native(&server_addr, 881, &limits).await?;
+        run_handshake(&_ep1, &_conn1, &limits).await?;
+        let mut first_registered = 0;
+        for _ in 0..200 {
+            first_registered = supervisor.registered_ids().await.len();
+            if first_registered >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            first_registered, 1,
+            "the first inbound identity from the source IP must register (a real source IP was \
+             resolved from the endpoint and counted against the per-IP cap)",
+        );
+
+        // Second distinct identity from the same source IP: the per-IP cap must
+        // reject its registration. The handshake may complete and then be closed,
+        // or be torn down mid-handshake by the rejection -- either way the server
+        // closes the connection with the resource-limit code and never registers a
+        // second peer. (Before the fix the accept passed remote_ip = None, so this
+        // identity registered and one source IP could exhaust the global budget.)
+        let (_ep2, conn2) = connect_native(&server_addr, 882, &limits).await?;
+        let _ = run_handshake(&_ep2, &conn2, &limits).await;
+        let mut rejected_close = false;
+        for _ in 0..400 {
+            if supervisor.registered_ids().await.len() >= 2 {
+                break;
+            }
+            if matches!(
+                conn2.close_reason(),
+                Some(iroh::endpoint::ConnectionError::ApplicationClosed(ref close))
+                    if close.error_code == VarInt::from_u32(ZAKURA_CLOSE_RESOURCE)
+            ) {
+                rejected_close = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let registered = supervisor.registered_ids().await.len();
+        assert!(
+            rejected_close && registered == 1,
+            "a second distinct identity from the same source IP must be rejected by the per-IP \
+             cap with a resource-limit close (resource_close={rejected_close}, \
+             registered={registered}); before the fix the inbound accept passed remote_ip = None, \
+             so both identities registered and one source IP could exhaust the connection budget",
+        );
+
+        router.shutdown().await?;
+        Ok(())
     }
 }

@@ -881,9 +881,9 @@ pub struct ZakuraDiscoveryPersistedEntry {
 
 /// A locally dialable discovery candidate.
 ///
-/// Candidates may come from signed discovery records or from trusted static bootstrap
-/// configuration. Only signed records are eligible for peer samples; unsigned static candidates are
-/// local dial hints.
+/// Candidates may come from first-party confirmed signed discovery records or from trusted static
+/// bootstrap configuration. Only signed records are eligible for peer samples; unsigned static
+/// candidates are local dial hints.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZakuraDiscoveryDialCandidate {
     /// Candidate iroh node id.
@@ -1133,6 +1133,39 @@ pub struct ZakuraDiscoveryHandle {
     self_record_tx: watch::Sender<Arc<ZakuraNodeRecord>>,
     peer_snapshot: watch::Receiver<ServicePeerSnapshot>,
     peer_snapshot_tx: watch::Sender<ServicePeerSnapshot>,
+    import_validation: DiscoveryImportValidation,
+}
+
+/// Immutable inputs needed to validate and bound a peer record batch without holding the
+/// global discovery mutex.
+///
+/// These mirror the fields [`ZakuraDiscoveryInner::validation_context`] reads, all of which
+/// are fixed at construction (local identity/network parameters and import limits never
+/// change at runtime). Snapshotting them on the handle lets [`ZakuraDiscoveryHandle::import_peer_records`]
+/// run CPU-heavy Ed25519 verification outside the lock.
+#[derive(Clone, Debug)]
+struct DiscoveryImportValidation {
+    expected_network_id: ZakuraNetworkId,
+    expected_chain_id: [u8; 32],
+    supported_protocol_min: u16,
+    supported_protocol_max: u16,
+    max_record_ttl: Duration,
+    clock_skew_tolerance: Duration,
+    max_imported_records_per_response: usize,
+}
+
+impl DiscoveryImportValidation {
+    fn context(&self, now: u64) -> DiscoveryRecordValidationContext {
+        DiscoveryRecordValidationContext {
+            expected_network_id: self.expected_network_id,
+            expected_chain_id: self.expected_chain_id,
+            current_unix_secs: now,
+            supported_protocol_min: self.supported_protocol_min,
+            supported_protocol_max: self.supported_protocol_max,
+            max_record_ttl: self.max_record_ttl,
+            clock_skew_tolerance: self.clock_skew_tolerance,
+        }
+    }
 }
 
 impl fmt::Debug for ZakuraDiscoveryHandle {
@@ -1405,6 +1438,15 @@ impl ZakuraDiscoveryHandle {
         let (peer_snapshot_tx, peer_snapshot_rx) =
             watch::channel(ServicePeerSnapshot::new(0, 0, config.peer_limits));
         let book = ZakuraDiscoveryBook::with_local_node_id(config.book_limits, local.node_id);
+        let import_validation = DiscoveryImportValidation {
+            expected_network_id: local.network_id,
+            expected_chain_id: local.chain_id,
+            supported_protocol_min: local.zakura_protocol_min,
+            supported_protocol_max: local.zakura_protocol_max,
+            max_record_ttl: config.max_record_ttl,
+            clock_skew_tolerance: config.clock_skew_tolerance,
+            max_imported_records_per_response: config.book_limits.max_imported_records_per_response,
+        };
         Ok(Self {
             inner: Arc::new(Mutex::new(ZakuraDiscoveryInner {
                 book,
@@ -1419,6 +1461,7 @@ impl ZakuraDiscoveryHandle {
             self_record_tx,
             peer_snapshot: peer_snapshot_rx,
             peer_snapshot_tx,
+            import_validation,
         })
     }
 
@@ -1581,15 +1624,47 @@ impl ZakuraDiscoveryHandle {
     }
 
     /// Imports peer-supplied signed records through the discovery book validation path.
+    ///
+    /// Record signatures are verified OUTSIDE the global discovery mutex. Ed25519
+    /// verification and signature-domain re-encoding are CPU-heavy and fully
+    /// attacker-driven (an authenticated discovery peer can send a full `Peers` batch of
+    /// records with valid or invalid signatures, repeatedly); running them while holding
+    /// the shared async lock lets that peer stall unrelated discovery admission,
+    /// sampling, and dial selection. Only the cheap book mutation (storage-limit recheck,
+    /// address policy, map insert, eviction) runs under the lock, and the lock is skipped
+    /// entirely when nothing survives verification. See finding
+    /// `claude-discovery-expensive-work-under-global-mutex` (SR-2).
     pub async fn import_peer_records(
         &self,
         records: impl IntoIterator<Item = ZakuraNodeRecord>,
         source: Option<NodeId>,
     ) -> ImportBatchOutcome {
         let now = current_unix_secs();
-        let mut inner = self.inner.lock().await;
-        let context = inner.validation_context(now);
-        inner.book.import_records(records, source, now, &context)
+        let context = self.import_validation.context(now);
+        let max_records = self.import_validation.max_imported_records_per_response;
+
+        let mut outcome = ImportBatchOutcome::default();
+        let mut verified = Vec::new();
+        for record in records {
+            if outcome.attempted >= max_records {
+                outcome.dropped_for_limit += 1;
+                continue;
+            }
+            outcome.attempted += 1;
+            match record.verify(&context) {
+                Ok(()) => verified.push(record),
+                Err(_) => outcome.rejected += 1,
+            }
+        }
+
+        if !verified.is_empty() {
+            let mut inner = self.inner.lock().await;
+            inner
+                .book
+                .import_pre_verified_records(verified, source, now, &context, &mut outcome);
+        }
+
+        outcome
     }
 
     /// Imports one peer-supplied signed record through the discovery book validation path.
@@ -2423,7 +2498,7 @@ impl ZakuraDiscoveryBook {
         now: u64,
         context: &DiscoveryRecordValidationContext,
     ) -> Result<ImportOutcome, DiscoveryBookError> {
-        self.import_record_inner(record, source, false, now, context)
+        self.import_record_inner(record, source, false, false, now, context)
     }
 
     /// Imports one signed static/bootstrap record.
@@ -2438,7 +2513,30 @@ impl ZakuraDiscoveryBook {
         now: u64,
         context: &DiscoveryRecordValidationContext,
     ) -> Result<ImportOutcome, DiscoveryBookError> {
-        self.import_record_inner(record, None, true, now, context)
+        self.import_record_inner(record, None, true, false, now, context)
+    }
+
+    /// Imports a batch of records whose signatures were already verified outside the lock.
+    ///
+    /// [`ZakuraDiscoveryHandle::import_peer_records`] performs signature verification and
+    /// applies the per-response cap before taking the global discovery mutex, so this only
+    /// runs the cheap storage-limit recheck, address-policy check, map mutation, and
+    /// eviction under the lock. `attempted`/`dropped_for_limit` are owned by the caller;
+    /// this updates the per-record success and rejection tallies on `outcome`.
+    fn import_pre_verified_records(
+        &mut self,
+        records: impl IntoIterator<Item = ZakuraNodeRecord>,
+        source: Option<NodeId>,
+        now: u64,
+        context: &DiscoveryRecordValidationContext,
+        outcome: &mut ImportBatchOutcome,
+    ) {
+        for record in records {
+            match self.import_record_inner(record, source, false, true, now, context) {
+                Ok(import_outcome) => outcome.record_success(import_outcome),
+                Err(_) => outcome.rejected += 1,
+            }
+        }
     }
 
     /// Imports a bounded batch of signed peer records from a single response.
@@ -2476,6 +2574,12 @@ impl ZakuraDiscoveryBook {
         let exclude_node_ids: HashSet<_> = exclude_node_ids.iter().copied().collect();
         let limit = limit.min(self.limits.max_imported_records_per_response);
 
+        // Reservoir-sample references and clone only the chosen records. The book can hold
+        // `max_records` (default 10_000) entries, each up to `max_encoded_record_bytes`, so cloning
+        // every record that passes the filter — when at most `limit` (default 32) are ever returned
+        // — was attacker-paced, allocation-heavy work performed while holding the global discovery
+        // mutex. Per-call clone work is now bounded by `limit`, not the book size. See finding
+        // `claude-discovery-expensive-work-under-global-mutex` (SR-2/SR-4).
         self.entries
             .iter()
             .filter(|(node_id, entry)| {
@@ -2485,8 +2589,11 @@ impl ZakuraDiscoveryBook {
                     && has_wanted_services(&entry.record, wanted_services)
                     && has_discovery_dialable_direct_addrs(&entry.record)
             })
-            .map(|(_, entry)| entry.record.clone())
+            .map(|(_, entry)| &entry.record)
             .choose_multiple(rng, limit)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     /// Returns bounded dial candidates for later dial-loop code.
@@ -2503,7 +2610,7 @@ impl ZakuraDiscoveryBook {
             exclusions.connected_node_ids.iter().copied().collect();
         let in_flight_node_ids: HashSet<_> =
             exclusions.in_flight_node_ids.iter().copied().collect();
-        let mut candidates: Vec<_> = self
+        let candidates: Vec<_> = self
             .entries
             .values()
             .filter(|entry| {
@@ -2518,6 +2625,7 @@ impl ZakuraDiscoveryBook {
                         dial_backoff.0,
                         dial_backoff.1,
                     )
+                    && entry_has_confirmed_dial_authority(entry)
                     && has_wanted_services(&entry.record, wanted_services)
                     && has_discovery_usable_direct_addrs(entry)
             })
@@ -2548,31 +2656,28 @@ impl ZakuraDiscoveryBook {
             }))
             .collect();
 
-        candidates.sort_by_cached_key(|entry| {
-            let non_static_random_tie = if !entry.is_static() {
-                rng.gen::<u64>()
-            } else {
-                0
-            };
-            let static_deterministic_tie = if entry.is_static() {
-                node_id_sort_key(&entry.node_id())
-            } else {
-                [0; NODE_ID_BYTES]
-            };
-            (
-                !entry.is_static(),
-                Reverse(entry.last_success().unwrap_or(0)),
-                entry.failure_count(),
-                Reverse(entry.last_seen()),
-                non_static_random_tie,
-                static_deterministic_tie,
-            )
-        });
-
-        candidates
+        // Bounded top-k selection instead of a full sort. The book can hold `max_records`
+        // (default 10_000) entries and this selection runs under the global discovery mutex on the
+        // per-second candidate-dialer path, yet only `limit` candidates are ever returned. Sorting
+        // the whole candidate set (O(n log n)) just to `take(limit)` is replaced with an O(n)
+        // partial select of the best `limit` candidates plus an O(limit log limit) sort of the
+        // survivors, keeping the order identical. See finding
+        // `claude-discovery-expensive-work-under-global-mutex` (SR-2/SR-4).
+        let mut keyed: Vec<(DialCandidateSortKey, DialCandidateRef<'_>)> = candidates
             .into_iter()
-            .take(limit)
-            .map(DialCandidateRef::into_candidate)
+            .map(|candidate| (dial_candidate_sort_key(&candidate, rng), candidate))
+            .collect();
+
+        let take = limit.min(keyed.len());
+        if take < keyed.len() {
+            keyed.select_nth_unstable_by(take, |a, b| a.0.cmp(&b.0));
+            keyed.truncate(take);
+        }
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+
+        keyed
+            .into_iter()
+            .map(|(_, candidate)| candidate.into_candidate())
             .collect()
     }
 
@@ -2691,7 +2796,7 @@ impl ZakuraDiscoveryBook {
             last_success: entry.last_success,
             failure_count: entry.failure_count,
         };
-        self.import_validated_record(entry.record, metadata, now, context)
+        self.import_validated_record(entry.record, metadata, false, now, context)
     }
 
     fn import_record_inner(
@@ -2699,6 +2804,7 @@ impl ZakuraDiscoveryBook {
         record: ZakuraNodeRecord,
         source: Option<NodeId>,
         is_static: bool,
+        pre_verified: bool,
         now: u64,
         context: &DiscoveryRecordValidationContext,
     ) -> Result<ImportOutcome, DiscoveryBookError> {
@@ -2710,13 +2816,20 @@ impl ZakuraDiscoveryBook {
             last_success: None,
             failure_count: 0,
         };
-        self.import_validated_record(record, metadata, now, context)
+        self.import_validated_record(record, metadata, pre_verified, now, context)
     }
 
+    /// Validates and stores one record.
+    ///
+    /// When `pre_verified` is set the signature/import-context check has already been run
+    /// outside the global discovery mutex by [`ZakuraDiscoveryHandle::import_peer_records`],
+    /// so it is not repeated here; the cheap storage-limit, address-policy, insertion, and
+    /// eviction steps still run under the caller's lock.
     fn import_validated_record(
         &mut self,
         record: ZakuraNodeRecord,
         metadata: DiscoveryEntryMetadata,
+        pre_verified: bool,
         now: u64,
         context: &DiscoveryRecordValidationContext,
     ) -> Result<ImportOutcome, DiscoveryBookError> {
@@ -2724,7 +2837,9 @@ impl ZakuraDiscoveryBook {
             return Err(DiscoveryBookError::SelfRecord);
         }
 
-        record.verify(context)?;
+        if !pre_verified {
+            record.verify(context)?;
+        }
         self.validate_record_storage_limits(&record)?;
         let direct_addr_policy = if metadata.is_static {
             DiscoveryDirectAddrPolicy::StaticConfigured
@@ -2930,6 +3045,48 @@ impl DialCandidateRef<'_> {
     }
 }
 
+/// Total dial-priority key for one candidate: prefer signed records over static ones, then most
+/// recent success, fewest failures, most recently seen, with a per-call random tie-break for
+/// non-static candidates and a deterministic node-id tie-break for static ones.
+type DialCandidateSortKey = (
+    bool,
+    Reverse<u64>,
+    u32,
+    Reverse<u64>,
+    u64,
+    [u8; NODE_ID_BYTES],
+);
+
+/// Computes the dial-priority key used to select the best dial candidates.
+///
+/// Factored out of [`ZakuraDiscoveryBook::dial_candidates`] so the key can be computed once per
+/// candidate and fed to a bounded top-k selection instead of a full sort, which keeps expensive
+/// per-book ordering work bounded under the global discovery mutex (finding
+/// `claude-discovery-expensive-work-under-global-mutex`).
+fn dial_candidate_sort_key<R: rand::Rng + ?Sized>(
+    candidate: &DialCandidateRef<'_>,
+    rng: &mut R,
+) -> DialCandidateSortKey {
+    let non_static_random_tie = if !candidate.is_static() {
+        rng.gen::<u64>()
+    } else {
+        0
+    };
+    let static_deterministic_tie = if candidate.is_static() {
+        node_id_sort_key(&candidate.node_id())
+    } else {
+        [0; NODE_ID_BYTES]
+    };
+    (
+        !candidate.is_static(),
+        Reverse(candidate.last_success().unwrap_or(0)),
+        candidate.failure_count(),
+        Reverse(candidate.last_seen()),
+        non_static_random_tie,
+        static_deterministic_tie,
+    )
+}
+
 fn update_existing_entry(
     entry: &mut ZakuraDiscoveryEntry,
     record: ZakuraNodeRecord,
@@ -2942,7 +3099,13 @@ fn update_existing_entry(
         return ImportOutcome::IgnoredOlder;
     }
 
-    entry.source = metadata.source;
+    let preserve_first_party_source = incoming_sequence == stored_sequence
+        && entry.source == Some(entry.record.body.node_id)
+        && metadata.source != Some(entry.record.body.node_id);
+
+    if !preserve_first_party_source {
+        entry.source = metadata.source;
+    }
     entry.is_static |= metadata.is_static;
     entry.last_seen = metadata.last_seen;
 
@@ -3127,9 +3290,10 @@ fn has_wanted_services(record: &ZakuraNodeRecord, wanted_services: &[ZakuraServi
 
 /// Validates direct addresses for discovery-book storage.
 ///
-/// Untrusted peer/gossip records must only contain globally dialable addresses, preserving the
-/// discovery security rule that gossiped records cannot inject loopback, link-local, multicast, or
-/// broadcast targets. Static records are trusted-by-configuration bootstrap records, so they may use
+/// Untrusted peer/gossip records must only contain globally routable addresses, preserving the
+/// discovery security rule that gossiped records cannot inject loopback, link-local, multicast,
+/// broadcast, RFC 1918 private, RFC 6598 shared (CGNAT), or RFC 4193 unique-local targets. Static
+/// records are trusted-by-configuration bootstrap records, so they may use
 /// local addresses for regtest and single-host deployments, but still reject empty, unspecified, and
 /// port-0 targets that cannot be dialed as configured peers.
 fn validate_discovery_direct_addrs(
@@ -3175,6 +3339,18 @@ fn has_discovery_usable_direct_addrs(entry: &ZakuraDiscoveryEntry) -> bool {
         })
 }
 
+fn entry_has_confirmed_dial_authority(entry: &ZakuraDiscoveryEntry) -> bool {
+    entry.is_static || entry.source == Some(entry.record.body.node_id)
+}
+
+/// Returns true only for addresses that are safe to dial from untrusted discovery gossip.
+///
+/// A signed `ZakuraNodeRecord` proves control of the node key, not ownership of the advertised
+/// `direct_addrs`. To stop an authenticated discovery peer from steering the candidate dialer at
+/// arbitrary non-public targets, gossiped records must advertise only globally routable addresses.
+/// Besides the obvious loopback/link-local/multicast/broadcast cases, this rejects RFC 1918 private,
+/// RFC 6598 shared (CGNAT), and RFC 4193 unique-local ranges, which are reachable internal targets
+/// the dialer would otherwise scan on the operator's network.
 fn is_discovery_dialable_addr(addr: &SocketAddr) -> bool {
     if addr.port() == 0 {
         return false;
@@ -3187,12 +3363,15 @@ fn is_discovery_dialable_addr(addr: &SocketAddr) -> bool {
                 && !ip.is_multicast()
                 && !ip.is_broadcast()
                 && !ip.is_link_local()
+                && !ip.is_private()
+                && !is_ipv4_shared(&ip)
         }
         IpAddr::V6(ip) => {
             !ip.is_unspecified()
                 && !ip.is_loopback()
                 && !ip.is_multicast()
                 && !is_ipv6_unicast_link_local(&ip)
+                && !is_ipv6_unique_local(&ip)
         }
     }
 }
@@ -3210,6 +3389,18 @@ fn is_static_discovery_configured_addr_usable(addr: &SocketAddr) -> bool {
 
 fn is_ipv6_unicast_link_local(ip: &Ipv6Addr) -> bool {
     (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+// `Ipv4Addr::is_shared` is still unstable, so match the RFC 6598 100.64.0.0/10 range directly,
+// mirroring `is_ipv6_unicast_link_local`.
+fn is_ipv4_shared(ip: &Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (octets[1] & 0b1100_0000) == 0b0100_0000
+}
+
+// `Ipv6Addr::is_unique_local` is still unstable, so match the RFC 4193 fc00::/7 range directly.
+fn is_ipv6_unique_local(ip: &Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
 }
 
 // Import accepts records inside the clock-skew window, but runtime liveness is strict.
@@ -4255,6 +4446,14 @@ mod tests {
             direct_addrs: record.body.direct_addrs.clone(),
             is_static,
         }
+    }
+
+    fn import_confirmed_record(
+        book: &mut ZakuraDiscoveryBook,
+        record: ZakuraNodeRecord,
+    ) -> Result<ImportOutcome, DiscoveryBookError> {
+        let source = record.body.node_id;
+        book.import_record(record, Some(source), NOW, &context())
     }
 
     fn small_book(max_records: usize) -> ZakuraDiscoveryBook {
@@ -5358,6 +5557,141 @@ mod tests {
     }
 
     #[test]
+    fn discovery_book_peer_import_rejects_private_and_internal_direct_addresses() {
+        // A signed record only proves control of the node key, not ownership of the advertised
+        // direct addresses. Untrusted gossip must therefore be restricted to globally routable
+        // targets; otherwise an authenticated discovery peer could seed signed records pointing at
+        // the honest node's private/internal network and turn the candidate dialer into an internal
+        // SSRF/scanner. RFC 1918 private, RFC 6598 shared (CGNAT), and RFC 4193 unique-local ranges
+        // are neither loopback nor link-local, so the original filter let them through.
+        let bad_addrs = [
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 8233),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(172, 16, 5, 5)), 8233),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8233),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1)), 8233),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)), 8233),
+            SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::new(0xfd12, 0x3456, 0, 0, 0, 0, 0, 1)),
+                8233,
+            ),
+        ];
+
+        for (index, bad_addr) in bad_addrs.into_iter().enumerate() {
+            let mut book = ZakuraDiscoveryBook::default();
+            // Pair the malicious target with a genuinely routable address to prove the whole
+            // record is rejected, not just dropped down to its usable addresses.
+            let record = signed_record_with_addrs(
+                u64::try_from(index).expect("small test index fits in u64"),
+                service(index),
+                vec![test_addr(30), bad_addr],
+            );
+
+            assert!(
+                matches!(
+                    book.import_record(record, Some(secret_key().public()), NOW, &context()),
+                    Err(DiscoveryBookError::NonDialableDirectAddress { addr }) if addr == bad_addr
+                ),
+                "untrusted gossip must reject internal direct address {bad_addr}"
+            );
+            assert!(book.is_empty());
+        }
+
+        // A genuinely globally routable gossip target still imports.
+        let mut book = ZakuraDiscoveryBook::default();
+        let public_record = signed_record_with_addrs(99, service(99), vec![test_addr(40)]);
+        assert_eq!(
+            book.import_record(public_record, Some(secret_key().public()), NOW, &context())
+                .expect("public gossip record imports"),
+            ImportOutcome::Added
+        );
+
+        // Trusted/static configuration is unchanged: operators may still configure private targets
+        // for LAN/regtest deployments.
+        let mut static_book = ZakuraDiscoveryBook::default();
+        let private_static = signed_record_with_addrs(
+            1,
+            service(1),
+            vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+                8233,
+            )],
+        );
+        assert_eq!(
+            static_book
+                .import_static_record(private_static, NOW, &context())
+                .expect("configured static private record imports"),
+            ImportOutcome::Added
+        );
+    }
+
+    #[test]
+    fn discovery_book_gossiped_public_third_party_record_is_not_dialable() {
+        let mut book = ZakuraDiscoveryBook::default();
+        let gossip_source = secret_key().public();
+        let public_target = signed_record_with_addrs(
+            1,
+            service(1),
+            vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)),
+                8233,
+            )],
+        );
+        let target_id = public_target.body.node_id;
+
+        assert_eq!(
+            book.import_record(public_target.clone(), Some(gossip_source), NOW, &context())
+                .expect("valid public third-party gossip record still imports"),
+            ImportOutcome::Added
+        );
+        assert_eq!(
+            book.get(&target_id).expect("entry is stored").record(),
+            &public_target
+        );
+
+        assert!(
+            book.dial_candidates(
+                10,
+                &[service(1)],
+                DialCandidateExclusions {
+                    connected_node_ids: &[],
+                    in_flight_node_ids: &[],
+                },
+                NOW,
+                (
+                    DEFAULT_DISCOVERY_DIAL_BACKOFF_BASE,
+                    DEFAULT_DISCOVERY_DIAL_BACKOFF_MAX,
+                ),
+                &mut StdRng::seed_from_u64(7),
+            )
+            .is_empty(),
+            "unconfirmed third-party public gossip must not drive native dials"
+        );
+
+        assert_eq!(
+            book.import_record(public_target.clone(), Some(target_id), NOW + 1, &context())
+                .expect("first-party self-record confirmation imports"),
+            ImportOutcome::MetadataUpdated
+        );
+        assert_eq!(
+            book.dial_candidates(
+                10,
+                &[service(1)],
+                DialCandidateExclusions {
+                    connected_node_ids: &[],
+                    in_flight_node_ids: &[],
+                },
+                NOW + 1,
+                (
+                    DEFAULT_DISCOVERY_DIAL_BACKOFF_BASE,
+                    DEFAULT_DISCOVERY_DIAL_BACKOFF_MAX,
+                ),
+                &mut StdRng::seed_from_u64(7),
+            ),
+            vec![candidate_for(&public_target, false)]
+        );
+    }
+
+    #[test]
     fn discovery_book_static_import_allows_loopback_direct_address() {
         let mut book = ZakuraDiscoveryBook::default();
         let loopback_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8233);
@@ -5698,10 +6032,8 @@ mod tests {
         let failed_id = failed.body.node_id;
         let preferred_id = preferred.body.node_id;
 
-        book.import_record(failed.clone(), None, NOW, &context())
-            .unwrap();
-        book.import_record(preferred.clone(), None, NOW, &context())
-            .unwrap();
+        import_confirmed_record(&mut book, failed.clone()).unwrap();
+        import_confirmed_record(&mut book, preferred.clone()).unwrap();
         book.mark_dial_attempt(&failed_id, NOW);
         book.mark_dial_failure(&failed_id, NOW);
         book.mark_dial_success(&preferred_id, NOW + 1);
@@ -5755,8 +6087,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         for record in &records {
-            book.import_record(record.clone(), None, NOW, &context())
-                .expect("test record imports");
+            import_confirmed_record(&mut book, record.clone()).expect("test record imports");
         }
 
         let mut deterministic = records
@@ -5815,8 +6146,7 @@ mod tests {
         let failed = signed_record_with(1, service(1), test_addr(1));
         let failed_id = failed.body.node_id;
 
-        book.import_record(failed.clone(), None, NOW, &context())
-            .unwrap();
+        import_confirmed_record(&mut book, failed.clone()).unwrap();
         book.mark_dial_attempt(&failed_id, NOW);
         book.mark_dial_failure(&failed_id, NOW);
 
@@ -5856,8 +6186,7 @@ mod tests {
         let exchanged = signed_record_with(1, service(1), test_addr(1));
         let exchanged_id = exchanged.body.node_id;
 
-        book.import_record(exchanged.clone(), None, NOW, &context())
-            .unwrap();
+        import_confirmed_record(&mut book, exchanged.clone()).unwrap();
         book.mark_dial_success(&exchanged_id, NOW);
         book.mark_short_lived_exchange(&exchanged_id, NOW);
 
@@ -5899,8 +6228,7 @@ mod tests {
         let mut book = ZakuraDiscoveryBook::default();
         let record = signed_record_with(1, service(9), test_addr(9));
         let node_id = record.body.node_id;
-        book.import_record(record.clone(), None, NOW, &context())
-            .unwrap();
+        import_confirmed_record(&mut book, record.clone()).unwrap();
         book.mark_dial_attempt(&node_id, NOW + 1);
         book.mark_dial_failure(&node_id, NOW + 1);
 
@@ -6460,8 +6788,13 @@ mod tests {
             .await
             .expect("connected self-record imports");
         handle
-            .import_peer_records([discovered.clone(), general.clone()], None)
-            .await;
+            .import_peer_record(discovered.clone(), Some(discovered.body.node_id))
+            .await
+            .expect("discovered first-party record imports");
+        handle
+            .import_peer_record(general.clone(), Some(general.body.node_id))
+            .await
+            .expect("general first-party record imports");
         connected_tx.send_replace(vec![peer_id_for(active_id)]);
 
         let matching = handle.service_candidates(&service(1), true, &[]).await;
@@ -7076,6 +7409,203 @@ mod tests {
         assert_eq!(outcome.rejected, 1);
     }
 
+    /// Regression test for `claude-discovery-expensive-work-under-global-mutex`.
+    ///
+    /// An authenticated discovery peer can send a full `Peers` batch whose records carry
+    /// invalid signatures. Each record still triggers a full Ed25519 verification — the
+    /// expensive, attacker-driven work. Previously that verification ran while holding the
+    /// global discovery mutex, so an attacker could repeatedly stall every other discovery
+    /// operation (admission, sampling, dial selection). Signatures are now verified outside
+    /// the lock, and an all-invalid batch never needs the lock at all, so the import makes
+    /// progress even while another task holds the mutex.
+    #[tokio::test]
+    async fn import_peer_records_verifies_signatures_without_holding_global_mutex() {
+        let (_connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+
+        // A full Peers batch of records with valid bodies but tampered signatures: bumping
+        // the sequence after signing leaves body validation passing while the Ed25519 check
+        // (re-encoding the body and verifying) runs in full and fails.
+        let mut batch = Vec::with_capacity(MAX_DISCOVERY_RECORDS_PER_RESPONSE);
+        for index in 0..MAX_DISCOVERY_RECORDS_PER_RESPONSE {
+            let octet = u8::try_from(index + 1).expect("test batch index fits in u8");
+            let sequence = u64::try_from(index + 1).expect("test batch index fits in u64");
+            let mut record = runtime_record_with(sequence, service(1), test_addr(octet));
+            record.body.sequence += 1;
+            batch.push(record);
+        }
+
+        // Hold the global discovery mutex for the entire import call.
+        let guard = handle.inner.lock().await;
+
+        // Verification and rejection of the whole batch must make progress without the lock;
+        // if it were still performed under the mutex this would deadlock until the timeout.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            handle.import_peer_records(batch, None),
+        )
+        .await
+        .expect("import_peer_records must verify signatures without holding the global mutex");
+
+        drop(guard);
+
+        assert_eq!(outcome.attempted, MAX_DISCOVERY_RECORDS_PER_RESPONSE);
+        assert_eq!(outcome.rejected, MAX_DISCOVERY_RECORDS_PER_RESPONSE);
+        assert_eq!(outcome.added, 0);
+    }
+
+    /// Regression test for `claude-discovery-expensive-work-under-global-mutex` (GetPeers sampling
+    /// facet).
+    ///
+    /// `sample_peers` runs under the global discovery mutex and is driven by attacker-paced GetPeers
+    /// requests. It previously cloned *every* record that passed the filter — up to the whole book
+    /// (`max_records`, default 10_000) — even though at most `max_imported_records_per_response`
+    /// records are ever returned. The clone is now bounded to the chosen sample.
+    ///
+    /// The bound is proven machine-independently by comparing the production `sample_peers` against
+    /// an in-test reference that reproduces the pre-fix clone-the-whole-filtered-set behavior, over
+    /// the same large book in the same run. With the fix, production clones only the returned sample
+    /// and is markedly cheaper than the clone-everything reference; before the fix the two are the
+    /// same computation, so the production-is-cheaper bound fails.
+    #[test]
+    fn sample_peers_clone_cost_is_bounded_by_returned_sample() {
+        const BOOK: usize = 1024;
+        const ITERS: usize = 400;
+
+        let wanted = service(1);
+        // Heavy records (maximum direct-address fan-out plus many services, with the wanted service
+        // first so the filter match itself stays cheap) make each *record clone* far more expensive
+        // than the allocation-free per-entry filter scan, so the clone count is the dominant cost
+        // and the bounded-vs-unbounded clone gap is large.
+        let addrs: Vec<SocketAddr> = (1u8..=MAX_DIRECT_ADDRS_PER_RECORD as u8)
+            .map(test_addr)
+            .collect();
+        let mut services = vec![wanted.clone()];
+        services.extend((100..100 + (MAX_SERVICES_PER_RECORD - 1)).map(service));
+
+        let mut book = ZakuraDiscoveryBook::new(ZakuraDiscoveryBookLimits {
+            max_records: BOOK,
+            ..ZakuraDiscoveryBookLimits::default()
+        });
+        for seq in 0..BOOK {
+            let secret = secret_key();
+            let mut record_body = body(&secret);
+            record_body.sequence = seq as u64 + 1;
+            record_body.direct_addrs = addrs.clone();
+            record_body.services = services.clone();
+            let record = ZakuraNodeRecord::sign(record_body, &secret).expect("test record signs");
+            book.import_record(record, None, NOW, &context())
+                .expect("test record imports");
+        }
+
+        let cap = book.limits.max_imported_records_per_response;
+
+        // Reference implementation: the pre-fix behavior of cloning every record that passes the
+        // filter, then reservoir-sampling the clones. Mirrors `sample_peers`'s filter exactly.
+        let naive_sample =
+            |book: &ZakuraDiscoveryBook, rng: &mut StdRng| -> Vec<ZakuraNodeRecord> {
+                book.entries
+                    .iter()
+                    .filter(|(node_id, entry)| {
+                        book.local_node_id != Some(**node_id)
+                            && !entry_is_expired(entry, NOW)
+                            && has_wanted_services(&entry.record, std::slice::from_ref(&wanted))
+                            && has_discovery_dialable_direct_addrs(&entry.record)
+                    })
+                    .map(|(_, entry)| entry.record.clone())
+                    .choose_multiple(rng, cap)
+            };
+
+        let mut rng = StdRng::seed_from_u64(5);
+
+        // Warm up the allocator and instruction caches before timing.
+        let _ = naive_sample(&book, &mut rng);
+        let _ = book.sample_peers(cap, std::slice::from_ref(&wanted), &[], NOW, &mut rng);
+
+        let naive_start = std::time::Instant::now();
+        for _ in 0..ITERS {
+            assert_eq!(naive_sample(&book, &mut rng).len(), cap);
+        }
+        let naive_time = naive_start.elapsed();
+
+        let production_start = std::time::Instant::now();
+        for _ in 0..ITERS {
+            assert_eq!(
+                book.sample_peers(cap, std::slice::from_ref(&wanted), &[], NOW, &mut rng)
+                    .len(),
+                cap
+            );
+        }
+        let production_time = production_start.elapsed();
+
+        // Both run the same O(book) filter scan and reservoir sampling; the only difference is how
+        // many records are cloned (production: the returned `cap`; reference: every match in the
+        // book). With the bound in place production must be clearly cheaper than cloning the whole
+        // filtered set. Before the fix they are the identical computation, so production is not
+        // meaningfully cheaper and this fails. The 0.8 factor is a ratio on the same machine, so it
+        // is machine-independent.
+        assert!(
+            production_time.as_nanos() * 5 < naive_time.as_nanos() * 4,
+            "sample_peers did not bound its clone work: production={production_time:?} \
+             clone-everything reference={naive_time:?}; production should be clearly cheaper than \
+             cloning every filtered record"
+        );
+    }
+
+    /// Guards the bounded top-k dial-candidate selection added for
+    /// `claude-discovery-expensive-work-under-global-mutex`.
+    ///
+    /// `dial_candidates` now selects the best `limit` candidates with a partial select instead of
+    /// sorting the whole book before `take(limit)`. With far more matching candidates than `limit`,
+    /// the result must still be exactly the highest dial-priority candidates (most recent
+    /// successful dial first), proving the partial selection keeps the same ordering as a full
+    /// sort.
+    #[test]
+    fn dial_candidates_selects_top_priority_subset_under_limit() {
+        let mut book = ZakuraDiscoveryBook::default();
+        let records = (1u8..=10)
+            .map(|index| signed_record_with(index.into(), service(1), test_addr(index)))
+            .collect::<Vec<_>>();
+        for record in &records {
+            import_confirmed_record(&mut book, record.clone()).expect("test record imports");
+        }
+
+        // Three candidates get strictly increasing last-success times, so dial priority is
+        // deterministic (most recent success first); the remaining seven have no successful dial.
+        book.mark_dial_success(&records[5].body.node_id, NOW + 1);
+        book.mark_dial_success(&records[3].body.node_id, NOW + 2);
+        book.mark_dial_success(&records[7].body.node_id, NOW + 3);
+        let expected_top = vec![
+            records[7].body.node_id,
+            records[3].body.node_id,
+            records[5].body.node_id,
+        ];
+
+        let mut rng = StdRng::seed_from_u64(99);
+        let selected = book.dial_candidates(
+            3,
+            &[service(1)],
+            DialCandidateExclusions {
+                connected_node_ids: &[],
+                in_flight_node_ids: &[],
+            },
+            NOW,
+            (
+                DEFAULT_DISCOVERY_DIAL_BACKOFF_BASE,
+                DEFAULT_DISCOVERY_DIAL_BACKOFF_MAX,
+            ),
+            &mut rng,
+        );
+
+        assert_eq!(
+            selected
+                .iter()
+                .map(|candidate| candidate.node_id)
+                .collect::<Vec<_>>(),
+            expected_top,
+        );
+    }
+
     #[tokio::test]
     async fn handle_samples_records_through_storage_path() {
         let (_connected_tx, connected_rx) = watch::channel(Vec::new());
@@ -7128,9 +7658,15 @@ mod tests {
         let candidate = runtime_record_with(1, service(1), test_addr(1));
         let connected = runtime_record_with(2, service(1), test_addr(2));
         let connected_id = connected.body.node_id;
+        let candidate_id = candidate.body.node_id;
         handle
-            .import_peer_records([candidate.clone(), connected], None)
-            .await;
+            .import_peer_record(candidate.clone(), Some(candidate_id))
+            .await
+            .expect("candidate first-party record imports");
+        handle
+            .import_connected_peer_record(connected, connected_id)
+            .await
+            .expect("connected self-record imports");
 
         connected_tx.send_replace(vec![peer_id_for(connected_id)]);
         assert!(handle.dial_candidates(&[service(1)], &[]).await.is_empty());
@@ -7148,9 +7684,15 @@ mod tests {
         );
         let connected = runtime_record_with(2, service(1), test_addr(2));
         let connected_id = connected.body.node_id;
+        let candidate_id = candidate.body.node_id;
         handle
-            .import_peer_records([candidate.clone(), connected], None)
-            .await;
+            .import_peer_record(candidate.clone(), Some(candidate_id))
+            .await
+            .expect("candidate first-party record imports");
+        handle
+            .import_connected_peer_record(connected, connected_id)
+            .await
+            .expect("connected self-record imports");
 
         connected_tx.send_replace(vec![peer_id_for(connected_id)]);
         assert_eq!(

@@ -1,8 +1,14 @@
-use super::{config::*, events::*, wire::*, *};
+use super::{config::*, events::*, pipe::*, wire::*, *};
 use crate::zakura::{
-    BoxRunFuture, FramedRecv, FramedSend, OrderedSendError, Peer, PeerStreamSession, Service, Sink,
-    SinkReject, Source, Stream, StreamMode, ZakuraPeerId, FRAME_HEADER_BYTES,
+    handle_pipe_exit, spawn_supervised_pipe, Flow, FramedSend, OrderedSendError, Peer,
+    PeerStreamSession, Pipe, PipeSink, Service, SessionGuard, SinkReject, Stream, StreamMode,
+    ZakuraPeerId, FRAME_HEADER_BYTES,
 };
+// The per-peer block-sync `Source` frame-pump is test-only scaffolding (see
+// `BlockSyncPeerRecord` / `add_peer`); its trait and boxed-future alias are only
+// referenced by that `cfg(test)` task.
+#[cfg(test)]
+use crate::zakura::{BoxRunFuture, Source};
 
 /// Maximum frame bytes for one stream-6 body frame plus protocol framing.
 ///
@@ -139,10 +145,18 @@ struct BlockSyncServiceInner {
 struct BlockSyncPeerRecord {
     direction: ServicePeerDirection,
     cancel_token: CancellationToken,
+    // Production outbound block-sync sends are authoritative through
+    // `BlockSyncPeerSession`: the reactor calls `try_send_get_blocks`/etc.
+    // directly (see `reactor::schedule`). The per-peer `BlockSyncSource` action
+    // pump and its `actions` sender are test-only scaffolding — no non-test code
+    // produces into this channel, and `drive_block_sync_actions` deliberately
+    // ignores the reactor's duplicate `SendMessage` to avoid double-sending.
+    // Gating the sender and the task handle to `cfg(test)` keeps that contract
+    // compiler-enforced: production has no producer to wire and therefore cannot
+    // double-send, and it retains no idle frame-pump task/channel per peer.
     #[cfg(test)]
     actions: mpsc::Sender<BlockSyncAction>,
-    #[cfg(not(test))]
-    _actions: mpsc::Sender<BlockSyncAction>,
+    #[cfg(test)]
     _tasks: Vec<JoinHandle<()>>,
 }
 
@@ -317,22 +331,55 @@ impl Service for BlockSyncService {
         let connection_cancel_token = peer.cancel_token();
         let block_sync_session = BlockSyncPeerSession::new(&session, peer.direction);
         let (_session_peer, _stream_kind, recv, send, _session_cancel) = session.into_parts();
-        let (actions_tx, actions_rx) =
-            mpsc::channel(self.inner.config.peer_limits.outbound_queue_depth.max(1));
 
-        let source_task = spawn_block_sync_source(
+        // The per-peer block-sync source frame-pump is test-only scaffolding (see
+        // `BlockSyncPeerRecord`). Production outbound frames go directly through
+        // `BlockSyncPeerSession`, so only the test build spawns the source to
+        // exercise `send_action`; production drops the redundant transport sender.
+        // The outbound stream stays alive through the `BlockSyncPeerSession` clone
+        // the reactor holds, so nothing is lost by not retaining it here.
+        #[cfg(test)]
+        let (actions_tx, source_task) = {
+            let (actions_tx, actions_rx) =
+                mpsc::channel(self.inner.config.peer_limits.outbound_queue_depth.max(1));
+            let source_task = spawn_block_sync_source(
+                peer_id.clone(),
+                actions_rx,
+                service_cancel_token.clone(),
+                send,
+            );
+            (actions_tx, source_task)
+        };
+        #[cfg(not(test))]
+        drop(send);
+
+        let pipe = block_sync_pipe(peer_id.clone(), self.inner.events.clone());
+        let sink = PipeSink::new(pipe, recv, service_cancel_token.clone());
+        let on_teardown = {
+            let lifecycle = self.inner.lifecycle.clone();
+            let peer_id = peer_id.clone();
+            move || {
+                let _ = lifecycle.send(BlockSyncEvent::PeerDisconnected(peer_id));
+            }
+        };
+        let on_panic = {
+            let connection_cancel_token = connection_cancel_token.clone();
+            move || connection_cancel_token.cancel()
+        };
+        // A protocol reject is fatal to the whole connection; a normal/parked exit
+        // leaves it for the other services riding on it. Panic teardown is in
+        // `on_panic`.
+        let pipe = async move {
+            handle_pipe_exit("block-sync", &connection_cancel_token, sink.run().await);
+        };
+        // Let the returned handle drop to detach the supervised task (like
+        // `tokio::spawn`); the `PipeTeardown` still runs on every exit path.
+        spawn_supervised_pipe(
             peer_id.clone(),
-            actions_rx,
             service_cancel_token.clone(),
-            send,
-        );
-        let sink_task = spawn_block_sync_sink(
-            peer_id.clone(),
-            recv,
-            self.inner.events.clone(),
-            self.inner.lifecycle.clone(),
-            service_cancel_token.clone(),
-            connection_cancel_token,
+            on_teardown,
+            on_panic,
+            pipe,
         );
 
         {
@@ -347,10 +394,9 @@ impl Service for BlockSyncService {
                     direction: peer.direction,
                     cancel_token: service_cancel_token,
                     #[cfg(test)]
-                    actions: actions_tx.clone(),
-                    #[cfg(not(test))]
-                    _actions: actions_tx.clone(),
-                    _tasks: vec![source_task, sink_task],
+                    actions: actions_tx,
+                    #[cfg(test)]
+                    _tasks: vec![source_task],
                 },
             );
         }
@@ -387,48 +433,18 @@ impl Service for BlockSyncService {
             return Ok(());
         }
 
-        deliver_block_sync_frame(&self.inner.events, peer_id, frame)
+        let mut pipe = block_sync_pipe(peer_id, self.inner.events.clone());
+        match pipe.run_one(frame) {
+            Flow::Continue(()) | Flow::Done => Ok(()),
+            Flow::Reject(reject) => Err(reject),
+        }
     }
 }
 
-fn spawn_block_sync_sink(
-    peer_id: ZakuraPeerId,
-    recv: FramedRecv,
-    events: mpsc::Sender<BlockSyncEvent>,
-    lifecycle: mpsc::UnboundedSender<BlockSyncEvent>,
-    service_cancel_token: CancellationToken,
-    connection_cancel_token: CancellationToken,
-) -> JoinHandle<()> {
-    task::spawn(async move {
-        let sink = Box::new(BlockSyncSink {
-            peer_id: peer_id.clone(),
-            events: events.clone(),
-            cancel_token: service_cancel_token,
-        });
-
-        match sink.run(recv).await {
-            Ok(()) => {}
-            Err(SinkReject::Protocol(error)) => {
-                tracing::debug!(
-                    ?error,
-                    ?peer_id,
-                    "block-sync stream rejected protocol-invalid frame"
-                );
-                connection_cancel_token.cancel();
-            }
-            Err(SinkReject::Local(error)) => {
-                tracing::debug!(
-                    ?error,
-                    ?peer_id,
-                    "block-sync stream could not deliver frame locally"
-                );
-            }
-        }
-
-        let _ = lifecycle.send(BlockSyncEvent::PeerDisconnected(peer_id));
-    })
-}
-
+// Test-only per-peer outbound frame-pump. Production block-sync sends go through
+// `BlockSyncPeerSession` directly (see `add_peer` / `BlockSyncPeerRecord`); this
+// source exists solely so tests can drive outbound frames via `send_action`.
+#[cfg(test)]
 fn spawn_block_sync_source(
     peer_id: ZakuraPeerId,
     actions: mpsc::Receiver<BlockSyncAction>,
@@ -445,33 +461,7 @@ fn spawn_block_sync_source(
     })
 }
 
-#[derive(Debug)]
-struct BlockSyncSink {
-    peer_id: ZakuraPeerId,
-    events: mpsc::Sender<BlockSyncEvent>,
-    cancel_token: CancellationToken,
-}
-
-impl Sink for BlockSyncSink {
-    fn run(self: Box<Self>, mut recv: FramedRecv) -> BoxRunFuture<'static, Result<(), SinkReject>> {
-        Box::pin(async move {
-            loop {
-                let frame = tokio::select! {
-                    _ = self.cancel_token.cancelled() => return Ok(()),
-                    frame = recv.recv() => {
-                        let Some(frame) = frame else {
-                            return Ok(());
-                        };
-                        frame
-                    }
-                };
-
-                deliver_block_sync_frame(&self.events, self.peer_id.clone(), frame)?;
-            }
-        })
-    }
-}
-
+#[cfg(test)]
 #[derive(Debug)]
 struct BlockSyncSource {
     peer_id: ZakuraPeerId,
@@ -479,6 +469,7 @@ struct BlockSyncSource {
     cancel_token: CancellationToken,
 }
 
+#[cfg(test)]
 impl Source for BlockSyncSource {
     fn run(mut self: Box<Self>, send: FramedSend) -> BoxRunFuture<'static, ()> {
         Box::pin(async move {
@@ -520,26 +511,24 @@ impl Source for BlockSyncSource {
     }
 }
 
-fn deliver_block_sync_frame(
-    events: &mpsc::Sender<BlockSyncEvent>,
+pub(super) fn block_sync_pipe(
     peer_id: ZakuraPeerId,
-    frame: Frame,
-) -> Result<(), SinkReject> {
-    let msg = match BlockSyncMessage::decode_frame(frame) {
-        Ok(msg) => msg,
-        Err(error) => {
-            // Block bodies are validated against committed headers in B1+.
-            let protocol_error =
-                std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string());
-            let _ = events.try_send(BlockSyncEvent::WireDecodeFailed {
-                peer: peer_id,
-                error: Arc::new(error),
-            });
-            return Err(SinkReject::protocol(protocol_error));
-        }
-    };
-
-    events
-        .try_send(BlockSyncEvent::WireMessage { peer: peer_id, msg })
-        .map_err(|error| SinkReject::local(format!("block-sync queue closed: {error}")))
+    events: mpsc::Sender<BlockSyncEvent>,
+) -> Pipe<BsLocal, BsEnv> {
+    Pipe::new(
+        peer_id,
+        BsLocal,
+        BsEnv::new(events),
+        // The transport already applies the per-connection count bucket and
+        // frame cap; this guard adds the same payload cap the codec enforces.
+        // Type validity is left to the decode stage on purpose: a disallowed or
+        // unknown stream-6 type must surface as `WireDecodeFailed` so the reactor
+        // records `MalformedMessage` misbehavior — a pre-decode guard reject would
+        // disconnect the peer but drop that misbehavior signal (see BS1). The
+        // block-sync byte budget likewise stays in the reactor scheduler/reorder
+        // state so existing request/retry accounting is not double-counted.
+        SessionGuard::oversize_only(MAX_BS_MESSAGE_BYTES as u32),
+        run_inbound,
+        &PIPE_SHAPE,
+    )
 }

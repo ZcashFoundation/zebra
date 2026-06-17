@@ -34,6 +34,7 @@ use super::{
 mod config;
 mod error;
 mod events;
+mod pipe;
 mod reactor;
 mod scheduler;
 mod service;

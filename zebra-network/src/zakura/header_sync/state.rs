@@ -8,7 +8,7 @@ pub(super) const HEADER_SYNC_ADVISORY_BACKOFF: Duration = Duration::from_secs(60
 pub(super) const HEADER_SYNC_ADVISORY_TTL: Duration = DEFAULT_LIVE_SERVICE_SUMMARY_TTL;
 
 #[derive(Clone, Debug)]
-pub(super) struct HeaderSyncState {
+pub(super) struct HeaderSyncCore {
     pub(super) anchor: (block::Height, block::Hash),
     pub(super) finalized_height: block::Height,
     pub(super) verified_block_tip: block::Height,
@@ -23,7 +23,7 @@ pub(super) struct HeaderSyncState {
     pub(super) advisory: HashMap<ZakuraPeerId, HeaderSyncAdvisoryPeerState>,
 }
 
-impl HeaderSyncState {
+impl HeaderSyncCore {
     pub(super) fn new(startup: &HeaderSyncStartup) -> Result<Self, HeaderSyncStartError> {
         validate_anchor(&startup.network, startup.anchor)?;
         let (best_header_tip, best_header_hash) = startup.best_header_tip.unwrap_or(startup.anchor);
@@ -175,9 +175,7 @@ pub(super) struct PeerHeaderState {
     pub(super) received_status: bool,
     pub(super) outstanding: Vec<OutstandingRange>,
     pub(super) late_covered_responses: usize,
-    pub(super) unsolicited: RateMeter,
-    pub(super) inbound_status: RateMeter,
-    pub(super) inbound_new_block: RateMeter,
+    pub(super) meters: HeaderSyncPeerMeters,
     pub(super) served_headers_inflight: u16,
     pub(super) misbehavior: u32,
 }
@@ -203,9 +201,11 @@ impl PeerHeaderState {
             received_status: false,
             outstanding: Vec::new(),
             late_covered_responses: 0,
-            unsolicited: RateMeter::new(status_refresh_interval),
-            inbound_status: RateMeter::new(inbound_status_min_interval),
-            inbound_new_block: RateMeter::new(inbound_new_block_min_interval),
+            meters: HeaderSyncPeerMeters::new(
+                status_refresh_interval,
+                inbound_status_min_interval,
+                inbound_new_block_min_interval,
+            ),
             served_headers_inflight: 0,
             misbehavior: 0,
         }
@@ -239,6 +239,27 @@ impl PeerHeaderState {
 
     pub(super) fn finish_serving_headers(&mut self) {
         self.served_headers_inflight = self.served_headers_inflight.saturating_sub(1);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct HeaderSyncPeerMeters {
+    pub(super) unsolicited: RateMeter,
+    pub(super) inbound_status: RateMeter,
+    pub(super) inbound_new_block: RateMeter,
+}
+
+impl HeaderSyncPeerMeters {
+    pub(super) fn new(
+        status_refresh_interval: Duration,
+        inbound_status_min_interval: Duration,
+        inbound_new_block_min_interval: Duration,
+    ) -> Self {
+        Self {
+            unsolicited: RateMeter::new(status_refresh_interval),
+            inbound_status: RateMeter::new(inbound_status_min_interval),
+            inbound_new_block: RateMeter::new(inbound_new_block_min_interval),
+        }
     }
 }
 

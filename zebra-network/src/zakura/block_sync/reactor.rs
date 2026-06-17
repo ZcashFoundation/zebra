@@ -7,6 +7,14 @@ use iroh::NodeId;
 
 const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 
+/// Upper bound on how long the reactor will wait to enqueue a data-plane action
+/// before abandoning it. The bounded `actions` channel is normally drained by
+/// the action driver almost immediately; this deadline only trips when that
+/// driver is genuinely stalled on backend/verifier work, and it keeps a stalled
+/// driver from wedging the reactor's control plane — peer-lifecycle draining,
+/// request timeouts, and above all misbehavior disconnects.
+const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Spawn a block-sync reactor and return its handle plus action stream.
 pub fn spawn_block_sync_reactor(
     startup: BlockSyncStartup,
@@ -530,15 +538,13 @@ impl BlockSyncReactor {
             return;
         }
 
-        if self
-            .actions
-            .send(BlockSyncAction::QueryBlocksByHeightRange {
+        if !self
+            .dispatch_action(BlockSyncAction::QueryBlocksByHeightRange {
                 peer: peer.clone(),
                 start: start_height,
                 count: requested_count,
             })
             .await
-            .is_err()
         {
             self.finish_serving_blocks(&peer);
         }
@@ -563,15 +569,21 @@ impl BlockSyncReactor {
                 .await;
             return;
         };
-        if let Some(index) = peer_state
+        let Some(index) = peer_state
             .outstanding
             .iter()
             .position(|outstanding| outstanding.request.start_height == start_height)
-        {
-            let outstanding = peer_state.outstanding.remove(index);
-            self.state.budget.release(outstanding.reserved_bytes());
-            self.state.schedule.clear_assignment(&outstanding.request);
-        }
+        else {
+            // A known, active peer sent a response terminator that correlates to no
+            // outstanding range. Fail closed: report `UnsolicitedDone` (a hard
+            // block-sync misbehavior) instead of silently rescheduling.
+            self.report_misbehavior(peer, BlockSyncMisbehavior::UnsolicitedDone)
+                .await;
+            return;
+        };
+        let outstanding = peer_state.outstanding.remove(index);
+        self.state.budget.release(outstanding.reserved_bytes());
+        self.state.schedule.clear_assignment(&outstanding.request);
         self.schedule().await;
     }
 
@@ -662,8 +674,7 @@ impl BlockSyncReactor {
             return false;
         }
         let _ = self
-            .actions
-            .send(BlockSyncAction::QueryNeededBlocks {
+            .dispatch_action(BlockSyncAction::QueryNeededBlocks {
                 verified_block_tip: self.state.verified_block_tip,
                 best_header_tip: self.state.best_header_tip,
             })
@@ -734,8 +745,7 @@ impl BlockSyncReactor {
                 });
             }
             let _ = self
-                .actions
-                .send(BlockSyncAction::SendMessage {
+                .dispatch_action(BlockSyncAction::SendMessage {
                     peer: peer_id,
                     msg: BlockSyncMessage::GetBlocks {
                         start_height: request.start_height,
@@ -757,8 +767,7 @@ impl BlockSyncReactor {
             self.state.schedule.mark_height_covered(height);
             metrics::counter!("sync.block.submit.sent").increment(1);
             let _ = self
-                .actions
-                .send(BlockSyncAction::SubmitBlock { block })
+                .dispatch_action(BlockSyncAction::SubmitBlock { block })
                 .await;
         }
     }
@@ -770,8 +779,7 @@ impl BlockSyncReactor {
         let status = self.local_status();
         let _ = peer_state.session.try_send_status(status);
         let _ = self
-            .actions
-            .send(BlockSyncAction::SendMessage {
+            .dispatch_action(BlockSyncAction::SendMessage {
                 peer: peer.clone(),
                 msg: BlockSyncMessage::Status(status),
             })
@@ -907,6 +915,24 @@ impl BlockSyncReactor {
         }
     }
 
+    /// Hand a data-plane action to the action driver without letting a slow or
+    /// stalled driver wedge the reactor. A full channel is awaited only up to
+    /// [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the reactor
+    /// keeps draining peer-lifecycle events, request timeouts, and misbehavior
+    /// disconnects. Returns `true` only if the action was accepted.
+    async fn dispatch_action(&self, action: BlockSyncAction) -> bool {
+        match time::timeout(ACTION_SEND_TIMEOUT, self.actions.send(action)).await {
+            Ok(Ok(())) => true,
+            // Receiver dropped: the driver is gone, treat like a send failure.
+            Ok(Err(_)) => false,
+            // Driver stalled past the deadline: drop the action and stay live.
+            Err(_) => {
+                metrics::counter!("sync.block.action.send_timeout").increment(1);
+                false
+            }
+        }
+    }
+
     async fn report_misbehavior(&mut self, peer: ZakuraPeerId, reason: BlockSyncMisbehavior) {
         let mut cancel_peer = None;
         if let Some(peer_state) = self.state.peers.get_mut(&peer) {
@@ -920,10 +946,20 @@ impl BlockSyncReactor {
         if let Some(cancel_token) = cancel_peer {
             cancel_token.cancel();
         }
-        let _ = self
+        // The Misbehavior action carries the hard-disconnect/scoring request to
+        // the supervisor. Deliver it without ever blocking the reactor: awaiting
+        // a full `actions` channel here was the backpressure stall that delayed
+        // misbehavior disconnects, request timeouts, and lifecycle draining
+        // whenever the action driver was slow. `try_send` keeps the reactor live
+        // so it can promptly tear down soft offenders at threshold and deliver
+        // the next disconnect as soon as the driver drains a slot.
+        if self
             .actions
-            .send(BlockSyncAction::Misbehavior { peer, reason })
-            .await;
+            .try_send(BlockSyncAction::Misbehavior { peer, reason })
+            .is_err()
+        {
+            metrics::counter!("sync.block.peer.disconnect.action_dropped").increment(1);
+        }
     }
 }
 

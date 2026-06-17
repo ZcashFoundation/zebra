@@ -276,6 +276,7 @@ impl ServiceRegistry {
         stream_kind: u16,
         request_id: u64,
         max_frame_bytes: u32,
+        max_message_bytes: u32,
         frame: Frame,
     ) -> Result<Vec<Frame>, SinkReject> {
         let Some(service) = self.service_for_kind(stream_kind) else {
@@ -290,7 +291,14 @@ impl ServiceRegistry {
         };
 
         handler
-            .request_frame(peer_id, stream_kind, request_id, max_frame_bytes, frame)
+            .request_frame(
+                peer_id,
+                stream_kind,
+                request_id,
+                max_frame_bytes,
+                max_message_bytes,
+                frame,
+            )
             .await
     }
 

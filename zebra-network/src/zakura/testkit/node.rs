@@ -189,6 +189,7 @@ async fn wait_for_peer_registration(
 pub struct ZakuraTestNodeBuilder {
     seed: u64,
     limits: ZakuraLocalLimits,
+    max_connections_per_ip: usize,
     transport_config: Option<TransportConfig>,
     legacy_upgrade: bool,
     tracer: JsonlTracer,
@@ -212,6 +213,7 @@ impl fmt::Debug for ZakuraTestNodeBuilder {
         f.debug_struct("ZakuraTestNodeBuilder")
             .field("seed", &self.seed)
             .field("limits", &self.limits)
+            .field("max_connections_per_ip", &self.max_connections_per_ip)
             .field("transport_config", &self.transport_config.is_some())
             .field("legacy_upgrade", &self.legacy_upgrade)
             .field("tracer", &self.tracer)
@@ -235,6 +237,7 @@ impl ZakuraTestNodeBuilder {
         Self {
             seed,
             limits,
+            max_connections_per_ip: Config::default().max_connections_per_ip,
             transport_config: None,
             legacy_upgrade: false,
             tracer: JsonlTracer::noop(),
@@ -261,6 +264,19 @@ impl ZakuraTestNodeBuilder {
     /// Override local limits.
     pub fn limits(mut self, limits: ZakuraLocalLimits) -> Self {
         self.limits = limits;
+        self
+    }
+
+    /// Override the per-IP connection cap enforced by this node's supervisor.
+    ///
+    /// Defaults to the production [`Config::max_connections_per_ip`] (1) so that
+    /// security and integration tests built on the default node exercise the
+    /// real per-IP admission gate instead of silently admitting many same-IP
+    /// peers. Multi-peer loopback harnesses — where every node shares
+    /// `127.0.0.1`, so the per-IP cap collapses to a single bucket — raise this
+    /// to restore cluster ergonomics.
+    pub fn max_connections_per_ip(mut self, max_connections_per_ip: usize) -> Self {
+        self.max_connections_per_ip = max_connections_per_ip;
         self
     }
 
@@ -332,7 +348,7 @@ impl ZakuraTestNodeBuilder {
         let endpoint = LocalEndpointFactory::with_transport_config(transport)
             .endpoint(self.seed)
             .await?;
-        let supervisor = ZakuraSupervisorHandle::new(self.limits.max_connections);
+        let supervisor = ZakuraSupervisorHandle::new(self.max_connections_per_ip);
         let recorder = InboundRecorder::new(usize::from(self.limits.max_inbound_queue_depth));
         let base_service = if let Some(factory) = self.service_factory {
             factory(supervisor.clone())
@@ -465,5 +481,75 @@ mod tests {
             .expect_err("legacy-upgrade hook is reserved, not silently ignored");
 
         assert!(error.to_string().contains("connect_via_upgrade"));
+    }
+
+    #[tokio::test]
+    async fn default_test_node_uses_production_per_ip_cap() {
+        // Every loopback test node binds 127.0.0.1, so the supervisor's per-IP
+        // cap collapses all peers into one IP bucket. A default test node must
+        // inherit the production per-IP cap (Config::max_connections_per_ip == 1)
+        // so security/integration tests built on it exercise the real per-IP
+        // admission gate. Before the fix the builder seeded the supervisor with
+        // max_connections (16), so a second same-IP peer was wrongly admitted and
+        // per-IP admission bugs could pass silently.
+        let peer1 = ZakuraTestNode::builder(9001)
+            .spawn()
+            .await
+            .expect("first loopback peer spawns");
+        let peer2 = ZakuraTestNode::builder(9002)
+            .spawn()
+            .await
+            .expect("second loopback peer spawns");
+        let node = ZakuraTestNode::builder(9003)
+            .spawn()
+            .await
+            .expect("default test node spawns");
+
+        node.connect_native(&peer1, Duration::from_secs(5))
+            .await
+            .expect("first same-IP outbound peer registers under per-IP cap 1");
+        let second = node.connect_native(&peer2, Duration::from_secs(5)).await;
+        assert!(
+            second.is_err(),
+            "second same-IP outbound dial must be rejected under the production \
+             per-IP cap of 1, but it registered — the test node is not enforcing \
+             production per-IP admission"
+        );
+
+        node.shutdown().await;
+        peer1.shutdown().await;
+        peer2.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn per_ip_cap_opt_out_admits_multiple_same_ip_peers() {
+        // Multi-peer loopback harnesses (clusters, gossip meshes) intentionally
+        // admit several same-IP peers and do not exercise the per-IP gate. The
+        // explicit builder opt-out restores that ergonomics on top of the
+        // production-faithful default.
+        let peer1 = ZakuraTestNode::builder(9101)
+            .spawn()
+            .await
+            .expect("first loopback peer spawns");
+        let peer2 = ZakuraTestNode::builder(9102)
+            .spawn()
+            .await
+            .expect("second loopback peer spawns");
+        let node = ZakuraTestNode::builder(9103)
+            .max_connections_per_ip(8)
+            .spawn()
+            .await
+            .expect("opt-out test node spawns");
+
+        node.connect_native(&peer1, Duration::from_secs(5))
+            .await
+            .expect("first same-IP peer registers with raised per-IP cap");
+        node.connect_native(&peer2, Duration::from_secs(5))
+            .await
+            .expect("second same-IP peer registers with raised per-IP cap");
+
+        node.shutdown().await;
+        peer1.shutdown().await;
+        peer2.shutdown().await;
     }
 }

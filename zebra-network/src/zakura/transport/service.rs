@@ -257,12 +257,18 @@ pub trait Service: fmt::Debug + Send + Sync + 'static {
 /// A Zakura service that accepts one-shot request/response streams.
 pub trait RequestResponseService: Service {
     /// Deliver one request-response request frame to this service.
+    ///
+    /// `max_frame_bytes` bounds each encoded outbound frame; `max_message_bytes`
+    /// is the peer's negotiated full-message cap. Responders must size outbound
+    /// frame payloads against the smaller of the two so the peer never receives
+    /// a frame larger than its accepted message cap.
     fn request_frame<'a>(
         &'a self,
         peer_id: ZakuraPeerId,
         stream_kind: u16,
         request_id: u64,
         max_frame_bytes: u32,
+        max_message_bytes: u32,
         frame: Frame,
     ) -> BoxRunFuture<'a, Result<Vec<Frame>, SinkReject>>;
 }

@@ -316,40 +316,11 @@ impl RateMeter {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ByteBudget {
-    max_bytes: u64,
-    reserved_bytes: u64,
-}
-
-impl ByteBudget {
-    pub(super) fn new(max_bytes: u64) -> Self {
-        Self {
-            max_bytes,
-            reserved_bytes: 0,
-        }
-    }
-
-    pub(super) fn available(self) -> u64 {
-        self.max_bytes.saturating_sub(self.reserved_bytes)
-    }
-
-    pub(super) fn reserved(self) -> u64 {
-        self.reserved_bytes
-    }
-
-    pub(super) fn try_reserve(&mut self, bytes: u64) -> bool {
-        if bytes == 0 || bytes > self.available() {
-            return false;
-        }
-        self.reserved_bytes = self.reserved_bytes.saturating_add(bytes);
-        true
-    }
-
-    pub(super) fn release(&mut self, bytes: u64) {
-        self.reserved_bytes = self.reserved_bytes.saturating_sub(bytes);
-    }
-}
+// `ByteBudget` was promoted to `transport/guard.rs` so byte-rate protection is
+// reusable across services. Re-exported here so existing block_sync call sites
+// (`reorder.rs`, `scheduler.rs`, `tests.rs`, and the field on this module's
+// state) keep resolving unchanged.
+pub(crate) use crate::zakura::transport::ByteBudget;
 
 pub(super) fn next_height(height: block::Height) -> Option<block::Height> {
     height.0.checked_add(1).map(block::Height)
