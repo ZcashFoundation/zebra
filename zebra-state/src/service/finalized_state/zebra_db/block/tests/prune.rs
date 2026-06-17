@@ -19,14 +19,14 @@ use zebra_chain::{
 use crate::{
     config::StorageMode,
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_PRUNE_HEIGHTS_PER_COMMIT, MIN_PRUNING_RETENTION},
-    request::{FinalizableBlock, Treestate},
+    request::{CheckpointVerifiedBlock, FinalizableBlock, FinalizedBlock, Treestate},
     rollback_finalized_state,
     service::finalized_state::{disk_db::DiskWriteBatch, FinalizedState},
     Config, ContextuallyVerifiedBlock, PruningConfig, RollbackFinalizedStateError,
     RollbackFinalizedStateOptions, SemanticallyVerifiedBlock,
 };
 
-use super::super::{prune_height_range_inner, should_log_prune_progress};
+use super::super::{prune_height_range_inner, should_log_prune_progress, RetentionPlan};
 
 /// The number of leading blocks committed by the database-backed prune tests.
 const TEST_BLOCKS: u32 = 9;
@@ -56,7 +56,7 @@ fn new_state_with_blocks(config: &Config, network: &Network) -> FinalizedState {
     state
 }
 
-/// Opens a fresh finalized state with a checkpoint retention floor and commits
+/// Opens a fresh finalized state with a checkpoint retention start and commits
 /// blocks `0..=TEST_BLOCKS` for `network`.
 fn new_state_with_checkpoint_retention(
     config: &Config,
@@ -130,8 +130,206 @@ fn coinbase_tx_hash(network: &Network, height: u32) -> zebra_chain::transaction:
     block.transactions[0].hash()
 }
 
+/// Returns the finalized checkpoint test block at `height`.
+fn finalized_checkpoint_block(network: &Network, height: u32) -> FinalizedBlock {
+    let block: Arc<Block> = network
+        .blockchain_map()
+        .get(&height)
+        .expect("block height has test data")
+        .zcash_deserialize_into()
+        .expect("test data deserializes");
+
+    FinalizedBlock::from_checkpoint_verified(
+        CheckpointVerifiedBlock::from(block),
+        Treestate::default(),
+    )
+}
+
 #[test]
-fn checkpoint_retention_hands_off_to_online_pruning_at_floor() {
+fn retention_plan_raw_transaction_and_backlog_flags_match_variants() {
+    assert!(
+        RetentionPlan::Store.stores_raw_transactions(),
+        "stored blocks write raw transactions"
+    );
+    assert!(
+        RetentionPlan::Prune {
+            from: Height(1),
+            until: Height(2),
+        }
+        .stores_raw_transactions(),
+        "ordinary pruning still writes the committed block's raw transactions"
+    );
+    assert!(
+        RetentionPlan::DrainBacklog {
+            from: Height(1),
+            until: Height(2),
+            final_chunk: false,
+        }
+        .stores_raw_transactions(),
+        "non-final archive-backlog drains keep writing current checkpoint raw transactions"
+    );
+    assert!(
+        !RetentionPlan::DrainBacklog {
+            from: Height(1),
+            until: Height(2),
+            final_chunk: true,
+        }
+        .stores_raw_transactions(),
+        "the final archive-backlog chunk switches to checkpoint raw transaction skipping"
+    );
+    assert!(
+        !RetentionPlan::Skip {
+            lowest_retained: Height(2),
+            write_marker: true,
+        }
+        .stores_raw_transactions(),
+        "checkpoint skip plans do not write raw transactions"
+    );
+
+    assert!(
+        RetentionPlan::DrainBacklog {
+            from: Height(1),
+            until: Height(2),
+            final_chunk: true,
+        }
+        .clears_archive_backlog(),
+        "only the final archive-backlog chunk clears the backlog flag"
+    );
+    assert!(
+        !RetentionPlan::DrainBacklog {
+            from: Height(1),
+            until: Height(2),
+            final_chunk: false,
+        }
+        .clears_archive_backlog(),
+        "non-final archive-backlog chunks keep the backlog flag set"
+    );
+    assert!(
+        !RetentionPlan::Skip {
+            lowest_retained: Height(2),
+            write_marker: true,
+        }
+        .clears_archive_backlog(),
+        "marker-only checkpoint skips do not clear an archive-backlog flag"
+    );
+}
+
+#[test]
+fn retention_plan_prepare_prune_writes_expected_pruning_batch() {
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+    let finalized = finalized_checkpoint_block(&network, 5);
+
+    let store_state = new_state_with_blocks(&pruned_config(), &network);
+    let mut batch = DiskWriteBatch::new();
+    RetentionPlan::Store.prepare_prune(&mut batch, &store_state.db, &finalized);
+    store_state
+        .db
+        .write_batch(batch)
+        .expect("store batch writes");
+    assert_eq!(
+        store_state.db.lowest_retained_height(),
+        None,
+        "store plans leave the pruning marker unchanged"
+    );
+
+    let prune_state = new_state_with_blocks(&pruned_config(), &network);
+    let mut batch = DiskWriteBatch::new();
+    RetentionPlan::Prune {
+        from: Height(1),
+        until: Height(3),
+    }
+    .prepare_prune(&mut batch, &prune_state.db, &finalized);
+    prune_state
+        .db
+        .write_batch(batch)
+        .expect("prune batch writes");
+    assert_eq!(
+        prune_state.db.lowest_retained_height(),
+        Some(Height(3)),
+        "ordinary prune plans advance the marker to the exclusive range end"
+    );
+    assert!(
+        prune_state
+            .db
+            .transaction(coinbase_tx_hash(&network, 1))
+            .is_none(),
+        "ordinary prune plans delete raw transactions inside the range"
+    );
+    assert!(
+        prune_state
+            .db
+            .transaction(coinbase_tx_hash(&network, 3))
+            .is_some(),
+        "ordinary prune plans keep raw transactions at the exclusive range end"
+    );
+
+    let backlog_state = new_state_with_blocks(&pruned_config(), &network);
+    let mut batch = DiskWriteBatch::new();
+    RetentionPlan::DrainBacklog {
+        from: Height(1),
+        until: Height(3),
+        final_chunk: false,
+    }
+    .prepare_prune(&mut batch, &backlog_state.db, &finalized);
+    backlog_state
+        .db
+        .write_batch(batch)
+        .expect("backlog batch writes");
+    assert_eq!(
+        backlog_state.db.lowest_retained_height(),
+        Some(Height(3)),
+        "archive-backlog drain plans advance the marker to the exclusive range end"
+    );
+    assert!(
+        backlog_state
+            .db
+            .transaction(coinbase_tx_hash(&network, 5))
+            .is_some(),
+        "non-final archive-backlog drains do not delete the current checkpoint block"
+    );
+
+    let skip_state = new_state_with_blocks(&pruned_config(), &network);
+    let mut batch = DiskWriteBatch::new();
+    RetentionPlan::Skip {
+        lowest_retained: Height(4),
+        write_marker: true,
+    }
+    .prepare_prune(&mut batch, &skip_state.db, &finalized);
+    skip_state.db.write_batch(batch).expect("skip batch writes");
+    assert_eq!(
+        skip_state.db.lowest_retained_height(),
+        Some(Height(4)),
+        "checkpoint skip plans can advance the marker without deleting a range"
+    );
+    assert!(
+        skip_state
+            .db
+            .transaction(coinbase_tx_hash(&network, 1))
+            .is_some(),
+        "checkpoint skip plans only write the marker; backlog drains do the range deletion"
+    );
+
+    let no_marker_state = new_state_with_blocks(&pruned_config(), &network);
+    let mut batch = DiskWriteBatch::new();
+    RetentionPlan::Skip {
+        lowest_retained: Height(4),
+        write_marker: false,
+    }
+    .prepare_prune(&mut batch, &no_marker_state.db, &finalized);
+    no_marker_state
+        .db
+        .write_batch(batch)
+        .expect("no-marker skip batch writes");
+    assert_eq!(
+        no_marker_state.db.lowest_retained_height(),
+        None,
+        "checkpoint skip plans honor write_marker = false"
+    );
+}
+
+#[test]
+fn checkpoint_retention_hands_off_to_online_pruning_at_start() {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
     let tx_retention = 5;
@@ -160,7 +358,7 @@ fn checkpoint_retention_hands_off_to_online_pruning_at_floor() {
     assert_eq!(
         state.db.lowest_retained_height(),
         Some(checkpoint_lowest_retained),
-        "checkpoint skipping advances the marker to the retained floor"
+        "checkpoint skipping advances the marker to the retention start"
     );
 
     for height in 1..checkpoint_lowest_retained.0 {
@@ -169,7 +367,7 @@ fn checkpoint_retention_hands_off_to_online_pruning_at_floor() {
                 .db
                 .transaction(coinbase_tx_hash(&network, height))
                 .is_none(),
-            "raw transaction is skipped below the checkpoint retention floor"
+            "raw transaction is skipped before the checkpoint retention start"
         );
     }
     assert!(
@@ -177,7 +375,7 @@ fn checkpoint_retention_hands_off_to_online_pruning_at_floor() {
             .db
             .transaction(coinbase_tx_hash(&network, checkpoint_lowest_retained.0))
             .is_some(),
-        "raw transaction is retained at the checkpoint retention floor before handoff"
+        "raw transaction is retained at the checkpoint retention start before handoff"
     );
 
     let handoff_tip = (max_checkpoint_height + 1).expect("max checkpoint height plus one is valid");
@@ -192,18 +390,18 @@ fn checkpoint_retention_hands_off_to_online_pruning_at_floor() {
         .expect("handoff block is valid");
 
     let online_prune_until =
-        (checkpoint_lowest_retained + 1).expect("checkpoint retention floor plus one is valid");
+        (checkpoint_lowest_retained + 1).expect("checkpoint retention start plus one is valid");
     assert_eq!(
         state.db.lowest_retained_height(),
         Some(online_prune_until),
-        "online pruning resumes exactly at the checkpoint retention floor"
+        "online pruning resumes exactly at the checkpoint retention start"
     );
     assert!(
         state
             .db
             .transaction(coinbase_tx_hash(&network, checkpoint_lowest_retained.0))
             .is_none(),
-        "online pruning deletes the first retained-floor height after the checkpoint target"
+        "online pruning deletes the checkpoint retention start height after the checkpoint target"
     );
     assert!(
         state
@@ -364,12 +562,12 @@ fn checkpoint_retention_skips_old_raw_transactions_in_pruned_mode() {
 
         assert!(
             state.db.transaction(tx_hash).is_none(),
-            "checkpoint raw transaction is skipped below the checkpoint retention floor"
+            "checkpoint raw transaction is skipped before the checkpoint retention start"
         );
         assert_eq!(
             state.db.transactions_by_height(Height(height)).count(),
             0,
-            "tx_by_loc has no raw transactions below the checkpoint retention floor"
+            "tx_by_loc has no raw transactions before the checkpoint retention start"
         );
         assert!(
             state.db.transaction_location(tx_hash).is_some(),
@@ -390,7 +588,7 @@ fn checkpoint_retention_skips_old_raw_transactions_in_pruned_mode() {
 
         assert!(
             state.db.transaction(tx_hash).is_some(),
-            "checkpoint raw transaction is retained at or above the checkpoint retention floor"
+            "checkpoint raw transaction is retained at or after the checkpoint retention start"
         );
         assert!(
             state.db.block(Height(height).into()).is_some(),
@@ -446,7 +644,7 @@ fn archive_to_pruned_checkpoint_sync_drains_archive_raw_transactions_before_skip
             .db
             .transaction(coinbase_tx_hash(&network, TEST_BLOCKS - 1))
             .is_some(),
-        "archive phase stores raw transactions below the future checkpoint floor"
+        "archive phase stores raw transactions before the future checkpoint retention start"
     );
     std::mem::drop(archive_state);
 
@@ -478,7 +676,7 @@ fn archive_to_pruned_checkpoint_sync_drains_archive_raw_transactions_before_skip
     assert_eq!(
         pruned_state.db.lowest_retained_height(),
         Some(checkpoint_lowest_retained),
-        "archive backlog is pruned up to the checkpoint retention floor"
+        "archive backlog is pruned up to the checkpoint retention start"
     );
 
     for height in 1..checkpoint_lowest_retained.0 {
@@ -514,8 +712,8 @@ fn archive_backlog_flag_is_recomputed_when_reopening_a_pruned_database() {
     };
     let blocks = network.blockchain_map();
 
-    // Archive phase: store raw transactions for every block below the future
-    // checkpoint retention floor.
+    // Archive phase: store raw transactions for every block before the future
+    // checkpoint retention start.
     let mut archive_state = FinalizedState::new(
         &archive_config,
         &network,
@@ -545,7 +743,7 @@ fn archive_backlog_flag_is_recomputed_when_reopening_a_pruned_database() {
         ..Config::ephemeral()
     };
 
-    // First pruned open: the archive backlog below the floor must be detected.
+    // First pruned open: the archive backlog before the start must be detected.
     let mut pruned_state = new_unvalidated_state_with_checkpoint_retention(
         &pruned_config,
         &network,
@@ -568,7 +766,7 @@ fn archive_backlog_flag_is_recomputed_when_reopening_a_pruned_database() {
     assert_eq!(
         pruned_state.db.lowest_retained_height(),
         Some(checkpoint_lowest_retained),
-        "archive backlog is pruned up to the checkpoint retention floor"
+        "archive backlog is pruned up to the checkpoint retention start"
     );
     assert!(
         !pruned_state.has_checkpoint_raw_tx_archive_backlog(),
@@ -595,7 +793,7 @@ fn archive_backlog_flag_is_recomputed_when_reopening_a_pruned_database() {
 }
 
 #[test]
-fn archive_mode_keeps_checkpoint_raw_transactions_below_checkpoint_retention_floor() {
+fn archive_mode_keeps_checkpoint_raw_transactions_before_checkpoint_retention_start() {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
     let config = Config::ephemeral();
@@ -624,7 +822,7 @@ fn archive_mode_keeps_checkpoint_raw_transactions_below_checkpoint_retention_flo
 }
 
 #[test]
-fn contextual_commits_keep_raw_transactions_below_checkpoint_retention_floor() {
+fn contextual_commits_keep_raw_transactions_before_checkpoint_retention_start() {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
     let config = pruned_config();
@@ -668,12 +866,12 @@ fn contextual_commits_keep_raw_transactions_below_checkpoint_retention_floor() {
             .db
             .transaction(coinbase_tx_hash(&network, 1))
             .is_some(),
-        "contextual finalized commits keep raw transaction data even below the checkpoint floor"
+        "contextual finalized commits keep raw transaction data even before the checkpoint retention start"
     );
     assert_eq!(
         state.db.lowest_retained_height(),
         None,
-        "contextual commit below checkpoint floor does not advance pruning marker"
+        "contextual commit before checkpoint retention start does not advance pruning marker"
     );
 }
 

@@ -24,6 +24,7 @@ use std::{
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
 use zebra_db::{
+    block::RetentionPlan,
     chain::BLOCK_INFO,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
@@ -142,10 +143,10 @@ pub struct FinalizedState {
 
     /// The lowest checkpoint-verified block height whose raw transaction bytes
     /// should be retained during checkpoint sync in pruned mode.
-    checkpoint_raw_tx_retention_floor: Option<block::Height>,
+    checkpoint_raw_tx_retention_start: Option<block::Height>,
 
     /// `true` if raw transactions from an archive-mode sync may still exist
-    /// below `checkpoint_raw_tx_retention_floor`.
+    /// before `checkpoint_raw_tx_retention_start`.
     ///
     /// Shared via `Arc<AtomicBool>` because [`FinalizedState`] is `Clone` and the
     /// commit path mutates this flag (clearing it once the archive backlog is
@@ -294,7 +295,7 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
-            checkpoint_raw_tx_retention_floor: None,
+            checkpoint_raw_tx_retention_start: None,
             checkpoint_raw_tx_archive_backlog: Arc::new(AtomicBool::new(false)),
             db,
             elastic_db,
@@ -304,7 +305,7 @@ impl FinalizedState {
         #[cfg(not(feature = "elasticsearch"))]
         let new_state = Self {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
-            checkpoint_raw_tx_retention_floor: None,
+            checkpoint_raw_tx_retention_start: None,
             checkpoint_raw_tx_archive_backlog: Arc::new(AtomicBool::new(false)),
             db,
         };
@@ -362,7 +363,7 @@ impl FinalizedState {
 
     /// Configure checkpoint raw transaction retention for pruned checkpoint sync.
     ///
-    /// Checkpoint-verified blocks below the configured floor can skip `tx_by_loc`
+    /// Checkpoint-verified blocks before the configured start can skip `tx_by_loc`
     /// writes, because they are outside the retention window relative to the
     /// known final checkpoint target.
     pub(crate) fn with_checkpoint_raw_tx_retention(
@@ -370,15 +371,15 @@ impl FinalizedState {
         max_checkpoint_height: block::Height,
         config: &Config,
     ) -> Self {
-        self.checkpoint_raw_tx_retention_floor = config.pruning_config().and_then(|pruning| {
-            compute_checkpoint_raw_tx_retention_floor(max_checkpoint_height, pruning.tx_retention)
+        self.checkpoint_raw_tx_retention_start = config.pruning_config().and_then(|pruning| {
+            compute_checkpoint_raw_tx_retention_start(max_checkpoint_height, pruning.tx_retention)
         });
 
         let has_archive_backlog = config.pruning_config().is_some()
-            && self.checkpoint_raw_tx_retention_floor.is_some_and(|floor| {
+            && self.checkpoint_raw_tx_retention_start.is_some_and(|start| {
                 let prune_from = self.db.lowest_retained_height().unwrap_or(block::Height(1));
 
-                self.db.raw_transactions_exist_in_range(prune_from, floor)
+                self.db.raw_transactions_exist_in_range(prune_from, start)
             });
 
         self.checkpoint_raw_tx_archive_backlog
@@ -392,8 +393,73 @@ impl FinalizedState {
     fn store_checkpoint_raw_transactions(&self, height: block::Height) -> bool {
         height.is_min()
             || self
-                .checkpoint_raw_tx_retention_floor
-                .is_none_or(|floor| height >= floor)
+                .checkpoint_raw_tx_retention_start
+                .is_none_or(|start| height >= start)
+    }
+
+    /// Resolves the [`RetentionPlan`] for committing the finalized block at
+    /// `height` in the current storage mode.
+    ///
+    /// This is the single place the raw-transaction retention decision is made:
+    /// whether to write this block's raw transactions, which aged-out or backlog
+    /// range to delete, and how to advance the pruning marker.
+    /// [`ZebraDb::write_block`] applies the returned plan without re-deriving it.
+    ///
+    /// `is_checkpoint` selects the checkpoint-sync policy (a retention start
+    /// before which raw transactions are skipped, plus bounded archive-backlog
+    /// draining) rather than the near-tip policy (ordinary online pruning). In
+    /// archive mode the plan is always [`RetentionPlan::Store`].
+    fn retention_plan(&self, height: block::Height, is_checkpoint: bool) -> RetentionPlan {
+        let Some(pruning) = self.db.config().pruning_config() else {
+            return RetentionPlan::Store;
+        };
+
+        let lowest_retained = self.db.lowest_retained_height();
+
+        // Checkpoint blocks before the retention start: skip raw transactions,
+        // draining any pre-existing archive backlog in bounded chunks first.
+        if is_checkpoint && !self.store_checkpoint_raw_transactions(height) {
+            let skipped_until = (height + 1).expect("checkpoint block height plus one is valid");
+
+            if self
+                .checkpoint_raw_tx_archive_backlog
+                .load(Ordering::Relaxed)
+            {
+                if let Some((from, until)) = self
+                    .db
+                    .checkpoint_raw_transaction_prune_range(skipped_until)
+                {
+                    // The marker can only advance past this block once the
+                    // backlog below it is fully drained, so the last chunk (which
+                    // reaches `skipped_until`) is the one that skips this block's
+                    // raw transactions and clears the backlog flag afterwards.
+                    let final_chunk =
+                        !checkpoint_prune_range_retains_current_height(height, Some((from, until)));
+
+                    return RetentionPlan::DrainBacklog {
+                        from,
+                        until,
+                        final_chunk,
+                    };
+                }
+            }
+
+            // No archive backlog left to drain: skip this block's raw
+            // transactions and advance the pruning marker so readers know raw
+            // data below it may be unavailable.
+            return RetentionPlan::Skip {
+                lowest_retained: skipped_until,
+                write_marker: lowest_retained < Some(skipped_until),
+            };
+        }
+
+        // Archive-equivalent path for this block (contextual blocks, or
+        // checkpoint blocks within the retention window): keep raw transactions
+        // and run ordinary online pruning.
+        match ZebraDb::prune_height_range(height, pruning.tx_retention, lowest_retained) {
+            Some((from, until)) => RetentionPlan::Prune { from, until },
+            None => RetentionPlan::Store,
+        }
     }
 
     /// Returns `true` if the cached archive raw transaction backlog flag is set.
@@ -466,117 +532,97 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (
-            height,
-            hash,
-            finalized,
-            prev_note_commitment_trees,
-            store_raw_transactions,
-            checkpoint_prune_range,
-        ) = match finalizable_block {
-            FinalizableBlock::Checkpoint {
-                checkpoint_verified,
-            } => {
-                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
-                // treestate of the finalized tip from the database and update it for the block
-                // being committed, assuming the retrieved treestate is the parent block's
-                // treestate. Later on, this function proves this assumption by asserting that the
-                // finalized tip is the parent block of the block being committed.
+        let (height, hash, finalized, prev_note_commitment_trees, retention) =
+            match finalizable_block {
+                FinalizableBlock::Checkpoint {
+                    checkpoint_verified,
+                } => {
+                    // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
+                    // treestate of the finalized tip from the database and update it for the block
+                    // being committed, assuming the retrieved treestate is the parent block's
+                    // treestate. Later on, this function proves this assumption by asserting that the
+                    // finalized tip is the parent block of the block being committed.
 
-                let block = checkpoint_verified.block.clone();
-                let mut history_tree = self.db.history_tree();
-                let prev_note_commitment_trees = prev_note_commitment_trees
-                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+                    let block = checkpoint_verified.block.clone();
+                    let mut history_tree = self.db.history_tree();
+                    let prev_note_commitment_trees = prev_note_commitment_trees
+                        .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
-                // Update the note commitment trees.
-                let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees
-                    .update_trees_parallel(&block)
-                    .map_err(ValidateContextError::from)?;
+                    // Update the note commitment trees.
+                    let mut note_commitment_trees = prev_note_commitment_trees.clone();
+                    note_commitment_trees
+                        .update_trees_parallel(&block)
+                        .map_err(ValidateContextError::from)?;
 
-                // Check the block commitment if the history tree was not
-                // supplied by the non-finalized state. Note that we don't do
-                // this check for history trees supplied by the non-finalized
-                // state because the non-finalized state checks the block
-                // commitment.
-                //
-                // For Nu5-onward, the block hash commits only to
-                // non-authorizing data (see ZIP-244). This checks the
-                // authorizing data commitment, making sure the entire block
-                // contents were committed to. The test is done here (and not
-                // during semantic validation) because it needs the history tree
-                // root. While it _is_ checked during contextual validation,
-                // that is not called by the checkpoint verifier, and keeping a
-                // history tree there would be harder to implement.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
-                    &self.network(),
-                    &history_tree,
-                )?;
+                    // Check the block commitment if the history tree was not
+                    // supplied by the non-finalized state. Note that we don't do
+                    // this check for history trees supplied by the non-finalized
+                    // state because the non-finalized state checks the block
+                    // commitment.
+                    //
+                    // For Nu5-onward, the block hash commits only to
+                    // non-authorizing data (see ZIP-244). This checks the
+                    // authorizing data commitment, making sure the entire block
+                    // contents were committed to. The test is done here (and not
+                    // during semantic validation) because it needs the history tree
+                    // root. While it _is_ checked during contextual validation,
+                    // that is not called by the checkpoint verifier, and keeping a
+                    // history tree there would be harder to implement.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    check::block_commitment_is_valid_for_chain_history(
+                        block.clone(),
+                        &self.network(),
+                        &history_tree,
+                    )?;
 
-                // Update the history tree.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                let history_tree_mut = Arc::make_mut(&mut history_tree);
-                let sapling_root = note_commitment_trees.sapling.root();
-                let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut
-                    .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
-                    .map_err(Arc::new)
-                    .map_err(ValidateContextError::from)?;
+                    // Update the history tree.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    let history_tree_mut = Arc::make_mut(&mut history_tree);
+                    let sapling_root = note_commitment_trees.sapling.root();
+                    let orchard_root = note_commitment_trees.orchard.root();
+                    history_tree_mut
+                        .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
+                        .map_err(Arc::new)
+                        .map_err(ValidateContextError::from)?;
 
-                let treestate = Treestate {
-                    note_commitment_trees,
-                    history_tree,
-                };
+                    let treestate = Treestate {
+                        note_commitment_trees,
+                        history_tree,
+                    };
 
-                let height = checkpoint_verified.height;
-                let hash = checkpoint_verified.hash;
-                let store_raw_transactions = self.store_checkpoint_raw_transactions(height);
-                let checkpoint_prune_range = if store_raw_transactions
-                    || !self
-                        .checkpoint_raw_tx_archive_backlog
-                        .load(Ordering::Relaxed)
-                {
-                    None
-                } else {
-                    let skipped_until =
-                        (height + 1).expect("checkpoint block height plus one is valid");
+                    let height = checkpoint_verified.height;
+                    let hash = checkpoint_verified.hash;
 
-                    self.db
-                        .checkpoint_raw_transaction_prune_range(skipped_until)
-                };
-                let store_raw_transactions = store_raw_transactions
-                    || checkpoint_prune_range_retains_current_height(
+                    (
                         height,
-                        checkpoint_prune_range,
-                    );
+                        hash,
+                        FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
+                        Some(prev_note_commitment_trees),
+                        self.retention_plan(height, true),
+                    )
+                }
+                FinalizableBlock::Contextual {
+                    contextually_verified,
+                    treestate,
+                } => {
+                    let height = contextually_verified.height;
 
-                (
-                    height,
-                    hash,
-                    FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
-                    Some(prev_note_commitment_trees),
-                    store_raw_transactions,
-                    checkpoint_prune_range,
-                )
-            }
-            FinalizableBlock::Contextual {
-                contextually_verified,
-                treestate,
-            } => (
-                contextually_verified.height,
-                contextually_verified.hash,
-                FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
-                prev_note_commitment_trees,
-                true,
-                None,
-            ),
-        };
+                    (
+                        height,
+                        contextually_verified.hash,
+                        FinalizedBlock::from_contextually_verified(
+                            contextually_verified,
+                            treestate,
+                        ),
+                        prev_note_commitment_trees,
+                        self.retention_plan(height, false),
+                    )
+                }
+            };
 
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
@@ -614,14 +660,11 @@ impl FinalizedState {
             prev_note_commitment_trees,
             &self.network(),
             source,
-            store_raw_transactions,
-            checkpoint_prune_range,
+            retention,
         );
 
         if result.is_ok() {
-            if checkpoint_prune_range.is_some_and(|(_, prune_until)| {
-                prune_until == (height + 1).expect("checkpoint block height plus one is valid")
-            }) {
+            if retention.clears_archive_backlog() {
                 self.checkpoint_raw_tx_archive_backlog
                     .store(false, Ordering::Relaxed);
             }
@@ -790,7 +833,7 @@ fn checkpoint_prune_range_retains_current_height(
 }
 
 /// Returns the lowest checkpoint height whose raw transactions should be kept.
-fn compute_checkpoint_raw_tx_retention_floor(
+fn compute_checkpoint_raw_tx_retention_start(
     max_checkpoint_height: block::Height,
     tx_retention: u32,
 ) -> Option<block::Height> {

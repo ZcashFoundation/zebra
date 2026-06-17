@@ -96,8 +96,8 @@ The one-way transition is tracked by a single progress marker stored in the
   family is treated the same as a missing marker: not pruned.
 - The marker is **written only when raw transaction history has actually become
   unavailable** — either because pruning deleted it, or because checkpoint sync
-  intentionally skipped storing raw transactions below the checkpoint retention
-  floor. A node configured as `pruned` that has not yet reached either condition
+  intentionally skipped storing raw transactions before the checkpoint retention
+  start. A node configured as `pruned` that has not yet reached either condition
   has no marker, and can still be switched back to archive.
 
 The `pruning_metadata` column family is created lazily on any writable database,
@@ -136,12 +136,12 @@ The genesis block (height 0) is never pruned.
 
 ### Archive-to-pruned checkpoint sync
 
-Checkpoint sync in pruned mode can skip writing raw transaction bytes below the
-checkpoint retention floor, because those blocks are already outside the retained
+Checkpoint sync in pruned mode can skip writing raw transaction bytes before the
+checkpoint retention start, because those blocks are already outside the retained
 window relative to the known final checkpoint target.
 
 If an archive database is reopened in pruned mode partway through checkpoint
-sync, older archive-era raw transactions can still exist below that floor. In
+sync, older archive-era raw transactions can still exist before that start. In
 that case Zebra temporarily keeps writing raw transaction bytes for new
 checkpoint blocks and uses the per-block write batch to drain the archive-era
 backlog in bounded chunks. Once no raw transaction bytes remain below the skipped

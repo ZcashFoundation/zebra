@@ -461,8 +461,8 @@ impl ZebraDb {
     /// pruned. When pruning is first enabled on an existing archive database,
     /// regular online pruning may advance this marker before older archive raw
     /// transactions are deleted. Checkpoint sync drains that archive backlog in
-    /// bounded chunks before it skips raw transaction writes below its retention
-    /// floor.
+    /// bounded chunks before it skips raw transaction writes before its retention
+    /// start.
     /// Returns `None` if the database has never pruned any data (it is
     /// effectively an archive database).
     pub fn lowest_retained_height(&self) -> Option<Height> {
@@ -494,7 +494,7 @@ impl ZebraDb {
     /// Since the returned range only ever covers heights at or below
     /// `new_tip - retention`, pruning can never delete data that a reorg or
     /// rollback could read.
-    fn prune_height_range(
+    pub(in super::super) fn prune_height_range(
         new_tip: Height,
         retention: u32,
         lowest_retained: Option<Height>,
@@ -505,10 +505,10 @@ impl ZebraDb {
     }
 
     /// Returns a bounded raw transaction prune range for checkpoint sync after
-    /// pruning is enabled on an archive database below the checkpoint retention
-    /// floor.
+    /// pruning is enabled on an archive database before the checkpoint retention
+    /// start.
     ///
-    /// Checkpoint sync can skip raw transaction writes below the floor, but a
+    /// Checkpoint sync can skip raw transaction writes before the start, but a
     /// single pruning marker cannot represent skipped heights above still-retained
     /// archive data. While the caller's cached archive-backlog flag is set,
     /// checkpoint commits keep raw transaction bytes and drain the backlog in
@@ -554,8 +554,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
-        store_raw_transactions: bool,
-        checkpoint_prune_range: Option<(Height, Height)>,
+        retention: RetentionPlan,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -686,81 +685,16 @@ impl ZebraDb {
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
-            store_raw_transactions,
+            retention.stores_raw_transactions(),
         )?;
 
         // In pruned storage mode, delete raw transaction history that has fallen
-        // outside the retention window. This goes in the same atomic batch as the
-        // tip advance, so the prune and the tip advance are always consistent, and
-        // it reuses the single-writer block commit path.
-        if let Some(pruning) = self.config().pruning_config() {
-            let lowest_retained_in_db = self.lowest_retained_height();
-            let already_pruned = lowest_retained_in_db.is_some();
-
-            if let Some((prune_from, prune_until)) = checkpoint_prune_range {
-                // Log every MAX_PRUNE_HEIGHTS_PER_COMMIT block boundaries and the first prune
-                // to avoid noise.
-                if should_log_prune_progress(
-                    already_pruned,
-                    finalized.height,
-                    prune_from,
-                    prune_until,
-                ) {
-                    tracing::info!(
-                        ?prune_from,
-                        ?prune_until,
-                        tip = ?finalized.height,
-                        retention = pruning.tx_retention,
-                        "pruning archive raw transaction history before checkpoint skipping",
-                    );
-                }
-
-                batch.prepare_prune_batch(self, prune_from, prune_until);
-            } else if !store_raw_transactions {
-                // This checkpoint block's raw transactions were intentionally
-                // not written. Mark them as pruned immediately, so readers know
-                // raw transaction data below this height may be unavailable.
-                let lowest_retained_height =
-                    (finalized.height + 1).expect("committed block height plus one is valid");
-
-                if lowest_retained_in_db < Some(lowest_retained_height) {
-                    batch.prepare_pruning_marker_batch(self, lowest_retained_height);
-                }
-
-                debug_assert!(
-                    Self::prune_height_range(
-                        finalized.height,
-                        pruning.tx_retention,
-                        lowest_retained_in_db.max(Some(lowest_retained_height)),
-                    )
-                    .is_none(),
-                    "checkpoint raw transaction skipping should keep the pruning marker ahead of online pruning"
-                );
-            } else if let Some((prune_from, prune_until)) = Self::prune_height_range(
-                finalized.height,
-                pruning.tx_retention,
-                lowest_retained_in_db,
-            ) {
-                // Log every MAX_PRUNE_HEIGHTS_PER_COMMIT block boundaries and the first prune
-                // to avoid noise.
-                if should_log_prune_progress(
-                    already_pruned,
-                    finalized.height,
-                    prune_from,
-                    prune_until,
-                ) {
-                    tracing::info!(
-                        ?prune_from,
-                        ?prune_until,
-                        tip = ?finalized.height,
-                        retention = pruning.tx_retention,
-                        "pruning raw transaction history outside the retention window",
-                    );
-                }
-
-                batch.prepare_prune_batch(self, prune_from, prune_until);
-            }
-        }
+        // outside the retention window, and/or advance the pruning marker. This
+        // goes in the same atomic batch as the tip advance, so pruning and the
+        // tip advance are always consistent, and it reuses the single-writer
+        // block commit path. In archive mode the plan is always `Store`, so this
+        // is a no-op.
+        retention.prepare_prune(&mut batch, self, &finalized);
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
@@ -862,6 +796,145 @@ fn should_log_prune_progress(
     !already_pruned
         || prune_until.0 - prune_from.0 >= MAX_PRUNE_HEIGHTS_PER_COMMIT
         || new_tip.0 % MAX_PRUNE_HEIGHTS_PER_COMMIT == 0
+}
+
+/// The resolved raw-transaction retention decision for committing one finalized
+/// block.
+///
+/// Computed once per block by
+/// [`FinalizedState::retention_plan`](super::super::FinalizedState::retention_plan)
+/// and applied by [`ZebraDb::write_block`] without re-derivation.
+///
+/// Only [`RetentionPlan::Store`] occurs in archive mode; the other variants are
+/// only produced in pruned storage mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in super::super) enum RetentionPlan {
+    /// Store this block's raw transactions and prune nothing in this commit.
+    ///
+    /// Archive mode, or pruned mode within the retention window with nothing due.
+    Store,
+
+    /// Store this block's raw transactions, and delete the half-open raw
+    /// transaction height range `[from, until)` that has aged out of the
+    /// retention window (ordinary online pruning near the tip).
+    Prune { from: Height, until: Height },
+
+    /// Drain a bounded chunk `[from, until)` of pre-existing archive raw
+    /// transaction backlog while checkpoint sync is before the retention start.
+    ///
+    /// `final_chunk` is set on the last chunk, which reaches the checkpoint skip
+    /// boundary: this block's own raw transactions are skipped and the
+    /// archive-backlog flag is cleared after the commit succeeds.
+    DrainBacklog {
+        from: Height,
+        until: Height,
+        final_chunk: bool,
+    },
+
+    /// Skip this checkpoint block's raw transactions (it is before the retention
+    /// start with no archive backlog left to drain).
+    ///
+    /// Advances the pruning marker to `lowest_retained` when `write_marker` is
+    /// set (i.e. the marker is not already at or ahead of it).
+    Skip {
+        lowest_retained: Height,
+        write_marker: bool,
+    },
+}
+
+impl RetentionPlan {
+    /// Returns `true` when this block's raw transaction bytes should be written
+    /// to `tx_by_loc`.
+    pub(in super::super) fn stores_raw_transactions(self) -> bool {
+        match self {
+            RetentionPlan::Store | RetentionPlan::Prune { .. } => true,
+            RetentionPlan::DrainBacklog { final_chunk, .. } => !final_chunk,
+            RetentionPlan::Skip { .. } => false,
+        }
+    }
+
+    /// Returns `true` when the archive-backlog flag should be cleared after the
+    /// commit succeeds, because the backlog has been fully drained.
+    pub(in super::super) fn clears_archive_backlog(self) -> bool {
+        matches!(
+            self,
+            RetentionPlan::DrainBacklog {
+                final_chunk: true,
+                ..
+            }
+        )
+    }
+
+    /// Adds this plan's raw transaction deletes and/or pruning marker to `batch`,
+    /// and logs pruning progress for operators.
+    ///
+    /// The block header and transaction data must already have been added to
+    /// `batch` (using [`Self::stores_raw_transactions`] to decide whether raw
+    /// transactions were written), so that pruning and the tip advance commit
+    /// together in one atomic batch.
+    pub(in super::super) fn prepare_prune(
+        self,
+        batch: &mut DiskWriteBatch,
+        zebra_db: &ZebraDb,
+        finalized: &FinalizedBlock,
+    ) {
+        let already_pruned = zebra_db.lowest_retained_height().is_some();
+        let retention = zebra_db
+            .config()
+            .pruning_config()
+            .map(|pruning| pruning.tx_retention);
+
+        match self {
+            RetentionPlan::Store => {}
+
+            RetentionPlan::Prune { from, until } => {
+                if should_log_prune_progress(already_pruned, finalized.height, from, until) {
+                    tracing::info!(
+                        prune_from = ?from,
+                        prune_until = ?until,
+                        tip = ?finalized.height,
+                        ?retention,
+                        "pruning raw transaction history outside the retention window",
+                    );
+                }
+
+                batch.prepare_prune_batch(zebra_db, from, until);
+            }
+
+            RetentionPlan::DrainBacklog { from, until, .. } => {
+                if should_log_prune_progress(already_pruned, finalized.height, from, until) {
+                    tracing::info!(
+                        prune_from = ?from,
+                        prune_until = ?until,
+                        tip = ?finalized.height,
+                        ?retention,
+                        "pruning archive raw transaction history before checkpoint skipping",
+                    );
+                }
+
+                batch.prepare_prune_batch(zebra_db, from, until);
+            }
+
+            RetentionPlan::Skip {
+                lowest_retained,
+                write_marker,
+            } => {
+                if write_marker {
+                    batch.prepare_pruning_marker_batch(zebra_db, lowest_retained);
+                }
+
+                debug_assert!(
+                    ZebraDb::prune_height_range(
+                        finalized.height,
+                        retention.expect("skipping raw transactions only happens in pruned mode"),
+                        zebra_db.lowest_retained_height().max(Some(lowest_retained)),
+                    )
+                    .is_none(),
+                    "checkpoint raw transaction skipping should keep the pruning marker ahead of online pruning"
+                );
+            }
+        }
+    }
 }
 
 impl DiskWriteBatch {
