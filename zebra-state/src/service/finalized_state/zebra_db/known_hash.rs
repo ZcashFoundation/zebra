@@ -42,22 +42,30 @@ pub type KnownHashChunkCf<'cf> = TypedColumnFamily<'cf, u32, RawBytes>;
 impl ZebraDb {
     // Column family convenience methods
 
-    /// Returns a typed handle to the `known_hash_chunk` column family.
-    pub(crate) fn known_hash_chunk_cf(&self) -> KnownHashChunkCf<'_> {
+    /// Returns a typed handle to the `known_hash_chunk` column family, or `None`
+    /// if it is not open.
+    ///
+    /// The column family is absent in read-only (secondary) opens of a database
+    /// created before it existed, because a secondary instance cannot create new
+    /// column families (see `DiskDb::construct_column_families`). Read-only
+    /// consumers don't need it: they generate chunks from state on demand
+    /// ([`crate::known_hash_chunk_bytes`]) rather than reading the download cache.
+    pub(crate) fn known_hash_chunk_cf(&self) -> Option<KnownHashChunkCf<'_>> {
         KnownHashChunkCf::new(&self.db, KNOWN_HASH_CHUNK)
-            .expect("column family was created when database was created")
     }
 
     // Read methods
 
-    /// Returns the verified known-hash chunk bytes stored at `index`, if present.
+    /// Returns the verified known-hash chunk bytes stored at `index`, if present
+    /// (and if the column family is open).
     ///
     /// The bytes are the v2 chunk format
     /// ([`zebra_chain::parameters::known_hashes::chunk_v2`]) as they were
     /// downloaded and verified before being written via
-    /// [`DiskWriteBatch::write_known_hash_chunk`].
+    /// [`DiskWriteBatch::write_known_hash_chunk`]. Returns `None` when the column
+    /// family is not open (read-only DB without it) or has no chunk at `index`.
     pub fn known_hash_chunk(&self, index: u32) -> Option<Vec<u8>> {
-        self.known_hash_chunk_cf()
+        self.known_hash_chunk_cf()?
             .zs_get(&index)
             .map(|raw| raw.raw_bytes().clone())
     }
@@ -89,8 +97,11 @@ impl DiskWriteBatch {
     /// The batch is modified by this method and written by the caller.
     pub fn prepare_known_hash_chunk(&mut self, db: &ZebraDb, index: u32, bytes: &[u8]) {
         // The batch is modified by this method and written by the caller.
+        // Writing only happens on a read/write database, where the column family
+        // always exists (a read-only/secondary instance never writes).
         let _ = db
             .known_hash_chunk_cf()
+            .expect("the known_hash_chunk column family exists on a read/write database")
             .with_batch_for_writing(self)
             .zs_insert(&index, &RawBytes::new_raw_bytes(bytes.to_vec()));
     }

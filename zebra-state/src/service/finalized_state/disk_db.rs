@@ -583,7 +583,7 @@ impl DiskDb {
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
@@ -639,7 +639,7 @@ impl DiskDb {
     pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
 
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
@@ -707,7 +707,7 @@ impl DiskDb {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
-        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
+        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), [], false) {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -979,6 +979,7 @@ impl DiskDb {
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
     ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
@@ -988,7 +989,19 @@ impl DiskDb {
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
         let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
-        let column_families_in_code = column_families_in_code.into_iter();
+
+        // A read-only (secondary) instance cannot create column families. A code
+        // column family that does not yet exist on disk — e.g. one added by a
+        // later format version, before a read/write open has created it — would
+        // make a secondary open fail with "Column family not found". So in
+        // read-only mode we open only the families already on disk; read-only
+        // consumers do not need newly-added (necessarily empty) families. In
+        // read/write mode we still add the new code families so they are created.
+        let column_families_in_code: Vec<String> = if read_only {
+            Vec::new()
+        } else {
+            column_families_in_code.into_iter().collect()
+        };
 
         column_families_on_disk
             .into_iter()
@@ -1053,6 +1066,7 @@ impl DiskDb {
             db_options.clone(),
             &path,
             column_family_names.iter().cloned(),
+            read_only,
         );
 
         let db_result = if read_only {
