@@ -8,7 +8,7 @@ use std::{
 use thiserror::Error;
 
 use super::{Frame, Peer, Service, SinkReject, Stream, StreamMode};
-use crate::zakura::ZakuraPeerId;
+use crate::zakura::{ServicePeerDirection, ZakuraPeerId};
 
 /// Errors returned while building a [`ServiceRegistry`].
 #[derive(Debug, Error)]
@@ -192,6 +192,52 @@ impl ServiceRegistry {
         streams
     }
 
+    /// Ordered streams that should be lazily escalated for this peer now.
+    ///
+    /// The connection initiator is the only side that proactively opens ordered
+    /// service streams. This demand check narrows the negotiated capabilities to
+    /// services that currently have local interest and room; the owning reactor
+    /// still makes the final admission decision after the typed session arrives.
+    pub fn ordered_streams_for_escalation(
+        &self,
+        negotiated: u64,
+        peer_id: &ZakuraPeerId,
+        direction: ServicePeerDirection,
+    ) -> Vec<Stream> {
+        let mut streams = Vec::new();
+
+        for service in self.services_for_negotiated(negotiated) {
+            if !service.wants_peer(peer_id, negotiated, direction) {
+                continue;
+            }
+
+            streams.extend(
+                service
+                    .streams()
+                    .iter()
+                    .copied()
+                    .filter(|stream| stream.mode == StreamMode::Ordered),
+            );
+        }
+
+        streams
+    }
+
+    /// Return true when the service owning `kind` still wants this peer.
+    pub fn wants_ordered_stream(
+        &self,
+        kind: u16,
+        negotiated: u64,
+        peer_id: &ZakuraPeerId,
+        direction: ServicePeerDirection,
+    ) -> bool {
+        let Some(service) = self.service_for_kind(kind) else {
+            return false;
+        };
+
+        service.wants_peer(peer_id, negotiated, direction)
+    }
+
     /// Request/response streams negotiated with a peer, in registry service order.
     pub fn request_response_streams_for_negotiated(&self, negotiated: u64) -> Vec<Stream> {
         let mut streams = Vec::new();
@@ -237,18 +283,24 @@ impl ServiceRegistry {
                 "request stream kind is not registered",
             ));
         };
+        let Some(handler) = service.as_request_response() else {
+            return Err(SinkReject::protocol(
+                "service does not accept request frames",
+            ));
+        };
 
-        service
+        handler
             .request_frame(peer_id, stream_kind, request_id, max_frame_bytes, frame)
             .await
     }
 
     /// Fan a newly connected peer out to every service enabled by its negotiated capabilities.
     pub fn add_peer(&self, peer: Peer) {
-        let (peer_id, remote_ip, negotiated, mut streams, cancel_token) = peer.into_parts();
+        let (peer_id, remote_ip, negotiated, direction, mut streams, cancel_token) =
+            peer.into_parts();
 
         for service in self.services_for_negotiated(negotiated) {
-            let service_streams = service
+            let service_streams: HashMap<_, _> = service
                 .streams()
                 .iter()
                 .filter_map(|stream| {
@@ -257,15 +309,67 @@ impl ServiceRegistry {
                         .map(|handles| (stream.kind, handles))
                 })
                 .collect();
+            let service_cancel_token = service_streams
+                .values()
+                .next()
+                .map(|stream| stream.cancel_token.clone())
+                .unwrap_or_else(|| cancel_token.child_token());
 
-            service.add_peer(Peer::new(
+            service.add_peer(Peer::new_with_service_cancel_token(
                 peer_id.clone(),
                 remote_ip,
                 negotiated,
+                direction,
                 service_streams,
                 cancel_token.clone(),
+                service_cancel_token,
             ));
         }
+    }
+
+    /// Fan a lazily escalated peer out only to services with opened streams.
+    ///
+    /// Returns the capability mask for services that received a peer session, so
+    /// disconnect fanout can be limited to reactors that were actually reached.
+    pub fn add_escalated_peer(&self, peer: Peer) -> u64 {
+        let (peer_id, remote_ip, negotiated, direction, mut streams, cancel_token) =
+            peer.into_parts();
+        let mut admitted_capabilities = 0;
+
+        for service in self.services_for_negotiated(negotiated) {
+            let service_streams: HashMap<_, _> = service
+                .streams()
+                .iter()
+                .filter_map(|stream| {
+                    streams.remove(&stream.kind).map(|handles| {
+                        admitted_capabilities |= stream.capability;
+                        (stream.kind, handles)
+                    })
+                })
+                .collect();
+
+            if service_streams.is_empty() {
+                continue;
+            }
+
+            let service_cancel_token = service_streams
+                .values()
+                .next()
+                .map(|stream| stream.cancel_token.clone())
+                .unwrap_or_else(|| cancel_token.child_token());
+
+            service.add_peer(Peer::new_with_service_cancel_token(
+                peer_id.clone(),
+                remote_ip,
+                negotiated,
+                direction,
+                service_streams,
+                cancel_token.clone(),
+                service_cancel_token,
+            ));
+        }
+
+        admitted_capabilities
     }
 
     /// Fan a disconnected peer out to every service enabled by `negotiated`.
@@ -289,6 +393,7 @@ mod tests {
     struct TestService {
         name: &'static str,
         streams: Vec<Stream>,
+        wants: Mutex<bool>,
         added: Mutex<Vec<ZakuraPeerId>>,
         added_streams: Mutex<Vec<Vec<u16>>>,
         removed: Mutex<Vec<ZakuraPeerId>>,
@@ -299,10 +404,18 @@ mod tests {
             Arc::new(Self {
                 name,
                 streams,
+                wants: Mutex::new(true),
                 added: Mutex::new(Vec::new()),
                 added_streams: Mutex::new(Vec::new()),
                 removed: Mutex::new(Vec::new()),
             })
+        }
+
+        fn set_wants(&self, wants: bool) {
+            *self
+                .wants
+                .lock()
+                .expect("test service demand flag should not be poisoned") = wants;
         }
     }
 
@@ -315,8 +428,21 @@ mod tests {
             &self.streams
         }
 
+        fn wants_peer(
+            &self,
+            _peer: &ZakuraPeerId,
+            _negotiated: u64,
+            _direction: ServicePeerDirection,
+        ) -> bool {
+            *self
+                .wants
+                .lock()
+                .expect("test service demand flag should not be poisoned")
+        }
+
         fn add_peer(&self, peer: Peer) {
-            let (peer_id, _remote_ip, _negotiated, streams, _cancel_token) = peer.into_parts();
+            let (peer_id, _remote_ip, _negotiated, _direction, streams, _cancel_token) =
+                peer.into_parts();
             self.added
                 .lock()
                 .expect("test service added list should not be poisoned")
@@ -566,6 +692,71 @@ mod tests {
         );
         assert_eq!(
             header
+                .removed
+                .lock()
+                .expect("test mutex should not be poisoned")
+                .as_slice(),
+            &[peer]
+        );
+    }
+
+    #[test]
+    fn ordered_streams_for_escalation_filters_services_without_demand() {
+        let header = TestService::new("header", vec![stream(5, 0b0001)]);
+        let discovery = TestService::new("discovery", vec![stream(4, 0b0010)]);
+        let registry = ServiceRegistry::new(vec![header.clone(), discovery.clone()])
+            .expect("test services declare unique stream kinds");
+        let peer = ZakuraPeerId::new(vec![11; 32]).expect("32-byte test peer id is valid");
+
+        header.set_wants(false);
+
+        let streams =
+            registry.ordered_streams_for_escalation(0b0011, &peer, ServicePeerDirection::Outbound);
+        let stream_kinds: Vec<_> = streams.iter().map(|stream| stream.kind).collect();
+
+        assert_eq!(stream_kinds, [4]);
+    }
+
+    #[test]
+    fn add_escalated_peer_fans_out_only_opened_streams_and_returns_remove_mask() {
+        let header = TestService::new("header", vec![stream(5, 0b0001)]);
+        let discovery = TestService::new("discovery", vec![stream(4, 0b0010)]);
+        let registry = ServiceRegistry::new(vec![header.clone(), discovery.clone()])
+            .expect("test services declare unique stream kinds");
+        let peer = ZakuraPeerId::new(vec![12; 32]).expect("32-byte test peer id is valid");
+        let (send_4, recv_4) = framed_channel(1);
+        let streams = HashMap::from([(4, (recv_4, send_4))]);
+
+        let remove_mask = registry.add_escalated_peer(Peer::new(
+            peer.clone(),
+            None,
+            0b0010,
+            streams,
+            CancellationToken::new(),
+        ));
+        registry.remove_peer(&peer, remove_mask);
+
+        assert!(header
+            .added
+            .lock()
+            .expect("test mutex should not be poisoned")
+            .is_empty());
+        assert_eq!(
+            discovery
+                .added_streams
+                .lock()
+                .expect("test mutex should not be poisoned")
+                .as_slice(),
+            &[vec![4]]
+        );
+        assert_eq!(remove_mask, 0b0010);
+        assert!(header
+            .removed
+            .lock()
+            .expect("test mutex should not be poisoned")
+            .is_empty());
+        assert_eq!(
+            discovery
                 .removed
                 .lock()
                 .expect("test mutex should not be poisoned")

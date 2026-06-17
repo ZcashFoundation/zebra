@@ -1,10 +1,13 @@
 use super::*;
 use super::{config::*, error::*, events::*, reactor::*, validation::*, wire::*};
-use crate::zakura::testkit::TraceCapture;
+use crate::zakura::{
+    testkit::TraceCapture, HeaderSyncServiceSummary, ServicePeerDirection, ServicePeerLimits,
+};
 use chrono::Duration;
 use metrics::{
     Counter, CounterFn, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit,
 };
+use rand::rngs::OsRng;
 use std::{
     collections::BTreeMap,
     sync::{Mutex, OnceLock},
@@ -131,7 +134,7 @@ async fn validate_headers_stateless_after_equihash_acceptance(
 
 fn headers_context(count: u32, peer_cap: u32) -> HeaderSyncDecodeContext {
     HeaderSyncDecodeContext::for_headers_response(
-        HeaderSyncRequestContract::new(block::Height(1), count).unwrap(),
+        ExpectedHeadersResponse::new(block::Height(1), count).unwrap(),
         peer_cap,
     )
 }
@@ -140,6 +143,7 @@ struct ReactorFixture {
     handle: HeaderSyncHandle,
     actions: mpsc::Receiver<HeaderSyncAction>,
     task: JoinHandle<()>,
+    outbound_receivers: Mutex<Vec<crate::zakura::FramedRecv>>,
 }
 
 impl Drop for ReactorFixture {
@@ -150,6 +154,30 @@ impl Drop for ReactorFixture {
 
 fn peer(byte: u8) -> ZakuraPeerId {
     ZakuraPeerId::new(vec![byte; 32]).expect("test peer id is within bounds")
+}
+
+fn node_peer() -> (ZakuraPeerId, iroh::NodeId) {
+    let node_id = iroh::SecretKey::generate(OsRng).public();
+    (
+        ZakuraPeerId::new(node_id.as_bytes().to_vec()).expect("node id is a valid peer id"),
+        node_id,
+    )
+}
+
+fn advisory_header_summary(
+    best_height: block::Height,
+    inbound_slots_free: u16,
+) -> HeaderSyncServiceSummary {
+    HeaderSyncServiceSummary {
+        best_height,
+        best_hash: block::Hash([7; 32]),
+        finalized_height: None,
+        serving_headers: true,
+        inbound_slots_free,
+        inbound_slots_max: inbound_slots_free,
+        outbound_slots_free: 1,
+        outbound_slots_max: 1,
+    }
 }
 
 fn regtest_network() -> Network {
@@ -259,12 +287,335 @@ fn startup_with_timeout(
     startup
 }
 
+#[tokio::test]
+async fn peer_caps_reject_full_without_status_or_misbehavior_and_free_on_remove() {
+    let network = Network::Mainnet;
+    let anchor = (block::Height(0), network.genesis_hash());
+    let mut startup = HeaderSyncStartup::new(
+        network,
+        anchor,
+        HeaderSyncFrontiers {
+            finalized_height: anchor.0,
+            verified_block_tip: anchor.0,
+        },
+        Some(anchor),
+        ZakuraHeaderSyncConfig {
+            peer_limits: ServicePeerLimits {
+                max_inbound_peers: 1,
+                ..ServicePeerLimits::default()
+            },
+            ..ZakuraHeaderSyncConfig::default()
+        },
+        LOCAL_MAX_MESSAGE_BYTES,
+    );
+    startup.range_state_actions_enabled = false;
+    let mut fixture = spawn_test_reactor(startup);
+    let admitted = peer(11);
+    let rejected = peer(12);
+
+    connect_peer(&fixture, admitted.clone()).await;
+    assert!(matches!(
+        next_action(&mut fixture.actions).await,
+        HeaderSyncAction::SendMessage {
+            peer,
+            msg: HeaderSyncMessage::Status(_),
+        } if peer == admitted
+    ));
+    assert_eq!(fixture.handle.peer_snapshot().inbound_peers, 1);
+    assert_eq!(fixture.handle.peer_snapshot().inbound_slots_free, 0);
+
+    let rejected_cancel =
+        connect_peer_with_direction(&fixture, rejected.clone(), ServicePeerDirection::Inbound)
+            .await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        rejected_cancel.cancelled(),
+    )
+    .await
+    .expect("rejected header-sync service session is locally parked");
+    assert_eq!(fixture.handle.peer_snapshot().inbound_peers, 1);
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::WireMessage {
+            peer: rejected.clone(),
+            msg: HeaderSyncMessage::Status(HeaderSyncStatus::default()),
+        })
+        .await
+        .unwrap();
+    while let Ok(Some(action)) =
+        tokio::time::timeout(std::time::Duration::from_millis(50), fixture.actions.recv()).await
+    {
+        assert!(
+            !matches!(
+                action,
+                HeaderSyncAction::SendMessage { ref peer, .. } if *peer == rejected
+            ),
+            "rejected peer must not receive header-sync scheduling state"
+        );
+        assert!(
+            !matches!(
+                action,
+                HeaderSyncAction::Misbehavior { ref peer, .. } if *peer == rejected
+            ),
+            "locally rejected peer must not be scored as misbehaving"
+        );
+    }
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::PeerDisconnected(admitted))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    assert_eq!(fixture.handle.peer_snapshot().inbound_peers, 0);
+    assert_eq!(fixture.handle.peer_snapshot().inbound_slots_free, 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn advisory_summary_status_mismatch_uses_status_without_misbehavior_and_backs_off() {
+    let network = regtest_network();
+    let mut fixture = spawn_test_reactor(startup_for(
+        network.clone(),
+        (block::Height(0), network.genesis_hash()),
+        None,
+    ));
+    let (peer_id, peer_node_id) = node_peer();
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::AdvisoryHeaderSummary {
+            peer: peer_id.clone(),
+            summary: advisory_header_summary(block::Height(10), 1),
+        })
+        .await
+        .unwrap();
+    assert!(fixture
+        .handle
+        .candidate_state()
+        .backed_off_node_ids
+        .is_empty());
+
+    connect_peer(&fixture, peer_id.clone()).await;
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(1),
+        1,
+        1,
+    )
+    .await;
+
+    let mut saw_status_authoritative_request = false;
+    while let Ok(Some(action)) = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        fixture.actions.recv(),
+    )
+    .await
+    {
+        match action {
+            HeaderSyncAction::Misbehavior { .. } => {
+                panic!("summary/Status mismatch must not score misbehavior")
+            }
+            HeaderSyncAction::SendMessage {
+                peer,
+                msg:
+                    HeaderSyncMessage::GetHeaders {
+                        start_height,
+                        count,
+                    },
+            } if peer == peer_id => {
+                assert_eq!(start_height, block::Height(1));
+                assert_eq!(count, 1);
+                saw_status_authoritative_request = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_status_authoritative_request);
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::WireMessage {
+            peer: peer_id.clone(),
+            msg: HeaderSyncMessage::Headers(Vec::new()),
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    assert!(
+        fixture
+            .handle
+            .candidate_state()
+            .backed_off_node_ids
+            .contains(&peer_node_id),
+        "repeated unconfirmed advisory usefulness enters local non-punitive backoff"
+    );
+    assert_no_commit_or_misbehavior(&mut fixture.actions).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn advisory_backoff_is_pruned_on_peer_disconnected() {
+    let network = regtest_network();
+    let mut fixture = spawn_test_reactor(startup_for(
+        network.clone(),
+        (block::Height(0), network.genesis_hash()),
+        None,
+    ));
+    let (peer_id, peer_node_id) = node_peer();
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::AdvisoryHeaderSummary {
+            peer: peer_id.clone(),
+            summary: advisory_header_summary(block::Height(10), 1),
+        })
+        .await
+        .unwrap();
+
+    connect_peer(&fixture, peer_id.clone()).await;
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(1),
+        1,
+        1,
+    )
+    .await;
+
+    while let Ok(Some(action)) = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        fixture.actions.recv(),
+    )
+    .await
+    {
+        if matches!(
+            action,
+            HeaderSyncAction::SendMessage {
+                ref peer,
+                msg: HeaderSyncMessage::GetHeaders { .. },
+            } if *peer == peer_id
+        ) {
+            break;
+        }
+    }
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::WireMessage {
+            peer: peer_id.clone(),
+            msg: HeaderSyncMessage::Headers(Vec::new()),
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    assert!(fixture
+        .handle
+        .candidate_state()
+        .backed_off_node_ids
+        .contains(&peer_node_id));
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::PeerDisconnected(peer_id.clone()))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    assert!(
+        !fixture
+            .handle
+            .candidate_state()
+            .backed_off_node_ids
+            .contains(&peer_node_id),
+        "disconnect prunes advisory backoff state"
+    );
+    assert_no_commit_or_misbehavior(&mut fixture.actions).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn admission_failure_after_advisory_selection_creates_no_outstanding_range() {
+    let network = regtest_network();
+    let anchor = (block::Height(0), network.genesis_hash());
+    let mut startup = HeaderSyncStartup::new(
+        network,
+        anchor,
+        HeaderSyncFrontiers {
+            finalized_height: anchor.0,
+            verified_block_tip: anchor.0,
+        },
+        Some(anchor),
+        ZakuraHeaderSyncConfig {
+            peer_limits: ServicePeerLimits {
+                max_inbound_peers: 0,
+                ..ServicePeerLimits::default()
+            },
+            ..ZakuraHeaderSyncConfig::default()
+        },
+        LOCAL_MAX_MESSAGE_BYTES,
+    );
+    startup.range_state_actions_enabled = true;
+    let mut fixture = spawn_test_reactor(startup);
+    let peer_id = peer(22);
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::AdvisoryHeaderSummary {
+            peer: peer_id.clone(),
+            summary: advisory_header_summary(block::Height(10), 1),
+        })
+        .await
+        .unwrap();
+    let cancel =
+        connect_peer_with_direction(&fixture, peer_id.clone(), ServicePeerDirection::Inbound).await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled())
+        .await
+        .expect("admission failure parks the service session");
+
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(10),
+        1,
+        1,
+    )
+    .await;
+
+    while let Ok(Some(action)) =
+        tokio::time::timeout(std::time::Duration::from_millis(50), fixture.actions.recv()).await
+    {
+        assert!(
+            !matches!(
+                action,
+                HeaderSyncAction::SendMessage {
+                    ref peer,
+                    msg: HeaderSyncMessage::GetHeaders { .. },
+                } if *peer == peer_id
+            ),
+            "locally rejected advisory peer must not get outstanding range work"
+        );
+        assert!(
+            !matches!(
+                action,
+                HeaderSyncAction::Misbehavior { ref peer, .. } if *peer == peer_id
+            ),
+            "admission failure is local and non-punitive"
+        );
+    }
+}
+
 fn spawn_test_reactor(startup: HeaderSyncStartup) -> ReactorFixture {
     let (handle, actions, task) = spawn_header_sync_reactor(startup).unwrap();
     ReactorFixture {
         handle,
         actions,
         task,
+        outbound_receivers: Mutex::new(Vec::new()),
     }
 }
 
@@ -315,11 +666,29 @@ async fn assert_no_commit_or_misbehavior(actions: &mut mpsc::Receiver<HeaderSync
 }
 
 async fn connect_peer(fixture: &ReactorFixture, peer_id: ZakuraPeerId) {
+    connect_peer_with_direction(fixture, peer_id, ServicePeerDirection::Inbound).await;
+}
+
+async fn connect_peer_with_direction(
+    fixture: &ReactorFixture,
+    peer_id: ZakuraPeerId,
+    direction: ServicePeerDirection,
+) -> CancellationToken {
+    let (send, recv) = crate::zakura::framed_channel(32);
+    fixture
+        .outbound_receivers
+        .lock()
+        .expect("test outbound receiver mutex ok")
+        .push(recv);
+    let cancel = CancellationToken::new();
+    let session =
+        HeaderSyncPeerSession::from_parts_with_direction(peer_id, direction, send, cancel.clone());
     fixture
         .handle
-        .send(HeaderSyncEvent::PeerConnected(peer_id))
+        .send(HeaderSyncEvent::PeerConnected(session))
         .await
         .unwrap();
+    cancel
 }
 
 async fn advertise_tip(

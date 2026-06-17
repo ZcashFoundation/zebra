@@ -47,13 +47,12 @@ use super::{
 use crate::{
     protocol::external::InventoryHash,
     zakura::{
-        direct_endpoint_builder, drive_header_sync_actions, header_sync_outbound_for_supervisor,
-        send_header_sync_message as send_header_sync_service_message, spawn_header_sync_reactor,
-        Clock, Frame, FramedRecv, FramedSend, HeaderSyncAction, HeaderSyncFrontiers,
-        HeaderSyncMessage, HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup,
-        Peer, RealClock, Service, ServiceRegistry, SinkReject, Stream, StreamMode, StreamPrelude,
-        ZakuraAcceptedLimits, ZakuraControlAck, ZakuraControlHello, ZakuraControlRole,
-        ZakuraControlValidation, ZakuraHandshakeConfig, ZakuraHandshakePath,
+        direct_endpoint_builder, drive_header_sync_actions, spawn_header_sync_reactor, Clock,
+        Frame, FramedRecv, FramedSend, HeaderSyncAction, HeaderSyncFrontiers,
+        HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup, Peer, RealClock,
+        Service, ServicePeerDirection, ServiceRegistry, ServiceStream, SinkReject, Stream,
+        StreamMode, StreamPrelude, ZakuraAcceptedLimits, ZakuraControlAck, ZakuraControlHello,
+        ZakuraControlRole, ZakuraControlValidation, ZakuraHandshakeConfig, ZakuraHandshakePath,
         ZakuraHeaderSyncConfig, ZakuraInitialLimits, ZakuraLimits, ZakuraPeerId,
         ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason, ZakuraUpgradeOutcome,
         CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC, CONTROL_VERSION, FRAME_HEADER_BYTES,
@@ -450,11 +449,6 @@ impl ZakuraEndpoint {
         if let Some(tasks) = self.header_sync_tasks.as_ref() {
             tasks.tasks.lock().await.push(task);
         }
-    }
-
-    /// Send a stream-5 header-sync message to a registered Zakura peer.
-    pub async fn send_header_sync_message(&self, peer: &ZakuraPeerId, msg: HeaderSyncMessage) {
-        send_header_sync_service_message(&self.supervisor, peer, msg).await;
     }
 
     /// Returns the endpoint's current direct node address.
@@ -936,7 +930,7 @@ struct ConnectionServeContext {
     limits: ZakuraConnectionLimits,
     accepted_capabilities: u64,
     role: &'static str,
-    direction: &'static str,
+    direction: ServicePeerDirection,
     conn: ZakuraConnTrace,
 }
 
@@ -946,6 +940,7 @@ struct RegisteredConnectionServeContext {
     connection_token: CancellationToken,
     accepted_capabilities: u64,
     opens_ordered_streams: bool,
+    direction: ServicePeerDirection,
 }
 
 struct StreamWorkerContext {
@@ -957,6 +952,7 @@ struct StreamWorkerContext {
     limits: ZakuraConnectionLimits,
     message_bucket: SharedMessageBucket,
     connection_token: CancellationToken,
+    stream_token: CancellationToken,
     freshness_tx: watch::Sender<Instant>,
 }
 
@@ -970,6 +966,7 @@ struct AdmittedOrderedStream {
     kind: u16,
     recv: FramedRecv,
     send: FramedSend,
+    cancel_token: CancellationToken,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1030,15 +1027,14 @@ pub(crate) struct NativeHandshakeNegotiated {
 }
 
 pub(crate) fn service_registry(
-    supervisor: &ZakuraSupervisorHandle,
+    _supervisor: &ZakuraSupervisorHandle,
     header_sync: Option<super::HeaderSyncHandle>,
     legacy_service: Arc<dyn Service>,
     discovery_service: Arc<dyn Service>,
 ) -> Result<Arc<ServiceRegistry>, BoxError> {
     let mut services = vec![legacy_service.clone(), discovery_service];
     if let Some(header_sync) = header_sync {
-        let outbound = header_sync_outbound_for_supervisor(supervisor);
-        services.push(Arc::new(HeaderSyncService::new(header_sync, outbound)) as Arc<dyn Service>);
+        services.push(Arc::new(HeaderSyncService::new(header_sync)) as Arc<dyn Service>);
     } else {
         services
             .push(Arc::new(HeaderSyncPassthroughService::new(legacy_service)) as Arc<dyn Service>);
@@ -1172,7 +1168,7 @@ impl ZakuraProtocolHandler {
                 limits: conn_limits,
                 accepted_capabilities: negotiated.accepted_capabilities,
                 role: "responder",
-                direction: "inbound",
+                direction: ServicePeerDirection::Inbound,
                 conn,
             },
         )
@@ -1308,9 +1304,18 @@ impl ZakuraProtocolHandler {
         let mut open_limiter = TokenBucket::new(limits.stream_open_rate_per_second);
         let mut message_buckets = MessageRateBuckets::new();
         let (freshness_tx, freshness_rx) = watch::channel(Instant::now());
-        let ordered_streams = self
+        let negotiated_ordered_streams = self
             .registry
             .ordered_streams_for_negotiated(accepted_capabilities);
+        let ordered_streams = if context.opens_ordered_streams {
+            self.registry.ordered_streams_for_escalation(
+                accepted_capabilities,
+                &peer_id,
+                context.direction,
+            )
+        } else {
+            Vec::new()
+        };
         let request_response_stream_count = self
             .registry
             .request_response_streams_for_negotiated(accepted_capabilities)
@@ -1334,27 +1339,35 @@ impl ZakuraProtocolHandler {
             connection.close(VarInt::from_u32(ZAKURA_CLOSE_RESOURCE), b"queue split");
             connection_token.cancel();
         }
-        let ordered_kinds: HashSet<u16> =
-            ordered_streams.iter().map(|stream| stream.kind).collect();
-        let per_stream_queue_depth =
-            per_stream_inbound_queue_depth(limits.max_inbound_queue_depth, ordered_streams.len());
+        let ordered_kinds: HashSet<u16> = negotiated_ordered_streams
+            .iter()
+            .map(|stream| stream.kind)
+            .collect();
+        let queue_split_stream_count = negotiated_ordered_streams.len().max(ordered_streams.len());
+        let per_stream_queue_depth = per_stream_inbound_queue_depth(
+            limits.max_inbound_queue_depth,
+            queue_split_stream_count,
+        );
         let mut service_streams = HashMap::new();
         let mut accepted_ordered_kinds = HashSet::new();
-        let mut services_added = false;
+        let mut admitted_capabilities = 0;
         let run_freshness_reaper =
-            should_run_freshness_reaper(ordered_streams.len(), request_response_stream_count);
+            should_run_freshness_reaper(queue_split_stream_count, request_response_stream_count);
 
-        if ordered_streams.is_empty() {
-            self.registry.add_peer(Peer::new(
+        if negotiated_ordered_streams.is_empty() {
+            self.registry.add_peer(Peer::new_with_direction(
                 peer_id.clone(),
                 remote_ip,
                 accepted_capabilities,
+                context.direction,
                 HashMap::new(),
                 connection_token.clone(),
             ));
-            services_added = true;
+            admitted_capabilities = accepted_capabilities;
         } else if context.opens_ordered_streams && !connection_token.is_cancelled() {
+            let mut opened_capabilities = 0;
             for stream in ordered_streams {
+                opened_capabilities |= stream.capability;
                 let admitted = match self
                     .open_ordered_service_stream(
                         &connection,
@@ -1386,17 +1399,25 @@ impl ZakuraProtocolHandler {
                         break;
                     }
                 };
-                service_streams.insert(admitted.kind, (admitted.recv, admitted.send));
+                service_streams.insert(
+                    admitted.kind,
+                    ServiceStream::new(admitted.recv, admitted.send, admitted.cancel_token),
+                );
             }
             if !connection_token.is_cancelled() {
-                self.registry.add_peer(Peer::new(
-                    peer_id.clone(),
-                    remote_ip,
-                    accepted_capabilities,
-                    std::mem::take(&mut service_streams),
-                    connection_token.clone(),
-                ));
-                services_added = true;
+                // The initiator has already narrowed escalation to opened
+                // ordered services. Disconnect fanout still uses the registry's
+                // returned admitted mask, not this peer context.
+                admitted_capabilities |=
+                    self.registry
+                        .add_escalated_peer(Peer::new_with_service_streams(
+                            peer_id.clone(),
+                            remote_ip,
+                            opened_capabilities,
+                            context.direction,
+                            std::mem::take(&mut service_streams),
+                            connection_token.clone(),
+                        ));
             }
         }
 
@@ -1445,18 +1466,47 @@ impl ZakuraProtocolHandler {
                                     continue;
                                 }
 
-                                service_streams
-                                    .insert(admitted.kind, (admitted.recv, admitted.send));
-                                if accepted_ordered_kinds.len() == ordered_kinds.len() {
-                                    self.registry.add_peer(Peer::new(
+                                if !self.registry.wants_ordered_stream(
+                                    admitted.kind,
+                                    accepted_capabilities,
+                                    &peer_id,
+                                    context.direction,
+                                ) {
+                                    debug!(
+                                        stream_kind = admitted.kind,
+                                        "locally parking ordered service stream because the service has no demand"
+                                    );
+                                    admitted.cancel_token.cancel();
+                                    continue;
+                                }
+
+                                let service_streams = HashMap::from([(
+                                    admitted.kind,
+                                    ServiceStream::new(
+                                        admitted.recv,
+                                        admitted.send,
+                                        admitted.cancel_token.clone(),
+                                    ),
+                                )]);
+                                // Current ordered services own one ordered stream
+                                // each, so the responder can fan out accepted
+                                // streams one at a time. Batch here if a service
+                                // gains multiple ordered streams.
+                                //
+                                // The responder keeps the full accepted capability
+                                // context so discovery can make cross-service
+                                // ownership decisions; disconnect fanout still
+                                // uses the registry's returned admitted mask.
+                                admitted_capabilities |= self.registry.add_escalated_peer(
+                                    Peer::new_with_service_streams(
                                         peer_id.clone(),
                                         remote_ip,
                                         accepted_capabilities,
-                                        std::mem::take(&mut service_streams),
+                                        context.direction,
+                                        service_streams,
                                         connection_token.clone(),
-                                    ));
-                                    services_added = true;
-                                }
+                                    ),
+                                );
                             }
                         }
                         Err(error) => {
@@ -1528,8 +1578,8 @@ impl ZakuraProtocolHandler {
             }
         }
         workers.abort_all();
-        if services_added {
-            self.registry.remove_peer(&peer_id, accepted_capabilities);
+        if admitted_capabilities != 0 {
+            self.registry.remove_peer(&peer_id, admitted_capabilities);
         }
         self.supervisor.deregister(&peer_id, remote_ip).await;
         metrics::counter!("zakura.p2p.conn.closed.neutral").increment(1);
@@ -1581,6 +1631,7 @@ impl ZakuraProtocolHandler {
             limits.message_rate_per_second,
             RealClock,
         );
+        let stream_token = connection_token.child_token();
         let context = StreamWorkerContext {
             trace: self.trace.clone(),
             conn: conn.clone(),
@@ -1590,6 +1641,7 @@ impl ZakuraProtocolHandler {
             limits,
             message_bucket,
             connection_token,
+            stream_token,
             freshness_tx,
         };
 
@@ -1751,6 +1803,7 @@ impl ZakuraProtocolHandler {
             admission.limits.message_rate_per_second,
             RealClock,
         );
+        let stream_token = admission.connection_token.child_token();
 
         let context = StreamWorkerContext {
             trace: admission.trace.clone(),
@@ -1761,6 +1814,7 @@ impl ZakuraProtocolHandler {
             limits: admission.limits,
             message_bucket,
             connection_token: admission.connection_token.clone(),
+            stream_token,
             freshness_tx: admission.freshness_tx.clone(),
         };
 
@@ -1792,10 +1846,19 @@ impl ZakuraProtocolHandler {
         remote_ip: Option<IpAddr>,
         context: ConnectionServeContext,
     ) -> Result<(), ZakuraHandlerError> {
-        let ordered_stream_count = self
-            .registry
-            .ordered_streams_for_negotiated(context.accepted_capabilities)
-            .len();
+        let ordered_stream_count = if context.role == "initiator" {
+            self.registry
+                .ordered_streams_for_escalation(
+                    context.accepted_capabilities,
+                    &peer_id,
+                    context.direction,
+                )
+                .len()
+        } else {
+            self.registry
+                .ordered_streams_for_negotiated(context.accepted_capabilities)
+                .len()
+        };
         if ordered_stream_count > usize::from(context.limits.max_open_streams) {
             debug!(
                 max_open_streams = context.limits.max_open_streams,
@@ -1849,7 +1912,7 @@ impl ZakuraProtocolHandler {
                         .conn
                         .event("accepted")
                         .role(context.role)
-                        .direction(context.direction),
+                        .direction(context.direction.trace_label()),
                 );
                 self.serve_connection(
                     connection,
@@ -1862,6 +1925,7 @@ impl ZakuraProtocolHandler {
                         connection_token: disconnect_token,
                         accepted_capabilities: context.accepted_capabilities,
                         opens_ordered_streams: context.role == "initiator",
+                        direction: context.direction,
                     },
                 )
                 .await
@@ -1875,7 +1939,7 @@ impl ZakuraProtocolHandler {
                         .conn
                         .event("duplicate")
                         .role(context.role)
-                        .direction(context.direction),
+                        .direction(context.direction.trace_label()),
                 );
                 connection.close(VarInt::from_u32(ZAKURA_CLOSE_NEUTRAL), b"duplicate");
                 Ok(())
@@ -1891,7 +1955,7 @@ impl ZakuraProtocolHandler {
                         .conn
                         .event("rejected.admission")
                         .role(context.role)
-                        .direction(context.direction)
+                        .direction(context.direction.trace_label())
                         .reason(reject_reason_label(reason)),
                 );
                 connection.close(VarInt::from_u32(ZAKURA_CLOSE_RESOURCE), b"registration");
@@ -1961,8 +2025,6 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         config.zakura.bootstrap_peers.len(),
         supervisor.subscribe(),
     )?;
-    let discovery_service =
-        Arc::new(super::DiscoveryService::new(discovery.clone())) as Arc<dyn Service>;
     let anchor = config.zakura.header_sync.anchor(&config.network)?;
     let frontiers = header_sync_driver_startup.as_ref().map_or(
         HeaderSyncFrontiers {
@@ -1991,6 +2053,10 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         startup.inbound_new_block_acceptance_enabled = true;
     }
     let (header_sync, header_sync_actions, header_sync_task) = spawn_header_sync_reactor(startup)?;
+    let discovery_service = Arc::new(super::DiscoveryService::with_header_sync(
+        discovery.clone(),
+        header_sync.clone(),
+    )) as Arc<dyn Service>;
     let legacy_service = sink_factory(supervisor.clone(), trace.clone());
     let registry = service_registry(
         &supervisor,
@@ -2123,7 +2189,7 @@ pub(crate) async fn serve_native_dial_connection(
                 limits: conn_limits,
                 accepted_capabilities: negotiated.accepted_capabilities,
                 role: "initiator",
-                direction: "outbound",
+                direction: ServicePeerDirection::Outbound,
                 conn,
             },
         )
@@ -2230,6 +2296,7 @@ fn spawn_persistent_stream_worker(
         kind: prelude.stream_kind,
         recv: FramedRecv::new(to_service_rx),
         send: FramedSend::new(from_service_tx),
+        cancel_token: context.stream_token.clone(),
     };
 
     workers.spawn(persistent_stream_worker(
@@ -2259,6 +2326,7 @@ async fn persistent_stream_worker(
         tokio::select! {
             biased;
             _ = context.connection_token.cancelled() => break,
+            _ = context.stream_token.cancelled() => break,
             outbound = async {
                 match outbound_rx.as_mut() {
                     Some(outbound_rx) => outbound_rx.recv().await,
@@ -2268,6 +2336,10 @@ async fn persistent_stream_worker(
                 match outbound {
                     Some(frame) => {
                         if let Err(error) = write_ordered_frame(&mut send, frame, context.limits, prelude.stream_kind).await {
+                            if ordered_stream_write_was_stopped(&error) {
+                                debug!(?error, "closing Zakura ordered stream after peer stopped receiving");
+                                break;
+                            }
                             debug!(?error, "closing Zakura ordered stream writer");
                             let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_BAD_PRELUDE));
                             context.connection_token.cancel();
@@ -2297,7 +2369,10 @@ async fn persistent_stream_worker(
                             InboundMessageAdmission::Throttled => continue,
                         }
                         if inbound_tx.send(frame).await.is_err() {
-                            context.connection_token.cancel();
+                            debug!(
+                                stream_kind = prelude.stream_kind,
+                                "closing Zakura ordered stream after local service receiver dropped"
+                            );
                             break;
                         }
                         metrics::gauge!(
@@ -2327,6 +2402,13 @@ async fn persistent_stream_worker(
             }
         }
     }
+}
+
+fn ordered_stream_write_was_stopped(error: &BoxError) -> bool {
+    matches!(
+        error.downcast_ref::<iroh::endpoint::WriteError>(),
+        Some(iroh::endpoint::WriteError::Stopped(_))
+    )
 }
 
 async fn request_stream_worker(
@@ -3411,10 +3493,16 @@ mod tests {
         protocol::internal::{InventoryResponse, Response},
         zakura::{
             legacy_gossip::{LegacyRequestFrame, LegacyRequestKind, LegacyResponseCodec},
-            HeaderSyncEvent, HeaderSyncMisbehavior, HeaderSyncOutbound, HeaderSyncStatus,
-            LOCAL_MAX_MESSAGE_BYTES, MAX_HS_MESSAGE_BYTES, MSG_HS_STATUS, ZAKURA_CAP_DISCOVERY,
-            ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
+            testkit::LocalEndpointFactory,
+            HeaderSyncEvent, HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncPeerSession,
+            HeaderSyncStatus, ServicePeerLimits, ZakuraDiscoveryConfig, ZakuraDiscoveryHandle,
+            ZakuraDiscoveryLocalConfig, LOCAL_MAX_MESSAGE_BYTES, MAX_HS_MESSAGE_BYTES,
+            MSG_HS_STATUS, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
         },
+    };
+    use iroh::{
+        endpoint::Connection,
+        protocol::{AcceptError, ProtocolHandler},
     };
     use zebra_chain::{
         block::{self, Block},
@@ -3422,6 +3510,25 @@ mod tests {
         transaction::{self, UnminedTxId},
     };
     use zebra_test::vectors::BLOCK_TESTNET_141042_BYTES;
+
+    #[derive(Debug, Clone)]
+    struct CaptureConnection {
+        connection_tx: mpsc::Sender<Connection>,
+        stream_tx: mpsc::Sender<(SendStream, RecvStream)>,
+    }
+
+    impl ProtocolHandler for CaptureConnection {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            let _ = self.connection_tx.send(connection.clone()).await;
+            for _ in 0..2 {
+                let Ok(streams) = connection.accept_bi().await else {
+                    break;
+                };
+                let _ = self.stream_tx.send(streams).await;
+            }
+            Ok(())
+        }
+    }
 
     #[derive(Debug, Default)]
     struct RecordingService {
@@ -3502,6 +3609,50 @@ mod tests {
 
     fn test_peer(byte: u8) -> ZakuraPeerId {
         ZakuraPeerId::new(vec![byte; 32]).expect("32-byte node id is valid")
+    }
+
+    fn header_sync_test_session(
+        peer: ZakuraPeerId,
+    ) -> (HeaderSyncPeerSession, crate::zakura::FramedRecv) {
+        let (send, recv) = crate::zakura::framed_channel(32);
+        (
+            HeaderSyncPeerSession::from_parts(peer, send, CancellationToken::new()),
+            recv,
+        )
+    }
+
+    fn test_discovery_service(supervisor: &ZakuraSupervisorHandle) -> Arc<dyn Service> {
+        let (_handle, service) =
+            test_discovery_service_with_peer_limits(supervisor, ServicePeerLimits::default());
+        service
+    }
+
+    fn test_discovery_service_with_peer_limits(
+        supervisor: &ZakuraSupervisorHandle,
+        peer_limits: ServicePeerLimits,
+    ) -> (ZakuraDiscoveryHandle, Arc<dyn Service>) {
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: SecretKey::from_bytes(&[7u8; 32]),
+                direct_addrs: Vec::new(),
+                services: crate::zakura::discovery::default_advertised_services(),
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig {
+                peer_limits,
+                ..ZakuraDiscoveryConfig::default()
+            },
+            supervisor.subscribe(),
+        )
+        .expect("test discovery handle builds");
+        let service =
+            Arc::new(crate::zakura::DiscoveryService::new(handle.clone())) as Arc<dyn Service>;
+        (handle, service)
     }
 
     fn header_sync_startup(shutdown: CancellationToken) -> HeaderSyncStartup {
@@ -3651,11 +3802,12 @@ mod tests {
 
         endpoint.shutdown().await;
 
+        let (session, _recv) = header_sync_test_session(
+            ZakuraPeerId::new(vec![5u8; 32]).expect("32-byte node id is valid"),
+        );
         let send_result = tokio::time::timeout(
             Duration::from_secs(1),
-            header_sync.send(HeaderSyncEvent::PeerConnected(
-                ZakuraPeerId::new(vec![5u8; 32]).expect("32-byte node id is valid"),
-            )),
+            header_sync.send(HeaderSyncEvent::PeerConnected(session)),
         )
         .await
         .expect("send returns promptly after header-sync shutdown");
@@ -3672,11 +3824,17 @@ mod tests {
         let (header_sync, mut actions, task) = spawn_header_sync_reactor(startup)?;
         let recorder = Arc::new(RecordingService::default());
         let supervisor = ZakuraSupervisorHandle::new(1);
-        let registry = service_registry(&supervisor, Some(header_sync.clone()), recorder.clone())?;
+        let registry = service_registry(
+            &supervisor,
+            Some(header_sync.clone()),
+            recorder.clone(),
+            test_discovery_service(&supervisor),
+        )?;
         let peer = test_peer(6);
 
+        let (session, _recv) = header_sync_test_session(peer.clone());
         header_sync
-            .send(HeaderSyncEvent::PeerConnected(peer.clone()))
+            .send(HeaderSyncEvent::PeerConnected(session))
             .await?;
         assert!(matches!(
             next_header_sync_action(&mut actions).await,
@@ -3771,7 +3929,7 @@ mod tests {
         let shutdown = CancellationToken::new();
         let startup = header_sync_startup(shutdown.clone());
         let (header_sync, _actions, task) = spawn_header_sync_reactor(startup)?;
-        let service = HeaderSyncService::new(header_sync, HeaderSyncOutbound::default());
+        let service = HeaderSyncService::new(header_sync);
         let peer = test_peer(11);
 
         shutdown.cancel();
@@ -3807,8 +3965,7 @@ mod tests {
         let shutdown = CancellationToken::new();
         let startup = header_sync_startup(shutdown.clone());
         let (header_sync, mut actions, reactor_task) = spawn_header_sync_reactor(startup)?;
-        let outbound = HeaderSyncOutbound::default();
-        let service = HeaderSyncService::new(header_sync, outbound.clone());
+        let service = HeaderSyncService::new(header_sync);
         let peer = test_peer(12);
         let cancel_token = CancellationToken::new();
         let (_inbound_tx, inbound_rx) = crate::zakura::framed_channel(1);
@@ -3824,17 +3981,11 @@ mod tests {
             cancel_token.clone(),
         ));
 
-        let queued = Frame {
-            message_type: u16::from(MSG_HS_STATUS),
-            flags: 0,
-            payload: Vec::new(),
-        };
-        outbound.send(&peer, queued.clone()).await?;
         let received = tokio::time::timeout(Duration::from_secs(1), outbound_rx.recv())
             .await
             .expect("header-sync outbound source is immediately ready")
             .expect("header-sync outbound receiver stays open");
-        assert_eq!(received.message_type, queued.message_type);
+        assert_eq!(received.message_type, u16::from(MSG_HS_STATUS));
 
         assert!(matches!(
             next_header_sync_action(&mut actions).await,
@@ -3852,6 +4003,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lazy_escalation_service_demand_respects_directional_caps() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let shutdown = CancellationToken::new();
+        let mut startup = header_sync_startup(shutdown.clone());
+        startup.config.peer_limits = ServicePeerLimits {
+            max_inbound_peers: 0,
+            max_outbound_peers: 1,
+            ..ServicePeerLimits::default()
+        };
+        let (header_sync, _actions, reactor_task) = spawn_header_sync_reactor(startup)?;
+        let service = HeaderSyncService::new(header_sync);
+        let peer = test_peer(17);
+
+        assert!(
+            !service.wants_peer(&peer, ZAKURA_CAP_HEADER_SYNC, ServicePeerDirection::Inbound,),
+            "a full inbound cap must not open a new header-sync stream"
+        );
+        assert!(
+            service.wants_peer(
+                &peer,
+                ZAKURA_CAP_HEADER_SYNC,
+                ServicePeerDirection::Outbound,
+            ),
+            "an outbound slot should still allow lazy header-sync escalation"
+        );
+
+        shutdown.cancel();
+        reactor_task.await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn registry_add_remove_updates_header_sync_peers() -> Result<(), BoxError> {
         let _guard = zebra_test::init();
         let shutdown = CancellationToken::new();
@@ -3863,6 +4046,7 @@ mod tests {
             &supervisor,
             Some(header_sync.clone()),
             Arc::new(RecordingService::default()),
+            test_discovery_service(&supervisor),
         )?;
         let (_inbound_tx, inbound_rx) = crate::zakura::framed_channel(1);
         let (outbound_tx, _outbound_rx) = crate::zakura::framed_channel(1);
@@ -3912,6 +4096,185 @@ mod tests {
             ),
             "deregistered peer must be removed from header-sync state, got {action:?}"
         );
+
+        shutdown.cancel();
+        reactor_task.await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discovery_admission_is_independent_when_header_sync_is_full() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let shutdown = CancellationToken::new();
+        let mut startup = header_sync_startup(shutdown.clone());
+        startup.config.peer_limits = ServicePeerLimits {
+            max_inbound_peers: 0,
+            ..ServicePeerLimits::default()
+        };
+        let (header_sync, mut actions, reactor_task) = spawn_header_sync_reactor(startup)?;
+        let supervisor = ZakuraSupervisorHandle::new(1);
+        let (discovery_handle, discovery_service) = test_discovery_service_with_peer_limits(
+            &supervisor,
+            ServicePeerLimits {
+                max_inbound_peers: 1,
+                ..ServicePeerLimits::default()
+            },
+        );
+        let registry = service_registry(
+            &supervisor,
+            Some(header_sync.clone()),
+            Arc::new(RecordingService::default()),
+            discovery_service,
+        )?;
+        let peer_node_id = SecretKey::from_bytes(&[13u8; 32]).public();
+        let peer = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        let (_hs_inbound_tx, hs_inbound_rx) = crate::zakura::framed_channel(1);
+        let (hs_outbound_tx, mut hs_outbound_rx) = crate::zakura::framed_channel(1);
+        let (_discovery_inbound_tx, discovery_inbound_rx) = crate::zakura::framed_channel(1);
+        let (discovery_outbound_tx, mut discovery_outbound_rx) = crate::zakura::framed_channel(4);
+        let streams = HashMap::from([
+            (HEADER_SYNC_STREAM_KIND, (hs_inbound_rx, hs_outbound_tx)),
+            (
+                DISCOVERY_STREAM_KIND,
+                (discovery_inbound_rx, discovery_outbound_tx),
+            ),
+        ]);
+
+        registry.add_peer(Peer::new(
+            peer.clone(),
+            None,
+            ZAKURA_CAP_HEADER_SYNC | ZAKURA_CAP_DISCOVERY,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut snapshots = discovery_handle.subscribe_peer_snapshot();
+            while snapshots.borrow().inbound_peers != 1 {
+                snapshots
+                    .changed()
+                    .await
+                    .expect("discovery snapshot channel stays open");
+            }
+        })
+        .await
+        .expect("discovery admits while header-sync is full");
+
+        assert_eq!(header_sync.peer_snapshot().inbound_peers, 0);
+        assert_eq!(header_sync.peer_snapshot().inbound_slots_free, 0);
+        assert!(
+            !matches!(
+                tokio::time::timeout(Duration::from_millis(100), hs_outbound_rx.recv()).await,
+                Ok(Some(_))
+            ),
+            "header-sync rejected peer must not receive Status"
+        );
+        let discovery_frame =
+            tokio::time::timeout(Duration::from_secs(1), discovery_outbound_rx.recv())
+                .await
+                .expect("discovery source sends its normal hello")
+                .expect("discovery outbound stream stays open");
+        assert_eq!(discovery_frame.message_type, 1);
+
+        while let Ok(Some(action)) =
+            tokio::time::timeout(Duration::from_millis(50), actions.recv()).await
+        {
+            assert!(
+                !matches!(action, HeaderSyncAction::Misbehavior { peer: action_peer, .. } if action_peer == peer),
+                "header-sync cap rejection must not score peer misbehavior"
+            );
+        }
+
+        registry.remove_peer(&peer, ZAKURA_CAP_HEADER_SYNC | ZAKURA_CAP_DISCOVERY);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut snapshots = discovery_handle.subscribe_peer_snapshot();
+            while snapshots.borrow().inbound_peers != 0 {
+                snapshots
+                    .changed()
+                    .await
+                    .expect("discovery snapshot channel stays open");
+            }
+        })
+        .await
+        .expect("discovery peer state is removed");
+
+        shutdown.cancel();
+        reactor_task.await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn header_sync_admission_is_independent_when_discovery_is_full() -> Result<(), BoxError> {
+        let _guard = zebra_test::init();
+        let shutdown = CancellationToken::new();
+        let mut startup = header_sync_startup(shutdown.clone());
+        startup.config.peer_limits = ServicePeerLimits {
+            max_inbound_peers: 1,
+            ..ServicePeerLimits::default()
+        };
+        let (header_sync, mut actions, reactor_task) = spawn_header_sync_reactor(startup)?;
+        let supervisor = ZakuraSupervisorHandle::new(1);
+        let (discovery_handle, discovery_service) = test_discovery_service_with_peer_limits(
+            &supervisor,
+            ServicePeerLimits {
+                max_inbound_peers: 0,
+                ..ServicePeerLimits::default()
+            },
+        );
+        let registry = service_registry(
+            &supervisor,
+            Some(header_sync.clone()),
+            Arc::new(RecordingService::default()),
+            discovery_service,
+        )?;
+        let peer_node_id = SecretKey::from_bytes(&[14u8; 32]).public();
+        let peer = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        let (_hs_inbound_tx, hs_inbound_rx) = crate::zakura::framed_channel(1);
+        let (hs_outbound_tx, mut hs_outbound_rx) = crate::zakura::framed_channel(1);
+        let (_discovery_inbound_tx, discovery_inbound_rx) = crate::zakura::framed_channel(1);
+        let (discovery_outbound_tx, mut discovery_outbound_rx) = crate::zakura::framed_channel(1);
+        let streams = HashMap::from([
+            (HEADER_SYNC_STREAM_KIND, (hs_inbound_rx, hs_outbound_tx)),
+            (
+                DISCOVERY_STREAM_KIND,
+                (discovery_inbound_rx, discovery_outbound_tx),
+            ),
+        ]);
+
+        registry.add_peer(Peer::new(
+            peer.clone(),
+            None,
+            ZAKURA_CAP_HEADER_SYNC | ZAKURA_CAP_DISCOVERY,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        let header_frame = tokio::time::timeout(Duration::from_secs(1), hs_outbound_rx.recv())
+            .await
+            .expect("header-sync sends immediate Status")
+            .expect("header-sync outbound stream stays open");
+        assert_eq!(header_frame.message_type, u16::from(MSG_HS_STATUS));
+        assert!(matches!(
+            next_header_sync_action(&mut actions).await,
+            HeaderSyncAction::SendMessage {
+                peer: action_peer,
+                msg: HeaderSyncMessage::Status(_),
+            } if action_peer == peer
+        ));
+        assert_eq!(header_sync.peer_snapshot().inbound_peers, 1);
+        assert_eq!(discovery_handle.peer_snapshot().inbound_peers, 0);
+        assert!(
+            !matches!(
+                tokio::time::timeout(Duration::from_millis(100), discovery_outbound_rx.recv())
+                    .await,
+                Ok(Some(_))
+            ),
+            "discovery rejected peer must not receive discovery source messages"
+        );
+
+        registry.remove_peer(&peer, ZAKURA_CAP_HEADER_SYNC | ZAKURA_CAP_DISCOVERY);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(header_sync.peer_snapshot().inbound_peers, 0);
 
         shutdown.cancel();
         reactor_task.await?;
@@ -3971,6 +4334,124 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn stream_cancel_closes_ordered_worker_without_connection_cancel() -> Result<(), BoxError>
+    {
+        const ALPN: &[u8] = b"/zakura/testkit/stream-cancel/0";
+
+        let _guard = zebra_test::init();
+        let server = LocalEndpointFactory::new().endpoint(50).await?;
+        let (conn_tx, mut conn_rx) = mpsc::channel(1);
+        let (stream_tx, mut stream_rx) = mpsc::channel(2);
+        let router = Router::builder(server)
+            .accept(
+                ALPN,
+                CaptureConnection {
+                    connection_tx: conn_tx,
+                    stream_tx,
+                },
+            )
+            .spawn();
+        let client = LocalEndpointFactory::new().endpoint(51).await?;
+        let server_addr = router.endpoint().node_addr().initialized().await;
+        client.add_node_addr(server_addr.clone())?;
+
+        let client_conn = timeout(Duration::from_secs(10), client.connect(server_addr, ALPN))
+            .await
+            .expect("client connects to loopback capture endpoint")?;
+        let server_conn = timeout(Duration::from_secs(10), conn_rx.recv())
+            .await
+            .expect("server connection is captured")
+            .expect("capture handler sends the accepted connection");
+        drop(server_conn);
+        let (mut client_send, _client_recv) =
+            timeout(Duration::from_secs(1), client_conn.open_bi())
+                .await
+                .expect("client opens the worker stream")?;
+        let test_frame = Frame {
+            message_type: 1,
+            flags: 0,
+            payload: Vec::new(),
+        }
+        .encode(LOCAL_MAX_CONTROL_FRAME_BYTES)?;
+        timeout(Duration::from_secs(1), client_send.write_all(&test_frame))
+            .await
+            .expect("client writes the worker stream frame")?;
+        let (server_send, server_recv) = timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the worker stream")
+            .expect("capture handler sends the worker stream");
+
+        let mut limits = test_connection_limits();
+        limits.idle_timeout = Duration::from_millis(50);
+        let stream_kind = DISCOVERY_STREAM_KIND;
+        let connection_token = CancellationToken::new();
+        let stream_token = connection_token.child_token();
+        let (inbound_tx, _inbound_rx) = mpsc::channel(1);
+        let (outbound_tx, outbound_rx) = mpsc::channel(1);
+        let (freshness_tx, _freshness_rx) = watch::channel(Instant::now());
+        let permit = Arc::new(Semaphore::new(1))
+            .try_acquire_owned()
+            .expect("test semaphore starts with one permit");
+        let context = StreamWorkerContext {
+            trace: ZakuraTrace::noop(),
+            conn: ZakuraConnTrace::without_peer(1),
+            peer_id: test_peer(55),
+            stream_id: 1,
+            _permit: permit,
+            limits,
+            message_bucket: Arc::new(std::sync::Mutex::new(TokenBucket::new(128))),
+            connection_token: connection_token.clone(),
+            stream_token: stream_token.clone(),
+            freshness_tx,
+        };
+        let prelude = StreamPrelude {
+            magic: STREAM_PRELUDE_MAGIC,
+            stream_kind,
+            stream_version: ZAKURA_STREAM_VERSION_1,
+            request_id: None,
+            max_frame_bytes: app_frame_cap_for_stream_kind(&limits, stream_kind),
+        };
+
+        let worker = tokio::spawn(persistent_stream_worker(
+            server_send,
+            server_recv,
+            prelude,
+            context,
+            inbound_tx,
+            outbound_rx,
+            1,
+        ));
+
+        drop(outbound_tx);
+        stream_token.cancel();
+        timeout(Duration::from_secs(1), worker)
+            .await
+            .expect("stream cancellation stops the worker promptly")?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !connection_token.is_cancelled(),
+            "stream-local cancellation must not cancel the shared connection"
+        );
+
+        let (mut sibling_send, _sibling_recv) =
+            timeout(Duration::from_secs(1), client_conn.open_bi())
+                .await
+                .expect("connection survives to open a sibling stream")?;
+        timeout(Duration::from_secs(1), sibling_send.write_all(&test_frame))
+            .await
+            .expect("client writes the sibling stream frame")?;
+        timeout(Duration::from_secs(1), stream_rx.recv())
+            .await
+            .expect("server accepts the sibling stream")
+            .expect("capture handler sends the sibling stream");
+
+        client_conn.close(0u32.into(), b"done");
+        client.close().await;
+        router.shutdown().await?;
+        Ok(())
+    }
+
     #[test]
     fn local_application_frame_cap_admits_default_header_sync_response() {
         let limits = ZakuraLocalLimits::from_config(&Config::default());
@@ -3980,6 +4461,13 @@ mod tests {
 
         assert!(limits.max_frame_bytes >= default_header_sync_frame_bytes);
         assert!(limits.initial_limits().max_frame_bytes >= default_header_sync_frame_bytes);
+    }
+
+    #[test]
+    fn ordered_stream_stopped_write_is_stream_local() {
+        let error: BoxError = iroh::endpoint::WriteError::Stopped(VarInt::from_u32(0)).into();
+
+        assert!(ordered_stream_write_was_stopped(&error));
     }
 
     #[test]

@@ -40,10 +40,10 @@ use crate::{
 };
 
 use super::{
-    trace::peer_label as trace_peer_label, BoxRunFuture, Frame, FramedSend, Peer,
-    Service as ZakuraService, SinkReject, Stream, StreamMode, ZakuraPeerHandle, ZakuraPeerId,
-    ZakuraSupervisorHandle, ZakuraTrace, FRAME_HEADER_BYTES, LEGACY_REQUEST_TABLE,
-    LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_LEGACY_GOSSIP,
+    trace::peer_label as trace_peer_label, BoxRunFuture, Frame, FramedSend, OrderedSendError, Peer,
+    RequestResponseService, Service as ZakuraService, SinkReject, Stream, StreamMode,
+    ZakuraPeerHandle, ZakuraPeerId, ZakuraSupervisorHandle, ZakuraTrace, FRAME_HEADER_BYTES,
+    LEGACY_REQUEST_TABLE, LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_LEGACY_GOSSIP,
 };
 
 /// Zakura stream kind reserved for legacy gossip compatibility.
@@ -95,8 +95,6 @@ const LEGACY_GOSSIP_SERVICE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_FIRST_SEEN_TTL: Duration = Duration::from_secs(10 * 60);
 const DEFAULT_FIRST_SEEN_CAPACITY: usize = 50_000;
 const LEGACY_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-/// Maximum time a gossip broadcast waits for one peer's bounded source queue.
-const LEGACY_GOSSIP_FANOUT_TIMEOUT: Duration = Duration::from_secs(2);
 const SOURCE_INVENTORY_MISSING_RETRIES: usize = 8;
 const SOURCE_INVENTORY_MISSING_RETRY_DELAY: Duration = Duration::from_millis(500);
 const LEGACY_REQUEST_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -1138,7 +1136,6 @@ impl ZakuraGossipBroadcast {
         frame: LegacyGossipFrame,
         exclude: Option<&ZakuraPeerId>,
     ) -> Result<(), BoxError> {
-        let frame = frame.encode_frame()?;
         self.outbound.remember_latest_block(&frame);
         self.outbound.send_to_peers(frame, exclude).await
     }
@@ -1158,75 +1155,109 @@ impl ZakuraGossipBroadcast {
 
 #[derive(Clone, Debug, Default)]
 struct LegacyGossipOutbound {
-    senders: Arc<StdMutex<HashMap<ZakuraPeerId, FramedSend>>>,
-    latest_block: Arc<StdMutex<Option<Frame>>>,
+    sessions: Arc<StdMutex<HashMap<ZakuraPeerId, LegacyGossipPeerSession>>>,
+    latest_block: Arc<StdMutex<Option<block::Hash>>>,
 }
 
 impl LegacyGossipOutbound {
-    fn insert(&self, peer: ZakuraPeerId, sender: FramedSend) {
-        self.senders
+    fn insert(&self, session: LegacyGossipPeerSession) {
+        self.sessions
             .lock()
             .expect("legacy gossip outbound mutex is never poisoned")
-            .insert(peer, sender);
+            .insert(session.peer_id().clone(), session);
     }
 
     fn remove(&self, peer: &ZakuraPeerId) {
-        self.senders
+        self.sessions
             .lock()
             .expect("legacy gossip outbound mutex is never poisoned")
             .remove(peer);
     }
 
-    fn remember_latest_block(&self, frame: &Frame) {
-        if frame.message_type != MSG_ADVERTISE_BLOCK {
-            return;
+    fn remember_latest_block(&self, frame: &LegacyGossipFrame) {
+        if let LegacyGossipFrame::AdvertiseBlock(hash) = frame {
+            *self
+                .latest_block
+                .lock()
+                .expect("legacy gossip latest-block mutex is never poisoned") = Some(*hash);
         }
-
-        *self
-            .latest_block
-            .lock()
-            .expect("legacy gossip latest-block mutex is never poisoned") = Some(Frame {
-            message_type: frame.message_type,
-            flags: frame.flags,
-            payload: frame.payload.clone(),
-        });
     }
 
     async fn replay_latest_block_to_peer(
         &self,
-        peer_id: ZakuraPeerId,
-        sender: FramedSend,
+        session: LegacyGossipPeerSession,
     ) -> Result<(), BoxError> {
-        let Some(frame) = self
+        let Some(hash) = *self
             .latest_block
             .lock()
             .expect("legacy gossip latest-block mutex is never poisoned")
-            .clone()
         else {
             return Ok(());
         };
 
-        send_to_senders(vec![(peer_id, sender)], frame).await
+        session.try_send_advertise_block(hash).map_err(Into::into)
     }
 
     async fn send_to_peers(
         &self,
-        frame: Frame,
+        frame: LegacyGossipFrame,
         exclude: Option<&ZakuraPeerId>,
     ) -> Result<(), BoxError> {
-        let senders: Vec<_> = {
-            let senders = self
-                .senders
+        let sessions: Vec<_> = {
+            let sessions = self
+                .sessions
                 .lock()
                 .expect("legacy gossip outbound mutex is never poisoned");
-            senders
+            sessions
                 .iter()
                 .filter(|(peer_id, _)| !exclude.is_some_and(|exclude| exclude == *peer_id))
-                .map(|(peer_id, sender)| (peer_id.clone(), sender.clone()))
+                .map(|(_peer_id, session)| session.clone())
                 .collect()
         };
 
-        send_to_senders(senders, frame).await
+        send_to_sessions(sessions, frame)
+    }
+}
+
+/// Typed ordered legacy gossip sender for one peer.
+#[derive(Clone, Debug)]
+pub struct LegacyGossipPeerSession {
+    peer_id: ZakuraPeerId,
+    send: FramedSend,
+}
+
+impl LegacyGossipPeerSession {
+    fn new(peer_id: ZakuraPeerId, send: FramedSend) -> Self {
+        Self { peer_id, send }
+    }
+
+    /// Authenticated peer identity for this legacy gossip stream.
+    pub fn peer_id(&self) -> &ZakuraPeerId {
+        &self.peer_id
+    }
+
+    /// Send an explicit block advertisement.
+    pub fn try_send_advertise_block(&self, hash: block::Hash) -> Result<(), OrderedSendError> {
+        self.try_send_gossip_frame(LegacyGossipFrame::AdvertiseBlock(hash))
+    }
+
+    /// Send explicit transaction id advertisements.
+    pub fn try_send_advertise_transaction_ids(
+        &self,
+        ids: Vec<UnminedTxId>,
+    ) -> Result<(), OrderedSendError> {
+        self.try_send_gossip_frame(LegacyGossipFrame::AdvertiseTransactionIds(ids))
+    }
+
+    fn try_send_gossip_frame(&self, frame: LegacyGossipFrame) -> Result<(), OrderedSendError> {
+        let frame = frame
+            .encode_frame()
+            .map_err(|error| OrderedSendError::Encode(Box::new(error)))?;
+        match self.send.try_send(frame) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_frame)) => Err(OrderedSendError::Full),
+            Err(mpsc::error::TrySendError::Closed(_frame)) => Err(OrderedSendError::Closed),
+        }
     }
 }
 
@@ -1253,38 +1284,27 @@ fn first_seen_for_supervisor(supervisor: &ZakuraSupervisorHandle) -> FirstSeenCa
         .clone()
 }
 
-async fn send_to_senders(
-    senders: Vec<(ZakuraPeerId, FramedSend)>,
-    frame: Frame,
+fn send_to_sessions(
+    sessions: Vec<LegacyGossipPeerSession>,
+    frame: LegacyGossipFrame,
 ) -> Result<(), BoxError> {
-    let sends = senders.into_iter().map(|(peer_id, sender)| {
-        let frame = Frame {
-            message_type: frame.message_type,
-            flags: frame.flags,
-            payload: frame.payload.clone(),
+    let mut first_error = None;
+    for session in sessions {
+        let result = match &frame {
+            LegacyGossipFrame::AdvertiseBlock(hash) => session.try_send_advertise_block(*hash),
+            LegacyGossipFrame::AdvertiseTransactionIds(ids) => {
+                session.try_send_advertise_transaction_ids(ids.clone())
+            }
         };
 
-        async move {
-            match timeout(LEGACY_GOSSIP_FANOUT_TIMEOUT, sender.send(frame)).await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(error)) => Err(format!(
-                    "Zakura gossip source queue unavailable for peer {peer_id:?}: {error}"
-                )),
-                Err(_) => Err(format!(
-                    "Zakura gossip source queue unavailable for peer {peer_id:?}: fanout timed out"
-                )),
-            }
-        }
-    });
-
-    let mut first_error = None;
-    for result in futures::future::join_all(sends).await {
-        match result {
-            Ok(()) => {}
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(error.into());
-                }
+        if let Err(error) = result {
+            debug!(
+                peer = ?session.peer_id(),
+                ?error,
+                "failed to queue Zakura legacy gossip frame"
+            );
+            if first_error.is_none() {
+                first_error = Some(error.into());
             }
         }
     }
@@ -2103,13 +2123,14 @@ impl ZakuraService for LegacyGossipSink {
         let inbound_tx = self.inbound_tx.clone();
         let peer_id = peer.id.clone();
         let cancel_token = peer.cancel_token();
+        let session = LegacyGossipPeerSession::new(peer_id.clone(), send);
 
-        outbound.insert(peer_id.clone(), send.clone());
+        outbound.insert(session.clone());
         tokio::spawn({
             let outbound = outbound.clone();
-            let peer_id = peer_id.clone();
+            let session = session.clone();
             async move {
-                if let Err(error) = outbound.replay_latest_block_to_peer(peer_id, send).await {
+                if let Err(error) = outbound.replay_latest_block_to_peer(session).await {
                     debug!(?error, "latest Zakura block gossip replay failed");
                 }
             }
@@ -2165,6 +2186,12 @@ impl ZakuraService for LegacyGossipSink {
         self.deliver(peer_id, stream_kind, frame)
     }
 
+    fn as_request_response(&self) -> Option<&dyn RequestResponseService> {
+        Some(self)
+    }
+}
+
+impl RequestResponseService for LegacyGossipSink {
     fn request_frame<'a>(
         &'a self,
         peer_id: ZakuraPeerId,
@@ -3642,21 +3669,22 @@ mod tests {
         })?;
 
         let (honest, mut honest_rx) = framed_channel(1);
-        let frame = Frame {
-            message_type: MSG_ADVERTISE_BLOCK,
-            flags: 0,
-            payload: vec![7],
-        };
+        let block_hash = block_hash(7);
 
-        let result = send_to_senders(
-            vec![(saturated_peer, saturated), (honest_peer, honest)],
-            frame,
-        )
-        .await;
+        let result = send_to_sessions(
+            vec![
+                LegacyGossipPeerSession::new(saturated_peer, saturated),
+                LegacyGossipPeerSession::new(honest_peer, honest),
+            ],
+            LegacyGossipFrame::AdvertiseBlock(block_hash),
+        );
         let outbound = tokio::time::timeout(Duration::from_secs(1), honest_rx.recv())
             .await?
             .expect("honest peer receives fanout");
-        assert_eq!(outbound.payload, vec![7]);
+        assert_eq!(
+            LegacyGossipFrame::decode_frame(outbound)?,
+            LegacyGossipFrame::AdvertiseBlock(block_hash)
+        );
 
         assert!(
             result.is_err(),
@@ -3678,10 +3706,11 @@ mod tests {
 
         let peer_id = ZakuraPeerId::new(vec![91; 32]).expect("test peer id is within bounds");
         let (sender, mut receiver) = framed_channel(1);
-        broadcast.outbound.insert(peer_id.clone(), sender.clone());
+        let session = LegacyGossipPeerSession::new(peer_id, sender);
+        broadcast.outbound.insert(session.clone());
         broadcast
             .outbound
-            .replay_latest_block_to_peer(peer_id, sender)
+            .replay_latest_block_to_peer(session)
             .await?;
 
         let replayed = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
@@ -3699,19 +3728,16 @@ mod tests {
         let peer_id = ZakuraPeerId::new(vec![9; 32]).expect("test peer id is within bounds");
         let (disconnected, rx) = framed_channel(1);
         drop(rx);
-        let frame = Frame {
-            message_type: MSG_ADVERTISE_BLOCK,
-            flags: 0,
-            payload: vec![8],
-        };
 
-        let error = send_to_senders(vec![(peer_id, disconnected)], frame)
-            .await
-            .expect_err("closed outbound queue reports an adapter error");
+        let error = send_to_sessions(
+            vec![LegacyGossipPeerSession::new(peer_id, disconnected)],
+            LegacyGossipFrame::AdvertiseBlock(block_hash(8)),
+        )
+        .expect_err("closed outbound queue reports an adapter error");
         assert!(
             error
                 .to_string()
-                .contains("Zakura gossip source queue unavailable"),
+                .contains("ordered stream send queue is closed"),
             "unexpected error: {error}"
         );
         Ok(())

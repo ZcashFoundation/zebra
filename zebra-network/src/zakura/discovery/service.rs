@@ -8,27 +8,37 @@
 //! (`message_type = DISCOVERY_FRAME_MESSAGE_TYPE`, `flags = 0`), identical to the
 //! original native-discovery wire so peers interoperate.
 
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use iroh::NodeId;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::zakura::{
-    BoxRunFuture, Frame, FramedRecv, FramedSend, Peer, Service, Sink, SinkReject, Source, Stream,
-    StreamMode, ZakuraPeerId, LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_DISCOVERY,
+    BoxRunFuture, Frame, FramedRecv, FramedSend, HeaderSyncEvent, HeaderSyncHandle,
+    OrderedSendError, Peer, PeerStreamSession, Service, ServiceAdmissionDecision,
+    ServicePeerDirection, Sink, SinkReject, Stream, StreamMode, ZakuraPeerId,
+    LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
 };
 
 use super::protocol::{
-    DiscoveryBookError, DiscoveryMessage, DiscoveryRecordError, ZakuraDiscoveryHandle,
-    ZakuraNodeRecord, MAX_DISCOVERY_RECORDS_PER_RESPONSE, ZAKURA_DISCOVERY_STREAM_VERSION,
-    ZAKURA_STREAM_DISCOVERY,
+    DiscoveryBookError, DiscoveryMessage, DiscoveryRecordError, GetServices,
+    HeaderSyncServiceSummary, ServiceSummaryEnvelope, Services, ZakuraDiscoveryHandle,
+    ZakuraNodeRecord, ZakuraServiceId, MAX_DISCOVERY_RECORDS_PER_RESPONSE,
+    ZAKURA_DISCOVERY_STREAM_VERSION, ZAKURA_STREAM_DISCOVERY,
 };
 
 /// Frame message type carrying a discovery payload (matches the native wire).
 const DISCOVERY_FRAME_MESSAGE_TYPE: u16 = 1;
 
-/// Minimum spacing between periodic discovery exchanges, regardless of config.
-const MIN_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+/// Maximum time discovery waits for first-party exchange responses before releasing the session.
+const DISCOVERY_EXCHANGE_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 const DISCOVERY_SERVICE_STREAMS: [Stream; 1] = [Stream {
     kind: ZAKURA_STREAM_DISCOVERY,
@@ -45,16 +55,124 @@ pub(crate) fn discovery_streams() -> &'static [Stream] {
     &DISCOVERY_SERVICE_STREAMS
 }
 
+/// Cloneable typed sender for one native discovery ordered stream.
+#[derive(Clone, Debug)]
+pub struct DiscoveryPeerSession {
+    peer_id: ZakuraPeerId,
+    direction: ServicePeerDirection,
+    send: FramedSend,
+    cancel: CancellationToken,
+}
+
+impl DiscoveryPeerSession {
+    fn new(session: &PeerStreamSession, direction: ServicePeerDirection) -> Self {
+        Self {
+            peer_id: session.peer_id().clone(),
+            direction,
+            send: session.sender(),
+            cancel: session.cancel_token(),
+        }
+    }
+
+    /// Authenticated peer identity for this discovery stream.
+    pub fn peer_id(&self) -> &ZakuraPeerId {
+        &self.peer_id
+    }
+
+    /// Direction of the underlying Zakura connection.
+    pub fn direction(&self) -> ServicePeerDirection {
+        self.direction
+    }
+
+    /// Peer disconnect/local shutdown cancellation token.
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel.clone()
+    }
+
+    /// Send this node's signed self-record.
+    pub fn try_send_hello(&self, record: ZakuraNodeRecord) -> Result<(), OrderedSendError> {
+        self.try_send_message(DiscoveryMessage::Hello { record })
+    }
+
+    /// Ask this peer for more peer records.
+    pub fn try_send_get_peers(
+        &self,
+        limit: u16,
+        wanted_services: Vec<ZakuraServiceId>,
+        exclude_node_ids: Vec<NodeId>,
+    ) -> Result<(), OrderedSendError> {
+        self.try_send_message(DiscoveryMessage::GetPeers {
+            limit,
+            wanted_services,
+            exclude_node_ids,
+        })
+    }
+
+    /// Send peer records to this peer.
+    pub fn try_send_peers(&self, records: Vec<ZakuraNodeRecord>) -> Result<(), OrderedSendError> {
+        self.try_send_message(DiscoveryMessage::Peers { records })
+    }
+
+    /// Ask this peer for its own live service summaries.
+    pub fn try_send_get_services(
+        &self,
+        wanted_services: Vec<ZakuraServiceId>,
+    ) -> Result<(), OrderedSendError> {
+        self.try_send_message(DiscoveryMessage::GetServices(GetServices {
+            wanted_services,
+        }))
+    }
+
+    /// Send this node's first-party live service summaries.
+    pub fn try_send_services(&self, services: Services) -> Result<(), OrderedSendError> {
+        self.try_send_message(DiscoveryMessage::Services(services))
+    }
+
+    fn try_send_message(&self, message: DiscoveryMessage) -> Result<(), OrderedSendError> {
+        let payload = message
+            .encode()
+            .map_err(|error| OrderedSendError::Encode(Box::new(error)))?;
+        match self.send.try_send(Frame {
+            message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+            flags: 0,
+            payload,
+        }) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_frame)) => {
+                Err(OrderedSendError::Full)
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_frame)) => {
+                Err(OrderedSendError::Closed)
+            }
+        }
+    }
+}
+
 /// Native discovery service backed by a [`ZakuraDiscoveryHandle`] runtime.
 #[derive(Clone, Debug)]
 pub struct DiscoveryService {
     handle: ZakuraDiscoveryHandle,
+    header_sync: Option<HeaderSyncHandle>,
 }
 
 impl DiscoveryService {
     /// Builds a discovery service driven by `handle`.
     pub fn new(handle: ZakuraDiscoveryHandle) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            header_sync: None,
+        }
+    }
+
+    /// Builds a discovery service with a header-sync first-party summary provider.
+    pub(crate) fn with_header_sync(
+        handle: ZakuraDiscoveryHandle,
+        header_sync: HeaderSyncHandle,
+    ) -> Self {
+        Self {
+            handle,
+            header_sync: Some(header_sync),
+        }
     }
 
     /// Returns the underlying discovery runtime handle.
@@ -72,6 +190,21 @@ impl Service for DiscoveryService {
         discovery_streams()
     }
 
+    fn wants_peer(
+        &self,
+        _peer: &ZakuraPeerId,
+        _negotiated: u64,
+        direction: ServicePeerDirection,
+    ) -> bool {
+        // Discovery escalation only checks this reactor's local room; live
+        // summaries are first-party advisory data imported by the runtime.
+        let snapshot = self.handle.peer_snapshot();
+        match direction {
+            ServicePeerDirection::Inbound => snapshot.inbound_slots_free > 0,
+            ServicePeerDirection::Outbound => snapshot.outbound_slots_free > 0,
+        }
+    }
+
     fn add_peer(&self, mut peer: Peer) {
         let Some((recv, send)) = peer.take_stream(ZAKURA_STREAM_DISCOVERY) else {
             return;
@@ -81,60 +214,162 @@ impl Service for DiscoveryService {
             // author; drop the stream without registering an exchange.
             return;
         };
-        let cancel = peer.cancel_token();
+        let session = PeerStreamSession::new(
+            peer.id.clone(),
+            ZAKURA_STREAM_DISCOVERY,
+            recv,
+            send,
+            peer.service_cancel_token(),
+        );
+        let discovery_session = DiscoveryPeerSession::new(&session, peer.direction);
+        let service_cancel = discovery_session.cancel_token();
+        let connection_cancel = peer.cancel_token();
+        let other_service_negotiated =
+            peer.negotiated & !(ZAKURA_CAP_DISCOVERY | ZAKURA_CAP_HEADER_SYNC) != 0;
+        let (_peer_id, _stream_kind, recv, _send, _session_cancel) = session.into_parts();
 
-        let sink = DiscoverySink {
-            handle: self.handle.clone(),
-            peer_node_id,
-            send: send.clone(),
-        };
-        let sink_cancel = cancel.clone();
+        let handle = self.handle.clone();
+        let header_sync = self.header_sync.clone();
         tokio::spawn(async move {
-            match Box::new(sink).run(recv).await {
-                Ok(()) => {}
-                Err(SinkReject::Protocol(error)) => {
-                    tracing::debug!(
-                        ?error,
-                        "Zakura discovery stream rejected protocol-invalid frame"
-                    );
-                    sink_cancel.cancel();
-                }
-                Err(SinkReject::Local(error)) => {
-                    tracing::debug!(?error, "Zakura discovery stream stopped on local error");
-                }
+            let decision = handle
+                .admit_peer(
+                    discovery_session.peer_id().clone(),
+                    discovery_session.direction(),
+                )
+                .await;
+            if decision != ServiceAdmissionDecision::Admit {
+                tracing::debug!(
+                    peer = ?discovery_session.peer_id(),
+                    direction = ?discovery_session.direction(),
+                    ?decision,
+                    "locally parking Zakura discovery service session"
+                );
+                service_cancel.cancel();
+                return;
             }
-        });
 
-        let source = DiscoverySource {
-            handle: self.handle.clone(),
-            cancel,
-        };
+            spawn_discovery_exchange(DiscoveryExchangeStart {
+                handle,
+                header_sync,
+                peer_node_id,
+                discovery_session,
+                recv,
+                service_cancel,
+                connection_cancel,
+                other_service_negotiated,
+            });
+        });
+    }
+
+    fn remove_peer(&self, peer: &ZakuraPeerId) {
+        let handle = self.handle.clone();
+        let peer = peer.clone();
         tokio::spawn(async move {
-            Box::new(source).run(send).await;
+            handle.remove_peer(&peer).await;
         });
     }
+}
 
-    fn remove_peer(&self, _peer: &ZakuraPeerId) {
-        // The runtime tracks the connected set through the supervisor watch it
-        // was constructed with; active-service queries cross-reference it, so a
-        // disconnect needs no explicit bookkeeping here.
-    }
+struct DiscoveryExchangeStart {
+    handle: ZakuraDiscoveryHandle,
+    header_sync: Option<HeaderSyncHandle>,
+    peer_node_id: NodeId,
+    discovery_session: DiscoveryPeerSession,
+    recv: FramedRecv,
+    service_cancel: CancellationToken,
+    connection_cancel: CancellationToken,
+    other_service_negotiated: bool,
+}
+
+fn spawn_discovery_exchange(start: DiscoveryExchangeStart) {
+    let DiscoveryExchangeStart {
+        handle,
+        header_sync,
+        peer_node_id,
+        discovery_session,
+        recv,
+        service_cancel,
+        connection_cancel,
+        other_service_negotiated,
+    } = start;
+    let peer_id = discovery_session.peer_id().clone();
+    let progress = Arc::new(DiscoveryExchangeProgress::default());
+    let source_header_sync = header_sync.clone();
+    let sink = DiscoverySink {
+        handle: handle.clone(),
+        header_sync,
+        peer_node_id,
+        session: discovery_session.clone(),
+        progress: progress.clone(),
+    };
+    let sink_service_cancel = service_cancel.clone();
+    let sink_connection_cancel = connection_cancel.clone();
+    tokio::spawn(async move {
+        match Box::new(sink).run(recv).await {
+            Ok(()) => {}
+            Err(SinkReject::Protocol(error)) => {
+                tracing::debug!(
+                    ?error,
+                    "Zakura discovery stream rejected protocol-invalid frame"
+                );
+                sink_connection_cancel.cancel();
+            }
+            Err(SinkReject::Local(error)) => {
+                tracing::debug!(?error, "Zakura discovery stream stopped on local error");
+            }
+        }
+        sink_service_cancel.cancel();
+    });
+
+    let source = DiscoverySource {
+        handle: handle.clone(),
+        session: discovery_session,
+        progress,
+    };
+    tokio::spawn(async move {
+        let exchanged = source.run().await;
+        if exchanged {
+            handle.mark_short_lived_exchange(&peer_node_id).await;
+        }
+        service_cancel.cancel();
+        handle.remove_peer(&peer_id).await;
+        if exchanged
+            && !peer_has_other_service_owner(
+                source_header_sync.as_ref(),
+                peer_node_id,
+                other_service_negotiated,
+            )
+        {
+            connection_cancel.cancel();
+        }
+    });
 }
 
 /// Reader half of the discovery stream: imports peer records and answers queries.
 struct DiscoverySink {
     handle: ZakuraDiscoveryHandle,
+    header_sync: Option<HeaderSyncHandle>,
     peer_node_id: NodeId,
-    send: FramedSend,
+    session: DiscoveryPeerSession,
+    progress: Arc<DiscoveryExchangeProgress>,
 }
 
 impl Sink for DiscoverySink {
     fn run(self: Box<Self>, mut recv: FramedRecv) -> BoxRunFuture<'static, Result<(), SinkReject>> {
         Box::pin(async move {
-            while let Some(frame) = recv.recv().await {
-                self.handle_frame(frame).await?;
+            let cancel = self.session.cancel_token();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Ok(()),
+                    frame = recv.recv() => {
+                        let Some(frame) = frame else {
+                            return Ok(());
+                        };
+                        self.handle_frame(frame).await?;
+                    }
+                }
             }
-            Ok(())
         })
     }
 }
@@ -153,23 +388,85 @@ impl DiscoverySink {
                     .handle
                     .sample_peers(usize::from(limit), &wanted_services, &exclude_node_ids)
                     .await;
-                self.send_message(DiscoveryMessage::Peers { records }).await
+                self.send_peers(records)
             }
             DiscoveryMessage::Peers { records } => {
                 self.handle
                     .import_peer_records(records, Some(self.peer_node_id))
                     .await;
+                self.progress.mark_peers();
                 Ok(())
             }
-            DiscoveryMessage::GetServices { .. } | DiscoveryMessage::Services { .. } => {
-                // Service discovery rides the self-record service list, not a
-                // dedicated message exchange; an explicit service message is a
-                // protocol violation.
-                Err(SinkReject::protocol(
-                    "Zakura discovery service messages are not supported",
-                ))
+            DiscoveryMessage::GetServices(query) => {
+                let services = self.local_services_response(query).await?;
+                self.send_services(services)
+            }
+            DiscoveryMessage::Services(services) => self.handle_services(services).await,
+        }
+    }
+
+    async fn local_services_response(&self, query: GetServices) -> Result<Services, SinkReject> {
+        let mut summaries = Vec::new();
+
+        if service_wanted(&query.wanted_services, &ZakuraServiceId::header_sync()) {
+            if let Some(header_sync) = &self.header_sync {
+                let (best_height, best_hash) = header_sync.best_header_tip();
+                let summary = HeaderSyncServiceSummary::from_snapshot(
+                    best_height,
+                    best_hash,
+                    None,
+                    true,
+                    header_sync.peer_snapshot(),
+                );
+                summaries.push(
+                    ServiceSummaryEnvelope::header_sync(&summary).map_err(SinkReject::local)?,
+                );
             }
         }
+
+        if service_wanted(&query.wanted_services, &ZakuraServiceId::discovery()) {
+            let summary = self.handle.local_discovery_summary().await;
+            summaries.push(ServiceSummaryEnvelope::discovery(&summary).map_err(SinkReject::local)?);
+        }
+
+        Ok(self.handle.local_services_response(summaries))
+    }
+
+    async fn handle_services(&self, services: Services) -> Result<(), SinkReject> {
+        if services.node_id != self.peer_node_id {
+            return Err(SinkReject::protocol(
+                "Zakura discovery SERVICES authored by a different node id",
+            ));
+        }
+
+        let header_summaries =
+            decode_header_sync_summaries(&services).map_err(SinkReject::protocol)?;
+        self.handle
+            .import_connected_peer_services(services, self.peer_node_id)
+            .await
+            .map_err(SinkReject::protocol)?;
+        self.progress.mark_services();
+
+        if let Some(header_sync) = &self.header_sync {
+            for summary in header_summaries {
+                if let Err(error) = header_sync
+                    .send(HeaderSyncEvent::AdvisoryHeaderSummary {
+                        peer: self.session.peer_id().clone(),
+                        summary,
+                    })
+                    .await
+                {
+                    tracing::debug!(
+                        ?error,
+                        peer = ?self.session.peer_id(),
+                        "failed to queue first-party Zakura header-sync advisory summary"
+                    );
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn handle_hello(&self, record: ZakuraNodeRecord) -> Result<(), SinkReject> {
@@ -189,55 +486,77 @@ impl DiscoverySink {
                 Ok(())
             }
             Err(error) => Err(SinkReject::protocol(error)),
+        }?;
+        self.progress.mark_hello();
+        Ok(())
+    }
+
+    fn send_peers(&self, records: Vec<ZakuraNodeRecord>) -> Result<(), SinkReject> {
+        match self.session.try_send_peers(records) {
+            Ok(()) | Err(OrderedSendError::Full) => Ok(()),
+            Err(OrderedSendError::Closed) => {
+                Err(SinkReject::local("Zakura discovery send channel closed"))
+            }
+            Err(OrderedSendError::Encode(error)) => Err(SinkReject::local(error)),
         }
     }
 
-    async fn send_message(&self, message: DiscoveryMessage) -> Result<(), SinkReject> {
-        send_discovery_message(&self.send, message).await
+    fn send_services(&self, services: Services) -> Result<(), SinkReject> {
+        match self.session.try_send_services(services) {
+            Ok(()) | Err(OrderedSendError::Full) => Ok(()),
+            Err(OrderedSendError::Closed) => {
+                Err(SinkReject::local("Zakura discovery send channel closed"))
+            }
+            Err(OrderedSendError::Encode(error)) => Err(SinkReject::local(error)),
+        }
     }
+}
+
+fn service_wanted(wanted_services: &[ZakuraServiceId], service_id: &ZakuraServiceId) -> bool {
+    wanted_services.is_empty() || wanted_services.iter().any(|wanted| wanted == service_id)
+}
+
+fn decode_header_sync_summaries(
+    services: &Services,
+) -> Result<Vec<HeaderSyncServiceSummary>, crate::BoxError> {
+    let mut summaries = Vec::new();
+    for envelope in &services.summaries {
+        if let Some(summary) = envelope.decode_header_sync()? {
+            summaries.push(summary);
+        }
+    }
+    Ok(summaries)
 }
 
 /// Writer half of the discovery stream: periodic self-record gossip + peer asks.
 struct DiscoverySource {
     handle: ZakuraDiscoveryHandle,
-    cancel: CancellationToken,
-}
-
-impl Source for DiscoverySource {
-    fn run(self: Box<Self>, send: FramedSend) -> BoxRunFuture<'static, ()> {
-        Box::pin(async move {
-            if self.exchange(&send).await.is_err() {
-                return;
-            }
-            let refresh = self
-                .handle
-                .refresh_interval()
-                .await
-                .max(MIN_DISCOVERY_REFRESH_INTERVAL);
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = self.cancel.cancelled() => return,
-                    _ = tokio::time::sleep(refresh) => {}
-                }
-                if self.exchange(&send).await.is_err() {
-                    return;
-                }
-            }
-        })
-    }
+    session: DiscoveryPeerSession,
+    progress: Arc<DiscoveryExchangeProgress>,
 }
 
 impl DiscoverySource {
-    /// Gossips the current self-record and asks the peer for more peers.
+    async fn run(self) -> bool {
+        if self.exchange().await.is_err() {
+            return false;
+        }
+        let cancel = self.session.cancel_token();
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {}
+            _ = self.progress.wait_complete() => {}
+            _ = tokio::time::sleep(DISCOVERY_EXCHANGE_SETTLE_TIMEOUT) => {}
+        }
+        true
+    }
+
+    /// Gossips the current self-record and asks the peer for records and services.
     ///
     /// Returns `Err(())` once the stream's send side is gone, so the caller
     /// stops the periodic loop.
-    async fn exchange(&self, send: &FramedSend) -> Result<(), ()> {
-        let hello = DiscoveryMessage::Hello {
-            record: (*self.handle.current_self_record()).clone(),
-        };
-        send_discovery_message(send, hello).await.map_err(|_| ())?;
+    async fn exchange(&self) -> Result<(), ()> {
+        let record = (*self.handle.current_self_record()).clone();
+        self.handle_send_result(self.session.try_send_hello(record))?;
 
         let limit = self
             .handle
@@ -246,30 +565,84 @@ impl DiscoverySource {
             .min(MAX_DISCOVERY_RECORDS_PER_RESPONSE);
         // `peer_sample_limit` is bounded by MAX_DISCOVERY_RECORDS_PER_RESPONSE
         // (<= u16::MAX), so the cast cannot truncate.
-        let get_peers = DiscoveryMessage::GetPeers {
-            limit: limit as u16,
-            wanted_services: Vec::new(),
-            exclude_node_ids: self.handle.peer_sample_exclusions().await,
-        };
-        send_discovery_message(send, get_peers)
-            .await
-            .map_err(|_| ())
+        let exclude_node_ids = self.handle.peer_sample_exclusions().await;
+        self.handle_send_result(self.session.try_send_get_peers(
+            limit as u16,
+            Vec::new(),
+            exclude_node_ids,
+        ))?;
+
+        self.handle_send_result(self.session.try_send_get_services(Vec::new()))
+    }
+
+    fn handle_send_result(&self, result: Result<(), OrderedSendError>) -> Result<(), ()> {
+        match result {
+            Ok(()) | Err(OrderedSendError::Full) => Ok(()),
+            Err(OrderedSendError::Closed) => Err(()),
+            Err(OrderedSendError::Encode(error)) => {
+                tracing::debug!(
+                    ?error,
+                    peer = ?self.session.peer_id(),
+                    "failed to encode Zakura discovery message"
+                );
+                Ok(())
+            }
+        }
     }
 }
 
-/// Encodes and sends a discovery message as a transport frame.
-async fn send_discovery_message(
-    send: &FramedSend,
-    message: DiscoveryMessage,
-) -> Result<(), SinkReject> {
-    let payload = message.encode().map_err(SinkReject::local)?;
-    send.send(Frame {
-        message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
-        flags: 0,
-        payload,
+#[derive(Default)]
+struct DiscoveryExchangeProgress {
+    hello: AtomicBool,
+    peers: AtomicBool,
+    services: AtomicBool,
+    notify: Notify,
+}
+
+impl DiscoveryExchangeProgress {
+    fn mark_hello(&self) {
+        self.hello.store(true, Ordering::Relaxed);
+        self.notify.notify_waiters();
+    }
+
+    fn mark_peers(&self) {
+        self.peers.store(true, Ordering::Relaxed);
+        self.notify.notify_waiters();
+    }
+
+    fn mark_services(&self) {
+        self.services.store(true, Ordering::Relaxed);
+        self.notify.notify_waiters();
+    }
+
+    fn complete(&self) -> bool {
+        self.hello.load(Ordering::Relaxed)
+            && self.peers.load(Ordering::Relaxed)
+            && self.services.load(Ordering::Relaxed)
+    }
+
+    async fn wait_complete(&self) {
+        while !self.complete() {
+            self.notify.notified().await;
+        }
+    }
+}
+
+fn peer_has_other_service_owner(
+    header_sync: Option<&HeaderSyncHandle>,
+    peer_node_id: NodeId,
+    other_service_negotiated: bool,
+) -> bool {
+    if other_service_negotiated {
+        return true;
+    }
+
+    header_sync.is_some_and(|header_sync| {
+        header_sync
+            .candidate_state()
+            .admitted_node_ids
+            .contains(&peer_node_id)
     })
-    .await
-    .map_err(|_| SinkReject::local("Zakura discovery send channel closed"))
 }
 
 /// Decodes a discovery message from a transport frame, rejecting a frame whose
@@ -304,4 +677,739 @@ fn is_advisory_self_record_import_error(error: &DiscoveryBookError) -> bool {
             | DiscoveryBookError::Record(DiscoveryRecordError::Expired)
             | DiscoveryBookError::Record(DiscoveryRecordError::FarFutureExpiry)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    use iroh::SecretKey;
+    use tokio::{sync::watch, task::JoinHandle};
+
+    use super::*;
+    use crate::zakura::discovery::protocol::{
+        DiscoveryServiceSummary, ZakuraLiveServiceSummary, ZakuraNodeRecordBody,
+    };
+    use crate::zakura::{
+        framed_channel, spawn_header_sync_reactor, HeaderSyncAction, HeaderSyncFrontiers,
+        HeaderSyncMessage, HeaderSyncPeerSession, HeaderSyncStartup, HeaderSyncStatus,
+        ServicePeerLimits, ZakuraDiscoveryConfig, ZakuraDiscoveryLocalConfig,
+        ZakuraHandshakeConfig, ZakuraHeaderSyncConfig, LOCAL_MAX_MESSAGE_BYTES,
+        ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
+    };
+    use zebra_chain::{block, parameters::Network};
+
+    struct HeaderAdvisoryFixture {
+        discovery_handle: ZakuraDiscoveryHandle,
+        header_sync: HeaderSyncHandle,
+        header_actions: tokio::sync::mpsc::Receiver<HeaderSyncAction>,
+        header_task: JoinHandle<()>,
+        peer_node_id: NodeId,
+        peer_id: ZakuraPeerId,
+        peer_send: FramedSend,
+        _peer_recv: FramedRecv,
+    }
+
+    impl Drop for HeaderAdvisoryFixture {
+        fn drop(&mut self) {
+            self.header_task.abort();
+        }
+    }
+
+    fn current_test_unix_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_secs()
+    }
+
+    fn header_summary(best_height: block::Height) -> HeaderSyncServiceSummary {
+        HeaderSyncServiceSummary {
+            best_height,
+            best_hash: block::Hash([7; 32]),
+            finalized_height: None,
+            serving_headers: true,
+            inbound_slots_free: 1,
+            inbound_slots_max: 1,
+            outbound_slots_free: 1,
+            outbound_slots_max: 1,
+        }
+    }
+
+    fn spawn_test_header_sync() -> Result<
+        (
+            HeaderSyncHandle,
+            tokio::sync::mpsc::Receiver<HeaderSyncAction>,
+            JoinHandle<()>,
+        ),
+        crate::BoxError,
+    > {
+        let network = Network::new_regtest(Default::default());
+        let anchor = (block::Height(0), network.genesis_hash());
+        let mut startup = HeaderSyncStartup::new(
+            network,
+            anchor,
+            HeaderSyncFrontiers {
+                finalized_height: anchor.0,
+                verified_block_tip: anchor.0,
+            },
+            Some(anchor),
+            ZakuraHeaderSyncConfig::default(),
+            LOCAL_MAX_MESSAGE_BYTES,
+        );
+        startup.range_state_actions_enabled = true;
+        spawn_header_sync_reactor(startup).map_err(Into::into)
+    }
+
+    fn signed_header_sync_record(
+        secret_key: &SecretKey,
+        handshake: &ZakuraHandshakeConfig,
+    ) -> Result<ZakuraNodeRecord, crate::BoxError> {
+        let body = ZakuraNodeRecordBody {
+            node_id: secret_key.public(),
+            direct_addrs: vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 44)),
+                8233,
+            )],
+            services: vec![ZakuraServiceId::header_sync()],
+            zakura_protocol_min: handshake.zakura_protocol_min,
+            zakura_protocol_max: handshake.zakura_protocol_max,
+            network_id: handshake.network_id,
+            chain_id: handshake.chain_id,
+            sequence: 1,
+            expires_at_unix_secs: current_test_unix_secs().saturating_add(60),
+        };
+        Ok(ZakuraNodeRecord::sign(body, secret_key)?)
+    }
+
+    fn spawn_header_advisory_fixture(
+        peer_seed: u8,
+    ) -> Result<HeaderAdvisoryFixture, crate::BoxError> {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[31u8; 32]);
+        let discovery_handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret,
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig::default(),
+            connected_rx,
+        )?;
+        let (header_sync, header_actions, header_task) = spawn_test_header_sync()?;
+        let service =
+            DiscoveryService::with_header_sync(discovery_handle.clone(), header_sync.clone());
+        let peer_node_id = SecretKey::from_bytes(&[peer_seed; 32]).public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        connected_tx.send_replace(vec![peer_id.clone()]);
+
+        let (peer_send, service_recv) = framed_channel(8);
+        let (service_send, peer_recv) = framed_channel(8);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+
+        service.add_peer(Peer::new(
+            peer_id.clone(),
+            None,
+            ZAKURA_CAP_DISCOVERY,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        Ok(HeaderAdvisoryFixture {
+            discovery_handle,
+            header_sync,
+            header_actions,
+            header_task,
+            peer_node_id,
+            peer_id,
+            peer_send,
+            _peer_recv: peer_recv,
+        })
+    }
+
+    async fn send_discovery_message(
+        fixture: &HeaderAdvisoryFixture,
+        message: DiscoveryMessage,
+    ) -> Result<(), crate::BoxError> {
+        fixture
+            .peer_send
+            .send(Frame {
+                message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+                flags: 0,
+                payload: message.encode()?,
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn discovery_frame(message: DiscoveryMessage) -> Result<Frame, crate::BoxError> {
+        Ok(Frame {
+            message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+            flags: 0,
+            payload: message.encode()?,
+        })
+    }
+
+    fn signed_discovery_record(
+        secret_key: &SecretKey,
+        handshake: &ZakuraHandshakeConfig,
+    ) -> Result<ZakuraNodeRecord, crate::BoxError> {
+        let body = ZakuraNodeRecordBody {
+            node_id: secret_key.public(),
+            direct_addrs: vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 45)),
+                8233,
+            )],
+            services: vec![ZakuraServiceId::discovery()],
+            zakura_protocol_min: handshake.zakura_protocol_min,
+            zakura_protocol_max: handshake.zakura_protocol_max,
+            network_id: handshake.network_id,
+            chain_id: handshake.chain_id,
+            sequence: 1,
+            expires_at_unix_secs: current_test_unix_secs().saturating_add(60),
+        };
+        Ok(ZakuraNodeRecord::sign(body, secret_key)?)
+    }
+
+    async fn complete_peer_side_discovery_exchange(
+        peer_send: &FramedSend,
+        peer_recv: &mut FramedRecv,
+        peer_secret: &SecretKey,
+        handshake: &ZakuraHandshakeConfig,
+    ) -> Result<(), crate::BoxError> {
+        let mut saw_hello = false;
+        let mut saw_get_peers = false;
+        let mut saw_get_services = false;
+        while !(saw_hello && saw_get_peers && saw_get_services) {
+            let frame = tokio::time::timeout(Duration::from_secs(2), peer_recv.recv())
+                .await?
+                .expect("discovery source sends exchange frames");
+            match decode_discovery_frame(&frame)? {
+                DiscoveryMessage::Hello { .. } => saw_hello = true,
+                DiscoveryMessage::GetPeers { .. } => saw_get_peers = true,
+                DiscoveryMessage::GetServices(_) => saw_get_services = true,
+                DiscoveryMessage::Peers { .. } | DiscoveryMessage::Services(_) => {}
+            }
+        }
+
+        peer_send
+            .send(discovery_frame(DiscoveryMessage::Hello {
+                record: signed_discovery_record(peer_secret, handshake)?,
+            })?)
+            .await?;
+        peer_send
+            .send(discovery_frame(DiscoveryMessage::Peers {
+                records: Vec::new(),
+            })?)
+            .await?;
+        let summary = DiscoveryServiceSummary {
+            peer_exchange_slots_free: 1,
+            max_records_per_response: 1,
+            expected_disconnect_after_exchange: true,
+        };
+        peer_send
+            .send(discovery_frame(DiscoveryMessage::Services(Services {
+                node_id: peer_secret.public(),
+                expires_at_unix_secs: u64::MAX,
+                summaries: vec![ServiceSummaryEnvelope::discovery(&summary)?],
+            }))?)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn wait_for_discovery_inbound_peers(handle: &ZakuraDiscoveryHandle, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if handle.peer_snapshot().inbound_peers == expected {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("discovery peer snapshot reaches expected inbound count");
+    }
+
+    async fn advisory_backoff_after_empty_headers(
+        fixture: &mut HeaderAdvisoryFixture,
+    ) -> Result<bool, crate::BoxError> {
+        let (send, _recv) = framed_channel(32);
+        let session = HeaderSyncPeerSession::from_parts_with_direction(
+            fixture.peer_id.clone(),
+            ServicePeerDirection::Inbound,
+            send,
+            CancellationToken::new(),
+        );
+        fixture
+            .header_sync
+            .send(HeaderSyncEvent::PeerConnected(session))
+            .await?;
+        fixture
+            .header_sync
+            .send(HeaderSyncEvent::WireMessage {
+                peer: fixture.peer_id.clone(),
+                msg: HeaderSyncMessage::Status(HeaderSyncStatus {
+                    tip_height: block::Height(1),
+                    tip_hash: block::Hash([9; 32]),
+                    anchor_height: block::Height(0),
+                    max_headers_per_response: 1,
+                    max_inflight_requests: 1,
+                }),
+            })
+            .await?;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(HeaderSyncAction::SendMessage {
+                    peer,
+                    msg: HeaderSyncMessage::GetHeaders { .. },
+                }) = fixture.header_actions.recv().await
+                {
+                    if peer == fixture.peer_id {
+                        return;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("header sync schedules a request before empty response");
+
+        fixture
+            .header_sync
+            .send(HeaderSyncEvent::WireMessage {
+                peer: fixture.peer_id.clone(),
+                msg: HeaderSyncMessage::Headers(Vec::new()),
+            })
+            .await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        Ok(fixture
+            .header_sync
+            .candidate_state()
+            .backed_off_node_ids
+            .contains(&fixture.peer_node_id))
+    }
+
+    #[tokio::test]
+    async fn get_services_returns_local_first_party_discovery_summary(
+    ) -> Result<(), crate::BoxError> {
+        let (_connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[21u8; 32]);
+        let handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret.clone(),
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig {
+                peer_limits: ServicePeerLimits {
+                    max_inbound_peers: 4,
+                    ..ServicePeerLimits::default()
+                },
+                ..ZakuraDiscoveryConfig::default()
+            },
+            connected_rx,
+        )?;
+        let service = DiscoveryService::new(handle.clone());
+        let peer_node_id = SecretKey::from_bytes(&[22u8; 32]).public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        let (peer_send, service_recv) = framed_channel(8);
+        let (service_send, mut peer_recv) = framed_channel(8);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+
+        service.add_peer(Peer::new(
+            peer_id,
+            None,
+            ZAKURA_CAP_DISCOVERY,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        peer_send
+            .send(Frame {
+                message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+                flags: 0,
+                payload: DiscoveryMessage::GetServices(GetServices {
+                    wanted_services: vec![ZakuraServiceId::discovery()],
+                })
+                .encode()?,
+            })
+            .await?;
+
+        let services = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let frame = peer_recv.recv().await.expect("discovery stream stays open");
+                let message = decode_discovery_frame(&frame).expect("outbound frame decodes");
+                if let DiscoveryMessage::Services(services) = message {
+                    return services;
+                }
+            }
+        })
+        .await
+        .expect("service response is sent");
+
+        assert_eq!(services.node_id, local_secret.public());
+        assert_eq!(services.summaries.len(), 1);
+        assert_eq!(
+            services.summaries[0].service_id,
+            ZakuraServiceId::discovery()
+        );
+        let summary = services.summaries[0]
+            .decode_discovery()?
+            .expect("discovery summary tag decodes");
+        assert_eq!(summary.peer_exchange_slots_free, 3);
+        assert!(summary.expected_disconnect_after_exchange);
+        assert_eq!(
+            summary.max_records_per_response,
+            u16::try_from(MAX_DISCOVERY_RECORDS_PER_RESPONSE)
+                .expect("record response cap fits in u16")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_services_updates_first_party_live_summary_cache() -> Result<(), crate::BoxError>
+    {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[23u8; 32]);
+        let handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret,
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig::default(),
+            connected_rx,
+        )?;
+        let service = DiscoveryService::new(handle.clone());
+        let peer_node_id = SecretKey::from_bytes(&[24u8; 32]).public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        connected_tx.send_replace(vec![peer_id.clone()]);
+
+        let (peer_send, service_recv) = framed_channel(8);
+        let (service_send, _peer_recv) = framed_channel(8);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+
+        service.add_peer(Peer::new(
+            peer_id,
+            None,
+            ZAKURA_CAP_DISCOVERY,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        let summary = DiscoveryServiceSummary {
+            peer_exchange_slots_free: 7,
+            max_records_per_response: 11,
+            expected_disconnect_after_exchange: false,
+        };
+        peer_send
+            .send(Frame {
+                message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+                flags: 0,
+                payload: DiscoveryMessage::Services(Services {
+                    node_id: peer_node_id,
+                    expires_at_unix_secs: u64::MAX,
+                    summaries: vec![ServiceSummaryEnvelope::discovery(&summary)?],
+                })
+                .encode()?,
+            })
+            .await?;
+
+        let cached = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(cached) = handle.live_service_summaries(peer_node_id).await {
+                    if !cached.is_empty() {
+                        return cached;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("inbound SERVICES is imported");
+
+        assert_eq!(cached.len(), 1);
+        assert_eq!(
+            cached[0].summary,
+            ZakuraLiveServiceSummary::Discovery(summary)
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_party_header_services_emit_header_sync_advisory() -> Result<(), crate::BoxError>
+    {
+        let mut fixture = spawn_header_advisory_fixture(25)?;
+        let summary = header_summary(block::Height(10));
+
+        send_discovery_message(
+            &fixture,
+            DiscoveryMessage::Services(Services {
+                node_id: fixture.peer_node_id,
+                expires_at_unix_secs: u64::MAX,
+                summaries: vec![ServiceSummaryEnvelope::header_sync(&summary)?],
+            }),
+        )
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(cached) = fixture
+                    .discovery_handle
+                    .live_service_summaries(fixture.peer_node_id)
+                    .await
+                {
+                    if cached.iter().any(|cached_summary| {
+                        cached_summary.summary == ZakuraLiveServiceSummary::HeaderSync(summary)
+                    }) {
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("first-party header summary is cached");
+
+        assert!(
+            advisory_backoff_after_empty_headers(&mut fixture).await?,
+            "first-party header SERVICES should emit a header-sync advisory event"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mismatched_services_node_id_does_not_emit_header_sync_advisory(
+    ) -> Result<(), crate::BoxError> {
+        let mut fixture = spawn_header_advisory_fixture(26)?;
+        let claimed_node_id = SecretKey::from_bytes(&[27u8; 32]).public();
+        let summary = header_summary(block::Height(10));
+
+        send_discovery_message(
+            &fixture,
+            DiscoveryMessage::Services(Services {
+                node_id: claimed_node_id,
+                expires_at_unix_secs: u64::MAX,
+                summaries: vec![ServiceSummaryEnvelope::header_sync(&summary)?],
+            }),
+        )
+        .await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        assert_eq!(
+            fixture
+                .discovery_handle
+                .live_service_summaries(fixture.peer_node_id)
+                .await,
+            None
+        );
+        assert_eq!(
+            fixture
+                .discovery_handle
+                .live_service_summaries(claimed_node_id)
+                .await,
+            None
+        );
+        assert!(
+            !advisory_backoff_after_empty_headers(&mut fixture).await?,
+            "mismatched SERVICES node id must not emit a header-sync advisory event"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn peers_response_does_not_emit_header_sync_advisory() -> Result<(), crate::BoxError> {
+        let mut fixture = spawn_header_advisory_fixture(28)?;
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let record_secret = SecretKey::from_bytes(&[29u8; 32]);
+        let record = signed_header_sync_record(&record_secret, &handshake)?;
+
+        send_discovery_message(
+            &fixture,
+            DiscoveryMessage::Peers {
+                records: vec![record.clone()],
+            },
+        )
+        .await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        assert_eq!(
+            fixture
+                .discovery_handle
+                .live_service_summaries(record.body.node_id)
+                .await,
+            None
+        );
+        assert!(
+            !advisory_backoff_after_empty_headers(&mut fixture).await?,
+            "PEERS/gossiped records must not emit live header-sync advisory events"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discovery_only_short_lived_exchange_closes_connection_and_backs_off(
+    ) -> Result<(), crate::BoxError> {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[40u8; 32]);
+        let handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret,
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig::default(),
+            connected_rx,
+        )?;
+        let service = DiscoveryService::new(handle.clone());
+        let peer_secret = SecretKey::from_bytes(&[41u8; 32]);
+        let peer_node_id = peer_secret.public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        connected_tx.send_replace(vec![peer_id.clone()]);
+
+        let connection_cancel = CancellationToken::new();
+        let (peer_send, service_recv) = framed_channel(16);
+        let (service_send, mut peer_recv) = framed_channel(16);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+
+        service.add_peer(Peer::new(
+            peer_id,
+            None,
+            ZAKURA_CAP_DISCOVERY,
+            streams,
+            connection_cancel.clone(),
+        ));
+
+        wait_for_discovery_inbound_peers(&handle, 1).await;
+        complete_peer_side_discovery_exchange(&peer_send, &mut peer_recv, &peer_secret, &handshake)
+            .await?;
+        tokio::time::timeout(Duration::from_secs(2), connection_cancel.cancelled())
+            .await
+            .expect("discovery-only exchange closes the shared connection");
+        wait_for_discovery_inbound_peers(&handle, 0).await;
+
+        connected_tx.send_replace(Vec::new());
+        assert!(handle
+            .dial_candidates(&[ZakuraServiceId::discovery()], &[])
+            .await
+            .is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discovery_short_lived_exchange_keeps_header_sync_connection(
+    ) -> Result<(), crate::BoxError> {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[42u8; 32]);
+        let discovery_handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret,
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig::default(),
+            connected_rx,
+        )?;
+        let (header_sync, _header_actions, header_task) = spawn_test_header_sync()?;
+        let service =
+            DiscoveryService::with_header_sync(discovery_handle.clone(), header_sync.clone());
+        let peer_secret = SecretKey::from_bytes(&[43u8; 32]);
+        let peer_node_id = peer_secret.public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        connected_tx.send_replace(vec![peer_id.clone()]);
+
+        let (header_send, _header_recv) = framed_channel(8);
+        let header_session = HeaderSyncPeerSession::from_parts_with_direction(
+            peer_id.clone(),
+            ServicePeerDirection::Inbound,
+            header_send,
+            CancellationToken::new(),
+        );
+        header_sync
+            .send(HeaderSyncEvent::PeerConnected(header_session))
+            .await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if header_sync
+                    .candidate_state()
+                    .admitted_node_ids
+                    .contains(&peer_node_id)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("header sync admits the peer");
+
+        let connection_cancel = CancellationToken::new();
+        let (peer_send, service_recv) = framed_channel(16);
+        let (service_send, mut peer_recv) = framed_channel(16);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+        service.add_peer(Peer::new(
+            peer_id,
+            None,
+            ZAKURA_CAP_DISCOVERY | ZAKURA_CAP_HEADER_SYNC,
+            streams,
+            connection_cancel.clone(),
+        ));
+
+        wait_for_discovery_inbound_peers(&discovery_handle, 1).await;
+        complete_peer_side_discovery_exchange(&peer_send, &mut peer_recv, &peer_secret, &handshake)
+            .await?;
+        wait_for_discovery_inbound_peers(&discovery_handle, 0).await;
+        assert_eq!(header_sync.peer_snapshot().inbound_peers, 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), connection_cancel.cancelled())
+                .await
+                .is_err(),
+            "discovery releases only its own session while header sync owns the connection"
+        );
+
+        header_task.abort();
+        Ok(())
+    }
 }

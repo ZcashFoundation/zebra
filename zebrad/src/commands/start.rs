@@ -90,7 +90,7 @@ use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_network::types::PeerServices;
 use zebra_network::zakura::{
     HeaderSyncAction, HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers,
-    HeaderSyncMessage, ZakuraEndpoint, ZakuraHeaderSyncDriverStartup, DEFAULT_HS_RANGE,
+    ZakuraEndpoint, ZakuraHeaderSyncDriverStartup, DEFAULT_HS_RANGE,
 };
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
@@ -247,14 +247,6 @@ async fn drive_zakura_header_sync_actions<State, ReadState, BlockVerifier>(
         };
 
         match action {
-            HeaderSyncAction::SendMessage { peer, msg } => {
-                endpoint.send_header_sync_message(&peer, msg).await;
-            }
-            HeaderSyncAction::ForwardNewBlock { peer, block, .. } => {
-                endpoint
-                    .send_header_sync_message(&peer, HeaderSyncMessage::NewBlock(block))
-                    .await;
-            }
             HeaderSyncAction::Misbehavior { peer, reason } => {
                 debug!(
                     ?peer,
@@ -323,24 +315,35 @@ async fn drive_zakura_header_sync_actions<State, ReadState, BlockVerifier>(
                 }
             }
             HeaderSyncAction::QueryHeadersByHeightRange { peer, start, count } => {
-                let mut returned_count = 0u32;
                 match read_state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::HeadersByHeightRange { start, count })
                     .await
                 {
                     Ok(zebra_state::ReadResponse::Headers(headers)) => {
-                        returned_count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
                         let headers = headers
                             .into_iter()
                             .map(|(_height, _hash, header)| header)
                             .collect();
-                        endpoint
-                            .send_header_sync_message(&peer, HeaderSyncMessage::Headers(headers))
+                        let _ = header_sync
+                            .send(HeaderSyncEvent::HeaderRangeResponseReady {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                headers,
+                            })
                             .await;
                     }
                     Ok(response) => {
                         warn!(?peer, ?response, "unexpected HeadersByHeightRange response");
+                        let _ = header_sync
+                            .send(HeaderSyncEvent::HeaderRangeResponseFinished {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                returned_count: 0,
+                            })
+                            .await;
                     }
                     Err(error) => {
                         warn!(
@@ -348,16 +351,16 @@ async fn drive_zakura_header_sync_actions<State, ReadState, BlockVerifier>(
                             ?error,
                             "failed to read Zakura Headers response from state"
                         );
+                        let _ = header_sync
+                            .send(HeaderSyncEvent::HeaderRangeResponseFinished {
+                                peer,
+                                start_height: start,
+                                requested_count: count,
+                                returned_count: 0,
+                            })
+                            .await;
                     }
                 }
-                let _ = header_sync
-                    .send(HeaderSyncEvent::HeaderRangeResponseFinished {
-                        peer,
-                        start_height: start,
-                        requested_count: count,
-                        returned_count,
-                    })
-                    .await;
             }
             HeaderSyncAction::CommitHeaderRange {
                 peer,

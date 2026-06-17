@@ -6,7 +6,10 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use super::{FramedRecv, FramedSend};
-use crate::{zakura::ZakuraPeerId, BoxError};
+use crate::{
+    zakura::{ServicePeerDirection, ZakuraPeerId},
+    BoxError,
+};
 
 use super::Frame;
 
@@ -37,6 +40,24 @@ pub struct Stream {
     pub mode: StreamMode,
 }
 
+/// Transport state for one ordered service stream.
+#[derive(Debug)]
+pub(crate) struct ServiceStream {
+    pub(crate) recv: FramedRecv,
+    pub(crate) send: FramedSend,
+    pub(crate) cancel_token: CancellationToken,
+}
+
+impl ServiceStream {
+    pub(crate) fn new(recv: FramedRecv, send: FramedSend, cancel_token: CancellationToken) -> Self {
+        Self {
+            recv,
+            send,
+            cancel_token,
+        }
+    }
+}
+
 /// Per-peer transport state handed to a service when a peer connects.
 #[derive(Debug)]
 pub struct Peer {
@@ -46,8 +67,11 @@ pub struct Peer {
     pub remote_ip: Option<IpAddr>,
     /// Capabilities accepted by both peers.
     pub negotiated: u64,
-    streams: HashMap<u16, (FramedRecv, FramedSend)>,
+    /// Direction of the underlying authenticated connection.
+    pub direction: ServicePeerDirection,
+    streams: HashMap<u16, ServiceStream>,
     cancel_token: CancellationToken,
+    service_cancel_token: CancellationToken,
 }
 
 impl Peer {
@@ -59,18 +83,86 @@ impl Peer {
         streams: HashMap<u16, (FramedRecv, FramedSend)>,
         cancel_token: CancellationToken,
     ) -> Self {
+        Self::new_with_direction(
+            id,
+            remote_ip,
+            negotiated,
+            ServicePeerDirection::Inbound,
+            streams,
+            cancel_token,
+        )
+    }
+
+    /// Build a peer from already-opened transport streams and a known direction.
+    pub fn new_with_direction(
+        id: ZakuraPeerId,
+        remote_ip: Option<IpAddr>,
+        negotiated: u64,
+        direction: ServicePeerDirection,
+        streams: HashMap<u16, (FramedRecv, FramedSend)>,
+        cancel_token: CancellationToken,
+    ) -> Self {
+        let streams = streams
+            .into_iter()
+            .map(|(kind, (recv, send))| {
+                (
+                    kind,
+                    ServiceStream::new(recv, send, cancel_token.child_token()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Self::new_with_service_streams(id, remote_ip, negotiated, direction, streams, cancel_token)
+    }
+
+    pub(crate) fn new_with_service_streams(
+        id: ZakuraPeerId,
+        remote_ip: Option<IpAddr>,
+        negotiated: u64,
+        direction: ServicePeerDirection,
+        streams: HashMap<u16, ServiceStream>,
+        cancel_token: CancellationToken,
+    ) -> Self {
+        let service_cancel_token = streams
+            .values()
+            .next()
+            .map(|stream| stream.cancel_token.clone())
+            .unwrap_or_else(|| cancel_token.child_token());
+        Self::new_with_service_cancel_token(
+            id,
+            remote_ip,
+            negotiated,
+            direction,
+            streams,
+            cancel_token,
+            service_cancel_token,
+        )
+    }
+
+    pub(crate) fn new_with_service_cancel_token(
+        id: ZakuraPeerId,
+        remote_ip: Option<IpAddr>,
+        negotiated: u64,
+        direction: ServicePeerDirection,
+        streams: HashMap<u16, ServiceStream>,
+        cancel_token: CancellationToken,
+        service_cancel_token: CancellationToken,
+    ) -> Self {
         Self {
             id,
             remote_ip,
             negotiated,
+            direction,
             streams,
             cancel_token,
+            service_cancel_token,
         }
     }
 
     /// Take ownership of a stream pair for `kind`.
     pub fn take_stream(&mut self, kind: u16) -> Option<(FramedRecv, FramedSend)> {
-        self.streams.remove(&kind)
+        self.streams
+            .remove(&kind)
+            .map(|stream| (stream.recv, stream.send))
     }
 
     /// Return the cancellation token for this peer's service tasks.
@@ -81,6 +173,14 @@ impl Peer {
         self.cancel_token.clone()
     }
 
+    /// Return the cancellation token for this service's local session work.
+    ///
+    /// Cancelling this token parks only the local service session. The parent
+    /// peer token still fires on connection shutdown.
+    pub fn service_cancel_token(&self) -> CancellationToken {
+        self.service_cancel_token.clone()
+    }
+
     /// Split this peer into fields so the registry can fan streams out by owner.
     pub(crate) fn into_parts(
         self,
@@ -88,13 +188,15 @@ impl Peer {
         ZakuraPeerId,
         Option<IpAddr>,
         u64,
-        HashMap<u16, (FramedRecv, FramedSend)>,
+        ServicePeerDirection,
+        HashMap<u16, ServiceStream>,
         CancellationToken,
     ) {
         (
             self.id,
             self.remote_ip,
             self.negotiated,
+            self.direction,
             self.streams,
             self.cancel_token,
         )
@@ -108,6 +210,25 @@ pub trait Service: fmt::Debug + Send + Sync + 'static {
 
     /// Streams this service owns.
     fn streams(&self) -> &[Stream];
+
+    /// Return whether this service currently wants a new session for `peer`.
+    ///
+    /// This is a cheap, advisory demand check used by the transport before
+    /// opening an ordered stream. Implementations intentionally keep this to
+    /// local room/interest state; remote first-party summary preference is
+    /// applied upstream before dialing or escalation selection.
+    ///
+    /// The service remains authoritative at [`Service::add_peer`], where it
+    /// can still reject or locally park a session if its state changed
+    /// concurrently.
+    fn wants_peer(
+        &self,
+        _peer: &ZakuraPeerId,
+        _negotiated: u64,
+        _direction: ServicePeerDirection,
+    ) -> bool {
+        true
+    }
 
     /// Add a connected peer and spawn any per-stream work owned by this service.
     fn add_peer(&self, peer: Peer);
@@ -127,21 +248,23 @@ pub trait Service: fmt::Debug + Send + Sync + 'static {
         ))
     }
 
+    /// Return this service's request/response handler, if it has one.
+    fn as_request_response(&self) -> Option<&dyn RequestResponseService> {
+        None
+    }
+}
+
+/// A Zakura service that accepts one-shot request/response streams.
+pub trait RequestResponseService: Service {
     /// Deliver one request-response request frame to this service.
     fn request_frame<'a>(
         &'a self,
-        _peer_id: ZakuraPeerId,
-        _stream_kind: u16,
-        _request_id: u64,
-        _max_frame_bytes: u32,
-        _frame: Frame,
-    ) -> BoxRunFuture<'a, Result<Vec<Frame>, SinkReject>> {
-        Box::pin(async {
-            Err(SinkReject::protocol(
-                "service does not accept request frames",
-            ))
-        })
-    }
+        peer_id: ZakuraPeerId,
+        stream_kind: u16,
+        request_id: u64,
+        max_frame_bytes: u32,
+        frame: Frame,
+    ) -> BoxRunFuture<'a, Result<Vec<Frame>, SinkReject>>;
 }
 
 /// A per-stream reader owned by a service.

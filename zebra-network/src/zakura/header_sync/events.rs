@@ -1,4 +1,8 @@
 use super::{config::*, error::*, validation::*, wire::*, *};
+use crate::zakura::{
+    HeaderSyncPeerSession, HeaderSyncServiceSummary, ServicePeerSnapshot,
+    ZakuraHeaderSyncCandidateState,
+};
 
 /// Cached state frontiers used by the header-sync reactor.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -71,6 +75,8 @@ pub struct HeaderSyncHandle {
     pub(super) events: mpsc::Sender<HeaderSyncEvent>,
     pub(super) lifecycle: mpsc::UnboundedSender<HeaderSyncEvent>,
     pub(super) tip: watch::Receiver<(block::Height, block::Hash)>,
+    pub(super) peers: watch::Receiver<ServicePeerSnapshot>,
+    pub(super) candidates: watch::Receiver<ZakuraHeaderSyncCandidateState>,
 }
 
 impl HeaderSyncHandle {
@@ -109,15 +115,42 @@ impl HeaderSyncHandle {
     pub fn best_header_tip(&self) -> (block::Height, block::Hash) {
         *self.tip.borrow()
     }
+
+    /// Subscribe to header-sync peer slot snapshots.
+    pub fn subscribe_peer_snapshot(&self) -> watch::Receiver<ServicePeerSnapshot> {
+        self.peers.clone()
+    }
+
+    /// Return the currently cached peer slot snapshot.
+    pub fn peer_snapshot(&self) -> ServicePeerSnapshot {
+        *self.peers.borrow()
+    }
+
+    /// Subscribe to header-sync candidate hints for discovery selection.
+    pub fn subscribe_candidate_state(&self) -> watch::Receiver<ZakuraHeaderSyncCandidateState> {
+        self.candidates.clone()
+    }
+
+    /// Return the currently cached header-sync candidate hints.
+    pub fn candidate_state(&self) -> ZakuraHeaderSyncCandidateState {
+        self.candidates.borrow().clone()
+    }
 }
 
 /// Facts accepted by the header-sync reactor.
 #[derive(Clone, Debug)]
 pub enum HeaderSyncEvent {
     /// A peer became available for stream-5 header sync.
-    PeerConnected(ZakuraPeerId),
+    PeerConnected(HeaderSyncPeerSession),
     /// A peer disconnected; all of its outstanding work is dropped.
     PeerDisconnected(ZakuraPeerId),
+    /// First-party header-sync summary observed over the authenticated discovery stream.
+    AdvisoryHeaderSummary {
+        /// Peer that supplied its own summary.
+        peer: ZakuraPeerId,
+        /// Advisory header-sync summary for dial/admission preference only.
+        summary: HeaderSyncServiceSummary,
+    },
     /// State committed a full block.
     FullBlockCommitted {
         /// Committed block height.
@@ -161,17 +194,19 @@ pub enum HeaderSyncEvent {
         /// Decoded stream-5 message.
         msg: HeaderSyncMessage,
     },
-    /// Inbound stream-5 frame from `peer` whose decode depends on reactor state.
-    WireFrame {
-        /// Serving peer.
-        peer: ZakuraPeerId,
-        /// Raw stream-5 frame.
-        frame: Frame,
-    },
     /// Stream-5 frame decoding failed after handler admission.
     WireDecodeFailed {
         /// Peer that sent the malformed frame.
         peer: ZakuraPeerId,
+        /// Decode/validation error.
+        error: Arc<HeaderSyncWireError>,
+    },
+    /// Stream-5 protocol failure decoded by the peer-owned session.
+    WireProtocolFailure {
+        /// Peer that sent the invalid message.
+        peer: ZakuraPeerId,
+        /// Misbehavior classification for the protocol failure.
+        reason: HeaderSyncMisbehavior,
         /// Decode/validation error.
         error: Arc<HeaderSyncWireError>,
     },
@@ -208,16 +243,28 @@ pub enum HeaderSyncEvent {
         /// Number of headers read from state and sent in the response.
         returned_count: u32,
     },
+    /// State returned headers requested by a peer and the reactor should send them.
+    HeaderRangeResponseReady {
+        /// Peer whose inbound request is being served.
+        peer: ZakuraPeerId,
+        /// First requested height.
+        start_height: block::Height,
+        /// Requested header count.
+        requested_count: u32,
+        /// Bounded headers returned by state.
+        headers: Vec<Arc<block::Header>>,
+    },
 }
 
 /// Actions emitted by the header-sync reactor for the eventual node wiring.
 #[derive(Clone, Debug)]
 pub enum HeaderSyncAction {
-    /// Send a stream-5 message to a peer.
+    /// Test-only observation of a stream-5 message sent directly through a typed session.
+    #[cfg(test)]
     SendMessage {
         /// Destination peer.
         peer: ZakuraPeerId,
-        /// Message to send.
+        /// Message that was queued.
         msg: HeaderSyncMessage,
     },
     /// Ask state to commit a contiguous header range.
@@ -265,19 +312,6 @@ pub enum HeaderSyncAction {
         /// Last missing height.
         to: block::Height,
     },
-    /// Forward an unseen valid full tip block to one eligible stream-5 peer.
-    ForwardNewBlock {
-        /// Source peer, if the block was received from the network.
-        source: Option<ZakuraPeerId>,
-        /// Destination peer.
-        peer: ZakuraPeerId,
-        /// Block height from the coinbase transaction.
-        height: block::Height,
-        /// Block hash used for deduplication.
-        hash: block::Hash,
-        /// Full block to forward.
-        block: Arc<block::Block>,
-    },
     /// Inform later block-pipeline wiring that a validated tip block arrived.
     NewBlockReceived {
         /// Source peer.
@@ -287,6 +321,20 @@ pub enum HeaderSyncAction {
         /// Block hash used for deduplication.
         hash: block::Hash,
         /// Full block received from the peer.
+        block: Arc<block::Block>,
+    },
+    /// Test-only observation of an unseen valid full tip block forwarded through a typed session.
+    #[cfg(test)]
+    ForwardNewBlock {
+        /// Source peer, if the block was received from the network.
+        source: Option<ZakuraPeerId>,
+        /// Destination peer.
+        peer: ZakuraPeerId,
+        /// Block height from the coinbase transaction.
+        height: block::Height,
+        /// Block hash used for deduplication.
+        hash: block::Hash,
+        /// Full block that was queued.
         block: Arc<block::Block>,
     },
 }
@@ -329,17 +377,17 @@ pub enum HeaderSyncCommitFailureKind {
     Local,
 }
 
-/// A single outbound `GetHeaders` range used to validate the next response.
+/// A single outbound `GetHeaders` range expected by a peer session.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct HeaderSyncRequestContract {
+pub struct ExpectedHeadersResponse {
     /// First requested height.
     pub start_height: block::Height,
     /// Requested header count.
     pub count: u32,
 }
 
-impl HeaderSyncRequestContract {
-    /// Create a bounded request contract.
+impl ExpectedHeadersResponse {
+    /// Create a bounded expected response.
     pub fn new(start_height: block::Height, count: u32) -> Result<Self, HeaderSyncWireError> {
         validate_get_headers_count(count)?;
         Ok(Self {

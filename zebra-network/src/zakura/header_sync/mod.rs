@@ -10,6 +10,7 @@ use std::{
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, Utc};
+use iroh::NodeId;
 use serde_json::{Number, Value};
 use thiserror::Error;
 use tokio::{
@@ -49,15 +50,13 @@ pub use config::{
 };
 pub use error::{HeaderSyncStartError, HeaderSyncWireError};
 pub use events::{
-    HeaderSyncAction, HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers,
-    HeaderSyncHandle, HeaderSyncMisbehavior, HeaderSyncRequestContract, HeaderSyncStartup,
+    ExpectedHeadersResponse, HeaderSyncAction, HeaderSyncCommitFailureKind, HeaderSyncEvent,
+    HeaderSyncFrontiers, HeaderSyncHandle, HeaderSyncMisbehavior, HeaderSyncStartup,
 };
 pub use reactor::spawn_header_sync_reactor;
-#[cfg(test)]
-pub(crate) use service::HeaderSyncOutbound;
+pub use service::HeaderSyncPeerSession;
 pub(crate) use service::{
-    drive_header_sync_actions, header_sync_outbound_for_supervisor, send_header_sync_message,
-    HeaderSyncPassthroughService, HeaderSyncService,
+    drive_header_sync_actions, HeaderSyncPassthroughService, HeaderSyncService,
 };
 pub use validation::{
     validate_header_range_links, validate_headers_stateless, validate_new_block_stateless,

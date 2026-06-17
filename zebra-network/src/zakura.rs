@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use iroh::{endpoint, Endpoint, NodeAddr, NodeId, RelayMode, SecretKey};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::watch;
 
@@ -56,6 +57,113 @@ pub const ZAKURA_CAP_HEADER_SYNC: u64 = 1 << 1;
 
 /// Capability bit for the native discovery service.
 pub const ZAKURA_CAP_DISCOVERY: u64 = 1 << 2;
+
+/// Production default for per-service peer caps.
+pub const DEFAULT_SERVICE_MAX_PEERS: usize = 256;
+/// Production default for per-service bounded inbound work queues.
+pub const DEFAULT_SERVICE_INBOUND_QUEUE_DEPTH: usize = 128;
+/// Production default for per-service bounded outbound work queues.
+pub const DEFAULT_SERVICE_OUTBOUND_QUEUE_DEPTH: usize = 128;
+/// Production default for demand-gated service escalations.
+pub const DEFAULT_SERVICE_MAX_PENDING_ESCALATIONS: usize = 32;
+
+/// Per-service peer and queue limits owned by a Zakura service reactor.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ServicePeerLimits {
+    /// Maximum inbound peers this service admits.
+    pub max_inbound_peers: usize,
+    /// Maximum outbound peers this service admits.
+    pub max_outbound_peers: usize,
+    /// Inbound queue depth reserved for this service.
+    ///
+    /// Reserved for future transport queue wiring; not enforced in this phase.
+    pub inbound_queue_depth: usize,
+    /// Outbound queue depth reserved for this service.
+    ///
+    /// Reserved for future transport queue wiring; not enforced in this phase.
+    pub outbound_queue_depth: usize,
+    /// Maximum service escalations that may be pending admission.
+    ///
+    /// Reserved for future lazy service escalation; not enforced in this phase.
+    pub max_pending_escalations: usize,
+}
+
+impl Default for ServicePeerLimits {
+    fn default() -> Self {
+        Self {
+            max_inbound_peers: DEFAULT_SERVICE_MAX_PEERS,
+            max_outbound_peers: DEFAULT_SERVICE_MAX_PEERS,
+            inbound_queue_depth: DEFAULT_SERVICE_INBOUND_QUEUE_DEPTH,
+            outbound_queue_depth: DEFAULT_SERVICE_OUTBOUND_QUEUE_DEPTH,
+            max_pending_escalations: DEFAULT_SERVICE_MAX_PENDING_ESCALATIONS,
+        }
+    }
+}
+
+/// Local service admission result.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ServiceAdmissionDecision {
+    /// The service accepted the typed peer session.
+    Admit,
+    /// The local service-specific peer cap is full.
+    RejectFull,
+    /// The peer is not useful for this service right now.
+    RejectNotUseful,
+    /// The peer is still in a local retry backoff window.
+    RejectBackoff,
+    /// The peer does not support this service.
+    RejectUnsupported,
+}
+
+/// Direction of the underlying Zakura connection.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum ServicePeerDirection {
+    /// The remote peer dialed this node.
+    Inbound,
+    /// This node dialed the remote peer.
+    Outbound,
+}
+
+impl ServicePeerDirection {
+    pub(crate) fn trace_label(self) -> &'static str {
+        match self {
+            Self::Inbound => "inbound",
+            Self::Outbound => "outbound",
+        }
+    }
+}
+
+/// Current admitted peer counts and slot availability for one service.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ServicePeerSnapshot {
+    /// Currently admitted inbound peers.
+    pub inbound_peers: usize,
+    /// Currently admitted outbound peers.
+    pub outbound_peers: usize,
+    /// Free inbound slots under the configured cap.
+    pub inbound_slots_free: usize,
+    /// Free outbound slots under the configured cap.
+    pub outbound_slots_free: usize,
+}
+
+impl ServicePeerSnapshot {
+    /// Build a snapshot from current admitted counts.
+    pub fn new(inbound_peers: usize, outbound_peers: usize, limits: ServicePeerLimits) -> Self {
+        Self {
+            inbound_peers,
+            outbound_peers,
+            inbound_slots_free: limits.max_inbound_peers.saturating_sub(inbound_peers),
+            outbound_slots_free: limits.max_outbound_peers.saturating_sub(outbound_peers),
+        }
+    }
+}
+
+impl Default for ServicePeerSnapshot {
+    fn default() -> Self {
+        Self::new(0, 0, ServicePeerLimits::default())
+    }
+}
 
 /// How long the legacy->Zakura liveness keeper waits for the upgraded QUIC
 /// connection to register with the supervisor before giving up.

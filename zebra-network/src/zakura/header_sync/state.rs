@@ -1,4 +1,11 @@
 use super::{error::*, events::*, scheduler::*, validation::*, wire::*, *};
+use crate::zakura::{
+    HeaderSyncServiceSummary, ServicePeerDirection, DEFAULT_LIVE_SERVICE_SUMMARY_TTL,
+};
+
+pub(super) const HEADER_SYNC_ADVISORY_BACKOFF_FAILURES: u32 = 2;
+pub(super) const HEADER_SYNC_ADVISORY_BACKOFF: Duration = Duration::from_secs(60);
+pub(super) const HEADER_SYNC_ADVISORY_TTL: Duration = DEFAULT_LIVE_SERVICE_SUMMARY_TTL;
 
 #[derive(Clone, Debug)]
 pub(super) struct HeaderSyncState {
@@ -8,10 +15,12 @@ pub(super) struct HeaderSyncState {
     pub(super) best_header_tip: block::Height,
     pub(super) best_header_hash: block::Hash,
     pub(super) peers: HashMap<ZakuraPeerId, PeerHeaderState>,
+    pub(super) parked_peers: HashSet<ZakuraPeerId>,
     pub(super) seen: HeaderHashDedup,
     pub(super) pending_new_blocks: HashSet<block::Hash>,
     pub(super) schedule: RangeScheduler,
     pub(super) pending_commits: HashMap<PendingCommitKey, RangeRequest>,
+    pub(super) advisory: HashMap<ZakuraPeerId, HeaderSyncAdvisoryPeerState>,
 }
 
 impl HeaderSyncState {
@@ -26,10 +35,12 @@ impl HeaderSyncState {
             best_header_tip,
             best_header_hash,
             peers: HashMap::new(),
+            parked_peers: HashSet::new(),
             seen: HeaderHashDedup::default(),
             pending_new_blocks: HashSet::new(),
             schedule: RangeScheduler::new(),
             pending_commits: HashMap::new(),
+            advisory: HashMap::new(),
         })
     }
 
@@ -104,8 +115,58 @@ impl HeaderSyncState {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub(super) struct HeaderSyncAdvisoryPeerState {
+    pub(super) summary: HeaderSyncServiceSummary,
+    pub(super) observed_at: Instant,
+    pub(super) failure_count: u32,
+    pub(super) backoff_until: Option<Instant>,
+}
+
+impl HeaderSyncAdvisoryPeerState {
+    pub(super) fn new(summary: HeaderSyncServiceSummary, observed_at: Instant) -> Self {
+        Self {
+            summary,
+            observed_at,
+            failure_count: 0,
+            backoff_until: None,
+        }
+    }
+
+    pub(super) fn refresh_summary(
+        &mut self,
+        summary: HeaderSyncServiceSummary,
+        observed_at: Instant,
+    ) {
+        self.summary = summary;
+        self.observed_at = observed_at;
+    }
+
+    pub(super) fn is_expired(&self, now: Instant) -> bool {
+        now.duration_since(self.observed_at) >= HEADER_SYNC_ADVISORY_TTL
+    }
+
+    pub(super) fn is_backed_off(&self, now: Instant) -> bool {
+        self.backoff_until.is_some_and(|until| until > now)
+    }
+
+    pub(super) fn record_confirmed(&mut self) {
+        self.failure_count = 0;
+        self.backoff_until = None;
+    }
+
+    pub(super) fn record_unconfirmed(&mut self, now: Instant) {
+        self.failure_count = self.failure_count.saturating_add(1);
+        if self.failure_count >= HEADER_SYNC_ADVISORY_BACKOFF_FAILURES {
+            self.backoff_until = Some(now + HEADER_SYNC_ADVISORY_BACKOFF);
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct PeerHeaderState {
+    pub(super) session: HeaderSyncPeerSession,
+    pub(super) direction: ServicePeerDirection,
     pub(super) advertised_tip: block::Height,
     pub(super) anchor: block::Height,
     pub(super) max_headers_per_response: u32,
@@ -122,6 +183,7 @@ pub(super) struct PeerHeaderState {
 
 impl PeerHeaderState {
     pub(super) fn new(
+        session: HeaderSyncPeerSession,
         anchor: block::Height,
         local_range: u32,
         local_inflight: u16,
@@ -130,6 +192,8 @@ impl PeerHeaderState {
         inbound_new_block_min_interval: Duration,
     ) -> Self {
         Self {
+            direction: session.direction(),
+            session,
             advertised_tip: anchor,
             anchor,
             max_headers_per_response: clamp_advertised_range(local_range),

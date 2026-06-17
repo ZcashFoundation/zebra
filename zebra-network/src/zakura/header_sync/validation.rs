@@ -101,7 +101,7 @@ pub(super) fn commit_failure_reason_label(kind: HeaderSyncCommitFailureKind) -> 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct HeaderSyncDecodeContext {
     /// The matching in-flight request, when a `Headers` response is expected.
-    pub requested: Option<HeaderSyncRequestContract>,
+    pub requested: Option<ExpectedHeadersResponse>,
     /// Peer's advertised response cap.
     pub peer_max_headers_per_response: u32,
 }
@@ -117,7 +117,7 @@ impl HeaderSyncDecodeContext {
 
     /// Context for a `Headers` response to `requested`.
     pub fn for_headers_response(
-        requested: HeaderSyncRequestContract,
+        requested: ExpectedHeadersResponse,
         peer_max_headers_per_response: u32,
     ) -> Self {
         Self {

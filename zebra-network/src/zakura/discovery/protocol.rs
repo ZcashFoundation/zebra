@@ -15,9 +15,15 @@ use iroh::{NodeAddr, NodeId, SecretKey};
 use rand::seq::IteratorRandom;
 use thiserror::Error;
 use tokio::sync::{watch, Mutex};
-use zebra_chain::primitives::ed25519::{Signature, SigningKey, VerificationKey};
+use zebra_chain::{
+    block,
+    primitives::ed25519::{Signature, SigningKey, VerificationKey},
+};
 
-use crate::zakura::{ZakuraNetworkId, ZakuraPeerId};
+use crate::zakura::{
+    ServiceAdmissionDecision, ServicePeerDirection, ServicePeerLimits, ServicePeerSnapshot,
+    ZakuraNetworkId, ZakuraPeerId,
+};
 
 /// Native discovery stream kind.
 pub const ZAKURA_STREAM_DISCOVERY: u16 = 4;
@@ -30,9 +36,9 @@ pub const MSG_DISCOVERY_HELLO: u8 = 1;
 pub const MSG_DISCOVERY_GET_PEERS: u8 = 2;
 /// Discovery peer sample response.
 pub const MSG_DISCOVERY_PEERS: u8 = 3;
-/// Reserved service discovery request.
+/// First-party live service summary request.
 pub const MSG_DISCOVERY_GET_SERVICES: u8 = 4;
-/// Reserved service discovery response.
+/// First-party live service summary response.
 pub const MSG_DISCOVERY_SERVICES: u8 = 5;
 
 /// Maximum bytes in an encoded discovery message.
@@ -43,6 +49,12 @@ pub const MAX_NODE_RECORD_BODY_BYTES: usize = 16 * 1024;
 pub const MAX_DIRECT_ADDRS_PER_RECORD: usize = 8;
 /// Maximum services in a node record or query.
 pub const MAX_SERVICES_PER_RECORD: usize = 32;
+/// Maximum services requested in a first-party live-service query.
+pub const MAX_GET_SERVICES_WANTED: usize = 32;
+/// Maximum first-party live summaries in a service response.
+pub const MAX_SERVICE_SUMMARIES_PER_RESPONSE: usize = 32;
+/// Maximum bytes in one length-delimited live summary payload.
+pub const MAX_SERVICE_SUMMARY_BYTES: usize = 1024;
 /// Maximum records in a discovery response.
 pub const MAX_DISCOVERY_RECORDS_PER_RESPONSE: usize = 32;
 /// Maximum excluded node ids in a discovery query.
@@ -69,15 +81,28 @@ pub const DEFAULT_MAX_CONCURRENT_DISCOVERY_DIALS: usize = 4;
 pub const DEFAULT_DISCOVERY_CONNECTION_HEADROOM: usize = 4;
 /// Default Zakura connection cap used by standalone discovery-state tests.
 pub const DEFAULT_DISCOVERY_ZAKURA_MAX_CONNECTIONS: usize = 32;
+/// Default lifetime for first-party live service summaries.
+pub const DEFAULT_LIVE_SERVICE_SUMMARY_TTL: Duration = Duration::from_secs(30);
 
 /// Native peer discovery service id.
 pub const SERVICE_ID_DISCOVERY: &str = "zakura.discovery.v1";
+/// Native header-sync service id.
+pub const SERVICE_ID_HEADER_SYNC: &str = "zakura.header_sync.v1";
 /// Native legacy gossip service id.
 pub const SERVICE_ID_LEGACY_GOSSIP: &str = "zakura.legacy_gossip.v1";
 /// Native legacy requests service id.
 pub const SERVICE_ID_LEGACY_REQUESTS: &str = "zakura.legacy_requests.v1";
 /// Native service discovery service id.
 pub const SERVICE_ID_SERVICE_DISCOVERY: &str = "zakura.service_discovery.v1";
+/// Summary tag for [`HeaderSyncServiceSummary`].
+pub const SUMMARY_TAG_HEADER_SYNC_V1: u16 = 1;
+/// Summary tag for [`DiscoveryServiceSummary`].
+pub const SUMMARY_TAG_DISCOVERY_V1: u16 = 2;
+/// Reserved summary tag for a future block-sync summary.
+///
+/// The block-sync reactor does not exist yet, so this tag is intentionally
+/// skippable and has no typed payload in this version.
+pub const SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED: u16 = 3;
 
 const SIGNATURE_BYTES: usize = 64;
 const NODE_ID_BYTES: usize = 32;
@@ -107,6 +132,12 @@ impl ZakuraServiceId {
     pub fn discovery() -> Self {
         Self::new(SERVICE_ID_DISCOVERY)
             .expect("built-in Zakura discovery service id is non-empty bounded ASCII")
+    }
+
+    /// Returns the native header-sync service id.
+    pub fn header_sync() -> Self {
+        Self::new(SERVICE_ID_HEADER_SYNC)
+            .expect("built-in Zakura header-sync service id is non-empty bounded ASCII")
     }
 
     /// Returns the native legacy gossip service id.
@@ -253,6 +284,156 @@ pub struct DiscoveryRecordValidationContext {
     pub clock_skew_tolerance: Duration,
 }
 
+/// First-party live service summary request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GetServices {
+    /// Requested service ids, or empty for every locally available summary.
+    pub wanted_services: Vec<ZakuraServiceId>,
+}
+
+/// First-party live service summary response.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Services {
+    /// Node id of the responder that authored these live summaries.
+    pub node_id: NodeId,
+    /// Unix timestamp after which these live summaries are stale.
+    pub expires_at_unix_secs: u64,
+    /// Length-delimited live summaries for this responder only.
+    pub summaries: Vec<ServiceSummaryEnvelope>,
+}
+
+/// Length-delimited live service summary envelope.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServiceSummaryEnvelope {
+    /// Service this summary describes.
+    pub service_id: ZakuraServiceId,
+    /// Versioned summary tag for the payload.
+    pub summary_tag: u16,
+    /// Bounded encoded summary payload.
+    pub summary_bytes: Vec<u8>,
+}
+
+impl ServiceSummaryEnvelope {
+    /// Build a header-sync summary envelope.
+    pub fn header_sync(summary: &HeaderSyncServiceSummary) -> Result<Self, DiscoveryWireError> {
+        let mut summary_bytes = Vec::new();
+        encode_header_sync_summary(summary, &mut summary_bytes)?;
+        Ok(Self {
+            service_id: ZakuraServiceId::header_sync(),
+            summary_tag: SUMMARY_TAG_HEADER_SYNC_V1,
+            summary_bytes,
+        })
+    }
+
+    /// Build a discovery summary envelope.
+    pub fn discovery(summary: &DiscoveryServiceSummary) -> Result<Self, DiscoveryWireError> {
+        let mut summary_bytes = Vec::new();
+        encode_discovery_summary(summary, &mut summary_bytes)?;
+        Ok(Self {
+            service_id: ZakuraServiceId::discovery(),
+            summary_tag: SUMMARY_TAG_DISCOVERY_V1,
+            summary_bytes,
+        })
+    }
+
+    /// Decode this envelope as a header-sync summary when its tag matches.
+    pub fn decode_header_sync(
+        &self,
+    ) -> Result<Option<HeaderSyncServiceSummary>, DiscoveryWireError> {
+        if self.summary_tag == SUMMARY_TAG_HEADER_SYNC_V1 {
+            decode_header_sync_summary(&self.summary_bytes).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Decode this envelope as a discovery summary when its tag matches.
+    pub fn decode_discovery(&self) -> Result<Option<DiscoveryServiceSummary>, DiscoveryWireError> {
+        if self.summary_tag == SUMMARY_TAG_DISCOVERY_V1 {
+            decode_discovery_summary(&self.summary_bytes).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Header-sync live summary used only as a dial/admission hint.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct HeaderSyncServiceSummary {
+    /// Best known header height.
+    pub best_height: block::Height,
+    /// Best known header hash.
+    pub best_hash: block::Hash,
+    /// Finalized height, when cheaply available.
+    pub finalized_height: Option<block::Height>,
+    /// Whether this node is currently serving headers.
+    pub serving_headers: bool,
+    /// Free inbound header-sync slots.
+    pub inbound_slots_free: u16,
+    /// Maximum inbound header-sync slots.
+    pub inbound_slots_max: u16,
+    /// Free outbound header-sync slots.
+    pub outbound_slots_free: u16,
+    /// Maximum outbound header-sync slots.
+    pub outbound_slots_max: u16,
+}
+
+impl HeaderSyncServiceSummary {
+    /// Build a summary from the header-sync reactor's cheap local snapshots.
+    pub fn from_snapshot(
+        best_height: block::Height,
+        best_hash: block::Hash,
+        finalized_height: Option<block::Height>,
+        serving_headers: bool,
+        peers: ServicePeerSnapshot,
+    ) -> Self {
+        Self {
+            best_height,
+            best_hash,
+            finalized_height,
+            serving_headers,
+            inbound_slots_free: saturating_u16(peers.inbound_slots_free),
+            inbound_slots_max: saturating_u16(
+                peers.inbound_peers.saturating_add(peers.inbound_slots_free),
+            ),
+            outbound_slots_free: saturating_u16(peers.outbound_slots_free),
+            outbound_slots_max: saturating_u16(
+                peers
+                    .outbound_peers
+                    .saturating_add(peers.outbound_slots_free),
+            ),
+        }
+    }
+}
+
+/// Discovery live summary used only as a dial/admission hint.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct DiscoveryServiceSummary {
+    /// Free inbound discovery exchange slots.
+    pub peer_exchange_slots_free: u16,
+    /// Maximum records this node will return in one peer response.
+    pub max_records_per_response: u16,
+    /// Whether this node expects to disconnect after one exchange.
+    pub expected_disconnect_after_exchange: bool,
+}
+
+impl DiscoveryServiceSummary {
+    /// Build a summary from the discovery runtime's cheap local snapshots.
+    pub fn from_snapshot(
+        peers: ServicePeerSnapshot,
+        max_records_per_response: usize,
+        expected_disconnect_after_exchange: bool,
+    ) -> Self {
+        Self {
+            peer_exchange_slots_free: saturating_u16(peers.inbound_slots_free),
+            max_records_per_response: saturating_u16(
+                max_records_per_response.min(MAX_DISCOVERY_RECORDS_PER_RESPONSE),
+            ),
+            expected_disconnect_after_exchange,
+        }
+    }
+}
+
 /// Native discovery protocol messages.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveryMessage {
@@ -275,20 +456,10 @@ pub enum DiscoveryMessage {
         /// Signed node records.
         records: Vec<ZakuraNodeRecord>,
     },
-    /// Reserved service query.
-    GetServices {
-        /// Service filter.
-        wanted_services: Vec<ZakuraServiceId>,
-        /// Maximum requested records.
-        limit: u16,
-        /// Node ids the responder should not return.
-        exclude_node_ids: Vec<NodeId>,
-    },
-    /// Reserved service response using signed records.
-    Services {
-        /// Signed node records.
-        records: Vec<ZakuraNodeRecord>,
-    },
+    /// Request first-party live service summaries.
+    GetServices(GetServices),
+    /// First-party live service summaries.
+    Services(Services),
 }
 
 impl DiscoveryMessage {
@@ -317,22 +488,19 @@ impl DiscoveryMessage {
                     &mut bytes,
                 )?;
             }
-            Self::GetServices {
-                wanted_services,
-                limit,
-                exclude_node_ids,
-            } => {
-                validate_query_fields(*limit, wanted_services, exclude_node_ids)?;
+            Self::GetServices(query) => {
+                validate_get_services(query)?;
                 bytes.write_u8(MSG_DISCOVERY_GET_SERVICES)?;
-                encode_query_fields(*limit, wanted_services, exclude_node_ids, &mut bytes)?;
-            }
-            Self::Services { records } => {
-                encode_records_message(
-                    MSG_DISCOVERY_SERVICES,
-                    records,
-                    MAX_DISCOVERY_RECORDS_PER_RESPONSE,
+                encode_service_ids_capped(
+                    &query.wanted_services,
+                    MAX_GET_SERVICES_WANTED,
                     &mut bytes,
                 )?;
+            }
+            Self::Services(services) => {
+                validate_services(services)?;
+                bytes.write_u8(MSG_DISCOVERY_SERVICES)?;
+                encode_services_message(services, &mut bytes)?;
             }
         }
 
@@ -371,17 +539,8 @@ impl DiscoveryMessage {
             MSG_DISCOVERY_PEERS => Self::Peers {
                 records: decode_record_list(&mut reader, MAX_DISCOVERY_RECORDS_PER_RESPONSE)?,
             },
-            MSG_DISCOVERY_GET_SERVICES => {
-                let (limit, wanted_services, exclude_node_ids) = decode_query_fields(&mut reader)?;
-                Self::GetServices {
-                    wanted_services,
-                    limit,
-                    exclude_node_ids,
-                }
-            }
-            MSG_DISCOVERY_SERVICES => Self::Services {
-                records: decode_record_list(&mut reader, MAX_DISCOVERY_RECORDS_PER_RESPONSE)?,
-            },
+            MSG_DISCOVERY_GET_SERVICES => Self::GetServices(decode_get_services(&mut reader)?),
+            MSG_DISCOVERY_SERVICES => Self::Services(decode_services_message(&mut reader)?),
             value => return Err(DiscoveryWireError::InvalidMessageType(value)),
         };
         reject_trailing(bytes, &reader)?;
@@ -405,6 +564,15 @@ pub enum DiscoveryWireError {
     #[error("Zakura discovery wire I/O error: {0}")]
     Io(#[from] io::Error),
 
+    /// A length-delimited field claimed more bytes than remain in the bounded buffer.
+    #[error("Zakura discovery field declared {declared} bytes with only {remaining} remaining")]
+    TruncatedPayload {
+        /// Declared field length.
+        declared: usize,
+        /// Remaining bytes in the bounded parent buffer.
+        remaining: usize,
+    },
+
     /// The discovery message type is unknown.
     #[error("invalid Zakura discovery message type {0}")]
     InvalidMessageType(u8),
@@ -421,6 +589,13 @@ pub enum DiscoveryWireError {
     #[error("invalid Zakura discovery node id")]
     InvalidNodeId,
 
+    /// A first-party live field described a different node than the authenticated peer.
+    #[error("Zakura discovery {field} does not match authenticated peer node id")]
+    MismatchedNodeId {
+        /// Field name.
+        field: &'static str,
+    },
+
     /// A decoded payload had trailing bytes.
     #[error("trailing bytes in Zakura discovery payload")]
     TrailingBytes,
@@ -432,6 +607,28 @@ pub enum DiscoveryWireError {
     /// A service id was not ASCII.
     #[error("Zakura discovery service id is not ASCII")]
     NonAsciiServiceId,
+
+    /// A boolean field was not encoded as 0 or 1.
+    #[error("invalid Zakura discovery boolean {field} value {value}")]
+    InvalidBoolean {
+        /// Field name.
+        field: &'static str,
+        /// Encoded value.
+        value: u8,
+    },
+
+    /// A known summary tag was attached to the wrong service id.
+    #[error("Zakura discovery summary tag {summary_tag} does not match service id {service_id}")]
+    MismatchedSummaryService {
+        /// Versioned summary payload tag.
+        summary_tag: u16,
+        /// Service id from the enclosing summary envelope.
+        service_id: ZakuraServiceId,
+    },
+
+    /// A block height exceeded Zebra's accepted height range.
+    #[error("invalid Zakura discovery block height {0}")]
+    InvalidHeight(u32),
 
     /// A numeric conversion failed while handling bounded data.
     #[error("numeric overflow while encoding Zakura discovery {0}")]
@@ -523,6 +720,7 @@ pub struct ZakuraDiscoveryEntry {
     last_seen: u64,
     last_dial_attempt: Option<u64>,
     last_success: Option<u64>,
+    last_short_lived_exchange: Option<u64>,
     failure_count: u32,
 }
 
@@ -555,6 +753,11 @@ impl ZakuraDiscoveryEntry {
     /// Returns the last successful dial as a Unix timestamp.
     pub fn last_success(&self) -> Option<u64> {
         self.last_success
+    }
+
+    /// Returns the last successful short-lived discovery exchange as a Unix timestamp.
+    pub fn last_short_lived_exchange(&self) -> Option<u64> {
+        self.last_short_lived_exchange
     }
 
     /// Returns the consecutive dial failure count.
@@ -617,6 +820,17 @@ pub struct ZakuraServiceCandidates {
     pub discovered: Vec<ZakuraDiscoveryDialCandidate>,
     /// Whether discovered candidates came from explicit fallback to general peers.
     pub used_fallback: bool,
+}
+
+/// Header-sync candidate selection hints owned by the header-sync reactor.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ZakuraHeaderSyncCandidateState {
+    /// Lowest header height that would make a new peer useful.
+    pub target_height: block::Height,
+    /// Peers already admitted by header sync; advisory "full" summaries do not remove them.
+    pub admitted_node_ids: Vec<NodeId>,
+    /// Peers in local, non-punitive advisory backoff after failing to confirm usefulness.
+    pub backed_off_node_ids: Vec<NodeId>,
 }
 
 /// The result of importing one signed discovery record.
@@ -732,6 +946,8 @@ pub struct ZakuraDiscoveryConfig {
     pub discovery_connection_headroom: usize,
     /// Total Zakura connection cap used to derive the discovery soft cap.
     pub max_zakura_connections: usize,
+    /// Discovery peer caps and queue limits owned by this runtime.
+    pub peer_limits: ServicePeerLimits,
     /// Maximum accepted future TTL on imported records.
     pub max_record_ttl: Duration,
     /// Accepted clock skew around expiry checks.
@@ -751,6 +967,7 @@ impl Default for ZakuraDiscoveryConfig {
             max_concurrent_discovery_dials: DEFAULT_MAX_CONCURRENT_DISCOVERY_DIALS,
             discovery_connection_headroom: DEFAULT_DISCOVERY_CONNECTION_HEADROOM,
             max_zakura_connections: DEFAULT_DISCOVERY_ZAKURA_MAX_CONNECTIONS,
+            peer_limits: ServicePeerLimits::default(),
             max_record_ttl: DEFAULT_DISCOVERY_MAX_RECORD_TTL,
             clock_skew_tolerance: DEFAULT_DISCOVERY_CLOCK_SKEW_TOLERANCE,
         }
@@ -805,6 +1022,8 @@ pub struct ZakuraDiscoveryHandle {
     connected: watch::Receiver<Vec<ZakuraPeerId>>,
     self_record: watch::Receiver<Arc<ZakuraNodeRecord>>,
     self_record_tx: watch::Sender<Arc<ZakuraNodeRecord>>,
+    peer_snapshot: watch::Receiver<ServicePeerSnapshot>,
+    peer_snapshot_tx: watch::Sender<ServicePeerSnapshot>,
 }
 
 impl fmt::Debug for ZakuraDiscoveryHandle {
@@ -823,6 +1042,7 @@ impl fmt::Debug for ZakuraDiscoveryHandle {
 struct ZakuraDiscoveryInner {
     book: ZakuraDiscoveryBook,
     active_services: HashMap<NodeId, ZakuraActiveServiceEntry>,
+    admitted_peers: HashMap<ZakuraPeerId, ServicePeerDirection>,
     last_connected_node_ids: HashSet<NodeId>,
     local: ZakuraLocalDiscoveryState,
     config: ZakuraDiscoveryConfig,
@@ -830,8 +1050,160 @@ struct ZakuraDiscoveryInner {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ZakuraActiveServiceEntry {
-    record: ZakuraNodeRecord,
+    record: Option<ZakuraNodeRecord>,
     services: Vec<ZakuraServiceId>,
+    live_summaries: Vec<ZakuraCachedLiveServiceSummary>,
+}
+
+impl ZakuraActiveServiceEntry {
+    fn from_record(record: ZakuraNodeRecord, services: Vec<ZakuraServiceId>) -> Self {
+        Self {
+            record: Some(record),
+            services,
+            live_summaries: Vec::new(),
+        }
+    }
+
+    fn from_live_summaries(summaries: Vec<ZakuraCachedLiveServiceSummary>) -> Self {
+        let mut services = Vec::new();
+        for summary in &summaries {
+            push_unique_service(&mut services, summary.service_id.clone());
+        }
+        Self {
+            record: None,
+            services,
+            live_summaries: summaries,
+        }
+    }
+
+    fn update_record(&mut self, record: ZakuraNodeRecord, services: Vec<ZakuraServiceId>) {
+        self.record = Some(record);
+        self.services = services;
+    }
+
+    fn update_live_summaries(&mut self, summaries: Vec<ZakuraCachedLiveServiceSummary>) {
+        self.live_summaries.retain(|cached| {
+            !summaries.iter().any(|summary| {
+                summary.service_id == cached.service_id && summary.summary_tag == cached.summary_tag
+            })
+        });
+        for summary in summaries {
+            self.live_summaries.push(summary);
+        }
+        if self.record.is_none() {
+            self.refresh_live_derived_services();
+        }
+    }
+
+    fn prune_expired_live_summaries(&mut self, now_unix_secs: u64) {
+        self.live_summaries
+            .retain(|summary| summary.expires_at_unix_secs > now_unix_secs);
+        if self.record.is_none() {
+            self.refresh_live_derived_services();
+        }
+    }
+
+    fn refresh_live_derived_services(&mut self) {
+        let mut services = Vec::new();
+        for summary in &self.live_summaries {
+            push_unique_service(&mut services, summary.service_id.clone());
+        }
+        self.services = services;
+    }
+
+    fn is_empty_live_only(&self) -> bool {
+        self.record.is_none() && self.live_summaries.is_empty()
+    }
+
+    fn live_summary_preference(&self, service: &ZakuraServiceId, now_unix_secs: u64) -> u32 {
+        self.live_summaries
+            .iter()
+            .filter(|summary| {
+                summary.service_id == *service && summary.expires_at_unix_secs > now_unix_secs
+            })
+            .map(ZakuraCachedLiveServiceSummary::preference_score)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn fresh_header_sync_summary(&self, now_unix_secs: u64) -> Option<HeaderSyncServiceSummary> {
+        self.live_summaries.iter().find_map(|summary| {
+            if summary.service_id != ZakuraServiceId::header_sync()
+                || summary.expires_at_unix_secs <= now_unix_secs
+            {
+                return None;
+            }
+            match summary.summary {
+                ZakuraLiveServiceSummary::HeaderSync(header_sync) => Some(header_sync),
+                ZakuraLiveServiceSummary::Discovery(_) | ZakuraLiveServiceSummary::Unknown => None,
+            }
+        })
+    }
+}
+
+/// A decoded first-party live service summary cached while its peer remains connected.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ZakuraCachedLiveServiceSummary {
+    /// Service this cached summary describes.
+    pub service_id: ZakuraServiceId,
+    /// Versioned summary payload tag.
+    pub summary_tag: u16,
+    /// Decoded payload for known service summary tags.
+    pub summary: ZakuraLiveServiceSummary,
+    /// Local Unix timestamp when this summary was observed.
+    pub observed_at_unix_secs: u64,
+    /// Effective local expiry, clamped to the local live-summary TTL.
+    pub expires_at_unix_secs: u64,
+}
+
+impl ZakuraCachedLiveServiceSummary {
+    fn from_envelope(
+        envelope: &ServiceSummaryEnvelope,
+        observed_at_unix_secs: u64,
+        expires_at_unix_secs: u64,
+    ) -> Result<Self, DiscoveryWireError> {
+        let summary = if let Some(summary) = envelope.decode_header_sync()? {
+            ZakuraLiveServiceSummary::HeaderSync(summary)
+        } else if let Some(summary) = envelope.decode_discovery()? {
+            ZakuraLiveServiceSummary::Discovery(summary)
+        } else {
+            ZakuraLiveServiceSummary::Unknown
+        };
+        Ok(Self {
+            service_id: envelope.service_id.clone(),
+            summary_tag: envelope.summary_tag,
+            summary,
+            observed_at_unix_secs,
+            expires_at_unix_secs,
+        })
+    }
+
+    fn preference_score(&self) -> u32 {
+        match self.summary {
+            ZakuraLiveServiceSummary::HeaderSync(summary) => {
+                if !summary.serving_headers {
+                    return 0;
+                }
+                u32::from(summary.inbound_slots_free)
+                    .saturating_add(u32::from(summary.outbound_slots_free))
+            }
+            ZakuraLiveServiceSummary::Discovery(summary) => {
+                u32::from(summary.peer_exchange_slots_free)
+            }
+            ZakuraLiveServiceSummary::Unknown => 1,
+        }
+    }
+}
+
+/// Decoded payload for a cached first-party live service summary.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ZakuraLiveServiceSummary {
+    /// Header-sync dial/admission hint.
+    HeaderSync(HeaderSyncServiceSummary),
+    /// Discovery exchange hint.
+    Discovery(DiscoveryServiceSummary),
+    /// Unknown or reserved summary tag, kept only as a freshness hint.
+    Unknown,
 }
 
 #[derive(Clone)]
@@ -893,11 +1265,14 @@ impl ZakuraDiscoveryHandle {
             config.record_ttl,
         )?);
         let (self_record_tx, self_record_rx) = watch::channel(self_record);
+        let (peer_snapshot_tx, peer_snapshot_rx) =
+            watch::channel(ServicePeerSnapshot::new(0, 0, config.peer_limits));
         let book = ZakuraDiscoveryBook::with_local_node_id(config.book_limits, local.node_id);
         Ok(Self {
             inner: Arc::new(Mutex::new(ZakuraDiscoveryInner {
                 book,
                 active_services: HashMap::new(),
+                admitted_peers: HashMap::new(),
                 last_connected_node_ids: HashSet::new(),
                 local,
                 config,
@@ -905,6 +1280,8 @@ impl ZakuraDiscoveryHandle {
             connected,
             self_record: self_record_rx,
             self_record_tx,
+            peer_snapshot: peer_snapshot_rx,
+            peer_snapshot_tx,
         })
     }
 
@@ -928,6 +1305,92 @@ impl ZakuraDiscoveryHandle {
     pub async fn refresh_interval(&self) -> Duration {
         let inner = self.inner.lock().await;
         inner.config.refresh_interval
+    }
+
+    /// Return the currently cached discovery peer slot snapshot.
+    pub fn peer_snapshot(&self) -> ServicePeerSnapshot {
+        *self.peer_snapshot.borrow()
+    }
+
+    /// Subscribe to discovery peer slot snapshots.
+    pub fn subscribe_peer_snapshot(&self) -> watch::Receiver<ServicePeerSnapshot> {
+        self.peer_snapshot.clone()
+    }
+
+    /// Build this node's first-party discovery service summary.
+    pub async fn local_discovery_summary(&self) -> DiscoveryServiceSummary {
+        DiscoveryServiceSummary::from_snapshot(
+            self.peer_snapshot(),
+            self.peer_sample_limit().await,
+            true,
+        )
+    }
+
+    /// Wrap first-party live summaries in a short-lived service response.
+    pub fn local_services_response(&self, summaries: Vec<ServiceSummaryEnvelope>) -> Services {
+        Services {
+            node_id: self.local_node_id(),
+            expires_at_unix_secs: current_unix_secs()
+                .saturating_add(DEFAULT_LIVE_SERVICE_SUMMARY_TTL.as_secs()),
+            summaries,
+        }
+    }
+
+    /// Admit a typed discovery session if the service-specific cap has room.
+    pub async fn admit_peer(
+        &self,
+        peer_id: ZakuraPeerId,
+        direction: ServicePeerDirection,
+    ) -> ServiceAdmissionDecision {
+        let mut inner = self.inner.lock().await;
+        if let Some(peer_direction) = inner.admitted_peers.get_mut(&peer_id) {
+            *peer_direction = direction;
+            self.publish_peer_snapshot_locked(&inner);
+            return ServiceAdmissionDecision::Admit;
+        }
+
+        let admitted = inner
+            .admitted_peers
+            .values()
+            .filter(|peer_direction| **peer_direction == direction)
+            .count();
+        let cap = match direction {
+            ServicePeerDirection::Inbound => inner.config.peer_limits.max_inbound_peers,
+            ServicePeerDirection::Outbound => inner.config.peer_limits.max_outbound_peers,
+        };
+
+        if admitted >= cap {
+            ServiceAdmissionDecision::RejectFull
+        } else {
+            inner.admitted_peers.insert(peer_id, direction);
+            self.publish_peer_snapshot_locked(&inner);
+            ServiceAdmissionDecision::Admit
+        }
+    }
+
+    /// Remove a locally closed or disconnected discovery service session.
+    pub async fn remove_peer(&self, peer_id: &ZakuraPeerId) {
+        let mut inner = self.inner.lock().await;
+        inner.admitted_peers.remove(peer_id);
+        self.publish_peer_snapshot_locked(&inner);
+    }
+
+    fn publish_peer_snapshot_locked(&self, inner: &ZakuraDiscoveryInner) {
+        let inbound = inner
+            .admitted_peers
+            .values()
+            .filter(|direction| **direction == ServicePeerDirection::Inbound)
+            .count();
+        let outbound = inner
+            .admitted_peers
+            .values()
+            .filter(|direction| **direction == ServicePeerDirection::Outbound)
+            .count();
+        let _ = self.peer_snapshot_tx.send(ServicePeerSnapshot::new(
+            inbound,
+            outbound,
+            inner.config.peer_limits,
+        ));
     }
 
     /// Returns bounded node ids to exclude from a peer-sample request.
@@ -1002,6 +1465,70 @@ impl ZakuraDiscoveryHandle {
         let mut inner = self.inner.lock().await;
         let context = inner.validation_context(now);
         inner.book.import_record(record, source, now, &context)
+    }
+
+    /// Imports a connected peer's first-party live service summaries.
+    ///
+    /// Live summaries are accepted only from the authenticated peer they describe, are bounded by
+    /// the connected-peer set, and expire independently of durable signed node records.
+    pub async fn import_connected_peer_services(
+        &self,
+        services: Services,
+        peer_node_id: NodeId,
+    ) -> Result<(), DiscoveryWireError> {
+        self.import_connected_peer_services_at(services, peer_node_id, current_unix_secs())
+            .await
+    }
+
+    async fn import_connected_peer_services_at(
+        &self,
+        services: Services,
+        peer_node_id: NodeId,
+        now: u64,
+    ) -> Result<(), DiscoveryWireError> {
+        if services.node_id != peer_node_id {
+            return Err(DiscoveryWireError::MismatchedNodeId {
+                field: "services node id",
+            });
+        }
+
+        let connected_node_ids = connected_peer_node_ids(&self.connected.borrow());
+        let mut inner = self.inner.lock().await;
+        inner.sync_active_services(&connected_node_ids, now);
+        if !connected_node_ids.contains(&peer_node_id) {
+            return Ok(());
+        }
+
+        let Some(expires_at_unix_secs) =
+            effective_live_summary_expiry(services.expires_at_unix_secs, now)
+        else {
+            if let Some(entry) = inner.active_services.get_mut(&peer_node_id) {
+                entry.live_summaries.clear();
+                if entry.record.is_none() {
+                    entry.refresh_live_derived_services();
+                }
+            }
+            inner
+                .active_services
+                .retain(|_, entry| !entry.is_empty_live_only());
+            return Ok(());
+        };
+
+        let mut live_summaries = Vec::with_capacity(services.summaries.len());
+        for envelope in &services.summaries {
+            live_summaries.push(ZakuraCachedLiveServiceSummary::from_envelope(
+                envelope,
+                now,
+                expires_at_unix_secs,
+            )?);
+        }
+
+        inner
+            .active_services
+            .entry(peer_node_id)
+            .and_modify(|entry| entry.update_live_summaries(live_summaries.clone()))
+            .or_insert_with(|| ZakuraActiveServiceEntry::from_live_summaries(live_summaries));
+        Ok(())
     }
 
     /// Imports one trusted static signed record through the static validation path.
@@ -1174,17 +1701,28 @@ impl ZakuraDiscoveryHandle {
 
         let now = current_unix_secs();
         let mut inner = self.inner.lock().await;
-        inner.sync_active_services(&connected_node_ids);
+        inner.sync_active_services(&connected_node_ids, now);
 
-        let mut connected: Vec<_> = inner
+        let mut connected_entries: Vec<_> = inner
             .active_services
             .iter()
             .filter(|(node_id, entry)| {
                 connected_node_ids.contains(node_id) && entry.services.contains(service)
             })
-            .map(|(node_id, _)| *node_id)
+            .map(|(node_id, entry)| {
+                (
+                    *node_id,
+                    entry.live_summary_preference(service, now),
+                    node_id_sort_key(node_id),
+                )
+            })
             .collect();
-        connected.sort_by_key(node_id_sort_key);
+        connected_entries
+            .sort_by_key(|(_, preference, sort_key)| (Reverse(*preference), *sort_key));
+        let connected: Vec<NodeId> = connected_entries
+            .into_iter()
+            .map(|(node_id, _, _)| node_id)
+            .collect();
 
         let wanted_services = bounded_services(std::slice::from_ref(service), book_limits);
         let mut rng = rand::thread_rng();
@@ -1221,6 +1759,124 @@ impl ZakuraDiscoveryHandle {
         }
     }
 
+    /// Returns header-sync candidates filtered and ordered by first-party advisory summaries.
+    ///
+    /// The returned peers are still advisory only: header-sync `Status` and header validation remain
+    /// authoritative after admission.
+    pub async fn header_sync_candidates(
+        &self,
+        header_sync: &ZakuraHeaderSyncCandidateState,
+        allow_fallback: bool,
+        in_flight_node_ids: &[NodeId],
+    ) -> ZakuraServiceCandidates {
+        let connected = self.connected.borrow().clone();
+        let connected_node_ids = connected_peer_node_ids(&connected);
+        let (limit, dial_backoff_base, dial_backoff_max, book_limits) = {
+            let inner = self.inner.lock().await;
+            (
+                discovery_dial_slot_limit(
+                    connected.len(),
+                    in_flight_node_ids.len(),
+                    inner.config.max_zakura_connections,
+                    inner.config.discovery_connection_headroom,
+                    inner.config.max_concurrent_discovery_dials,
+                ),
+                inner.config.dial_backoff_base,
+                inner.config.dial_backoff_max,
+                inner.config.book_limits,
+            )
+        };
+
+        let now = current_unix_secs();
+        let mut inner = self.inner.lock().await;
+        inner.sync_active_services(&connected_node_ids, now);
+
+        let admitted_node_ids: HashSet<_> = header_sync.admitted_node_ids.iter().copied().collect();
+        let backed_off_node_ids: HashSet<_> =
+            header_sync.backed_off_node_ids.iter().copied().collect();
+        let header_sync_service = ZakuraServiceId::header_sync();
+        let mut connected_entries: Vec<_> = inner
+            .active_services
+            .iter()
+            .filter_map(|(node_id, entry)| {
+                let is_admitted = admitted_node_ids.contains(node_id);
+                if !connected_node_ids.contains(node_id)
+                    || !entry.services.contains(&header_sync_service)
+                    || (backed_off_node_ids.contains(node_id) && !is_admitted)
+                {
+                    return None;
+                }
+
+                let summary = entry.fresh_header_sync_summary(now);
+                if summary.is_some_and(|summary| {
+                    summary.serving_headers && summary.inbound_slots_free == 0 && !is_admitted
+                }) {
+                    return None;
+                }
+
+                Some((
+                    *node_id,
+                    header_sync_candidate_preference(summary, header_sync.target_height),
+                    node_id_sort_key(node_id),
+                ))
+            })
+            .collect();
+        connected_entries
+            .sort_by_key(|(_, preference, sort_key)| (Reverse(*preference), *sort_key));
+        let connected: Vec<NodeId> = connected_entries
+            .into_iter()
+            .map(|(node_id, _, _)| node_id)
+            .collect();
+
+        let wanted_services =
+            bounded_services(std::slice::from_ref(&header_sync_service), book_limits);
+        let mut excluded_node_ids = Vec::with_capacity(
+            in_flight_node_ids
+                .len()
+                .saturating_add(header_sync.backed_off_node_ids.len()),
+        );
+        excluded_node_ids.extend_from_slice(in_flight_node_ids);
+        excluded_node_ids.extend(
+            header_sync
+                .backed_off_node_ids
+                .iter()
+                .copied()
+                .filter(|node_id| !admitted_node_ids.contains(node_id)),
+        );
+        let mut rng = rand::thread_rng();
+        let mut discovered = inner.book.dial_candidates(
+            limit,
+            &wanted_services,
+            DialCandidateExclusions {
+                connected_node_ids: &connected_node_ids,
+                in_flight_node_ids: &excluded_node_ids,
+            },
+            now,
+            (dial_backoff_base, dial_backoff_max),
+            &mut rng,
+        );
+        let used_fallback = allow_fallback && connected.is_empty() && discovered.is_empty();
+        if used_fallback {
+            discovered = inner.book.dial_candidates(
+                limit,
+                &[],
+                DialCandidateExclusions {
+                    connected_node_ids: &connected_node_ids,
+                    in_flight_node_ids: &excluded_node_ids,
+                },
+                now,
+                (dial_backoff_base, dial_backoff_max),
+                &mut rng,
+            );
+        }
+
+        ZakuraServiceCandidates {
+            connected,
+            discovered,
+            used_fallback,
+        }
+    }
+
     /// Marks a discovery dial attempt for `node_id`.
     pub async fn mark_dial_attempt(&self, node_id: &NodeId) {
         let mut inner = self.inner.lock().await;
@@ -1239,11 +1895,20 @@ impl ZakuraDiscoveryHandle {
         inner.book.mark_dial_failure(node_id, current_unix_secs());
     }
 
+    /// Marks a completed short-lived discovery exchange for local redial backoff.
+    pub async fn mark_short_lived_exchange(&self, node_id: &NodeId) {
+        let mut inner = self.inner.lock().await;
+        inner
+            .book
+            .mark_short_lived_exchange(node_id, current_unix_secs());
+    }
+
     /// Returns a connected peer's advertised services as a derived supervisor-watch projection.
     pub async fn active_services(&self, node_id: NodeId) -> Option<Vec<ZakuraServiceId>> {
         let connected = connected_peer_node_ids(&self.connected.borrow());
+        let now = current_unix_secs();
         let mut inner = self.inner.lock().await;
-        inner.sync_active_services(&connected);
+        inner.sync_active_services(&connected, now);
         if !connected.contains(&node_id) {
             return None;
         }
@@ -1252,6 +1917,33 @@ impl ZakuraDiscoveryHandle {
             .active_services
             .get(&node_id)
             .map(|entry| entry.services.clone())
+    }
+
+    /// Returns fresh first-party live summaries cached for a connected peer.
+    pub async fn live_service_summaries(
+        &self,
+        node_id: NodeId,
+    ) -> Option<Vec<ZakuraCachedLiveServiceSummary>> {
+        self.live_service_summaries_at(node_id, current_unix_secs())
+            .await
+    }
+
+    async fn live_service_summaries_at(
+        &self,
+        node_id: NodeId,
+        now: u64,
+    ) -> Option<Vec<ZakuraCachedLiveServiceSummary>> {
+        let connected = connected_peer_node_ids(&self.connected.borrow());
+        let mut inner = self.inner.lock().await;
+        inner.sync_active_services(&connected, now);
+        if !connected.contains(&node_id) {
+            return None;
+        }
+
+        inner
+            .active_services
+            .get(&node_id)
+            .map(|entry| entry.live_summaries.clone())
     }
 
     /// Returns a stored discovery record for `node_id`, if present.
@@ -1280,10 +1972,15 @@ impl ZakuraDiscoveryInner {
         }
     }
 
-    fn sync_active_services(&mut self, connected_node_ids: &[NodeId]) {
+    fn sync_active_services(&mut self, connected_node_ids: &[NodeId], now_unix_secs: u64) {
         let connected_node_ids: HashSet<_> = connected_node_ids.iter().copied().collect();
         self.active_services
             .retain(|node_id, _| connected_node_ids.contains(node_id));
+        for entry in self.active_services.values_mut() {
+            entry.prune_expired_live_summaries(now_unix_secs);
+        }
+        self.active_services
+            .retain(|_, entry| !entry.is_empty_live_only());
         self.last_connected_node_ids = connected_node_ids;
     }
 
@@ -1294,11 +1991,12 @@ impl ZakuraDiscoveryInner {
         services: Vec<ZakuraServiceId>,
         import_result: &Result<ImportOutcome, DiscoveryBookError>,
     ) {
-        if self
-            .active_services
-            .get(&node_id)
-            .is_some_and(|active| record.body.sequence <= active.record.body.sequence)
-        {
+        if self.active_services.get(&node_id).is_some_and(|active| {
+            active
+                .record
+                .as_ref()
+                .is_some_and(|active_record| record.body.sequence <= active_record.body.sequence)
+        }) {
             return;
         }
 
@@ -1318,7 +2016,9 @@ impl ZakuraDiscoveryInner {
 
         if should_update {
             self.active_services
-                .insert(node_id, ZakuraActiveServiceEntry { record, services });
+                .entry(node_id)
+                .and_modify(|entry| entry.update_record(record.clone(), services.clone()))
+                .or_insert_with(|| ZakuraActiveServiceEntry::from_record(record, services));
         }
     }
 }
@@ -1462,6 +2162,7 @@ impl ZakuraDiscoveryBook {
                 last_seen: now,
                 last_dial_attempt: None,
                 last_success: None,
+                last_short_lived_exchange: None,
                 failure_count: 0,
             });
         candidate.direct_addrs = direct_addrs;
@@ -1566,6 +2267,12 @@ impl ZakuraDiscoveryBook {
                     && self.local_node_id != Some(entry.record.body.node_id)
                     && !entry_is_expired(entry, now)
                     && !entry_in_dial_backoff(entry, now, dial_backoff.0, dial_backoff.1)
+                    && !entry_in_short_lived_exchange_backoff(
+                        entry,
+                        now,
+                        dial_backoff.0,
+                        dial_backoff.1,
+                    )
                     && has_wanted_services(&entry.record, wanted_services)
                     && has_discovery_usable_direct_addrs(entry)
             })
@@ -1579,6 +2286,12 @@ impl ZakuraDiscoveryBook {
                     || entry_metadata_in_dial_backoff(
                         candidate.last_dial_attempt,
                         candidate.failure_count,
+                        now,
+                        dial_backoff.0,
+                        dial_backoff.1,
+                    )
+                    || entry_metadata_in_short_lived_exchange_backoff(
+                        candidate.last_short_lived_exchange,
                         now,
                         dial_backoff.0,
                         dial_backoff.1,
@@ -1647,6 +2360,16 @@ impl ZakuraDiscoveryBook {
         }
         if let Some(candidate) = self.static_candidates.get_mut(node_id) {
             candidate.failure_count = candidate.failure_count.saturating_add(1);
+        }
+    }
+
+    /// Marks a successful short-lived discovery exchange for `node_id`.
+    pub fn mark_short_lived_exchange(&mut self, node_id: &NodeId, now: u64) {
+        if let Some(entry) = self.entries.get_mut(node_id) {
+            entry.last_short_lived_exchange = Some(now);
+        }
+        if let Some(candidate) = self.static_candidates.get_mut(node_id) {
+            candidate.last_short_lived_exchange = Some(now);
         }
     }
 
@@ -1779,6 +2502,7 @@ impl ZakuraDiscoveryBook {
                 last_seen: metadata.last_seen,
                 last_dial_attempt: metadata.last_dial_attempt,
                 last_success: metadata.last_success,
+                last_short_lived_exchange: None,
                 failure_count: metadata.failure_count,
             },
         );
@@ -1888,6 +2612,7 @@ struct ZakuraStaticDiscoveryCandidate {
     last_seen: u64,
     last_dial_attempt: Option<u64>,
     last_success: Option<u64>,
+    last_short_lived_exchange: Option<u64>,
     failure_count: u32,
 }
 
@@ -2039,6 +2764,47 @@ fn normalize_services(services: Vec<ZakuraServiceId>) -> Vec<ZakuraServiceId> {
     services.dedup();
     services.truncate(MAX_SERVICES_PER_RECORD);
     services
+}
+
+fn push_unique_service(services: &mut Vec<ZakuraServiceId>, service: ZakuraServiceId) {
+    if services.iter().any(|existing| existing == &service) {
+        return;
+    }
+    if services.len() < MAX_SERVICES_PER_RECORD {
+        services.push(service);
+        services.sort_unstable();
+    }
+}
+
+fn effective_live_summary_expiry(declared_expires_at: u64, now_unix_secs: u64) -> Option<u64> {
+    if declared_expires_at <= now_unix_secs {
+        return None;
+    }
+    Some(
+        declared_expires_at
+            .min(now_unix_secs.saturating_add(DEFAULT_LIVE_SERVICE_SUMMARY_TTL.as_secs())),
+    )
+}
+
+fn header_sync_candidate_preference(
+    summary: Option<HeaderSyncServiceSummary>,
+    target_height: block::Height,
+) -> u32 {
+    let Some(summary) = summary else {
+        return 0;
+    };
+    if !summary.serving_headers
+        || summary.inbound_slots_free == 0
+        || summary.best_height < target_height
+    {
+        return 0;
+    }
+
+    let useful_height_delta = summary.best_height.0.saturating_sub(target_height.0);
+    1_000_000u32
+        .saturating_add(u32::from(summary.inbound_slots_free))
+        .saturating_add(u32::from(summary.outbound_slots_free))
+        .saturating_add(useful_height_delta)
 }
 
 fn bounded_services(
@@ -2216,6 +2982,33 @@ fn entry_metadata_in_dial_backoff(
     now < last_dial_attempt.saturating_add(backoff)
 }
 
+fn entry_in_short_lived_exchange_backoff(
+    entry: &ZakuraDiscoveryEntry,
+    now: u64,
+    dial_backoff_base: Duration,
+    dial_backoff_max: Duration,
+) -> bool {
+    entry_metadata_in_short_lived_exchange_backoff(
+        entry.last_short_lived_exchange,
+        now,
+        dial_backoff_base,
+        dial_backoff_max,
+    )
+}
+
+fn entry_metadata_in_short_lived_exchange_backoff(
+    last_short_lived_exchange: Option<u64>,
+    now: u64,
+    dial_backoff_base: Duration,
+    dial_backoff_max: Duration,
+) -> bool {
+    let Some(last_short_lived_exchange) = last_short_lived_exchange else {
+        return false;
+    };
+    let backoff = dial_backoff_secs(1, dial_backoff_base.as_secs(), dial_backoff_max.as_secs());
+    now < last_short_lived_exchange.saturating_add(backoff)
+}
+
 fn dial_backoff_secs(failure_count: u32, base_secs: u64, max_secs: u64) -> u64 {
     if failure_count == 0 {
         return 0;
@@ -2315,6 +3108,77 @@ fn validate_query_fields(
     Ok(())
 }
 
+fn validate_get_services(query: &GetServices) -> Result<(), DiscoveryWireError> {
+    validate_service_ids(&query.wanted_services, MAX_GET_SERVICES_WANTED)
+}
+
+fn validate_services(services: &Services) -> Result<(), DiscoveryWireError> {
+    if services.summaries.len() > MAX_SERVICE_SUMMARIES_PER_RESPONSE {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: services.summaries.len(),
+            max: MAX_SERVICE_SUMMARIES_PER_RESPONSE,
+        });
+    }
+    for summary in &services.summaries {
+        validate_summary_envelope(summary)?;
+    }
+    Ok(())
+}
+
+fn validate_summary_envelope(envelope: &ServiceSummaryEnvelope) -> Result<(), DiscoveryWireError> {
+    validate_service_id(envelope.service_id.as_str().as_bytes())?;
+    if envelope.summary_bytes.len() > MAX_SERVICE_SUMMARY_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: envelope.summary_bytes.len(),
+            max: MAX_SERVICE_SUMMARY_BYTES,
+        });
+    }
+    validate_summary_service_binding(envelope.summary_tag, &envelope.service_id)?;
+    validate_known_summary_payload(envelope.summary_tag, &envelope.summary_bytes)?;
+    Ok(())
+}
+
+fn validate_summary_service_binding(
+    summary_tag: u16,
+    service_id: &ZakuraServiceId,
+) -> Result<(), DiscoveryWireError> {
+    let expected = match summary_tag {
+        SUMMARY_TAG_HEADER_SYNC_V1 => Some(ZakuraServiceId::header_sync()),
+        SUMMARY_TAG_DISCOVERY_V1 => Some(ZakuraServiceId::discovery()),
+        SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED => None,
+        _ => None,
+    };
+
+    if expected
+        .as_ref()
+        .is_some_and(|expected| expected != service_id)
+    {
+        return Err(DiscoveryWireError::MismatchedSummaryService {
+            summary_tag,
+            service_id: service_id.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_known_summary_payload(
+    summary_tag: u16,
+    summary_bytes: &[u8],
+) -> Result<(), DiscoveryWireError> {
+    match summary_tag {
+        SUMMARY_TAG_HEADER_SYNC_V1 => {
+            decode_header_sync_summary(summary_bytes)?;
+        }
+        SUMMARY_TAG_DISCOVERY_V1 => {
+            decode_discovery_summary(summary_bytes)?;
+        }
+        SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED => {}
+        _ => {}
+    }
+    Ok(())
+}
+
 fn validate_service_id(bytes: &[u8]) -> Result<(), DiscoveryWireError> {
     if bytes.is_empty() {
         return Err(DiscoveryWireError::Empty("service id"));
@@ -2327,6 +3191,22 @@ fn validate_service_id(bytes: &[u8]) -> Result<(), DiscoveryWireError> {
     }
     if !bytes.is_ascii() {
         return Err(DiscoveryWireError::NonAsciiServiceId);
+    }
+    Ok(())
+}
+
+fn validate_service_ids(
+    services: &[ZakuraServiceId],
+    max_count: usize,
+) -> Result<(), DiscoveryWireError> {
+    if services.len() > max_count {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: services.len(),
+            max: max_count,
+        });
+    }
+    for service in services {
+        validate_service_id(service.as_str().as_bytes())?;
     }
     Ok(())
 }
@@ -2427,6 +3307,95 @@ fn decode_query_fields(
     let exclude_node_ids = decode_node_ids(reader, MAX_DISCOVERY_EXCLUDED_NODE_IDS)?;
     validate_query_fields(limit, &wanted_services, &exclude_node_ids)?;
     Ok((limit, wanted_services, exclude_node_ids))
+}
+
+fn decode_get_services(reader: &mut impl Read) -> Result<GetServices, DiscoveryWireError> {
+    let wanted_services = decode_service_ids(reader, MAX_GET_SERVICES_WANTED)?;
+    Ok(GetServices { wanted_services })
+}
+
+fn encode_services_message(
+    services: &Services,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    writer.write_all(services.node_id.as_bytes())?;
+    writer.write_u64::<LittleEndian>(services.expires_at_unix_secs)?;
+    writer.write_u16::<LittleEndian>(u16_from_usize(
+        services.summaries.len(),
+        "service summary count",
+    )?)?;
+    for summary in &services.summaries {
+        encode_summary_envelope(summary, writer)?;
+    }
+    Ok(())
+}
+
+fn decode_services_message(reader: &mut Cursor<&[u8]>) -> Result<Services, DiscoveryWireError> {
+    let node_id = decode_node_id(reader)?;
+    let expires_at_unix_secs = reader.read_u64::<LittleEndian>()?;
+    let count = usize::from(reader.read_u16::<LittleEndian>()?);
+    if count > MAX_SERVICE_SUMMARIES_PER_RESPONSE {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: count,
+            max: MAX_SERVICE_SUMMARIES_PER_RESPONSE,
+        });
+    }
+
+    let mut summaries = Vec::with_capacity(count);
+    for _ in 0..count {
+        summaries.push(decode_summary_envelope(reader)?);
+    }
+
+    let services = Services {
+        node_id,
+        expires_at_unix_secs,
+        summaries,
+    };
+    validate_services(&services)?;
+    Ok(services)
+}
+
+fn encode_summary_envelope(
+    envelope: &ServiceSummaryEnvelope,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    validate_summary_envelope(envelope)?;
+    encode_service_id(&envelope.service_id, writer)?;
+    writer.write_u16::<LittleEndian>(envelope.summary_tag)?;
+    writer.write_u16::<LittleEndian>(u16_from_usize(
+        envelope.summary_bytes.len(),
+        "service summary length",
+    )?)?;
+    writer.write_all(&envelope.summary_bytes)?;
+    Ok(())
+}
+
+fn decode_summary_envelope(
+    reader: &mut Cursor<&[u8]>,
+) -> Result<ServiceSummaryEnvelope, DiscoveryWireError> {
+    let service_id = decode_service_id(reader)?;
+    let summary_tag = reader.read_u16::<LittleEndian>()?;
+    let summary_len = usize::from(reader.read_u16::<LittleEndian>()?);
+    if summary_len > MAX_SERVICE_SUMMARY_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: summary_len,
+            max: MAX_SERVICE_SUMMARY_BYTES,
+        });
+    }
+    let remaining = cursor_remaining(reader)?;
+    if summary_len > remaining {
+        return Err(DiscoveryWireError::TruncatedPayload {
+            declared: summary_len,
+            remaining,
+        });
+    }
+    let summary_bytes = read_exact_vec(reader, summary_len)?;
+    validate_known_summary_payload(summary_tag, &summary_bytes)?;
+    Ok(ServiceSummaryEnvelope {
+        service_id,
+        summary_tag,
+        summary_bytes,
+    })
 }
 
 fn encode_record_body_to(
@@ -2554,19 +3523,35 @@ fn encode_service_ids(
     services: &[ZakuraServiceId],
     writer: &mut impl Write,
 ) -> Result<(), DiscoveryWireError> {
-    if services.len() > MAX_SERVICES_PER_RECORD {
+    encode_service_ids_capped(services, MAX_SERVICES_PER_RECORD, writer)
+}
+
+fn encode_service_ids_capped(
+    services: &[ZakuraServiceId],
+    max_count: usize,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    if services.len() > max_count {
         return Err(DiscoveryWireError::OversizedPayload {
             actual: services.len(),
-            max: MAX_SERVICES_PER_RECORD,
+            max: max_count,
         });
     }
     writer.write_u16::<LittleEndian>(u16_from_usize(services.len(), "service count")?)?;
     for service in services {
-        let bytes = service.as_str().as_bytes();
-        validate_service_id(bytes)?;
-        writer.write_u16::<LittleEndian>(u16_from_usize(bytes.len(), "service id length")?)?;
-        writer.write_all(bytes)?;
+        encode_service_id(service, writer)?;
     }
+    Ok(())
+}
+
+fn encode_service_id(
+    service: &ZakuraServiceId,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    let bytes = service.as_str().as_bytes();
+    validate_service_id(bytes)?;
+    writer.write_u16::<LittleEndian>(u16_from_usize(bytes.len(), "service id length")?)?;
+    writer.write_all(bytes)?;
     Ok(())
 }
 
@@ -2583,20 +3568,23 @@ fn decode_service_ids(
     }
     let mut services = Vec::with_capacity(count);
     for _ in 0..count {
-        let len = usize::from(reader.read_u16::<LittleEndian>()?);
-        if len > MAX_ZAKURA_SERVICE_ID_BYTES {
-            return Err(DiscoveryWireError::OversizedPayload {
-                actual: len,
-                max: MAX_ZAKURA_SERVICE_ID_BYTES,
-            });
-        }
-        let bytes = read_exact_vec(reader, len)?;
-        validate_service_id(&bytes)?;
-        let service =
-            String::from_utf8(bytes).map_err(|_| DiscoveryWireError::NonAsciiServiceId)?;
-        services.push(ZakuraServiceId(service));
+        services.push(decode_service_id(reader)?);
     }
     Ok(services)
+}
+
+fn decode_service_id(reader: &mut impl Read) -> Result<ZakuraServiceId, DiscoveryWireError> {
+    let len = usize::from(reader.read_u16::<LittleEndian>()?);
+    if len > MAX_ZAKURA_SERVICE_ID_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: len,
+            max: MAX_ZAKURA_SERVICE_ID_BYTES,
+        });
+    }
+    let bytes = read_exact_vec(reader, len)?;
+    validate_service_id(&bytes)?;
+    let service = String::from_utf8(bytes).map_err(|_| DiscoveryWireError::NonAsciiServiceId)?;
+    Ok(ZakuraServiceId(service))
 }
 
 fn encode_node_ids(node_ids: &[NodeId], writer: &mut impl Write) -> Result<(), DiscoveryWireError> {
@@ -2626,12 +3614,15 @@ fn decode_node_ids(
     }
     let mut node_ids = Vec::with_capacity(count);
     for _ in 0..count {
-        let mut bytes = [0u8; NODE_ID_BYTES];
-        reader.read_exact(&mut bytes)?;
-        let node_id = NodeId::from_bytes(&bytes).map_err(|_| DiscoveryWireError::InvalidNodeId)?;
-        node_ids.push(node_id);
+        node_ids.push(decode_node_id(reader)?);
     }
     Ok(node_ids)
+}
+
+fn decode_node_id(reader: &mut impl Read) -> Result<NodeId, DiscoveryWireError> {
+    let mut bytes = [0u8; NODE_ID_BYTES];
+    reader.read_exact(&mut bytes)?;
+    NodeId::from_bytes(&bytes).map_err(|_| DiscoveryWireError::InvalidNodeId)
 }
 
 fn network_id_from_code(value: u32) -> Result<ZakuraNetworkId, DiscoveryWireError> {
@@ -2642,6 +3633,143 @@ fn network_id_from_code(value: u32) -> Result<ZakuraNetworkId, DiscoveryWireErro
         4 => Ok(ZakuraNetworkId::Configured),
         _ => Err(DiscoveryWireError::InvalidNetworkId(value)),
     }
+}
+
+fn encode_header_sync_summary(
+    summary: &HeaderSyncServiceSummary,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    write_height(writer, summary.best_height)?;
+    writer.write_all(&summary.best_hash.0)?;
+    write_optional_height(writer, summary.finalized_height)?;
+    write_bool(writer, summary.serving_headers)?;
+    writer.write_u16::<LittleEndian>(summary.inbound_slots_free)?;
+    writer.write_u16::<LittleEndian>(summary.inbound_slots_max)?;
+    writer.write_u16::<LittleEndian>(summary.outbound_slots_free)?;
+    writer.write_u16::<LittleEndian>(summary.outbound_slots_max)?;
+    Ok(())
+}
+
+fn decode_header_sync_summary(
+    bytes: &[u8],
+) -> Result<HeaderSyncServiceSummary, DiscoveryWireError> {
+    if bytes.len() > MAX_SERVICE_SUMMARY_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: bytes.len(),
+            max: MAX_SERVICE_SUMMARY_BYTES,
+        });
+    }
+    let mut reader = Cursor::new(bytes);
+    let best_height = read_height(&mut reader)?;
+    let mut best_hash = [0u8; 32];
+    reader.read_exact(&mut best_hash)?;
+    let finalized_height = read_optional_height(&mut reader)?;
+    let serving_headers = read_bool(&mut reader, "header sync serving_headers")?;
+    let inbound_slots_free = reader.read_u16::<LittleEndian>()?;
+    let inbound_slots_max = reader.read_u16::<LittleEndian>()?;
+    let outbound_slots_free = reader.read_u16::<LittleEndian>()?;
+    let outbound_slots_max = reader.read_u16::<LittleEndian>()?;
+    reject_trailing(bytes, &reader)?;
+    Ok(HeaderSyncServiceSummary {
+        best_height,
+        best_hash: block::Hash(best_hash),
+        finalized_height,
+        serving_headers,
+        inbound_slots_free,
+        inbound_slots_max,
+        outbound_slots_free,
+        outbound_slots_max,
+    })
+}
+
+fn encode_discovery_summary(
+    summary: &DiscoveryServiceSummary,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    writer.write_u16::<LittleEndian>(summary.peer_exchange_slots_free)?;
+    writer.write_u16::<LittleEndian>(summary.max_records_per_response)?;
+    write_bool(writer, summary.expected_disconnect_after_exchange)?;
+    Ok(())
+}
+
+fn decode_discovery_summary(bytes: &[u8]) -> Result<DiscoveryServiceSummary, DiscoveryWireError> {
+    if bytes.len() > MAX_SERVICE_SUMMARY_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: bytes.len(),
+            max: MAX_SERVICE_SUMMARY_BYTES,
+        });
+    }
+    let mut reader = Cursor::new(bytes);
+    let peer_exchange_slots_free = reader.read_u16::<LittleEndian>()?;
+    let max_records_per_response = reader.read_u16::<LittleEndian>()?;
+    let expected_disconnect_after_exchange =
+        read_bool(&mut reader, "discovery expected_disconnect_after_exchange")?;
+    reject_trailing(bytes, &reader)?;
+    Ok(DiscoveryServiceSummary {
+        peer_exchange_slots_free,
+        max_records_per_response,
+        expected_disconnect_after_exchange,
+    })
+}
+
+fn write_height(writer: &mut impl Write, height: block::Height) -> Result<(), DiscoveryWireError> {
+    writer.write_u32::<LittleEndian>(height.0)?;
+    Ok(())
+}
+
+fn read_height(reader: &mut impl Read) -> Result<block::Height, DiscoveryWireError> {
+    let height = reader.read_u32::<LittleEndian>()?;
+    block::Height::try_from(height).map_err(|_| DiscoveryWireError::InvalidHeight(height))
+}
+
+fn write_optional_height(
+    writer: &mut impl Write,
+    height: Option<block::Height>,
+) -> Result<(), DiscoveryWireError> {
+    match height {
+        Some(height) => {
+            writer.write_u8(1)?;
+            write_height(writer, height)?;
+        }
+        None => writer.write_u8(0)?,
+    }
+    Ok(())
+}
+
+fn read_optional_height(
+    reader: &mut impl Read,
+) -> Result<Option<block::Height>, DiscoveryWireError> {
+    match reader.read_u8()? {
+        0 => Ok(None),
+        1 => read_height(reader).map(Some),
+        value => Err(DiscoveryWireError::InvalidBoolean {
+            field: "optional height present",
+            value,
+        }),
+    }
+}
+
+fn write_bool(writer: &mut impl Write, value: bool) -> Result<(), DiscoveryWireError> {
+    writer.write_u8(u8::from(value))?;
+    Ok(())
+}
+
+fn read_bool(reader: &mut impl Read, field: &'static str) -> Result<bool, DiscoveryWireError> {
+    match reader.read_u8()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(DiscoveryWireError::InvalidBoolean { field, value }),
+    }
+}
+
+fn saturating_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
+fn cursor_remaining(reader: &Cursor<&[u8]>) -> Result<usize, DiscoveryWireError> {
+    let position = usize::try_from(reader.position())
+        .map_err(|_| DiscoveryWireError::NumericOverflow("cursor position"))?;
+    Ok(reader.get_ref().len().saturating_sub(position))
 }
 
 fn read_exact_vec(reader: &mut impl Read, len: usize) -> Result<Vec<u8>, DiscoveryWireError> {
@@ -2890,6 +4018,47 @@ mod tests {
         ZakuraPeerId::new(node_id.as_bytes().to_vec()).expect("node id is a valid peer id")
     }
 
+    fn header_summary() -> HeaderSyncServiceSummary {
+        HeaderSyncServiceSummary {
+            best_height: block::Height(42),
+            best_hash: block::Hash([7; 32]),
+            finalized_height: Some(block::Height(40)),
+            serving_headers: true,
+            inbound_slots_free: 3,
+            inbound_slots_max: 10,
+            outbound_slots_free: 4,
+            outbound_slots_max: 11,
+        }
+    }
+
+    fn discovery_summary() -> DiscoveryServiceSummary {
+        DiscoveryServiceSummary {
+            peer_exchange_slots_free: 5,
+            max_records_per_response: 12,
+            expected_disconnect_after_exchange: true,
+        }
+    }
+
+    fn services_message(summaries: Vec<ServiceSummaryEnvelope>) -> DiscoveryMessage {
+        DiscoveryMessage::Services(Services {
+            node_id: secret_key().public(),
+            expires_at_unix_secs: NOW + 30,
+            summaries,
+        })
+    }
+
+    fn first_party_services(
+        node_id: NodeId,
+        expires_at_unix_secs: u64,
+        summaries: Vec<ServiceSummaryEnvelope>,
+    ) -> Services {
+        Services {
+            node_id,
+            expires_at_unix_secs,
+            summaries,
+        }
+    }
+
     #[test]
     fn service_id_accepts_valid_ids_and_rejects_invalid_ids() {
         assert_eq!(
@@ -2949,6 +4118,10 @@ mod tests {
         let other = signed_record();
         let services = vec![ZakuraServiceId::discovery(), service(1)];
         let excluded = vec![record.body.node_id, other.body.node_id];
+        let header_envelope =
+            ServiceSummaryEnvelope::header_sync(&header_summary()).expect("summary encodes");
+        let discovery_envelope =
+            ServiceSummaryEnvelope::discovery(&discovery_summary()).expect("summary encodes");
         let messages = vec![
             DiscoveryMessage::Hello {
                 record: record.clone(),
@@ -2961,20 +4134,122 @@ mod tests {
             DiscoveryMessage::Peers {
                 records: vec![record.clone(), other.clone()],
             },
-            DiscoveryMessage::GetServices {
+            DiscoveryMessage::GetServices(GetServices {
                 wanted_services: services,
-                limit: 2,
-                exclude_node_ids: excluded,
-            },
-            DiscoveryMessage::Services {
-                records: vec![record, other],
-            },
+            }),
+            services_message(vec![header_envelope, discovery_envelope]),
         ];
 
         for message in messages {
             let encoded = message.encode().expect("message encodes");
             assert_eq!(DiscoveryMessage::decode(&encoded).unwrap(), message);
         }
+    }
+
+    #[test]
+    fn service_summary_envelopes_roundtrip_and_unknown_tags_are_skipped() {
+        let header = header_summary();
+        let discovery = discovery_summary();
+        let header_envelope =
+            ServiceSummaryEnvelope::header_sync(&header).expect("header summary encodes");
+        let discovery_envelope =
+            ServiceSummaryEnvelope::discovery(&discovery).expect("discovery summary encodes");
+        let unknown_envelope = ServiceSummaryEnvelope {
+            service_id: service(99),
+            summary_tag: 999,
+            summary_bytes: vec![1, 2, 3, 4],
+        };
+
+        assert_eq!(header_envelope.decode_header_sync().unwrap(), Some(header));
+        assert_eq!(
+            discovery_envelope.decode_discovery().unwrap(),
+            Some(discovery)
+        );
+
+        let message = services_message(vec![
+            unknown_envelope.clone(),
+            header_envelope.clone(),
+            discovery_envelope.clone(),
+        ]);
+        let decoded = DiscoveryMessage::decode(&message.encode().expect("message encodes"))
+            .expect("message decodes");
+
+        let DiscoveryMessage::Services(services) = decoded else {
+            panic!("expected service response");
+        };
+        assert_eq!(services.summaries[0], unknown_envelope);
+        assert_eq!(
+            services.summaries[1].decode_header_sync().unwrap(),
+            Some(header)
+        );
+        assert_eq!(
+            services.summaries[2].decode_discovery().unwrap(),
+            Some(discovery)
+        );
+    }
+
+    #[test]
+    fn service_summary_decode_rejects_lying_and_truncated_lengths() {
+        let node_id = secret_key().public();
+        let mut lying = vec![MSG_DISCOVERY_SERVICES];
+        lying.write_all(node_id.as_bytes()).unwrap();
+        lying.write_u64::<LittleEndian>(NOW + 30).unwrap();
+        lying.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&service(1), &mut lying).unwrap();
+        lying.write_u16::<LittleEndian>(999).unwrap();
+        lying.write_u16::<LittleEndian>(4).unwrap();
+        lying.write_u8(1).unwrap();
+
+        assert!(matches!(
+            DiscoveryMessage::decode(&lying),
+            Err(DiscoveryWireError::TruncatedPayload { .. })
+        ));
+
+        let mut truncated_known = vec![MSG_DISCOVERY_SERVICES];
+        truncated_known.write_all(node_id.as_bytes()).unwrap();
+        truncated_known.write_u64::<LittleEndian>(NOW + 30).unwrap();
+        truncated_known.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&ZakuraServiceId::header_sync(), &mut truncated_known).unwrap();
+        truncated_known
+            .write_u16::<LittleEndian>(SUMMARY_TAG_HEADER_SYNC_V1)
+            .unwrap();
+        truncated_known.write_u16::<LittleEndian>(1).unwrap();
+        truncated_known.write_u8(0).unwrap();
+
+        assert!(DiscoveryMessage::decode(&truncated_known).is_err());
+    }
+
+    #[test]
+    fn known_service_summary_payload_trailing_bytes_are_rejected() {
+        let mut envelope =
+            ServiceSummaryEnvelope::header_sync(&header_summary()).expect("summary encodes");
+        envelope.summary_bytes.push(0);
+
+        assert!(matches!(
+            services_message(vec![envelope.clone()]).encode(),
+            Err(DiscoveryWireError::TrailingBytes)
+        ));
+
+        let node_id = secret_key().public();
+        let mut encoded = vec![MSG_DISCOVERY_SERVICES];
+        encoded.write_all(node_id.as_bytes()).unwrap();
+        encoded.write_u64::<LittleEndian>(NOW + 30).unwrap();
+        encoded.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&envelope.service_id, &mut encoded).unwrap();
+        encoded
+            .write_u16::<LittleEndian>(envelope.summary_tag)
+            .unwrap();
+        encoded
+            .write_u16::<LittleEndian>(
+                u16::try_from(envelope.summary_bytes.len()).expect("test length fits"),
+            )
+            .unwrap();
+        encoded.write_all(&envelope.summary_bytes).unwrap();
+
+        assert!(matches!(
+            DiscoveryMessage::decode(&encoded),
+            Err(DiscoveryWireError::TrailingBytes)
+        ));
     }
 
     #[test]
@@ -3128,7 +4403,6 @@ mod tests {
         }
         .encode()
         .is_err());
-        assert!(DiscoveryMessage::Services { records }.encode().is_err());
 
         let wanted_services = (0..=MAX_SERVICES_PER_RECORD).map(service).collect();
         assert!(DiscoveryMessage::GetPeers {
@@ -3139,16 +4413,12 @@ mod tests {
         .encode()
         .is_err());
 
-        let exclude_node_ids = (0..=MAX_DISCOVERY_EXCLUDED_NODE_IDS)
-            .map(|_| secret_key().public())
-            .collect();
-        assert!(DiscoveryMessage::GetServices {
-            wanted_services: Vec::new(),
-            limit: 1,
-            exclude_node_ids,
-        }
-        .encode()
-        .is_err());
+        let wanted_services = (0..=MAX_GET_SERVICES_WANTED).map(service).collect();
+        assert!(
+            DiscoveryMessage::GetServices(GetServices { wanted_services })
+                .encode()
+                .is_err()
+        );
 
         assert!(DiscoveryMessage::GetPeers {
             limit: u16::try_from(MAX_DISCOVERY_RECORDS_PER_RESPONSE + 1)
@@ -3158,6 +4428,111 @@ mod tests {
         }
         .encode()
         .is_err());
+
+        let too_many_summaries = vec![
+            ServiceSummaryEnvelope {
+                service_id: service(1),
+                summary_tag: 999,
+                summary_bytes: Vec::new(),
+            };
+            MAX_SERVICE_SUMMARIES_PER_RESPONSE + 1
+        ];
+        assert!(services_message(too_many_summaries).encode().is_err());
+
+        let oversized_summary = ServiceSummaryEnvelope {
+            service_id: service(1),
+            summary_tag: 999,
+            summary_bytes: vec![0; MAX_SERVICE_SUMMARY_BYTES + 1],
+        };
+        assert!(services_message(vec![oversized_summary]).encode().is_err());
+
+        let large_summary = ServiceSummaryEnvelope {
+            service_id: service(1),
+            summary_tag: 999,
+            summary_bytes: vec![0; MAX_SERVICE_SUMMARY_BYTES],
+        };
+        let total_oversized = vec![large_summary; 16];
+        assert!(matches!(
+            services_message(total_oversized).encode(),
+            Err(DiscoveryWireError::OversizedPayload { .. })
+        ));
+    }
+
+    #[test]
+    fn known_summary_tags_must_match_their_service_ids() {
+        let mismatched_header = ServiceSummaryEnvelope {
+            service_id: ZakuraServiceId::discovery(),
+            summary_tag: SUMMARY_TAG_HEADER_SYNC_V1,
+            summary_bytes: {
+                let mut bytes = Vec::new();
+                encode_header_sync_summary(&header_summary(), &mut bytes)
+                    .expect("test header summary encodes");
+                bytes
+            },
+        };
+        assert!(matches!(
+            services_message(vec![mismatched_header.clone()]).encode(),
+            Err(DiscoveryWireError::MismatchedSummaryService {
+                summary_tag: SUMMARY_TAG_HEADER_SYNC_V1,
+                ..
+            })
+        ));
+        let mut mismatched_header_wire = vec![MSG_DISCOVERY_SERVICES];
+        mismatched_header_wire
+            .write_all(secret_key().public().as_bytes())
+            .expect("test node id writes");
+        mismatched_header_wire
+            .write_u64::<LittleEndian>(NOW + 30)
+            .expect("test expiry writes");
+        mismatched_header_wire
+            .write_u16::<LittleEndian>(1)
+            .expect("test summary count writes");
+        encode_service_id(&ZakuraServiceId::discovery(), &mut mismatched_header_wire)
+            .expect("test service id writes");
+        mismatched_header_wire
+            .write_u16::<LittleEndian>(SUMMARY_TAG_HEADER_SYNC_V1)
+            .expect("test summary tag writes");
+        mismatched_header_wire
+            .write_u16::<LittleEndian>(
+                u16::try_from(mismatched_header.summary_bytes.len())
+                    .expect("test summary length fits in u16"),
+            )
+            .expect("test summary length writes");
+        mismatched_header_wire
+            .write_all(&mismatched_header.summary_bytes)
+            .expect("test summary payload writes");
+        assert!(matches!(
+            DiscoveryMessage::decode(&mismatched_header_wire),
+            Err(DiscoveryWireError::MismatchedSummaryService {
+                summary_tag: SUMMARY_TAG_HEADER_SYNC_V1,
+                ..
+            })
+        ));
+
+        let mismatched_discovery = ServiceSummaryEnvelope {
+            service_id: ZakuraServiceId::header_sync(),
+            summary_tag: SUMMARY_TAG_DISCOVERY_V1,
+            summary_bytes: {
+                let mut bytes = Vec::new();
+                encode_discovery_summary(&discovery_summary(), &mut bytes)
+                    .expect("test discovery summary encodes");
+                bytes
+            },
+        };
+        assert!(matches!(
+            services_message(vec![mismatched_discovery]).encode(),
+            Err(DiscoveryWireError::MismatchedSummaryService {
+                summary_tag: SUMMARY_TAG_DISCOVERY_V1,
+                ..
+            })
+        ));
+
+        let reserved = ServiceSummaryEnvelope {
+            service_id: service(42),
+            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
+            summary_bytes: vec![1, 2, 3],
+        };
+        assert!(services_message(vec![reserved]).encode().is_ok());
     }
 
     #[test]
@@ -3199,6 +4574,70 @@ mod tests {
             DiscoveryMessage::decode(&query),
             Err(DiscoveryWireError::OversizedPayload { .. })
         ));
+
+        let mut service_query = vec![MSG_DISCOVERY_GET_SERVICES];
+        service_query
+            .write_u16::<LittleEndian>(
+                u16::try_from(MAX_GET_SERVICES_WANTED + 1).expect("test service count fits in u16"),
+            )
+            .unwrap();
+        assert!(matches!(
+            DiscoveryMessage::decode(&service_query),
+            Err(DiscoveryWireError::OversizedPayload { .. })
+        ));
+
+        let mut service_response = vec![MSG_DISCOVERY_SERVICES];
+        service_response
+            .write_all(secret_key().public().as_bytes())
+            .unwrap();
+        service_response
+            .write_u64::<LittleEndian>(NOW + 30)
+            .unwrap();
+        service_response
+            .write_u16::<LittleEndian>(
+                u16::try_from(MAX_SERVICE_SUMMARIES_PER_RESPONSE + 1)
+                    .expect("test summary count fits in u16"),
+            )
+            .unwrap();
+        assert!(matches!(
+            DiscoveryMessage::decode(&service_response),
+            Err(DiscoveryWireError::OversizedPayload { .. })
+        ));
+
+        let mut oversized_summary = vec![MSG_DISCOVERY_SERVICES];
+        oversized_summary
+            .write_all(secret_key().public().as_bytes())
+            .unwrap();
+        oversized_summary
+            .write_u64::<LittleEndian>(NOW + 30)
+            .unwrap();
+        oversized_summary.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&service(1), &mut oversized_summary).unwrap();
+        oversized_summary.write_u16::<LittleEndian>(999).unwrap();
+        oversized_summary
+            .write_u16::<LittleEndian>(
+                u16::try_from(MAX_SERVICE_SUMMARY_BYTES + 1).expect("summary cap fits in u16"),
+            )
+            .unwrap();
+        assert!(matches!(
+            DiscoveryMessage::decode(&oversized_summary),
+            Err(DiscoveryWireError::OversizedPayload { .. })
+        ));
+    }
+
+    #[test]
+    fn peers_response_cannot_encode_live_summaries_structurally() {
+        let message = DiscoveryMessage::Peers {
+            records: vec![signed_record()],
+        };
+        let encoded = message.encode().expect("peers message encodes");
+        let decoded = DiscoveryMessage::decode(&encoded).expect("peers message decodes");
+
+        match decoded {
+            DiscoveryMessage::Peers { records } => assert_eq!(records.len(), 1),
+            DiscoveryMessage::Services(_) => panic!("PEERS decoded as SERVICES"),
+            _ => panic!("unexpected discovery message variant"),
+        }
     }
 
     #[test]
@@ -3970,6 +5409,50 @@ mod tests {
     }
 
     #[test]
+    fn discovery_book_short_lived_exchange_backoff_is_non_punitive() {
+        let mut book = ZakuraDiscoveryBook::default();
+        let exchanged = signed_record_with(1, service(1), test_addr(1));
+        let exchanged_id = exchanged.body.node_id;
+
+        book.import_record(exchanged.clone(), None, NOW, &context())
+            .unwrap();
+        book.mark_dial_success(&exchanged_id, NOW);
+        book.mark_short_lived_exchange(&exchanged_id, NOW);
+
+        let entry = book.get(&exchanged_id).unwrap();
+        assert_eq!(entry.failure_count(), 0);
+        assert_eq!(entry.last_short_lived_exchange(), Some(NOW));
+
+        assert!(book
+            .dial_candidates(
+                10,
+                &[service(1)],
+                DialCandidateExclusions {
+                    connected_node_ids: &[],
+                    in_flight_node_ids: &[],
+                },
+                NOW + 29,
+                (Duration::from_secs(30), Duration::from_secs(300)),
+                &mut StdRng::seed_from_u64(7),
+            )
+            .is_empty());
+        assert_eq!(
+            book.dial_candidates(
+                10,
+                &[service(1)],
+                DialCandidateExclusions {
+                    connected_node_ids: &[],
+                    in_flight_node_ids: &[],
+                },
+                NOW + 30,
+                (Duration::from_secs(30), Duration::from_secs(300)),
+                &mut StdRng::seed_from_u64(7),
+            ),
+            vec![candidate_for(&exchanged, false)]
+        );
+    }
+
+    #[test]
     fn discovery_book_services_and_persistence_hooks_revalidate_records() {
         let mut book = ZakuraDiscoveryBook::default();
         let record = signed_record_with(1, service(9), test_addr(9));
@@ -4210,6 +5693,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connected_services_import_creates_and_updates_first_party_live_summary() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let node_id = secret_key().public();
+        let now = current_unix_secs();
+        connected_tx.send_replace(vec![peer_id_for(node_id)]);
+
+        let first_summary = DiscoveryServiceSummary {
+            peer_exchange_slots_free: 1,
+            ..discovery_summary()
+        };
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    node_id,
+                    u64::MAX,
+                    vec![ServiceSummaryEnvelope::discovery(&first_summary)
+                        .expect("test discovery summary encodes")],
+                ),
+                node_id,
+                now,
+            )
+            .await
+            .expect("first-party services import");
+
+        assert_eq!(
+            handle.active_services(node_id).await,
+            Some(vec![ZakuraServiceId::discovery()])
+        );
+        let cached = handle
+            .live_service_summaries_at(node_id, now)
+            .await
+            .expect("live summary entry exists");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].observed_at_unix_secs, now);
+        assert_eq!(
+            cached[0].expires_at_unix_secs,
+            now + DEFAULT_LIVE_SERVICE_SUMMARY_TTL.as_secs()
+        );
+        assert_eq!(
+            cached[0].summary,
+            ZakuraLiveServiceSummary::Discovery(first_summary)
+        );
+
+        let updated_summary = DiscoveryServiceSummary {
+            peer_exchange_slots_free: 9,
+            ..discovery_summary()
+        };
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    node_id,
+                    now + 10,
+                    vec![ServiceSummaryEnvelope::discovery(&updated_summary)
+                        .expect("test discovery summary encodes")],
+                ),
+                node_id,
+                now + 1,
+            )
+            .await
+            .expect("newer first-party services update");
+
+        let cached = handle
+            .live_service_summaries_at(node_id, now + 1)
+            .await
+            .expect("updated live summary entry exists");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].observed_at_unix_secs, now + 1);
+        assert_eq!(cached[0].expires_at_unix_secs, now + 10);
+        assert_eq!(
+            cached[0].summary,
+            ZakuraLiveServiceSummary::Discovery(updated_summary)
+        );
+    }
+
+    #[tokio::test]
+    async fn connected_services_mismatched_node_id_rejected_without_live_summary() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let peer_node_id = secret_key().public();
+        let claimed_node_id = secret_key().public();
+        connected_tx.send_replace(vec![peer_id_for(peer_node_id)]);
+
+        let error = handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    claimed_node_id,
+                    NOW + 30,
+                    vec![ServiceSummaryEnvelope::discovery(&discovery_summary())
+                        .expect("test discovery summary encodes")],
+                ),
+                peer_node_id,
+                NOW,
+            )
+            .await
+            .expect_err("mismatched services are rejected");
+
+        assert!(matches!(
+            error,
+            DiscoveryWireError::MismatchedNodeId {
+                field: "services node id"
+            }
+        ));
+        assert_eq!(
+            handle.live_service_summaries_at(peer_node_id, NOW).await,
+            None
+        );
+        assert_eq!(
+            handle.live_service_summaries_at(claimed_node_id, NOW).await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn peers_response_and_gossiped_record_do_not_create_live_summary() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let record = runtime_record_with(1, service(9), test_addr(9));
+        let node_id = record.body.node_id;
+        let message = DiscoveryMessage::Peers {
+            records: vec![record],
+        };
+        let encoded = message.encode().expect("test peers response encodes");
+        let DiscoveryMessage::Peers { records } =
+            DiscoveryMessage::decode(&encoded).expect("test peers response decodes")
+        else {
+            panic!("PEERS response decoded as a different message");
+        };
+
+        handle.import_peer_records(records, None).await;
+        connected_tx.send_replace(vec![peer_id_for(node_id)]);
+
+        assert_eq!(handle.live_service_summaries_at(node_id, NOW).await, None);
+        assert_eq!(handle.active_services(node_id).await, None);
+        assert!(handle.record_for(node_id).await.is_some());
+    }
+
+    #[tokio::test]
     async fn active_services_prefer_latest_connected_hello_over_book_record() {
         let (connected_tx, connected_rx) = watch::channel(Vec::new());
         let handle = discovery_handle_with_connected(connected_rx);
@@ -4420,6 +6041,331 @@ mod tests {
         assert!(fallback.connected.is_empty());
         assert_eq!(fallback.discovered, vec![candidate_for(&general, false)]);
         assert!(fallback.used_fallback);
+    }
+
+    #[tokio::test]
+    async fn live_first_party_summary_prioritizes_service_candidates_until_stale() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let now = current_unix_secs();
+        let first = runtime_record_with(1, ZakuraServiceId::header_sync(), test_addr(1));
+        let second = runtime_record_with(2, ZakuraServiceId::header_sync(), test_addr(2));
+        let first_id = first.body.node_id;
+        let second_id = second.body.node_id;
+        connected_tx.send_replace(vec![peer_id_for(first_id), peer_id_for(second_id)]);
+
+        handle
+            .import_connected_peer_record(first, first_id)
+            .await
+            .expect("first connected self-record imports");
+        handle
+            .import_connected_peer_record(second, second_id)
+            .await
+            .expect("second connected self-record imports");
+
+        let initial = handle
+            .service_candidates(&ZakuraServiceId::header_sync(), false, &[])
+            .await
+            .connected;
+        assert_eq!(initial.len(), 2);
+        let preferred_id = initial[1];
+        let mut preferred_summary = header_summary();
+        preferred_summary.inbound_slots_free = 8;
+        preferred_summary.outbound_slots_free = 8;
+
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    preferred_id,
+                    now + 30,
+                    vec![ServiceSummaryEnvelope::header_sync(&preferred_summary)
+                        .expect("test header summary encodes")],
+                ),
+                preferred_id,
+                now,
+            )
+            .await
+            .expect("first-party header summary imports");
+
+        let with_live_summary = handle
+            .service_candidates(&ZakuraServiceId::header_sync(), false, &[])
+            .await
+            .connected;
+        assert_eq!(with_live_summary[0], preferred_id);
+
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    preferred_id,
+                    now,
+                    vec![ServiceSummaryEnvelope::header_sync(&preferred_summary)
+                        .expect("test header summary encodes")],
+                ),
+                preferred_id,
+                now,
+            )
+            .await
+            .expect("expired first-party header summary is dropped");
+
+        assert_eq!(
+            handle
+                .service_candidates(&ZakuraServiceId::header_sync(), false, &[])
+                .await
+                .connected,
+            initial
+        );
+    }
+
+    #[tokio::test]
+    async fn header_sync_candidates_prefer_useful_first_party_height() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let now = current_unix_secs();
+        let without_summary = runtime_record_with(1, ZakuraServiceId::header_sync(), test_addr(1));
+        let with_summary = runtime_record_with(2, ZakuraServiceId::header_sync(), test_addr(2));
+        let without_summary_id = without_summary.body.node_id;
+        let with_summary_id = with_summary.body.node_id;
+        connected_tx.send_replace(vec![
+            peer_id_for(without_summary_id),
+            peer_id_for(with_summary_id),
+        ]);
+
+        handle
+            .import_connected_peer_record(without_summary, without_summary_id)
+            .await
+            .expect("connected record imports");
+        handle
+            .import_connected_peer_record(with_summary, with_summary_id)
+            .await
+            .expect("connected record imports");
+
+        let mut summary = header_summary();
+        summary.best_height = block::Height(20);
+        summary.inbound_slots_free = 1;
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    with_summary_id,
+                    now + 30,
+                    vec![ServiceSummaryEnvelope::header_sync(&summary)
+                        .expect("test header summary encodes")],
+                ),
+                with_summary_id,
+                now,
+            )
+            .await
+            .expect("first-party header summary imports");
+
+        let candidates = handle
+            .header_sync_candidates(
+                &ZakuraHeaderSyncCandidateState {
+                    target_height: block::Height(10),
+                    ..ZakuraHeaderSyncCandidateState::default()
+                },
+                false,
+                &[],
+            )
+            .await;
+
+        assert_eq!(candidates.connected[0], with_summary_id);
+        assert!(candidates.connected.contains(&without_summary_id));
+    }
+
+    #[tokio::test]
+    async fn header_sync_candidates_skip_full_inbound_unless_already_admitted() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let now = current_unix_secs();
+        let full = runtime_record_with(1, ZakuraServiceId::header_sync(), test_addr(1));
+        let open = runtime_record_with(2, ZakuraServiceId::header_sync(), test_addr(2));
+        let full_id = full.body.node_id;
+        let open_id = open.body.node_id;
+        connected_tx.send_replace(vec![peer_id_for(full_id), peer_id_for(open_id)]);
+
+        handle
+            .import_connected_peer_record(full, full_id)
+            .await
+            .expect("connected record imports");
+        handle
+            .import_connected_peer_record(open, open_id)
+            .await
+            .expect("connected record imports");
+
+        let mut full_summary = header_summary();
+        full_summary.best_height = block::Height(20);
+        full_summary.inbound_slots_free = 0;
+        let mut open_summary = full_summary;
+        open_summary.inbound_slots_free = 2;
+        for (node_id, summary) in [(full_id, full_summary), (open_id, open_summary)] {
+            handle
+                .import_connected_peer_services_at(
+                    first_party_services(
+                        node_id,
+                        now + 30,
+                        vec![ServiceSummaryEnvelope::header_sync(&summary)
+                            .expect("test header summary encodes")],
+                    ),
+                    node_id,
+                    now,
+                )
+                .await
+                .expect("first-party header summary imports");
+        }
+
+        let candidates = handle
+            .header_sync_candidates(
+                &ZakuraHeaderSyncCandidateState {
+                    target_height: block::Height(10),
+                    ..ZakuraHeaderSyncCandidateState::default()
+                },
+                false,
+                &[],
+            )
+            .await;
+        assert_eq!(candidates.connected, vec![open_id]);
+
+        let candidates = handle
+            .header_sync_candidates(
+                &ZakuraHeaderSyncCandidateState {
+                    target_height: block::Height(10),
+                    admitted_node_ids: vec![full_id],
+                    ..ZakuraHeaderSyncCandidateState::default()
+                },
+                false,
+                &[],
+            )
+            .await;
+        assert!(candidates.connected.contains(&full_id));
+        assert!(candidates.connected.contains(&open_id));
+    }
+
+    #[tokio::test]
+    async fn live_summaries_expire_independently_of_signed_records() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let record = runtime_record_with(1, ZakuraServiceId::discovery(), test_addr(1));
+        let node_id = record.body.node_id;
+        connected_tx.send_replace(vec![peer_id_for(node_id)]);
+
+        handle
+            .import_connected_peer_record(record.clone(), node_id)
+            .await
+            .expect("connected self-record imports");
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    node_id,
+                    NOW + 5,
+                    vec![ServiceSummaryEnvelope::discovery(&discovery_summary())
+                        .expect("test discovery summary encodes")],
+                ),
+                node_id,
+                NOW,
+            )
+            .await
+            .expect("first-party discovery summary imports");
+
+        assert_eq!(
+            handle
+                .live_service_summaries_at(node_id, NOW)
+                .await
+                .expect("fresh summary is cached")
+                .len(),
+            1
+        );
+        assert_eq!(
+            handle.live_service_summaries_at(node_id, NOW + 6).await,
+            Some(Vec::new())
+        );
+        assert_eq!(handle.record_for(node_id).await, Some(record));
+        assert_eq!(
+            handle.active_services(node_id).await,
+            Some(vec![ZakuraServiceId::discovery()])
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_live_only_service_membership_is_pruned() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let service = service(42);
+        let live_only_node_id = secret_key().public();
+        let record_backed = runtime_record_with(1, service.clone(), test_addr(42));
+        let record_backed_node_id = record_backed.body.node_id;
+        let now = current_unix_secs();
+        connected_tx.send_replace(vec![
+            peer_id_for(live_only_node_id),
+            peer_id_for(record_backed_node_id),
+        ]);
+
+        handle
+            .import_connected_peer_record(record_backed, record_backed_node_id)
+            .await
+            .expect("connected record imports");
+        for node_id in [live_only_node_id, record_backed_node_id] {
+            handle
+                .import_connected_peer_services_at(
+                    first_party_services(
+                        node_id,
+                        now + 30,
+                        vec![ServiceSummaryEnvelope {
+                            service_id: service.clone(),
+                            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
+                            summary_bytes: vec![1, 2, 3],
+                        }],
+                    ),
+                    node_id,
+                    now,
+                )
+                .await
+                .expect("first-party live summary imports");
+        }
+
+        assert_eq!(
+            handle.active_services(live_only_node_id).await,
+            Some(vec![service.clone()])
+        );
+        assert_eq!(
+            handle.active_services(record_backed_node_id).await,
+            Some(vec![service.clone()])
+        );
+        let fresh_candidates = handle
+            .service_candidates(&service, false, &[])
+            .await
+            .connected;
+        assert!(fresh_candidates.contains(&live_only_node_id));
+        assert!(fresh_candidates.contains(&record_backed_node_id));
+
+        for node_id in [live_only_node_id, record_backed_node_id] {
+            handle
+                .import_connected_peer_services_at(
+                    first_party_services(
+                        node_id,
+                        now,
+                        vec![ServiceSummaryEnvelope {
+                            service_id: service.clone(),
+                            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
+                            summary_bytes: vec![1, 2, 3],
+                        }],
+                    ),
+                    node_id,
+                    now,
+                )
+                .await
+                .expect("expired first-party live summary is dropped");
+        }
+
+        assert_eq!(handle.active_services(live_only_node_id).await, None);
+        assert_eq!(
+            handle.active_services(record_backed_node_id).await,
+            Some(vec![service.clone()])
+        );
+        let stale_candidates = handle
+            .service_candidates(&service, false, &[])
+            .await
+            .connected;
+        assert!(!stale_candidates.contains(&live_only_node_id));
+        assert!(stale_candidates.contains(&record_backed_node_id));
     }
 
     #[tokio::test]

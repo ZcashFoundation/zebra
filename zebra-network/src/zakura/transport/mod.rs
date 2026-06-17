@@ -8,9 +8,15 @@ mod frame;
 mod io;
 mod registry;
 mod service;
+mod session;
 
 pub use clock::{Clock, RealClock};
 pub use frame::{Frame, StreamPrelude, ZakuraTrace};
 pub use io::{framed_channel, FramedRecv, FramedSend};
 pub use registry::{RegistryError, ServiceRegistry};
-pub use service::{BoxRunFuture, Peer, Service, Sink, SinkReject, Source, Stream, StreamMode};
+pub(crate) use service::ServiceStream;
+pub use service::{
+    BoxRunFuture, Peer, RequestResponseService, Service, Sink, SinkReject, Source, Stream,
+    StreamMode,
+};
+pub use session::{OrderedSendError, PeerStreamSession};

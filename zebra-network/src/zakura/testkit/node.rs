@@ -73,15 +73,6 @@ impl ZakuraTestNode {
         self.endpoint.take_header_sync_actions().await
     }
 
-    /// Send one header-sync message through the production stream-5 sender.
-    pub async fn send_header_sync_message(
-        &self,
-        peer: &ZakuraPeerId,
-        msg: crate::zakura::HeaderSyncMessage,
-    ) {
-        self.endpoint.send_header_sync_message(peer, msg).await;
-    }
-
     /// Local limits used by this node.
     pub fn limits(&self) -> &ZakuraLocalLimits {
         &self.limits
@@ -360,8 +351,6 @@ impl ZakuraTestNodeBuilder {
             0,
             supervisor.subscribe(),
         )?;
-        let discovery_service =
-            Arc::new(DiscoveryService::new(discovery.clone())) as Arc<dyn Service>;
 
         let mut header_sync_handle = None;
         let mut header_sync_actions = None;
@@ -391,6 +380,14 @@ impl ZakuraTestNodeBuilder {
             // Recorder-only nodes use the stream-5 passthrough so tests can
             // inspect header-sync frames without spawning the reactor.
             None
+        };
+        let discovery_service = if let Some(header_sync) = header_sync.as_ref() {
+            Arc::new(DiscoveryService::with_header_sync(
+                discovery.clone(),
+                header_sync.clone(),
+            )) as Arc<dyn Service>
+        } else {
+            Arc::new(DiscoveryService::new(discovery.clone())) as Arc<dyn Service>
         };
         let registry = service_registry(&supervisor, header_sync, base_service, discovery_service)?;
         let handler = ZakuraProtocolHandler::new_with_registry_and_trace(

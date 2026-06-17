@@ -1,4 +1,5 @@
 use super::{error::*, validation::*, wire::*, *};
+use crate::zakura::ServicePeerLimits;
 
 /// Header-sync peer status advertisement.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -59,6 +60,8 @@ pub struct ZakuraHeaderSyncConfig {
     /// How often this node sends unsolicited status refreshes after local frontier changes.
     #[serde(with = "humantime_serde")]
     pub status_refresh_interval: Duration,
+    /// Header-sync peer caps and queue limits owned by this reactor.
+    pub peer_limits: ServicePeerLimits,
     /// Optional trusted header-sync anchor height.
     ///
     /// When unset, header sync starts from genesis. When set, [`anchor_hash`](Self::anchor_hash)
@@ -77,6 +80,7 @@ impl Default for ZakuraHeaderSyncConfig {
             max_headers_per_response: DEFAULT_HS_RANGE,
             max_inflight_requests: DEFAULT_HS_MAX_INFLIGHT,
             status_refresh_interval: DEFAULT_HS_STATUS_REFRESH_INTERVAL,
+            peer_limits: ServicePeerLimits::default(),
             anchor_height: None,
             anchor_hash: None,
         }

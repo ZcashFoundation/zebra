@@ -138,12 +138,13 @@ mod tests {
     use crate::{
         zakura::trace::header_sync_trace as hs_trace,
         zakura::{
-            spawn_header_sync_reactor, DiscoveryMessage, Frame, FramedSend, HeaderSyncAction,
-            HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers, HeaderSyncHandle,
-            HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncStartup, HeaderSyncStatus, Peer,
-            Service, Stream, ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraTrace,
-            ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
-            ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_GOSSIP, ZAKURA_STREAM_HEADER_SYNC,
+            spawn_header_sync_reactor, DiscoveryMessage, Frame, FramedRecv, FramedSend,
+            HeaderSyncAction, HeaderSyncCommitFailureKind, HeaderSyncEvent, HeaderSyncFrontiers,
+            HeaderSyncHandle, HeaderSyncMessage, HeaderSyncMisbehavior, HeaderSyncPeerSession,
+            HeaderSyncStartup, HeaderSyncStatus, Peer, Service, Stream, ZakuraHeaderSyncConfig,
+            ZakuraLocalLimits, ZakuraTrace, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
+            ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_GOSSIP,
+            ZAKURA_STREAM_HEADER_SYNC,
         },
         Config,
     };
@@ -481,6 +482,7 @@ mod tests {
         observed_gaps: Arc<Mutex<Vec<(block::Height, block::Height)>>>,
         disconnects: Arc<Mutex<Vec<(ZakuraPeerId, HeaderSyncMisbehavior)>>>,
         sent: Arc<Mutex<Vec<(ZakuraPeerId, HeaderSyncMessage)>>>,
+        outbound_receivers: Arc<StdMutex<Vec<FramedRecv>>>,
     }
 
     #[derive(Debug)]
@@ -489,6 +491,17 @@ mod tests {
         actions: Option<mpsc::Receiver<HeaderSyncAction>>,
         task: JoinHandle<()>,
         shutdown: CancellationToken,
+    }
+
+    impl E2eNodeView {
+        fn header_sync_session(&self, peer: ZakuraPeerId) -> HeaderSyncPeerSession {
+            let (send, recv) = crate::zakura::framed_channel(32);
+            self.outbound_receivers
+                .lock()
+                .expect("test outbound receiver mutex is not poisoned")
+                .push(recv);
+            HeaderSyncPeerSession::from_parts(peer, send, CancellationToken::new())
+        }
     }
 
     #[derive(Debug)]
@@ -542,6 +555,7 @@ mod tests {
                 observed_gaps: Arc::new(Mutex::new(Vec::new())),
                 disconnects: Arc::new(Mutex::new(Vec::new())),
                 sent: Arc::new(Mutex::new(Vec::new())),
+                outbound_receivers: Arc::new(StdMutex::new(Vec::new())),
             };
             self.nodes.push(E2eNode {
                 view,
@@ -579,12 +593,12 @@ mod tests {
                     if left == right {
                         continue;
                     }
+                    let peer = self.nodes[right].view.peer_id.clone();
+                    let session = self.nodes[left].view.header_sync_session(peer);
                     self.nodes[left]
                         .view
                         .handle
-                        .send(HeaderSyncEvent::PeerConnected(
-                            self.nodes[right].view.peer_id.clone(),
-                        ))
+                        .send(HeaderSyncEvent::PeerConnected(session))
                         .await
                         .unwrap();
                 }
@@ -592,10 +606,11 @@ mod tests {
         }
 
         async fn connect_peer(&self, node: usize, peer: ZakuraPeerId) {
+            let session = self.nodes[node].view.header_sync_session(peer);
             self.nodes[node]
                 .view
                 .handle
-                .send(HeaderSyncEvent::PeerConnected(peer))
+                .send(HeaderSyncEvent::PeerConnected(session))
                 .await
                 .unwrap();
         }
@@ -1093,14 +1108,8 @@ mod tests {
         tokio::spawn(async move {
             while let Some(action) = actions.recv().await {
                 match action {
-                    HeaderSyncAction::SendMessage { peer, msg } => {
-                        endpoint.send_header_sync_message(&peer, msg).await;
-                    }
-                    HeaderSyncAction::ForwardNewBlock { peer, block, .. } => {
-                        endpoint
-                            .send_header_sync_message(&peer, HeaderSyncMessage::NewBlock(block))
-                            .await;
-                    }
+                    HeaderSyncAction::SendMessage { .. }
+                    | HeaderSyncAction::ForwardNewBlock { .. } => {}
                     HeaderSyncAction::Misbehavior { peer, reason } => {
                         disconnects
                             .lock()
@@ -1469,6 +1478,7 @@ mod tests {
                 }
                 // The victim's own discovery source also asks us for peers.
                 DiscoveryMessage::GetPeers { .. } => {}
+                DiscoveryMessage::GetServices(_) => {}
                 other => panic!("unexpected discovery message: {other:?}"),
             }
         }
@@ -1832,12 +1842,14 @@ mod tests {
 
         let mut sink_exited = false;
         let mut source_exited = false;
-        while !sink_exited || !source_exited {
+        let mut removed = false;
+        while !sink_exited || !source_exited || !removed {
             match wait_for_probe_event(&mut events_rx, "service task exit", |event| {
                 matches!(
                     event,
                     TaskExitProbeEvent::SinkExited(peer)
                         | TaskExitProbeEvent::SourceExited(peer)
+                        | TaskExitProbeEvent::Removed(peer)
                         if peer == &peer_id
                 )
             })
@@ -1845,16 +1857,10 @@ mod tests {
             {
                 TaskExitProbeEvent::SinkExited(peer) if peer == peer_id => sink_exited = true,
                 TaskExitProbeEvent::SourceExited(peer) if peer == peer_id => source_exited = true,
+                TaskExitProbeEvent::Removed(peer) if peer == peer_id => removed = true,
                 _ => {}
             }
         }
-
-        wait_for_probe_event(
-            &mut events_rx,
-            "service remove",
-            |event| matches!(event, TaskExitProbeEvent::Removed(peer) if peer == &peer_id),
-        )
-        .await?;
 
         let second =
             HostilePeer::connect_native_with_capabilities(&victim, 23, ZAKURA_CAP_LEGACY_GOSSIP)
