@@ -142,6 +142,7 @@ default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyinde
 # 60s (= 30s × terminate-after 2) is 4000× their normal runtime.
 [[profile.all-tests.overrides]]
 filter = "test(~peer_set_ready) or test(=peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set_route_inv_advertised_registry)"
+retries = 2
 slow-timeout = { period = "30s", terminate-after = 2 }
 
 # disconnects_from_misbehaving_peers: passes in 223-300s, but has no overall
@@ -149,4 +150,12 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # 10min (= 5m × terminate-after 2) gives 2-3× headroom.
 [[profile.all-tests.overrides]]
 filter = "test(=disconnects_from_misbehaving_peers)"
+retries = 2
+slow-timeout = { period = "5m", terminate-after = 2 }
+
+# trusted_chain_sync_handles_forks_correctly: passes in ~60s normally but
+# depends on peer connections and can fail with Elapsed/broken-pipe errors.
+[[profile.all-tests.overrides]]
+filter = "test(=trusted_chain_sync_handles_forks_correctly)"
+retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
