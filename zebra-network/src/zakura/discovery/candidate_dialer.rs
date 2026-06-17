@@ -18,11 +18,11 @@ use tracing::debug;
 
 use super::dialer::native_bootstrap_dial;
 use super::protocol::{ZakuraDiscoveryDialCandidate, ZakuraDiscoveryHandle};
+use super::redial::ZAKURA_REDIAL_HEALTHY_CONNECTION;
 use crate::zakura::{ZakuraEndpoint, ZakuraHandlerError, ZakuraLocalLimits, ZakuraPeerId};
 
 /// How often the discovery dialer wakes to look for new candidates.
 const ZAKURA_DISCOVERY_DIAL_INTERVAL: Duration = Duration::from_secs(1);
-const ZAKURA_DISCOVERY_DUPLICATE_SETTLE: Duration = Duration::from_millis(500);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum DiscoveryDialResult {
@@ -257,12 +257,8 @@ async fn run_discovery_dial_once(
             .iter()
             .any(|id| id == &peer_id)
         {
-            break match tokio::time::timeout(ZAKURA_DISCOVERY_DUPLICATE_SETTLE, &mut dial).await {
-                Ok(Ok(Ok(()))) | Ok(Ok(Err(_))) | Ok(Err(_)) => {
-                    DiscoveryDialResult::ShortLivedRegistered
-                }
-                Err(_) => DiscoveryDialResult::Registered,
-            };
+            break wait_for_discovery_registration_to_settle(&mut registered, &peer_id, &mut dial)
+                .await;
         }
 
         tokio::select! {
@@ -305,6 +301,41 @@ async fn run_discovery_dial_once(
     }
 }
 
+async fn wait_for_discovery_registration_to_settle(
+    registered: &mut tokio::sync::watch::Receiver<Vec<ZakuraPeerId>>,
+    peer_id: &ZakuraPeerId,
+    dial: &mut std::pin::Pin<
+        &mut tokio::task::JoinHandle<Result<(), crate::zakura::ZakuraHandlerError>>,
+    >,
+) -> DiscoveryDialResult {
+    let healthy = tokio::time::sleep(ZAKURA_REDIAL_HEALTHY_CONNECTION);
+    tokio::pin!(healthy);
+
+    loop {
+        if !registered
+            .borrow_and_update()
+            .iter()
+            .any(|id| id == peer_id)
+        {
+            return DiscoveryDialResult::ShortLivedRegistered;
+        }
+
+        tokio::select! {
+            dial_result = &mut *dial => {
+                return match dial_result {
+                    Ok(Ok(())) | Ok(Err(_)) | Err(_) => DiscoveryDialResult::ShortLivedRegistered,
+                };
+            }
+            changed = registered.changed() => {
+                if changed.is_err() {
+                    return DiscoveryDialResult::Failed;
+                }
+            }
+            _ = &mut healthy => return DiscoveryDialResult::Registered,
+        }
+    }
+}
+
 async fn apply_discovery_dial_result(
     discovery: &ZakuraDiscoveryHandle,
     node_id: &NodeId,
@@ -326,5 +357,36 @@ async fn apply_discovery_dial_result(
         DiscoveryDialResult::LocalResourceLimit => {
             metrics::counter!("zakura.p2p.discovery.dial.local_resource_limit").increment(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn peer_id(byte: u8) -> ZakuraPeerId {
+        ZakuraPeerId::new(vec![byte; 32]).expect("32-byte test peer id is valid")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn registration_drop_before_healthy_threshold_is_short_lived() {
+        let peer_id = peer_id(7);
+        let (registered_tx, mut registered_rx) = tokio::sync::watch::channel(vec![peer_id.clone()]);
+        let dial = tokio::spawn(async {
+            std::future::pending::<Result<(), crate::zakura::ZakuraHandlerError>>().await
+        });
+        tokio::pin!(dial);
+
+        let settled =
+            wait_for_discovery_registration_to_settle(&mut registered_rx, &peer_id, &mut dial);
+        tokio::pin!(settled);
+        tokio::select! {
+            biased;
+            result = &mut settled => panic!("settled before registration dropped: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+
+        registered_tx.send_replace(Vec::new());
+        assert_eq!(settled.await, DiscoveryDialResult::ShortLivedRegistered);
     }
 }

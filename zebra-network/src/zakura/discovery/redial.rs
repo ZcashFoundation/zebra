@@ -10,7 +10,7 @@ use crate::zakura::{ZakuraEndpoint, ZakuraLocalLimits, ZakuraPeerId};
 /// A connection that served at least this long is treated as healthy, so the
 /// next re-dial after it drops starts from the initial (fast) backoff again
 /// instead of penalising a long-lived peer for an eventual disconnect.
-const ZAKURA_REDIAL_HEALTHY_CONNECTION: Duration = Duration::from_secs(60);
+pub(super) const ZAKURA_REDIAL_HEALTHY_CONNECTION: Duration = Duration::from_secs(60);
 
 /// Controls how [`native_dial_supervised`] retries and re-dials a peer.
 #[derive(Clone, Copy, Debug)]

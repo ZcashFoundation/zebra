@@ -576,13 +576,11 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
     BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
     BlockVerifier::Future: Send + 'static,
 {
-    let checkpoint_combined_apply_limit =
-        combined_apply_limit.max(sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT);
     while let Some(index) = pending_applies
         .iter()
         .position(|pending| match pending.class {
             BlockApplyClass::Checkpoint => {
-                *checkpoint_in_flight + *full_in_flight < checkpoint_combined_apply_limit
+                *checkpoint_in_flight + *full_in_flight < combined_apply_limit
                     && *checkpoint_in_flight < checkpoint_apply_limit
             }
             BlockApplyClass::Full => {

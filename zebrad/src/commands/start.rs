@@ -2993,6 +2993,113 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[tokio::test]
+    async fn block_sync_driver_combined_apply_limit_binds_checkpoint_applies() {
+        let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let block2 = mainnet_block(&BLOCK_MAINNET_2_BYTES);
+        let (action_tx, action_rx) = mpsc::channel(8);
+        let startup = block_sync_startup_for_test();
+        let (block_sync, _reactor_actions, reactor_task) =
+            zebra_network::zakura::spawn_block_sync_reactor(startup);
+        let (commit_tx, mut commit_rx) = mpsc::channel(8);
+        let release_first = Arc::new(tokio::sync::Notify::new());
+        let verifier = {
+            let release_first = release_first.clone();
+            service_fn(move |request: zebra_consensus::Request| {
+                let commit_tx = commit_tx.clone();
+                let release_first = release_first.clone();
+                async move {
+                    match request {
+                        zebra_consensus::Request::Commit(block) => {
+                            let height = block.coinbase_height().expect("test block has height");
+                            let hash = block.hash();
+                            commit_tx
+                                .send(height)
+                                .await
+                                .expect("test commit receiver stays open");
+                            if height == block::Height(1) {
+                                release_first.notified().await;
+                            }
+                            Ok::<_, zebra_consensus::BoxError>(hash)
+                        }
+                        request => panic!("unexpected consensus request: {request:?}"),
+                    }
+                }
+            })
+        };
+        let block2_hash = block2.hash();
+        let read_state = service_fn(move |request: zebra_state::ReadRequest| async move {
+            match request {
+                zebra_state::ReadRequest::FinalizedTip => Ok::<_, zebra_state::BoxError>(
+                    zebra_state::ReadResponse::FinalizedTip(Some((block::Height(2), block2_hash))),
+                ),
+                zebra_state::ReadRequest::Tip => Ok(zebra_state::ReadResponse::Tip(Some((
+                    block::Height(2),
+                    block2_hash,
+                )))),
+                request => panic!("unexpected read request: {request:?}"),
+            }
+        });
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let driver = tokio::spawn(drive_block_sync_actions(
+            action_rx,
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height(2),
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            1,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        ));
+
+        action_tx
+            .send(BlockSyncAction::SubmitBlock {
+                token: 1,
+                block: block1.clone(),
+            })
+            .await
+            .expect("driver action channel stays open");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), commit_rx.recv())
+                .await
+                .expect("first checkpoint commit starts"),
+            Some(block::Height(1))
+        );
+
+        action_tx
+            .send(BlockSyncAction::SubmitBlock {
+                token: 2,
+                block: block2.clone(),
+            })
+            .await
+            .expect("driver action channel stays open");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), commit_rx.recv())
+                .await
+                .is_err(),
+            "combined apply cap must bind checkpoint applies",
+        );
+
+        release_first.notify_one();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), commit_rx.recv())
+                .await
+                .expect("second checkpoint commit starts after combined cap has room"),
+            Some(block::Height(2)),
+        );
+
+        let _ = shutdown_tx.send(());
+        driver.await.expect("driver task exits cleanly");
+        reactor_task.abort();
+    }
+
+    #[tokio::test]
     async fn block_sync_driver_combined_apply_limit_binds_full_applies() {
         let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
         let block2 = mainnet_block(&BLOCK_MAINNET_2_BYTES);
