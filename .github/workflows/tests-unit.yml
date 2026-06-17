@@ -2,7 +2,10 @@ name: Unit Tests
 
 on:
   pull_request:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
+    # `evan/zakura-02-discovery-and-sync` is the base branch of the stacked
+    # Zakura block-sync PR; including it here runs the unit tests and the Zakura
+    # regtest e2e gate against that PR while the stack is still under review.
+    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2, evan/zakura-02-discovery-and-sync]
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     paths:
       - "**/*.rs"
