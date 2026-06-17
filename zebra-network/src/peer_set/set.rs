@@ -1013,6 +1013,7 @@ where
         if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
             let peer = peer.expect("just checked peer is Some");
             tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
+            metrics::counter!("pool.route_inv.advertiser.count").increment(1);
             let fut = svc.call(req);
             self.push_unready(peer, svc);
             return fut.map_err(Into::into).boxed();
@@ -1036,9 +1037,24 @@ where
         if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
             let peer = peer.expect("just checked peer is Some");
             tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
+            metrics::counter!("pool.route_inv.maybe.count").increment(1);
             let fut = svc.call(req);
             self.push_unready(peer, svc);
             return fut.map_err(Into::into).boxed();
+        }
+
+        // Split the synthetic registry-miss by cause so a stall can be diagnosed (the two collapse
+        // into the same `NotFoundRegistry` error otherwise). Incremented synchronously here, not in
+        // the returned future, so the count reflects the routing decision even if it isn't polled.
+        //
+        // - `no_ready`: effectively no ready peer to try — peer-set saturation (speculative
+        //   look-ahead keeps every peer busy), so the head-of-line block can't get on the wire.
+        // - `all_missing`: ready peers exist, but every one is marked missing this hash — local
+        //   inventory-marker staleness.
+        if self.ready_services.is_empty() {
+            metrics::counter!("pool.route_inv.notfound.no_ready.count").increment(1);
+        } else {
+            metrics::counter!("pool.route_inv.notfound.all_missing.count").increment(1);
         }
 
         tracing::debug!(

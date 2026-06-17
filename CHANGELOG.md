@@ -97,6 +97,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   correctly.
 - Retry missing block downloads inside the active sync round, avoiding long
   stalls when a peer reports `notfound` for a required block hash.
+- Give the head-of-line block priority during checkpoint sync. When a required
+  block is missing from all current peers, Zebra now pauses _new_ speculative
+  look-ahead downloads and retries the block on a non-blocking backoff timer,
+  so the in-flight pipeline drains and frees peers for the critical block
+  instead of saturating them with future-block downloads. This removes minutes-
+  long head-of-line freezes on thin-peer draws. New `pool.route_inv.*` metrics
+  break down single-block routing outcomes (advertiser / maybe / synthetic
+  not-found by cause) to diagnose peer-scarcity stalls.
 
 ### Security
 
