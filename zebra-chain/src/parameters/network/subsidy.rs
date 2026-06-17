@@ -400,6 +400,10 @@ pub enum SubsidyError {
     #[cfg(zcash_unstable = "zip235")]
     #[error("invalid zip233 amount")]
     InvalidZip233Amount,
+
+    #[cfg(zcash_unstable = "zip235")]
+    #[error("coinbase transaction version must be 6 or later from NU7 onward")]
+    InvalidCoinbaseVersion,
 }
 
 /// The divisor used for halvings.
