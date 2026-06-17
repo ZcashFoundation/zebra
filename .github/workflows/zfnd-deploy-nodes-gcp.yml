@@ -106,10 +106,6 @@ on:
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
-    # Restrict the GCP deploy/image-test PR run to `main`; PRs targeting the
-    # ironwood fork branches don't need the GCP nodes pipeline.
-    branches:
-      - main
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests

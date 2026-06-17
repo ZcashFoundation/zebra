@@ -2,8 +2,7 @@ name: Test Docker Config
 
 on:
   pull_request:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -14,14 +13,8 @@ on:
       - zebrad/tests/common/configs/**
       - .github/workflows/test-docker.yml
 
-  schedule:
-    # Keep release-mode Docker coverage off the critical PR path.
-    - cron: "0 9 * * *"
-
-  workflow_dispatch:
-
   push:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -53,7 +46,6 @@ env:
 jobs:
   build-docker-image:
     name: Build Docker Image
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'A-release')
     permissions:
       contents: read
       id-token: write
@@ -64,13 +56,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      # The `tests` target image bakes in the full `target/release` build tree, which
-      # overflows the ~14 GB free on a standard ubuntu-latest runner. Reclaim space by
-      # removing preinstalled toolchains we don't use for this build.
-      - name: Free up runner disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
-          df -h /
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
@@ -99,7 +84,6 @@ jobs:
   test-configurations:
     name: Test ${{ matrix.name }}
     needs: build-docker-image
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'A-release')
     permissions:
       contents: read
       actions: read
@@ -181,13 +165,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # `docker load` of the `tests` image needs more space than the ~14 GB free on a
-      # standard ubuntu-latest runner. Reclaim space by removing unused toolchains.
-      - name: Free up runner disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
-          df -h /
-
       - name: Download artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
@@ -264,4 +241,3 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: build-docker-image,test-configurations

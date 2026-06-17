@@ -2,7 +2,7 @@ name: Coverage
 
 on:
   push:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"

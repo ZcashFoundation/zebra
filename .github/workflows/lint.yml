@@ -2,7 +2,7 @@ name: Lint
 
 on:
   pull_request:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -13,7 +13,7 @@ on:
       - supply-chain/**
 
   push:
-    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -22,11 +22,6 @@ on:
       - .cargo/config.toml
       - .github/workflows/lint.yml
       - supply-chain/**
-
-  # Run the full lint suite when a PR is queued so the merge queue validates the
-  # merged result against the latest `main`. `merge_group` ignores path filters,
-  # so this runs unconditionally on every queued entry.
-  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
