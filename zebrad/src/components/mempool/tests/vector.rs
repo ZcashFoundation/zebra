@@ -613,16 +613,29 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
-    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
+    // Use a configured Testnet that activates NU5 at `NU5_ACTIVATION_TEST_HEIGHT`, so a real
+    // network-upgrade `TipAction::Reset` is reachable from generated blocks. Under the
+    // `next_height` reset semantics, committing the block at `NU5_ACTIVATION_TEST_HEIGHT - 1`
+    // produces a `Reset` (since the next height is the NU5 activation height).
+    let network = nu_activation_test_network();
 
-    // Using the mainnet for now
-    let network = Network::Mainnet;
+    // Generate enough blocks to commit a chain that reaches the NU5 reset boundary, plus a spare
+    // block whose coinbase transaction we queue for download (it is never committed, so it is not
+    // in the best chain and a network download is attempted).
+    let blocks = generate_test_chain(&network, NU5_ACTIVATION_TEST_HEIGHT as usize + 2);
+    let reset_block = blocks[NU5_ACTIVATION_TEST_HEIGHT as usize - 1].clone();
+    assert_eq!(
+        reset_block.coinbase_height(),
+        Some(Height(NU5_ACTIVATION_TEST_HEIGHT - 1)),
+        "reset block should be one below the NU5 activation height"
+    );
+    let uncommitted_tx_id = blocks
+        .last()
+        .expect("generated chain is non-empty")
+        .transactions[0]
+        .unmined_id();
 
+    // Don't commit the mainnet genesis block; we commit the generated chain instead.
     let (
         mut mempool,
         mut peer_set,
@@ -631,19 +644,29 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         _tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
-    ) = setup(&network, u64::MAX, true).await;
+    ) = setup(&network, u64::MAX, false).await;
 
-    // Enable the mempool
+    // Commit the chain up to (but not including) the NU5 reset boundary. These commits are the
+    // genesis reset followed by plain `Grow`s, leaving the tip at `NU5_ACTIVATION_TEST_HEIGHT - 2`.
+    for block in &blocks[..NU5_ACTIVATION_TEST_HEIGHT as usize - 1] {
+        commit_block_and_wait_for_tip_change(
+            &mut state_service,
+            &mut chain_tip_change,
+            block.clone(),
+        )
+        .await;
+    }
+
+    // Enable the mempool now that the tip is past genesis and stable.
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 2 for download
-    let txid = block2.transactions[0].unmined_id();
+    // Queue the uncommitted transaction for download.
     let response = mempool
         .ready()
         .await
         .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
+        .call(Request::Queue(vec![uncommitted_tx_id.into()]))
         .await
         .unwrap();
     let queued_responses = match response {
@@ -657,32 +680,10 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
-    // Push block 1 to the state. This is considered a network upgrade,
+    // Commit the NU5 activation block. This is a network upgrade reset (`TipAction::Reset`),
     // and thus must cancel all pending transaction downloads.
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
-            block1.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update
-    if let Err(timeout_error) = timeout(
-        CHAIN_TIP_UPDATE_WAIT_LIMIT,
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await
-    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-    {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
-    }
+    commit_block_and_wait_for_tip_change(&mut state_service, &mut chain_tip_change, reset_block)
+        .await;
 
     // Ignore all the previous network requests.
     while let Some(_request) = peer_set.try_next_request().await {}
@@ -698,7 +699,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 
     assert_eq!(
         request.request(),
-        &zebra_network::Request::TransactionsById(iter::once(txid).collect()),
+        &zebra_network::Request::TransactionsById(iter::once(uncommitted_tx_id).collect()),
     );
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
@@ -881,18 +882,43 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
 /// during verification.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
-    let network = Network::Mainnet;
+    // Use a configured Testnet that activates NU5 at `NU5_ACTIVATION_TEST_HEIGHT`, so a real
+    // network-upgrade `TipAction::Reset` is reachable from generated blocks (see
+    // `nu_activation_test_network`).
+    let network = nu_activation_test_network();
 
-    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
+    // Generate enough blocks to commit a chain across the NU5 reset boundary and one block past it,
+    // plus a spare block whose coinbase transaction we queue for download (it is never committed,
+    // so it is not in the best chain and a network download is attempted).
+    let blocks = generate_test_chain(&network, NU5_ACTIVATION_TEST_HEIGHT as usize + 2);
+    // Committing this block produces a network-upgrade `TipAction::Reset` (its next height is the
+    // NU5 activation height).
+    let reset_block = blocks[NU5_ACTIVATION_TEST_HEIGHT as usize - 1].clone();
+    assert_eq!(
+        reset_block.coinbase_height(),
+        Some(Height(NU5_ACTIVATION_TEST_HEIGHT - 1)),
+        "reset block should be one below the NU5 activation height"
+    );
+    // Committing this block (the NU5 activation block) is a plain `TipAction::Grow` that increases
+    // the tip height past the height the queued tx was verified at.
+    let grow_block = blocks[NU5_ACTIVATION_TEST_HEIGHT as usize].clone();
+    assert_eq!(
+        grow_block.coinbase_height(),
+        Some(Height(NU5_ACTIVATION_TEST_HEIGHT)),
+        "grow block should be at the NU5 activation height"
+    );
 
+    // The queued transaction is the coinbase of a generated block that is never committed, so it is
+    // not in the best chain and a network download is attempted. All verification is mocked, so the
+    // transaction contents don't matter.
+    let tx = blocks
+        .last()
+        .expect("generated chain is non-empty")
+        .transactions[0]
+        .clone();
+    let txid = tx.unmined_id();
+
+    // Don't commit the mainnet genesis block; we commit the generated chain instead.
     let (
         mut mempool,
         mut peer_set,
@@ -901,15 +927,24 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         mut tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
-    ) = setup(&network, u64::MAX, true).await;
+    ) = setup(&network, u64::MAX, false).await;
 
-    // Enable the mempool
+    // Commit the chain up to (but not including) the NU5 reset boundary. These commits are the
+    // genesis reset followed by plain `Grow`s, leaving the tip at `NU5_ACTIVATION_TEST_HEIGHT - 2`.
+    for block in &blocks[..NU5_ACTIVATION_TEST_HEIGHT as usize - 1] {
+        commit_block_and_wait_for_tip_change(
+            &mut state_service,
+            &mut chain_tip_change,
+            block.clone(),
+        )
+        .await;
+    }
+
+    // Enable the mempool now that the tip is past genesis and stable.
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 3 for download
-    let tx = block3.transactions[0].clone();
-    let txid = block3.transactions[0].unmined_id();
+    // Queue the transaction for download
     let response = mempool
         .ready()
         .await
@@ -959,24 +994,14 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Push block 1 to the state. This is considered a network upgrade,
-    // and must cancel all pending transaction downloads with a `TipAction::Reset`.
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
-            block1.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update without a timeout
-    // (skipping the chain tip change here will fail the test)
-    chain_tip_change
-        .wait_for_tip_change()
-        .await
-        .expect("unexpected chain tip update failure");
+    // Commit the NU5 activation block. This is a network upgrade reset (`TipAction::Reset`),
+    // and must cancel all pending transaction downloads and re-queue them for verification.
+    commit_block_and_wait_for_tip_change(
+        &mut state_service,
+        &mut chain_tip_change,
+        reset_block.clone(),
+    )
+    .await;
 
     // Query the mempool to make it poll chain_tip_change and try reverifying its state for the `TipAction::Reset`
     mempool.dummy_call().await;
@@ -1021,24 +1046,10 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Push block 2 to the state. This will increase the tip height past the expected
-    // tip height that the tx was verified at.
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
-            block2.clone().into(),
-        ))
-        .await
-        .unwrap();
-
-    // Wait for the chain tip update without a timeout
-    // (skipping the chain tip change here will fail the test)
-    chain_tip_change
-        .wait_for_tip_change()
-        .await
-        .expect("unexpected chain tip update failure");
+    // Commit the next block (a plain `Grow`). This increases the tip height past the expected
+    // tip height that the tx was verified at, so the mempool must re-verify it.
+    commit_block_and_wait_for_tip_change(&mut state_service, &mut chain_tip_change, grow_block)
+        .await;
 
     // Query the mempool to make it poll tx_downloads.pending and try reverifying transactions
     // because the tip height has changed.
@@ -1793,6 +1804,96 @@ fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
                 .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
         })
         .expect("missing non-coinbase transaction")
+}
+
+/// The height at which the network returned by [`nu_activation_test_network`] activates NU5.
+///
+/// All earlier network upgrades activate at height 1, so the only non-genesis network upgrade
+/// reset boundary is at NU5. Because [`ChainTipChange::action`] resets when the *next* height
+/// (`tip + 1`) is an activation height, committing the block at height
+/// `NU5_ACTIVATION_TEST_HEIGHT - 1` produces a [`TipAction::Reset`].
+const NU5_ACTIVATION_TEST_HEIGHT: u32 = 4;
+
+/// Build a configured Testnet that activates NU5 at [`NU5_ACTIVATION_TEST_HEIGHT`].
+///
+/// This makes a network-upgrade reset reachable from generated blocks: under the
+/// `next_height` reset semantics in [`ChainTipChange::action`], committing the block at height
+/// `NU5_ACTIVATION_TEST_HEIGHT - 1` yields a [`TipAction::Reset`], because the next height is the
+/// NU5 activation height. The temporary Orchard-disabling soft fork is disabled so the only
+/// non-genesis reset boundary is the NU5 activation.
+fn nu_activation_test_network() -> Network {
+    use zebra_chain::parameters::testnet::{
+        ConfiguredActivationHeights, Parameters as TestnetParameters,
+    };
+
+    TestnetParameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(1),
+            sapling: Some(1),
+            blossom: Some(1),
+            heartwood: Some(1),
+            canopy: Some(1),
+            nu5: Some(NU5_ACTIVATION_TEST_HEIGHT),
+            ..Default::default()
+        })
+        .expect("configured activation heights are valid")
+        .disable_temporary_orchard_disabling_soft_fork()
+        .extend_funding_streams()
+        .to_network()
+        .expect("configured network is valid")
+}
+
+/// Generate a chain of `count` valid blocks (starting at the genesis block) for `network`.
+///
+/// The blocks have valid commitments, so they can be committed to a state service via
+/// [`zebra_state::Request::CommitCheckpointVerifiedBlock`].
+fn generate_test_chain(network: &Network, count: usize) -> Vec<Arc<Block>> {
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
+    use zebra_chain::block::{arbitrary::allow_all_transparent_coinbase_spends, LedgerState};
+
+    let strategy = LedgerState::genesis_strategy(Some(network.clone()), None, None, false)
+        .prop_flat_map(move |init| {
+            Block::partial_chain_strategy(
+                init,
+                count,
+                allow_all_transparent_coinbase_spends,
+                // Generate valid commitments so the blocks pass the checkpoint commit checks.
+                true,
+            )
+        });
+
+    let mut runner = TestRunner::deterministic();
+    strategy
+        .new_tree(&mut runner)
+        .expect("partial chain strategy should produce a value tree")
+        .current()
+        .0
+}
+
+/// Commit a checkpoint-verified `block` to `state_service` and wait for the chain tip change.
+async fn commit_block_and_wait_for_tip_change(
+    state_service: &mut StateService,
+    chain_tip_change: &mut ChainTipChange,
+    block: Arc<Block>,
+) {
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            block.into(),
+        ))
+        .await
+        .expect("unexpected block commit failure");
+
+    chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .expect("unexpected chain tip update failure");
 }
 
 /// Create a new [`Mempool`] instance using mocked services.

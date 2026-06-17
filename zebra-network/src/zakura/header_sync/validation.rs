@@ -161,7 +161,7 @@ pub async fn validate_headers_stateless(
     validate_internal_continuity(&headers)?;
     validate_header_times(&headers, context.now, context.start_height)?;
     validate_solution_sizes(&headers, context.network)?;
-    validate_pow_spawn_blocking(headers).await
+    validate_pow_spawn_blocking(headers, context.network).await
 }
 
 /// Check that a header range links to its anchor and is internally contiguous.
@@ -191,7 +191,7 @@ pub async fn validate_new_block_stateless(
     let header = block.header.clone();
     validate_header_times(std::slice::from_ref(&header), now, height)?;
     validate_solution_sizes(std::slice::from_ref(&header), network)?;
-    validate_pow_spawn_blocking(vec![header]).await
+    validate_pow_spawn_blocking(vec![header], network).await
 }
 
 pub(super) fn validate_header_count(
@@ -245,7 +245,9 @@ pub(super) fn validate_solution_sizes(
         .is_some_and(|parameters| parameters.is_regtest());
     for header in headers {
         match (expect_regtest, header.solution) {
-            (true, equihash::Solution::Regtest(_)) | (false, equihash::Solution::Common(_)) => {}
+            (true, equihash::Solution::Regtest(_))
+            | (true, equihash::Solution::Common(_))
+            | (false, equihash::Solution::Common(_)) => {}
             _ => return Err(HeaderSyncWireError::WrongEquihashSolutionSize),
         }
     }
@@ -254,13 +256,22 @@ pub(super) fn validate_solution_sizes(
 
 pub(super) async fn validate_pow_spawn_blocking(
     headers: Vec<Arc<block::Header>>,
+    network: &Network,
 ) -> Result<(), HeaderSyncWireError> {
-    tokio::task::spawn_blocking(move || validate_pow_blocking(&headers)).await?
+    let skip_pow_filter = network
+        .parameters()
+        .is_some_and(|parameters| parameters.is_regtest());
+    tokio::task::spawn_blocking(move || validate_pow_blocking(&headers, skip_pow_filter)).await?
 }
 
 pub(super) fn validate_pow_blocking(
     headers: &[Arc<block::Header>],
+    skip_pow_filter: bool,
 ) -> Result<(), HeaderSyncWireError> {
+    if skip_pow_filter {
+        return Ok(());
+    }
+
     for header in headers {
         header.solution.check(header)?;
         let hash = block::Hash::from(header.as_ref());
@@ -298,6 +309,19 @@ pub(super) fn validate_get_headers_count(count: u32) -> Result<(), HeaderSyncWir
 pub(super) fn validate_headers_len(len: usize, max: usize) -> Result<(), HeaderSyncWireError> {
     if len > max {
         return Err(HeaderSyncWireError::HeaderCountLimit { actual: len, max });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_body_sizes_len(
+    headers: usize,
+    body_sizes: usize,
+) -> Result<(), HeaderSyncWireError> {
+    if headers != body_sizes {
+        return Err(HeaderSyncWireError::BodySizeCountMismatch {
+            headers,
+            body_sizes,
+        });
     }
     Ok(())
 }

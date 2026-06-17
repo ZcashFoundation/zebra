@@ -36,6 +36,15 @@ pub enum HeaderSyncWireError {
         max: usize,
     },
 
+    /// A locally constructed `Headers` message had a different number of size hints.
+    #[error("Zakura header-sync Headers body-size count {body_sizes} does not match header count {headers}")]
+    BodySizeCountMismatch {
+        /// Header count.
+        headers: usize,
+        /// Body-size hint count.
+        body_sizes: usize,
+    },
+
     /// An inbound `Headers` response did not match an in-flight request.
     #[error("unsolicited Zakura header-sync Headers response")]
     UnsolicitedHeaders,

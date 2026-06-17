@@ -106,7 +106,11 @@ fn format_upgrades(
             "add pruning metadata column family",
             Version::new(27, 1, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        Box::new(no_migration::NoMigration::new(
+            "add Zakura header body size hints",
+            Version::new(27, 2, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 7])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -867,4 +871,13 @@ fn format_upgrades_are_in_version_order() {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
     }
+}
+
+#[test]
+fn zakura_header_body_size_cf_upgrade_is_no_migration() {
+    let upgrades: Vec<_> = format_upgrades(Some(Version::new(27, 1, 0))).collect();
+
+    assert_eq!(upgrades.len(), 1);
+    assert_eq!(upgrades[0].version(), Version::new(27, 2, 0));
+    assert!(!upgrades[0].needs_migration());
 }

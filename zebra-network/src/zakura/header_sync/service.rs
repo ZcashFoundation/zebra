@@ -146,7 +146,20 @@ impl HeaderSyncPeerSession {
         &self,
         headers: Vec<Arc<block::Header>>,
     ) -> Result<(), OrderedSendError> {
-        self.try_send_message(HeaderSyncMessage::Headers(headers))
+        let body_sizes = vec![0; headers.len()];
+        self.try_send_headers_with_sizes(headers, body_sizes)
+    }
+
+    /// Send a typed header range response with one advisory body-size hint per header.
+    pub fn try_send_headers_with_sizes(
+        &self,
+        headers: Vec<Arc<block::Header>>,
+        body_sizes: Vec<u32>,
+    ) -> Result<(), OrderedSendError> {
+        self.try_send_message(HeaderSyncMessage::Headers {
+            headers,
+            body_sizes,
+        })
     }
 
     /// Send a typed full tip block announcement.

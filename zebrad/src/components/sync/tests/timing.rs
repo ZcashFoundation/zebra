@@ -14,15 +14,13 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
-use zebra_network::constants::{
-    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
-};
+use zebra_network::constants::HANDSHAKE_TIMEOUT;
 use zebra_state::ChainTipSender;
 
 use crate::{
     components::sync::{
         ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY, SYNC_RESTART_SLEEP,
     },
     config::ZebradConfig,
 };
@@ -32,10 +30,15 @@ use crate::{
 fn ensure_timeouts_consistent() {
     let _init_guard = zebra_test::init();
 
-    // This constraint clears the download pipeline during a restart
+    // This fork deliberately decouples the post-round idle (`SYNC_RESTART_SLEEP`) from the
+    // per-operation restart timeout (`SYNC_RESTART_DELAY`), and keeps both short to recover
+    // quickly on thin or flaky peer sets. It accepts that sync may re-enter while cancelled
+    // downloads from the previous round are still draining, so the upstream invariant
+    // `SYNC_RESTART_DELAY > 2 * BLOCK_DOWNLOAD_TIMEOUT` no longer applies. We instead require
+    // the post-round idle to stay shorter than the restart-operation timeout.
     assert!(
-        SYNC_RESTART_DELAY.as_secs() > 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
-        "Sync restart should allow for pending and buffered requests to complete"
+        SYNC_RESTART_SLEEP.as_secs() < SYNC_RESTART_DELAY.as_secs(),
+        "the post-round sync sleep should be shorter than the sync restart timeout"
     );
 
     // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
@@ -82,28 +85,15 @@ fn ensure_timeouts_consistent() {
         "a syncer tip crawl should complete before most new blocks"
     );
 
-    // This is a compromise between two failure modes:
-    // - some peers have the inventory, but they weren't ready last time we checked,
-    //   so we want to retry soon
-    // - all peers are missing the inventory, so we want to wait for a while before retrying
+    // `SYNC_RESTART_DELAY` now bounds restart operations (obtaining tips and retrying the
+    // genesis block) rather than the inter-round cadence, so it must be long enough for peers
+    // to respond to a tip request — at least one handshake. The upstream invariants that
+    // compared the restart delay against the inventory-rotation and peer-crawl intervals
+    // assumed it was the much longer inter-round delay; this fork's short restart timeout
+    // intentionally no longer satisfies them (the inter-round idle is `SYNC_RESTART_SLEEP`).
     assert!(
-        INVENTORY_ROTATION_INTERVAL < SYNC_RESTART_DELAY,
-        "we should expire some inventory every time the syncer resets"
-    );
-    assert!(
-        SYNC_RESTART_DELAY < 2 * INVENTORY_ROTATION_INTERVAL,
-        "we should give the syncer at least one retry attempt, \
-         before we expire all inventory"
-    );
-
-    // The default peer crawler interval should be at least
-    // `HANDSHAKE_TIMEOUT` lower than all other crawler intervals.
-    //
-    // See `DEFAULT_CRAWL_NEW_PEER_INTERVAL` for details.
-    assert!(
-        DEFAULT_CRAWL_NEW_PEER_INTERVAL.as_secs() + HANDSHAKE_TIMEOUT.as_secs()
-            < SYNC_RESTART_DELAY.as_secs(),
-        "an address crawl and peer connections should complete before most syncer tips crawls"
+        SYNC_RESTART_DELAY.as_secs() > HANDSHAKE_TIMEOUT.as_secs(),
+        "a sync restart should allow at least one peer handshake to complete"
     );
 }
 

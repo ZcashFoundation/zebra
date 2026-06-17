@@ -180,11 +180,13 @@ impl HeaderSyncReactor {
                 start_height,
                 requested_count,
                 headers,
+                body_sizes,
             } => self.handle_header_range_response_ready(
                 peer,
                 start_height,
                 requested_count,
                 headers,
+                body_sizes,
             ),
         }
     }
@@ -350,7 +352,7 @@ impl HeaderSyncReactor {
             .or_insert_with(|| {
                 PeerHeaderState::new(
                     session,
-                    self.state.anchor.0,
+                    self.state.anchor,
                     self.startup.config.advertised_max_headers_per_response(),
                     self.startup.config.advertised_max_inflight_requests(),
                     self.startup.status_refresh_interval,
@@ -581,12 +583,19 @@ impl HeaderSyncReactor {
         start_height: block::Height,
         requested_count: u32,
         headers: Vec<Arc<block::Header>>,
+        body_sizes: Vec<u32>,
     ) {
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
             return;
         };
+        if validate_body_sizes_len(headers.len(), body_sizes.len()).is_err() {
+            peer_state.finish_serving_headers();
+            return;
+        }
         let returned_count = u32::try_from(headers.len()).unwrap_or(u32::MAX);
-        let send_result = peer_state.session.try_send_headers(headers);
+        let send_result = peer_state
+            .session
+            .try_send_headers_with_sizes(headers, body_sizes);
         peer_state.finish_serving_headers();
 
         match send_result {
@@ -622,12 +631,15 @@ impl HeaderSyncReactor {
                 let Some(peer_state) = self.state.peers.get_mut(&peer) else {
                     return;
                 };
-                if !peer_state.inbound_status.try_take(Instant::now()) {
+                let advances_advertised_tip = status.tip_height > peer_state.advertised_tip;
+                let status_token_available = peer_state.inbound_status.try_take(Instant::now());
+                if !advances_advertised_tip && !status_token_available {
                     self.report_misbehavior(peer, HeaderSyncMisbehavior::StatusSpam)
                         .await;
                     return;
                 }
                 peer_state.advertised_tip = status.tip_height;
+                peer_state.advertised_hash = status.tip_hash;
                 peer_state.anchor = status.anchor_height;
                 peer_state.max_headers_per_response =
                     clamp_advertised_range(status.max_headers_per_response);
@@ -639,8 +651,11 @@ impl HeaderSyncReactor {
                 self.trace_status_received(&peer, status);
                 self.schedule().await;
             }
-            HeaderSyncMessage::Headers(headers) => {
-                self.handle_headers(peer, headers).await;
+            HeaderSyncMessage::Headers {
+                headers,
+                body_sizes,
+            } => {
+                self.handle_headers(peer, headers, body_sizes).await;
             }
             HeaderSyncMessage::GetHeaders {
                 start_height,
@@ -804,7 +819,12 @@ impl HeaderSyncReactor {
     }
 
     #[tracing::instrument(skip(self, headers))]
-    async fn handle_headers(&mut self, peer: ZakuraPeerId, headers: Vec<Arc<block::Header>>) {
+    async fn handle_headers(
+        &mut self,
+        peer: ZakuraPeerId,
+        headers: Vec<Arc<block::Header>>,
+        body_sizes: Vec<u32>,
+    ) {
         metrics::counter!("sync.header.response.received").increment(1);
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
             self.report_misbehavior(peer, HeaderSyncMisbehavior::UnsolicitedHeaders)
@@ -825,6 +845,7 @@ impl HeaderSyncReactor {
         self.handle_headers_for_outstanding(
             peer,
             headers,
+            body_sizes,
             outstanding,
             peer_max_headers_per_response,
             in_flight_count,
@@ -836,10 +857,19 @@ impl HeaderSyncReactor {
         &mut self,
         peer: ZakuraPeerId,
         headers: Vec<Arc<block::Header>>,
+        body_sizes: Vec<u32>,
         outstanding: OutstandingRange,
         peer_max_headers_per_response: u32,
         in_flight_count: usize,
     ) {
+        if validate_body_sizes_len(headers.len(), body_sizes.len()).is_err() {
+            self.report_misbehavior(peer, HeaderSyncMisbehavior::MalformedMessage)
+                .await;
+            self.state.schedule.retry(outstanding.range);
+            self.schedule().await;
+            return;
+        }
+
         if headers.is_empty() {
             self.record_advisory_unconfirmed(&peer);
             let deadline = Instant::now() + self.empty_headers_retry_delay();
@@ -892,17 +922,29 @@ impl HeaderSyncReactor {
                 outstanding.expected_max_count,
             ),
         };
-        if validate_header_range_links(outstanding.range.anchor_hash, &headers).is_err() {
+        if let Err(error) = validate_header_range_links(outstanding.range.anchor_hash, &headers) {
+            debug!(
+                ?peer,
+                ?error,
+                anchor_hash = ?outstanding.range.anchor_hash,
+                start_height = ?outstanding.range.start_height,
+                count = ?header_count,
+                "Zakura header-sync rejected header range links"
+            );
             self.report_misbehavior(peer.clone(), HeaderSyncMisbehavior::InvalidRange)
                 .await;
             self.state.schedule.retry(outstanding.range);
             self.schedule().await;
             return;
         }
-        if validate_headers_stateless(headers.clone(), validation_context)
-            .await
-            .is_err()
-        {
+        if let Err(error) = validate_headers_stateless(headers.clone(), validation_context).await {
+            debug!(
+                ?peer,
+                ?error,
+                start_height = ?outstanding.range.start_height,
+                count = ?header_count,
+                "Zakura header-sync rejected stateless header range"
+            );
             self.report_misbehavior(peer.clone(), HeaderSyncMisbehavior::InvalidRange)
                 .await;
             self.state.schedule.retry(outstanding.range);
@@ -944,6 +986,7 @@ impl HeaderSyncReactor {
                 anchor: outstanding.range.anchor_hash,
                 start_height: outstanding.range.start_height,
                 headers,
+                body_sizes,
                 finalized: outstanding.range.finalized,
             })
             .await;

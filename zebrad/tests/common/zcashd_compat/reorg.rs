@@ -195,6 +195,7 @@ pub async fn over_batch_branch_restart_recovers() -> Result<()> {
     wait_for_tips_match(&setup, STANDARD_SYNC_TIMEOUT).await?;
 
     force_zebra_reorg(&setup, 8, (SYNC_BATCH_SIZE_LIMIT + 1) as u32).await?;
+
     wait_for_tips_match(&setup, DEEP_REORG_SYNC_TIMEOUT).await?;
 
     restart_zcashd_and_wait_for_tips(&setup).await?;

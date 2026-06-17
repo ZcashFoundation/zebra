@@ -47,17 +47,19 @@ use super::{
 use crate::{
     protocol::external::InventoryHash,
     zakura::{
-        direct_endpoint_builder, drive_header_sync_actions, spawn_header_sync_reactor, Clock,
-        Frame, FramedRecv, FramedSend, HeaderSyncAction, HeaderSyncFrontiers,
-        HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup, Peer, RealClock,
-        Service, ServicePeerDirection, ServiceRegistry, ServiceStream, SinkReject, Stream,
-        StreamMode, StreamPrelude, ZakuraAcceptedLimits, ZakuraControlAck, ZakuraControlHello,
-        ZakuraControlRole, ZakuraControlValidation, ZakuraHandshakeConfig, ZakuraHandshakePath,
-        ZakuraHeaderSyncConfig, ZakuraInitialLimits, ZakuraLimits, ZakuraPeerId,
-        ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason, ZakuraUpgradeOutcome,
-        CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC, CONTROL_VERSION, FRAME_HEADER_BYTES,
-        LOCAL_MAX_CONTROL_FRAME_BYTES, MAX_HS_MESSAGE_BYTES, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC,
-        TRANSCRIPT_HASH_BYTES, ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_PROTOCOL_VERSION_1,
+        direct_endpoint_builder, drive_header_sync_actions, spawn_block_sync_reactor,
+        spawn_header_sync_reactor, BlockSyncAction, BlockSyncFrontiers, BlockSyncHandle,
+        BlockSyncService, BlockSyncStartup, Clock, Frame, FramedRecv, FramedSend, HeaderSyncAction,
+        HeaderSyncFrontiers, HeaderSyncPassthroughService, HeaderSyncService, HeaderSyncStartup,
+        Peer, RealClock, Service, ServicePeerDirection, ServiceRegistry, ServiceStream, SinkReject,
+        Stream, StreamMode, StreamPrelude, ZakuraAcceptedLimits, ZakuraBlockSyncConfig,
+        ZakuraControlAck, ZakuraControlHello, ZakuraControlRole, ZakuraControlValidation,
+        ZakuraHandshakeConfig, ZakuraHandshakePath, ZakuraHeaderSyncConfig, ZakuraInitialLimits,
+        ZakuraLimits, ZakuraPeerId, ZakuraPeerSupervisor, ZakuraProtocolError, ZakuraRejectReason,
+        ZakuraUpgradeOutcome, CONTROL_ACK_MAGIC, CONTROL_HELLO_MAGIC, CONTROL_VERSION,
+        FRAME_HEADER_BYTES, LOCAL_MAX_CONTROL_FRAME_BYTES, MAX_BS_FRAME_BYTES,
+        MAX_HS_MESSAGE_BYTES, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC, TRANSCRIPT_HASH_BYTES,
+        ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_PROTOCOL_VERSION_1, ZAKURA_STREAM_BLOCK_SYNC,
         ZAKURA_STREAM_HEADER_SYNC,
     },
 };
@@ -85,6 +87,23 @@ pub const DEFAULT_ZAKURA_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_ZAKURA_QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(150);
 /// QUIC keepalive interval used by Zakura endpoints.
 pub const DEFAULT_ZAKURA_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// Minimum age of an incumbent Zakura connection before a duplicate connection
+/// for the same identity is allowed to evict it.
+///
+/// A duplicate almost always means the peer restarted or redialed (the redial
+/// supervisor skips peers that are already registered). If the incumbent has
+/// been registered longer than this, it is treated as a stale connection left
+/// behind by a restarted peer: that peer's process is gone, so the connection
+/// only lingers until the QUIC idle timeout ([`DEFAULT_ZAKURA_QUIC_IDLE_TIMEOUT`],
+/// ~150s). Evicting it immediately lets the peer's redial take the freed slot in
+/// seconds instead of stalling for the whole idle window.
+///
+/// A younger incumbent is kept: two connections registered close together are a
+/// simultaneous-open race (both sides dialed before either registered), and
+/// evicting on every duplicate would make those flap. The redial backoff
+/// resolves that race instead. This threshold must stay above the worst-case
+/// simultaneous-dial window and below the QUIC idle timeout.
+pub const ZAKURA_DUPLICATE_EVICT_MIN_AGE: Duration = Duration::from_secs(30);
 /// QUIC stream receive window used by Zakura endpoints.
 pub const DEFAULT_ZAKURA_STREAM_RECEIVE_WINDOW: u32 = 512 * 1024;
 /// QUIC connection receive window used by Zakura endpoints.
@@ -136,7 +155,7 @@ const _: () =
     assert!(LEGACY_REQUEST_STREAM_KIND == super::legacy_gossip::ZAKURA_STREAM_LEGACY_REQUESTS);
 const _: () = assert!(DISCOVERY_STREAM_KIND == super::discovery::ZAKURA_STREAM_DISCOVERY);
 const _: () = assert!(HEADER_SYNC_STREAM_KIND == super::header_sync::ZAKURA_STREAM_HEADER_SYNC);
-const _: () = assert!(ZAKURA_STREAM_VERSION_1 == ZAKURA_HEADER_SYNC_STREAM_VERSION);
+const _: () = assert!(ZAKURA_STREAM_VERSION_2 == ZAKURA_HEADER_SYNC_STREAM_VERSION);
 const _: () =
     assert!(LEGACY_REQUEST_BLOCKS_BY_HASH == super::legacy_gossip::MSG_REQUEST_BLOCKS_BY_HASH);
 const _: () = assert!(
@@ -214,6 +233,8 @@ pub struct ZakuraConfig {
     pub trace_dir: Option<PathBuf>,
     /// Native stream-5 header-sync wire settings.
     pub header_sync: ZakuraHeaderSyncConfig,
+    /// Native stream-6 block-sync wire, scheduling, serving, and rollout settings.
+    pub block_sync: ZakuraBlockSyncConfig,
 }
 
 impl Default for ZakuraConfig {
@@ -227,6 +248,7 @@ impl Default for ZakuraConfig {
             message_rate_per_second: DEFAULT_ZAKURA_MESSAGE_RATE_PER_SECOND,
             trace_dir: None,
             header_sync: ZakuraHeaderSyncConfig::default(),
+            block_sync: ZakuraBlockSyncConfig::default(),
         }
     }
 }
@@ -373,8 +395,10 @@ pub struct ZakuraEndpoint {
     supervisor: ZakuraSupervisorHandle,
     handler: ZakuraProtocolHandler,
     header_sync: Option<super::HeaderSyncHandle>,
+    block_sync: Option<BlockSyncHandle>,
     header_sync_tasks: Option<Arc<HeaderSyncBackgroundTasks>>,
     header_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<HeaderSyncAction>>>>>,
+    block_sync_actions: Option<Arc<Mutex<Option<mpsc::Receiver<BlockSyncAction>>>>>,
     upgrade_dials: Arc<StdMutex<HashSet<ZakuraPeerId>>>,
 }
 
@@ -391,6 +415,8 @@ pub struct ZakuraHeaderSyncDriverStartup {
     pub frontiers: HeaderSyncFrontiers,
     /// Durable best header tip loaded from state.
     pub best_header_tip: Option<(block::Height, block::Hash)>,
+    /// Hash of `frontiers.verified_block_tip`.
+    pub verified_block_tip_hash: block::Hash,
 }
 
 impl ZakuraEndpoint {
@@ -431,9 +457,20 @@ impl ZakuraEndpoint {
         self.header_sync.clone()
     }
 
+    /// Returns the block-sync handle when native block sync is active.
+    pub fn block_sync(&self) -> Option<BlockSyncHandle> {
+        self.block_sync.clone()
+    }
+
     /// Take the header-sync action receiver when this endpoint was started in external-driver mode.
     pub async fn take_header_sync_actions(&self) -> Option<mpsc::Receiver<HeaderSyncAction>> {
         let actions = self.header_sync_actions.as_ref()?;
+        actions.lock().await.take()
+    }
+
+    /// Take the block-sync action receiver when this endpoint was started in external-driver mode.
+    pub async fn take_block_sync_actions(&self) -> Option<mpsc::Receiver<BlockSyncAction>> {
+        let actions = self.block_sync_actions.as_ref()?;
         actions.lock().await.take()
     }
 
@@ -449,6 +486,11 @@ impl ZakuraEndpoint {
         if let Some(tasks) = self.header_sync_tasks.as_ref() {
             tasks.tasks.lock().await.push(task);
         }
+    }
+
+    /// Track a block-sync integration task under the endpoint shutdown owner.
+    pub async fn push_block_sync_task(&self, task: JoinHandle<()>) {
+        self.push_header_sync_task(task).await;
     }
 
     /// Returns the endpoint's current direct node address.
@@ -558,8 +600,10 @@ impl ZakuraEndpoint {
             supervisor,
             handler,
             header_sync: None,
+            block_sync: None,
             header_sync_tasks: None,
             header_sync_actions: None,
+            block_sync_actions: None,
             upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
         }
     }
@@ -579,11 +623,13 @@ impl ZakuraEndpoint {
             supervisor,
             handler,
             header_sync: Some(header_sync),
+            block_sync: None,
             header_sync_tasks: Some(Arc::new(HeaderSyncBackgroundTasks {
                 shutdown,
                 tasks: Mutex::new(tasks),
             })),
             header_sync_actions: actions.map(|actions| Arc::new(Mutex::new(Some(actions)))),
+            block_sync_actions: None,
             upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
         }
     }
@@ -607,6 +653,10 @@ struct ZakuraSupervisorState {
     outbound_by_peer: HashMap<ZakuraPeerId, ZakuraPeerHandle>,
     disconnect_by_peer: HashMap<ZakuraPeerId, CancellationToken>,
     caps_by_peer: HashMap<ZakuraPeerId, u64>,
+    /// When each authenticated peer's current connection registered, used to
+    /// decide whether a duplicate may evict a stale incumbent (see
+    /// [`ZAKURA_DUPLICATE_EVICT_MIN_AGE`]).
+    registered_at: HashMap<ZakuraPeerId, Instant>,
     active_by_ip: HashMap<IpAddr, usize>,
     max_connections_per_ip: usize,
 }
@@ -695,6 +745,7 @@ impl ZakuraSupervisorHandle {
                 outbound_by_peer: HashMap::new(),
                 disconnect_by_peer: HashMap::new(),
                 caps_by_peer: HashMap::new(),
+                registered_at: HashMap::new(),
                 active_by_ip: HashMap::new(),
                 max_connections_per_ip: max_connections_per_ip.max(1),
             })),
@@ -786,6 +837,7 @@ impl ZakuraSupervisorHandle {
                 state
                     .caps_by_peer
                     .insert(peer_id.clone(), accepted_capabilities);
+                state.registered_at.insert(peer_id.clone(), Instant::now());
                 let registered_ids: Vec<_> = state.active_by_peer.keys().cloned().collect();
                 set_active_connection_gauge(registered_ids.len());
                 self.peer_set_tx.send_replace(registered_ids);
@@ -800,7 +852,29 @@ impl ZakuraSupervisorHandle {
                     disconnect_token,
                 }
             }
-            ZakuraUpgradeOutcome::Duplicate { .. } => ZakuraRegistration::Duplicate { peer_id },
+            ZakuraUpgradeOutcome::Duplicate { .. } => {
+                // A duplicate for an identity that already has a connection is
+                // almost always a restart or redial. If the incumbent has been
+                // registered long enough to be a stale connection left behind by
+                // a restarted peer, cancel it now so it tears down through its
+                // normal cleanup path and frees the slot in milliseconds; the
+                // peer's redial then takes the freed slot instead of waiting for
+                // the dead connection's QUIC idle timeout (~150s). A young
+                // incumbent is kept to avoid flapping on simultaneous-open races.
+                // The newcomer is still closed (its redial reconnects cleanly
+                // once the slot is free), which avoids racing the incumbent's
+                // service-registration teardown.
+                if let Some(registered_at) = state.registered_at.get(&peer_id) {
+                    if registered_at.elapsed() >= ZAKURA_DUPLICATE_EVICT_MIN_AGE {
+                        if let Some(token) = state.disconnect_by_peer.get(&peer_id) {
+                            token.cancel();
+                            metrics::counter!("zakura.p2p.conn.duplicate.evicted_stale")
+                                .increment(1);
+                        }
+                    }
+                }
+                ZakuraRegistration::Duplicate { peer_id }
+            }
             ZakuraUpgradeOutcome::Rejected { reason } => ZakuraRegistration::Rejected(reason),
         }
     }
@@ -811,6 +885,7 @@ impl ZakuraSupervisorHandle {
         state.outbound_by_peer.remove(peer_id);
         state.disconnect_by_peer.remove(peer_id);
         state.caps_by_peer.remove(peer_id);
+        state.registered_at.remove(peer_id);
         if let Some(remote_ip) = remote_ip {
             if let Some(count) = state.active_by_ip.get_mut(&remote_ip) {
                 *count = count.saturating_sub(1);
@@ -1029,16 +1104,29 @@ pub(crate) struct NativeHandshakeNegotiated {
 pub(crate) fn service_registry(
     _supervisor: &ZakuraSupervisorHandle,
     header_sync: Option<super::HeaderSyncHandle>,
+    block_sync: Option<BlockSyncHandle>,
+    block_sync_config: ZakuraBlockSyncConfig,
     legacy_service: Arc<dyn Service>,
     discovery_service: Arc<dyn Service>,
 ) -> Result<Arc<ServiceRegistry>, BoxError> {
     let mut services = vec![legacy_service.clone(), discovery_service];
-    if let Some(header_sync) = header_sync {
-        services.push(Arc::new(HeaderSyncService::new(header_sync)) as Arc<dyn Service>);
+    if let Some(header_sync) = &header_sync {
+        services.push(Arc::new(HeaderSyncService::new(header_sync.clone())) as Arc<dyn Service>);
     } else {
         services
             .push(Arc::new(HeaderSyncPassthroughService::new(legacy_service)) as Arc<dyn Service>);
     }
+    let block_sync = match block_sync {
+        Some(block_sync) => BlockSyncService::new_with_handle(block_sync_config, block_sync),
+        None => match header_sync.as_ref() {
+            Some(header_sync) => BlockSyncService::new_with_header_tip(
+                block_sync_config,
+                header_sync.subscribe_tip(),
+            ),
+            None => BlockSyncService::new(block_sync_config),
+        },
+    };
+    services.push(Arc::new(block_sync) as Arc<dyn Service>);
 
     Ok(Arc::new(
         ServiceRegistry::new(services).map_err(|error| -> BoxError { Box::new(error) })?,
@@ -1304,6 +1392,13 @@ impl ZakuraProtocolHandler {
         let mut open_limiter = TokenBucket::new(limits.stream_open_rate_per_second);
         let mut message_buckets = MessageRateBuckets::new();
         let (freshness_tx, freshness_rx) = watch::channel(Instant::now());
+        // Bounded label describing why this connection closed. Updated at each
+        // local teardown site and attached to the final `closed.neutral` trace
+        // so readers can distinguish idle timeouts, peer-side closes, resource
+        // limits, and protocol faults. The default covers the external path:
+        // the connection token was cancelled by a disconnect request, peerset
+        // eviction, or process shutdown.
+        let mut close_reason: &'static str = "cancelled";
         let negotiated_ordered_streams = self
             .registry
             .ordered_streams_for_negotiated(accepted_capabilities);
@@ -1327,6 +1422,7 @@ impl ZakuraProtocolHandler {
                 "closing Zakura peer because negotiated ordered streams exceed max-open-streams"
             );
             connection.close(VarInt::from_u32(ZAKURA_CLOSE_RESOURCE), b"ordered streams");
+            close_reason = "resource_ordered_streams";
             connection_token.cancel();
         } else if !ordered_streams.is_empty()
             && usize::from(limits.max_inbound_queue_depth) < ordered_streams.len()
@@ -1337,6 +1433,7 @@ impl ZakuraProtocolHandler {
                 "closing Zakura peer because inbound queue depth cannot be split across ordered streams"
             );
             connection.close(VarInt::from_u32(ZAKURA_CLOSE_RESOURCE), b"queue split");
+            close_reason = "resource_queue_split";
             connection_token.cancel();
         }
         let ordered_kinds: HashSet<u16> = negotiated_ordered_streams
@@ -1395,6 +1492,7 @@ impl ZakuraProtocolHandler {
                             VarInt::from_u32(ZAKURA_CLOSE_RESOURCE),
                             b"ordered stream setup",
                         );
+                        close_reason = "stream_setup_failed";
                         connection_token.cancel();
                         break;
                     }
@@ -1427,6 +1525,7 @@ impl ZakuraProtocolHandler {
                 _ = connection_token.cancelled() => break,
                 _ = freshness_reaper(freshness_rx.clone(), limits.idle_timeout), if run_freshness_reaper => {
                     connection.close(VarInt::from_u32(ZAKURA_CLOSE_NEUTRAL), b"idle");
+                    close_reason = "idle_timeout";
                     break;
                 }
                 Some(joined) = workers.join_next() => {
@@ -1462,6 +1561,7 @@ impl ZakuraProtocolHandler {
                                         stream_kind = admitted.kind,
                                         "closing peer after duplicate or unexpected ordered stream"
                                     );
+                                    close_reason = "duplicate_stream";
                                     connection_token.cancel();
                                     continue;
                                 }
@@ -1511,12 +1611,14 @@ impl ZakuraProtocolHandler {
                         }
                         Err(error) => {
                             debug!(?error, "Zakura connection stopped accepting streams");
+                            close_reason = "accept_failed";
                             break;
                         }
                     }
                 }
                 outbound = outbound_rx.recv() => {
                     let Some(outbound) = outbound else {
+                        close_reason = "outbound_closed";
                         break;
                     };
                     match outbound {
@@ -1557,6 +1659,7 @@ impl ZakuraProtocolHandler {
                                         VarInt::from_u32(ZAKURA_CLOSE_BAD_PRELUDE),
                                         b"malformed response",
                                     );
+                                    close_reason = "bad_response";
                                     connection_token.cancel();
                                     let _ = completion.send(Err(error));
                                 }
@@ -1583,7 +1686,10 @@ impl ZakuraProtocolHandler {
         }
         self.supervisor.deregister(&peer_id, remote_ip).await;
         metrics::counter!("zakura.p2p.conn.closed.neutral").increment(1);
-        self.trace.emit(CONN_TABLE, conn.event("closed.neutral"));
+        self.trace.emit(
+            CONN_TABLE,
+            conn.event("closed.neutral").reason(close_reason),
+        );
         Ok(())
     }
 
@@ -2050,22 +2156,48 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
     startup.shutdown = header_sync_shutdown.clone();
     if header_sync_driver_startup.is_some() {
         startup.range_state_actions_enabled = true;
-        startup.inbound_new_block_acceptance_enabled = true;
+        startup.inbound_new_block_acceptance_enabled = config.zakura.header_sync.accept_new_blocks;
     }
     let (header_sync, header_sync_actions, header_sync_task) = spawn_header_sync_reactor(startup)?;
-    let discovery_service = Arc::new(super::DiscoveryService::with_header_sync(
+    let block_sync_driver_enabled = header_sync_driver_startup.is_some();
+    let (block_sync, block_sync_actions, block_sync_task) =
+        if let Some(driver_startup) = header_sync_driver_startup.as_ref() {
+            let best_header_tip = driver_startup.best_header_tip.unwrap_or(anchor);
+            let mut startup = BlockSyncStartup::new(
+                BlockSyncFrontiers {
+                    finalized_height: driver_startup.frontiers.finalized_height,
+                    verified_block_tip: driver_startup.frontiers.verified_block_tip,
+                    verified_block_hash: driver_startup.verified_block_tip_hash,
+                },
+                best_header_tip,
+                header_sync.subscribe_tip(),
+                config.zakura.block_sync.clone(),
+            );
+            startup.shutdown = header_sync_shutdown.clone();
+            let (handle, actions, task) = spawn_block_sync_reactor(startup);
+            (Some(handle), Some(actions), Some(task))
+        } else {
+            (None, None, None)
+        };
+    let discovery_service = Arc::new(super::DiscoveryService::with_sync_services(
         discovery.clone(),
         header_sync.clone(),
+        block_sync.clone(),
     )) as Arc<dyn Service>;
     let legacy_service = sink_factory(supervisor.clone(), trace.clone());
     let registry = service_registry(
         &supervisor,
         Some(header_sync.clone()),
+        block_sync.clone(),
+        config.zakura.block_sync.clone(),
         legacy_service,
         discovery_service,
     )?;
     let mut tasks = vec![header_sync_task];
-    let header_sync_actions = if header_sync_driver_startup.is_some() {
+    if let Some(task) = block_sync_task {
+        tasks.push(task);
+    }
+    let header_sync_actions = if block_sync_driver_enabled {
         Some(Arc::new(Mutex::new(Some(header_sync_actions))))
     } else {
         let action_driver_task = tokio::spawn(drive_header_sync_actions(
@@ -2077,6 +2209,9 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         tasks.push(action_driver_task);
         None
     };
+    let block_sync_actions = block_sync_actions
+        .filter(|_| block_sync_driver_enabled)
+        .map(|actions| Arc::new(Mutex::new(Some(actions))));
     let header_sync_tasks = Arc::new(HeaderSyncBackgroundTasks {
         shutdown: header_sync_shutdown,
         tasks: Mutex::new(tasks),
@@ -2097,8 +2232,10 @@ pub async fn spawn_zakura_endpoint_with_header_sync_driver(
         supervisor,
         handler,
         header_sync: Some(header_sync),
+        block_sync,
         header_sync_tasks: Some(header_sync_tasks),
         header_sync_actions,
+        block_sync_actions,
         upgrade_dials: Arc::new(StdMutex::new(HashSet::new())),
     };
 
@@ -3293,6 +3430,7 @@ fn stream_kind_label(stream_kind: u16) -> &'static str {
         LEGACY_REQUEST_STREAM_KIND => "legacy_request",
         DISCOVERY_STREAM_KIND => "discovery",
         HEADER_SYNC_STREAM_KIND => "header_sync",
+        ZAKURA_STREAM_BLOCK_SYNC => "block_sync",
         _ => "unknown",
     }
 }
@@ -3305,6 +3443,7 @@ fn app_frame_cap_for_stream_kind(limits: &ZakuraConnectionLimits, stream_kind: u
                     .expect("header-sync frame cap fits in u32");
             limits.max_frame_bytes.min(header_sync_cap)
         }
+        ZAKURA_STREAM_BLOCK_SYNC => limits.max_frame_bytes.min(MAX_BS_FRAME_BYTES),
         _ => limits.max_frame_bytes.min(LOCAL_MAX_CONTROL_FRAME_BYTES),
     }
     .max(1)
@@ -3332,6 +3471,7 @@ fn should_run_freshness_reaper(
 /// The only stream-kind version this v1 handler serves. Every known kind is
 /// at version 1; a peer naming any other version of a known kind is rejected.
 const ZAKURA_STREAM_VERSION_1: u16 = 1;
+const ZAKURA_STREAM_VERSION_2: u16 = 2;
 
 /// Returns whether the handler can serve a stream with this kind and version.
 ///
@@ -3827,6 +3967,8 @@ mod tests {
         let registry = service_registry(
             &supervisor,
             Some(header_sync.clone()),
+            None,
+            ZakuraBlockSyncConfig::default(),
             recorder.clone(),
             test_discovery_service(&supervisor),
         )?;
@@ -4045,6 +4187,8 @@ mod tests {
         let registry = service_registry(
             &supervisor,
             Some(header_sync.clone()),
+            None,
+            ZakuraBlockSyncConfig::default(),
             Arc::new(RecordingService::default()),
             test_discovery_service(&supervisor),
         )?;
@@ -4123,6 +4267,8 @@ mod tests {
         let registry = service_registry(
             &supervisor,
             Some(header_sync.clone()),
+            None,
+            ZakuraBlockSyncConfig::default(),
             Arc::new(RecordingService::default()),
             discovery_service,
         )?;
@@ -4224,6 +4370,8 @@ mod tests {
         let registry = service_registry(
             &supervisor,
             Some(header_sync.clone()),
+            None,
+            ZakuraBlockSyncConfig::default(),
             Arc::new(RecordingService::default()),
             discovery_service,
         )?;
@@ -4293,6 +4441,68 @@ mod tests {
             .await
             .expect("disconnect token is cancelled promptly");
         assert!(!supervisor.disconnect_peer(&test_peer(9)).await);
+
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn duplicate_evicts_stale_incumbent_but_keeps_fresh_one() -> Result<(), BoxError> {
+        // A duplicate connection for an identity that already has one either
+        // means the peer restarted (incumbent is a dead, stale connection that
+        // should be evicted so the redial can reclaim the slot) or that two
+        // connections raced at startup (simultaneous open, both fresh, must NOT
+        // be evicted or they flap). Incumbent age distinguishes the two.
+        let supervisor = ZakuraSupervisorHandle::new(4);
+
+        async fn register_duplicate(
+            supervisor: &ZakuraSupervisorHandle,
+            peer: &ZakuraPeerId,
+            token: CancellationToken,
+        ) -> ZakuraRegistration {
+            let (outbound_tx, _outbound_rx) = mpsc::channel(1);
+            let outbound_handle = ZakuraPeerHandle::new_for_tests(peer.clone(), outbound_tx);
+            supervisor
+                .register(
+                    peer.clone(),
+                    None,
+                    [peer.as_bytes()[0]; TRANSCRIPT_HASH_BYTES],
+                    outbound_handle,
+                    token,
+                    ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                )
+                .await
+        }
+
+        // Fresh incumbent: an immediate duplicate is a simultaneous-open race and
+        // must not evict it.
+        let fresh_peer = test_peer(8);
+        let fresh_incumbent = CancellationToken::new();
+        register_test_peer(&supervisor, fresh_peer.clone(), fresh_incumbent.clone()).await;
+        let registration =
+            register_duplicate(&supervisor, &fresh_peer, CancellationToken::new()).await;
+        assert!(matches!(registration, ZakuraRegistration::Duplicate { .. }));
+        assert!(
+            !fresh_incumbent.is_cancelled(),
+            "a young incumbent is kept so simultaneous-open races do not flap",
+        );
+
+        // Stale incumbent: once it is older than the threshold, a duplicate
+        // evicts it so a restarted peer's redial can reclaim the slot.
+        let stale_peer = test_peer(9);
+        let stale_incumbent = CancellationToken::new();
+        register_test_peer(&supervisor, stale_peer.clone(), stale_incumbent.clone()).await;
+        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+        let newcomer = CancellationToken::new();
+        let registration = register_duplicate(&supervisor, &stale_peer, newcomer.clone()).await;
+        assert!(matches!(registration, ZakuraRegistration::Duplicate { .. }));
+        assert!(
+            stale_incumbent.is_cancelled(),
+            "a stale incumbent is evicted so the restarted peer's redial reclaims the slot",
+        );
+        assert!(
+            !newcomer.is_cancelled(),
+            "the rejected newcomer's token is never registered, so it is left to redial",
+        );
 
         Ok(())
     }
@@ -4594,48 +4804,62 @@ mod tests {
                 },
                 Stream {
                     kind: HEADER_SYNC_STREAM_KIND,
-                    version: ZAKURA_STREAM_VERSION_1,
+                    version: ZAKURA_STREAM_VERSION_2,
                     frame_cap: 1024,
                     capability: ZAKURA_CAP_HEADER_SYNC,
+                    mode: StreamMode::Ordered,
+                },
+                Stream {
+                    kind: ZAKURA_STREAM_BLOCK_SYNC,
+                    version: ZAKURA_STREAM_VERSION_1,
+                    frame_cap: MAX_BS_FRAME_BYTES,
+                    capability: crate::zakura::ZAKURA_CAP_BLOCK_SYNC,
                     mode: StreamMode::Ordered,
                 },
             ],
         }) as Arc<dyn Service>])
         .expect("test registry declares unique stream kinds");
 
-        for kind in [
-            LEGACY_GOSSIP_STREAM_KIND,
-            LEGACY_REQUEST_STREAM_KIND,
-            DISCOVERY_STREAM_KIND,
-            HEADER_SYNC_STREAM_KIND,
+        for (kind, version) in [
+            (LEGACY_GOSSIP_STREAM_KIND, ZAKURA_STREAM_VERSION_1),
+            (LEGACY_REQUEST_STREAM_KIND, ZAKURA_STREAM_VERSION_1),
+            (DISCOVERY_STREAM_KIND, ZAKURA_STREAM_VERSION_1),
+            (HEADER_SYNC_STREAM_KIND, ZAKURA_STREAM_VERSION_2),
+            (ZAKURA_STREAM_BLOCK_SYNC, ZAKURA_STREAM_VERSION_1),
         ] {
             assert!(
-                is_supported_stream(&registry, kind, ZAKURA_STREAM_VERSION_1),
-                "registered kind {kind} at version 1 must be supported"
+                is_supported_stream(&registry, kind, version),
+                "registered kind {kind} at declared version {version} must be supported"
             );
             assert!(
                 !is_supported_stream(&registry, kind, 0),
                 "registered kind {kind} at version 0 must be rejected"
             );
             assert!(
-                !is_supported_stream(&registry, kind, 2),
+                !is_supported_stream(&registry, kind, version.saturating_add(1)),
                 "registered kind {kind} at an unsupported version must be rejected"
             );
         }
+
+        assert!(
+            !is_supported_stream(&registry, HEADER_SYNC_STREAM_KIND, ZAKURA_STREAM_VERSION_1),
+            "header-sync v1 is intentionally rejected after the clean v2 break"
+        );
 
         assert_eq!(stream_kind_label(2), "gossip");
         assert_eq!(stream_kind_label(3), "legacy_request");
         assert_eq!(stream_kind_label(4), "discovery");
         assert_eq!(stream_kind_label(5), "header_sync");
+        assert_eq!(stream_kind_label(6), "block_sync");
 
-        for kind in [0u16, 1, 6, 7, 255, u16::MAX] {
+        for kind in [0u16, 1, 7, 255, u16::MAX] {
             assert!(
                 !is_supported_stream(&registry, kind, ZAKURA_STREAM_VERSION_1),
                 "unknown kind {kind} must be rejected even at version 1"
             );
         }
 
-        for kind in [6u16, 7, 255, u16::MAX] {
+        for kind in [7u16, 255, u16::MAX] {
             assert_eq!(stream_kind_label(kind), "unknown");
         }
     }

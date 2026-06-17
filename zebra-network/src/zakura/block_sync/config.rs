@@ -1,0 +1,173 @@
+use super::{error::*, wire::*, *};
+
+/// Default number of blocks advertised per response.
+pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 16;
+/// Default number of in-flight block requests advertised per peer.
+pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 4;
+/// Default total response byte target advertised per range response.
+pub const DEFAULT_BS_MAX_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
+/// Default global byte budget reserved for later block-download scheduling.
+pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
+/// Default block-sync request timeout reserved for later scheduling.
+pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default block-sync status refresh interval reserved for later advertisement.
+pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+/// Default tolerated size-hint deviation percentage reserved for later soft scoring.
+pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
+/// Default block-sync peer fanout reserved for later range scheduling.
+pub const DEFAULT_BS_FANOUT: usize = 3;
+/// Maximum peer-advertised response byte target accepted from stream-6 status.
+pub const MAX_BS_RESPONSE_BYTES: u32 = {
+    // This cast is safe: MAX_BS_MESSAGE_BYTES is asserted below 4 MiB.
+    MAX_BS_MESSAGE_BYTES as u32
+};
+
+/// Block-sync peer status advertisement.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct BlockSyncStatus {
+    /// Earliest block body this peer can serve.
+    pub servable_low: block::Height,
+    /// Highest contiguous verified block body this peer can serve.
+    pub servable_high: block::Height,
+    /// Hash of `servable_high`.
+    pub tip_hash: block::Hash,
+    /// Maximum blocks the sender will serve per requested range.
+    pub max_blocks_per_response: u32,
+    /// Maximum concurrent `GetBlocks` requests the sender will service.
+    pub max_inflight_requests: u16,
+    /// Maximum total response bytes the sender targets per requested range.
+    pub max_response_bytes: u32,
+}
+
+impl BlockSyncStatus {
+    pub(super) fn encode_to<W: Write>(&self, writer: &mut W) -> Result<(), BlockSyncWireError> {
+        write_height(writer, self.servable_low)?;
+        write_height(writer, self.servable_high)?;
+        self.tip_hash.zcash_serialize(&mut *writer)?;
+        writer.write_u32::<LittleEndian>(clamp_advertised_blocks(self.max_blocks_per_response))?;
+        writer.write_u16::<LittleEndian>(self.max_inflight_requests)?;
+        writer.write_u32::<LittleEndian>(self.max_response_bytes.max(1))?;
+        Ok(())
+    }
+
+    pub(super) fn decode_from<R: Read>(reader: &mut R) -> Result<Self, BlockSyncWireError> {
+        Ok(Self {
+            servable_low: read_height(reader)?,
+            servable_high: read_height(reader)?,
+            tip_hash: block::Hash::zcash_deserialize(&mut *reader)?,
+            max_blocks_per_response: clamp_advertised_blocks(reader.read_u32::<LittleEndian>()?),
+            max_inflight_requests: clamp_advertised_inflight(reader.read_u16::<LittleEndian>()?),
+            max_response_bytes: clamp_advertised_response_bytes(reader.read_u32::<LittleEndian>()?),
+        })
+    }
+}
+
+impl Default for BlockSyncStatus {
+    fn default() -> Self {
+        Self {
+            servable_low: block::Height::MIN,
+            servable_high: block::Height::MIN,
+            tip_hash: block::Hash([0; 32]),
+            max_blocks_per_response: DEFAULT_BS_BLOCKS_PER_RESPONSE,
+            max_inflight_requests: DEFAULT_BS_MAX_INFLIGHT,
+            max_response_bytes: DEFAULT_BS_MAX_RESPONSE_BYTES,
+        }
+    }
+}
+
+/// Block-sync configuration nested under the Zakura P2P-v2 config.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ZakuraBlockSyncConfig {
+    /// Disable the legacy `ChainSync` body downloader on Zakura-enabled nodes.
+    ///
+    /// This leaves the legacy syncer available for non-Zakura nodes and as the
+    /// default-safe fallback when the gate is unset.
+    pub replace_legacy_syncer: bool,
+    /// Maximum blocks this node advertises per `GetBlocks` response.
+    pub max_blocks_per_response: u32,
+    /// Maximum concurrent `GetBlocks` requests this node advertises per peer.
+    pub max_inflight_requests: u16,
+    /// Maximum total response bytes this node advertises per `GetBlocks` response.
+    pub max_response_bytes: u32,
+    /// Maximum estimated bytes reserved for in-flight and buffered block bodies.
+    pub max_inflight_block_bytes: u64,
+    /// Timeout for an outstanding block-body range request.
+    #[serde(with = "humantime_serde")]
+    pub request_timeout: Duration,
+    /// How often this node sends unsolicited status refreshes after local frontier changes.
+    #[serde(with = "humantime_serde")]
+    pub status_refresh_interval: Duration,
+    /// Percentage deviation from advertised body-size hints tolerated before soft scoring.
+    pub size_deviation_tolerance: u32,
+    /// Number of peers later range scheduling may fan out to for the same body gap.
+    pub fanout: usize,
+    /// Block-sync peer caps and queue limits owned by this service.
+    pub peer_limits: ServicePeerLimits,
+}
+
+impl Default for ZakuraBlockSyncConfig {
+    fn default() -> Self {
+        Self {
+            replace_legacy_syncer: false,
+            max_blocks_per_response: DEFAULT_BS_BLOCKS_PER_RESPONSE,
+            max_inflight_requests: DEFAULT_BS_MAX_INFLIGHT,
+            max_response_bytes: DEFAULT_BS_MAX_RESPONSE_BYTES,
+            max_inflight_block_bytes: DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES,
+            request_timeout: DEFAULT_BS_REQUEST_TIMEOUT,
+            status_refresh_interval: DEFAULT_BS_STATUS_REFRESH_INTERVAL,
+            size_deviation_tolerance: DEFAULT_BS_SIZE_DEVIATION_TOLERANCE,
+            fanout: DEFAULT_BS_FANOUT,
+            peer_limits: ServicePeerLimits::default(),
+        }
+    }
+}
+
+impl ZakuraBlockSyncConfig {
+    /// Return the clamped block-count advertisement for wire status messages.
+    pub fn advertised_max_blocks_per_response(&self) -> u32 {
+        clamp_advertised_blocks(self.max_blocks_per_response)
+    }
+
+    /// Return the locally capped in-flight advertisement for status messages.
+    pub fn advertised_max_inflight_requests(&self) -> u16 {
+        clamp_advertised_inflight(self.max_inflight_requests)
+    }
+
+    /// Return the non-zero response byte advertisement for status messages.
+    pub fn advertised_max_response_bytes(&self) -> u32 {
+        clamp_advertised_response_bytes(self.max_response_bytes)
+    }
+
+    /// Build the inert local status used before the block-sync reactor is wired.
+    pub fn initial_status(&self) -> BlockSyncStatus {
+        BlockSyncStatus {
+            max_blocks_per_response: self.advertised_max_blocks_per_response(),
+            max_inflight_requests: self.advertised_max_inflight_requests(),
+            max_response_bytes: self.advertised_max_response_bytes(),
+            ..BlockSyncStatus::default()
+        }
+    }
+}
+
+/// Clamp an advertised block count to the hard stream-6 request cap.
+pub fn clamp_advertised_blocks(count: u32) -> u32 {
+    count.clamp(1, MAX_BS_BLOCKS_PER_REQUEST)
+}
+
+/// Clamp an advertised in-flight request count to the local status ceiling.
+pub fn clamp_advertised_inflight(count: u16) -> u16 {
+    count.clamp(1, DEFAULT_BS_MAX_INFLIGHT)
+}
+
+/// Clamp an advertised response byte target to the largest stream-6 message.
+pub fn clamp_advertised_response_bytes(bytes: u32) -> u32 {
+    bytes.clamp(1, MAX_BS_RESPONSE_BYTES)
+}
+
+/// Maximum inbound `GetBlocks.count` this node will serve before looking at body sizes.
+pub fn inbound_get_blocks_count_limit(config: &ZakuraBlockSyncConfig) -> u32 {
+    config
+        .advertised_max_blocks_per_response()
+        .clamp(1, MAX_BS_BLOCKS_PER_REQUEST)
+}

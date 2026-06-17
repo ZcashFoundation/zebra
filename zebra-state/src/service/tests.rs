@@ -14,7 +14,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction, transparent,
     value_balance::ValueBalance,
 };
@@ -482,15 +482,55 @@ async fn header_only_service_requests_preserve_body_boundary() -> std::result::R
         ReadResponse::FinalizedTip(Some((Height(0), genesis.hash()))),
     );
 
+    let genesis_size = u32::try_from(genesis.zcash_serialize_to_vec()?.len())
+        .expect("serialized block size fits in u32");
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::BlocksByHeightRange {
+                start: Height(0),
+                count: 3,
+            })
+            .await?,
+        ReadResponse::Blocks(vec![(
+            Height(0),
+            genesis.clone(),
+            genesis.zcash_serialize_to_vec()?.len(),
+        )]),
+    );
+
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::BlockSizeHints {
+                from: Height(0),
+                count: 1,
+            })
+            .await?,
+        ReadResponse::BlockSizeHints(vec![(Height(0), Some(genesis_size))]),
+    );
+
     assert_eq!(
         state
             .clone()
             .oneshot(Request::CommitHeaderRange {
                 anchor: genesis.hash(),
                 headers: vec![block1.header.clone(), block2.header.clone()],
+                body_sizes: vec![999_999, 0],
             })
             .await?,
         Response::Committed(block2_hash),
+    );
+
+    assert_eq!(
+        read_state
+            .clone()
+            .oneshot(ReadRequest::BlockSizeHints {
+                from: Height(1),
+                count: 2,
+            })
+            .await?,
+        ReadResponse::BlockSizeHints(vec![(Height(1), Some(999_999)), (Height(2), None)]),
     );
 
     assert_eq!(
@@ -534,6 +574,7 @@ async fn header_only_service_requests_preserve_body_boundary() -> std::result::R
     );
     assert_eq!(
         state
+            .clone()
             .oneshot(Request::AnyChainBlock(block1_hash.into()))
             .await?,
         Response::Block(None),
@@ -569,6 +610,17 @@ async fn header_only_service_requests_preserve_body_boundary() -> std::result::R
     assert_eq!(
         read_state
             .clone()
+            .oneshot(ReadRequest::BlocksByHeightRange {
+                start: Height(1),
+                count: 2,
+            })
+            .await?,
+        ReadResponse::Blocks(Vec::new()),
+    );
+
+    assert_eq!(
+        read_state
+            .clone()
             .oneshot(ReadRequest::BestHeaderTip)
             .await?,
         ReadResponse::BestHeaderTip(Some((Height(2), block2_hash))),
@@ -583,10 +635,80 @@ async fn header_only_service_requests_preserve_body_boundary() -> std::result::R
             .await?,
         ReadResponse::MissingBlockBodies(vec![Height(1), Height(2)]),
     );
+
     assert_eq!(
         read_state.oneshot(ReadRequest::FinalizedTip).await?,
         ReadResponse::FinalizedTip(Some((Height(0), genesis.hash()))),
     );
+
+    Ok(())
+}
+
+/// A node still in the finalized (checkpoint) write phase must be able to commit
+/// a Zakura header range.
+///
+/// This reproduces the Zakura catch-up deadlock. A freshly started node has an
+/// empty non-finalized chain set, so it keeps its finalized block-write sender
+/// and the block write task drains the finalized channel before handling any
+/// non-finalized message. The finalized->non-finalized transition only fires
+/// when a non-finalized block is queued as a child of the finalized tip (the
+/// legacy commit path). A node catching up to a peer that sits at a *static*
+/// tip over Zakura commits header ranges via `CommitHeaderRange` (a
+/// non-finalized message) but never queues such a block, so before the fix the
+/// request never completes: the header tip stays at genesis, block sync stays
+/// gated off (`best_header_tip <= verified_block_tip`), and the node stalls.
+///
+/// Unlike `header_only_service_requests_preserve_body_boundary`, this test does
+/// NOT drop `block_write_sender.finalized`, so it exercises the real catch-up
+/// state. Without the fix the `CommitHeaderRange` future never resolves and the
+/// bounded wait below fails the test.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_header_range_completes_while_in_finalized_write_phase(
+) -> std::result::Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (mut state_service, _read_state, _, _) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+    let genesis =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block1 =
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block2 =
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+    let block2_hash = block2.hash();
+
+    assert_eq!(
+        state_service
+            .ready()
+            .await?
+            .call(Request::CommitCheckpointVerifiedBlock(
+                CheckpointVerifiedBlock::from(genesis.clone()),
+            ))
+            .await?,
+        Response::Committed(genesis.hash()),
+    );
+
+    // The node is still in the finalized write phase: committing a checkpoint
+    // block does not trigger the finalized->non-finalized transition, which is
+    // exactly the state a Zakura node catching up to a static tip is stuck in.
+    assert!(
+        state_service.block_write_sender.finalized.is_some(),
+        "a fresh node stays in the finalized write phase after a checkpoint commit",
+    );
+    let state = Buffer::new(BoxService::new(state_service), 1);
+
+    let committed = tokio::time::timeout(
+        Duration::from_secs(20),
+        state.clone().oneshot(Request::CommitHeaderRange {
+            anchor: genesis.hash(),
+            headers: vec![block1.header.clone(), block2.header.clone()],
+            body_sizes: vec![999_999, 0],
+        }),
+    )
+    .await
+    .expect("CommitHeaderRange must not deadlock while in the finalized write phase")?;
+
+    assert_eq!(committed, Response::Committed(block2_hash));
 
     Ok(())
 }
@@ -882,9 +1004,12 @@ proptest! {
         for block in finalized_blocks {
             let expected_block = block.clone();
 
-            let expected_action = if expected_block.height <= block::Height(1) {
-                // 0: reset by both initialization and the Genesis network upgrade
-                // 1: reset by the BeforeOverwinter network upgrade
+            let expected_action = if expected_block.height == block::Height(0) {
+                // Height 0 is reset by initialization. The BeforeOverwinter upgrade
+                // (activation height 1) also resets at height 0 rather than at height 1,
+                // because `ChainTipChange` resets one block *before* an activation height
+                // (it checks `height.next()`, matching the height the mempool verifies
+                // against). See `ChainTipChange::action`.
                 TipAction::reset_with(expected_block.clone().into())
             } else {
                 TipAction::grow_with(expected_block.clone().into())
@@ -906,12 +1031,10 @@ proptest! {
         for block in non_finalized_blocks {
             let expected_block = block.clone();
 
-            let expected_action = if expected_block.height == block::Height(1) {
-                // 1: reset by the BeforeOverwinter network upgrade
-                TipAction::reset_with(expected_block.clone().into())
-            } else {
-                TipAction::grow_with(expected_block.clone().into())
-            };
+            // The genesis block (height 0) is always finalized, and the BeforeOverwinter
+            // reset fires at height 0 (one block before its activation height of 1), so
+            // every non-finalized block (height >= 1) grows the chain.
+            let expected_action = TipAction::grow_with(expected_block.clone().into());
 
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
             let result = result_receiver.blocking_recv();

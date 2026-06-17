@@ -16,6 +16,7 @@ use super::protocol::{
 pub(crate) fn default_advertised_services() -> Vec<ZakuraServiceId> {
     vec![
         ZakuraServiceId::discovery(),
+        ZakuraServiceId::block_sync(),
         ZakuraServiceId::header_sync(),
         ZakuraServiceId::legacy_gossip(),
         ZakuraServiceId::legacy_requests(),

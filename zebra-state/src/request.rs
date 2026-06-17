@@ -846,6 +846,10 @@ pub enum Request {
         anchor: block::Hash,
         /// Contiguous headers in ascending height order.
         headers: Vec<Arc<block::Header>>,
+        /// Advisory serialized body sizes, parallel to `headers`.
+        ///
+        /// A `0` value means unknown. These hints are not consensus data.
+        body_sizes: Vec<u32>,
     },
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
@@ -1314,6 +1318,27 @@ pub enum ReadRequest {
         limit: u32,
     },
 
+    /// Returns scheduling-only body-size hints for a contiguous height range.
+    ///
+    /// Confirmed committed block sizes win over untrusted advertised header
+    /// hints. Unknown advertised sizes are returned as `None`.
+    BlockSizeHints {
+        /// First height to read.
+        from: block::Height,
+        /// Maximum number of heights to return.
+        count: u32,
+    },
+
+    /// Returns contiguous committed blocks by height, in ascending order.
+    ///
+    /// The response stops before the first height without a committed body.
+    BlocksByHeightRange {
+        /// First height to read.
+        start: block::Height,
+        /// Maximum number of blocks to return.
+        count: u32,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1482,6 +1507,8 @@ impl ReadRequest {
             ReadRequest::HeadersByHeightRange { .. } => "headers_by_height_range",
             ReadRequest::BestHeaderTip => "best_header_tip",
             ReadRequest::MissingBlockBodies { .. } => "missing_block_bodies",
+            ReadRequest::BlockSizeHints { .. } => "block_size_hints",
+            ReadRequest::BlocksByHeightRange { .. } => "blocks_by_height_range",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",

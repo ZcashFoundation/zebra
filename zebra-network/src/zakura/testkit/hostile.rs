@@ -10,9 +10,10 @@ use super::{LocalEndpointFactory, ZakuraTestNode};
 use crate::{
     zakura::{
         legacy_gossip::ZAKURA_STREAM_GOSSIP, run_native_initiator_handshake, Frame, StreamPrelude,
-        ZakuraHandshakeConfig, ZakuraLocalLimits, ZakuraPeerId, FRAME_HEADER_BYTES, P2P_V2_ALPN,
-        STREAM_PRELUDE_MAGIC, ZAKURA_CAP_HEADER_SYNC, ZAKURA_CAP_LEGACY_GOSSIP,
-        ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_HEADER_SYNC,
+        ZakuraHandshakeConfig, ZakuraLocalLimits, ZakuraPeerId, FRAME_HEADER_BYTES,
+        LEGACY_GOSSIP_VERSION, P2P_V2_ALPN, STREAM_PRELUDE_MAGIC, ZAKURA_CAP_HEADER_SYNC,
+        ZAKURA_CAP_LEGACY_GOSSIP, ZAKURA_DISCOVERY_STREAM_VERSION,
+        ZAKURA_HEADER_SYNC_STREAM_VERSION, ZAKURA_STREAM_DISCOVERY, ZAKURA_STREAM_HEADER_SYNC,
     },
     BoxError, Config,
 };
@@ -311,12 +312,21 @@ impl HostilePeer {
         let prelude = StreamPrelude {
             magic: STREAM_PRELUDE_MAGIC,
             stream_kind,
-            stream_version: 1,
+            stream_version: Self::stream_version(stream_kind),
             request_id: None,
             max_frame_bytes: self.limits.max_frame_bytes,
         };
         send.write_all(&prelude.encode()?).await?;
         Ok(())
+    }
+
+    fn stream_version(stream_kind: u16) -> u16 {
+        match stream_kind {
+            ZAKURA_STREAM_GOSSIP => LEGACY_GOSSIP_VERSION,
+            ZAKURA_STREAM_DISCOVERY => ZAKURA_DISCOVERY_STREAM_VERSION,
+            ZAKURA_STREAM_HEADER_SYNC => ZAKURA_HEADER_SYNC_STREAM_VERSION,
+            _ => 1,
+        }
     }
 
     async fn read_prelude(recv: &mut RecvStream) -> Result<StreamPrelude, BoxError> {

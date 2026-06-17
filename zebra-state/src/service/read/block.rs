@@ -25,6 +25,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_HEADER_SYNC_HEIGHT_RANGE,
     response::{AnyTx, MinedTx},
     service::{
         finalized_state::ZebraDb,
@@ -361,4 +362,40 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().block_info(hash_or_height))
         .or_else(|| db.block_info(hash_or_height))
+}
+
+/// Returns block-size hints for a contiguous height range.
+///
+/// Confirmed committed sizes from [`BlockInfo`] win over untrusted advertised
+/// header-sync hints. Advertised hints are scheduling-only data and are never
+/// consulted by verification.
+pub fn block_size_hints<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    from: Height,
+    count: u32,
+) -> Vec<(Height, Option<u32>)>
+where
+    C: AsRef<Chain>,
+{
+    let count = count.min(MAX_HEADER_SYNC_HEIGHT_RANGE);
+    let mut hints = Vec::with_capacity(
+        usize::try_from(count).expect("capped block size hint count fits in usize"),
+    );
+
+    for offset in 0..count {
+        let Some(height) = from.0.checked_add(offset).map(Height) else {
+            break;
+        };
+        let confirmed_size = chain
+            .as_ref()
+            .and_then(|chain| chain.as_ref().block_info(height.into()))
+            .or_else(|| db.block_info(height.into()))
+            .map(|info| info.size());
+        let size = confirmed_size.or_else(|| db.advertised_body_size(height));
+
+        hints.push((height, size));
+    }
+
+    hints
 }

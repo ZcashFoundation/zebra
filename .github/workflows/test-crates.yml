@@ -2,7 +2,7 @@ name: Test Crate Build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -12,7 +12,7 @@ on:
       - .github/workflows/test-crates.yml
 
   push:
-    branches: [main]
+    branches: [main, ironwood-main, evan/ironwood-qol, feat/p2p-v2]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -20,6 +20,11 @@ on:
       - .cargo/config.toml
       - "**/clippy.toml"
       - .github/workflows/test-crates.yml
+
+  # Run the full crate-build suite when a PR is queued so the merge queue
+  # validates the merged result against the latest `main`. `merge_group` ignores
+  # path filters, so this runs unconditionally on every queued entry.
+  merge_group:
 
   workflow_dispatch:
 
@@ -181,8 +186,10 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
-        # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
-        if: matrix.crate != 'zebrad'
+        # zebrad and zebra-watchdog can have a higher MSRV than the other crates since they are
+        # binaries, not libraries, so we skip the MSRV build for them. zebra-watchdog depends on
+        # sentry, which requires a newer rustc than the workspace library MSRV.
+        if: matrix.crate != 'zebrad' && matrix.crate != 'zebra-watchdog'
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets

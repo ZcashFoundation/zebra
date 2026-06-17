@@ -102,6 +102,14 @@ pub struct Config {
     ///       Zebra's last non-finalized state before it shut down.
     pub should_backup_non_finalized_state: bool,
 
+    /// Whether committed full blocks should seed the Zakura header-only store.
+    ///
+    /// This is enabled by zebrad only for the Zakura v2 path. It is skipped in
+    /// serde so the generic Zebra state config does not expose a Zakura-specific
+    /// user setting.
+    #[serde(skip)]
+    pub enable_zakura_header_seed_from_committed_blocks: bool,
+
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -393,6 +401,7 @@ impl Default for Config {
             cache_dir: default_cache_dir(),
             ephemeral: false,
             should_backup_non_finalized_state: true,
+            enable_zakura_header_seed_from_committed_blocks: false,
             delete_old_database: true,
             storage_mode: StorageMode::default(),
             debug_stop_at_height: None,

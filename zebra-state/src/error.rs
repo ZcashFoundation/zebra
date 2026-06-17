@@ -158,6 +158,15 @@ pub enum CommitHeaderRangeError {
         actual: usize,
     },
 
+    /// The request supplied a different number of body-size hints than headers.
+    #[error("header range body-size count {body_sizes} does not match header count {headers}")]
+    BodySizeCountMismatch {
+        /// Header count.
+        headers: usize,
+        /// Body-size hint count.
+        body_sizes: usize,
+    },
+
     /// The supplied anchor is not known to state.
     #[error("header range anchor {anchor} is not known")]
     UnknownAnchor {

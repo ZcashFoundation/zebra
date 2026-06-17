@@ -520,9 +520,12 @@ mod tests {
             NetworkUpgrade::Nu7.activation_height(network),
             Some(activation_height)
         );
+        // NU7 inherits the post-Blossom consensus target spacing (75s); this is the
+        // protocol block spacing and is independent of the harness `target_spacing_secs`
+        // option used to space the generated seeded-block timestamps.
         assert_eq!(
             NetworkUpgrade::target_spacing_for_height(network, activation_height).num_seconds(),
-            25
+            i64::from(crate::parameters::POST_BLOSSOM_POW_TARGET_SPACING)
         );
     }
 

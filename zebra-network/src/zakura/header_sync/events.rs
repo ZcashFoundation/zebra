@@ -253,6 +253,8 @@ pub enum HeaderSyncEvent {
         requested_count: u32,
         /// Bounded headers returned by state.
         headers: Vec<Arc<block::Header>>,
+        /// Advisory serialized body sizes, parallel to `headers`.
+        body_sizes: Vec<u32>,
     },
 }
 
@@ -277,6 +279,8 @@ pub enum HeaderSyncAction {
         start_height: block::Height,
         /// Headers to commit. This is an output payload, not reactor state.
         headers: Vec<Arc<block::Header>>,
+        /// Advisory serialized body sizes, parallel to `headers`.
+        body_sizes: Vec<u32>,
         /// Whether the range is expected to be finalized by checkpoint policy.
         finalized: bool,
     },

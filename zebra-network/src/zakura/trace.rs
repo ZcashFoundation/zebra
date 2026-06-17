@@ -1,10 +1,12 @@
 //! Structured JSONL trace helpers for Zakura P2P.
 //!
 //! `closed.punitive` is reserved in the schema until Zakura has a punitive close
-//! path and matching metric. Connection admission rejects use
-//! `rejected.admission` with a bounded `reason` label rather than one event name
-//! per rejection metric, so readers should pivot by `event` plus `reason` for
-//! those rows.
+//! path and matching metric. `closed.neutral` carries a bounded `reason` label
+//! describing the teardown cause (for example `idle_timeout`, `accept_failed`,
+//! `outbound_closed`, `bad_response`, or `cancelled`). Connection admission
+//! rejects use `rejected.admission` with a bounded `reason` label rather than
+//! one event name per rejection metric, so readers should pivot by `event` plus
+//! `reason` for those rows.
 
 use std::{
     sync::Arc,

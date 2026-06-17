@@ -1,11 +1,10 @@
 //! Opt-in Zakura dual-stack regtest e2e (lightweight, host-networked).
 //!
-//! Ignored by default, and additionally skipped in CI and when Docker is
-//! unavailable, so it never gates normal CI — the unit-test lane runs ignored
-//! tests (`--run-ignored=all`) on runners that have Docker, but this
-//! host-networked docker-compose e2e is environment sensitive and is meant for
-//! local validation only. There is no image build: each node runs the
-//! host-built `zebrad` binary bind-mounted into stock `debian:trixie-slim`.
+//! Ignored by default, and additionally skipped in CI unless
+//! `ZAKURA_REGTEST_E2E=1` is set. The unit-test workflow opts this test in as
+//! a dedicated required job so failures are isolated from ordinary unit-test
+//! output. There is no image build: each node runs the host-built `zebrad`
+//! binary bind-mounted into stock `debian:trixie-slim`.
 //!
 //! To run it locally:
 //!
@@ -13,7 +12,7 @@
 //! cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
 //! ```
 //!
-//! To force it in a CI environment, set `ZAKURA_REGTEST_E2E=1`.
+//! To force it in any CI environment, set `ZAKURA_REGTEST_E2E=1`.
 //!
 //! It shells out to `docker/zakura-regtest-e2e/run.sh`, which builds `zebrad`
 //! (debug) if needed, brings up four Regtest nodes sharing the host network — a
@@ -50,12 +49,22 @@ fn zakura_regtest_dual_stack_e2e() {
     let script =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docker/zakura-regtest-e2e/run.sh");
 
-    let status = Command::new("bash")
-        .arg(&script)
-        .status()
-        .expect("failed to spawn the Zakura regtest e2e script");
+    for (label, replace_legacy_syncer) in [("coexistence", false), ("block-sync-only", true)] {
+        let mut command = Command::new("bash");
+        command.arg(&script).env("ZAKURA_REGTEST_E2E_LABEL", label);
+        if replace_legacy_syncer {
+            command.env("ZAKURA_BLOCK_SYNC_REPLACE_LEGACY", "1");
+        }
 
-    assert!(status.success(), "Zakura regtest dual-stack e2e failed");
+        let status = command
+            .status()
+            .expect("failed to spawn the Zakura regtest e2e script");
+
+        assert!(
+            status.success(),
+            "Zakura regtest e2e failed in {label} mode"
+        );
+    }
 }
 
 fn command_succeeds(command: &mut Command) -> bool {

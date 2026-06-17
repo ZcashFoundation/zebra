@@ -15,9 +15,9 @@ use crate::{
     zakura::{
         discovery::build_discovery_handle, service_registry, spawn_header_sync_reactor,
         DiscoveryService, HeaderSyncAction, HeaderSyncFrontiers, HeaderSyncHandle,
-        HeaderSyncStartup, Service, ZakuraDiscoveryHandle, ZakuraEndpoint, ZakuraHandshakeConfig,
-        ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraPeerId, ZakuraProtocolHandler,
-        ZakuraServiceId, ZakuraSupervisorHandle, ZakuraTrace, P2P_V2_ALPN,
+        HeaderSyncStartup, Service, ZakuraBlockSyncConfig, ZakuraDiscoveryHandle, ZakuraEndpoint,
+        ZakuraHandshakeConfig, ZakuraHeaderSyncConfig, ZakuraLocalLimits, ZakuraPeerId,
+        ZakuraProtocolHandler, ZakuraServiceId, ZakuraSupervisorHandle, ZakuraTrace, P2P_V2_ALPN,
     },
     BoxError, Config,
 };
@@ -57,6 +57,7 @@ impl ZakuraTestNode {
     }
 
     /// Clone the underlying endpoint for test-only external drivers.
+    #[cfg(test)]
     pub(crate) fn endpoint(&self) -> ZakuraEndpoint {
         self.endpoint.clone()
     }
@@ -382,14 +383,22 @@ impl ZakuraTestNodeBuilder {
             None
         };
         let discovery_service = if let Some(header_sync) = header_sync.as_ref() {
-            Arc::new(DiscoveryService::with_header_sync(
+            Arc::new(DiscoveryService::with_sync_services(
                 discovery.clone(),
                 header_sync.clone(),
+                None,
             )) as Arc<dyn Service>
         } else {
             Arc::new(DiscoveryService::new(discovery.clone())) as Arc<dyn Service>
         };
-        let registry = service_registry(&supervisor, header_sync, base_service, discovery_service)?;
+        let registry = service_registry(
+            &supervisor,
+            header_sync,
+            None,
+            ZakuraBlockSyncConfig::default(),
+            base_service,
+            discovery_service,
+        )?;
         let handler = ZakuraProtocolHandler::new_with_registry_and_trace(
             supervisor.clone(),
             network.clone(),

@@ -21,8 +21,9 @@ use zebra_chain::{
 };
 
 use crate::zakura::{
-    ServiceAdmissionDecision, ServicePeerDirection, ServicePeerLimits, ServicePeerSnapshot,
-    ZakuraNetworkId, ZakuraPeerId,
+    BlockSyncStatus, ServiceAdmissionDecision, ServicePeerDirection, ServicePeerLimits,
+    ServicePeerSnapshot, ZakuraNetworkId, ZakuraPeerId, MAX_BS_BLOCKS_PER_REQUEST,
+    MAX_BS_RESPONSE_BYTES,
 };
 
 /// Native discovery stream kind.
@@ -88,6 +89,8 @@ pub const DEFAULT_LIVE_SERVICE_SUMMARY_TTL: Duration = Duration::from_secs(30);
 pub const SERVICE_ID_DISCOVERY: &str = "zakura.discovery.v1";
 /// Native header-sync service id.
 pub const SERVICE_ID_HEADER_SYNC: &str = "zakura.header_sync.v1";
+/// Native block-sync service id.
+pub const SERVICE_ID_BLOCK_SYNC: &str = "zakura.block_sync.v1";
 /// Native legacy gossip service id.
 pub const SERVICE_ID_LEGACY_GOSSIP: &str = "zakura.legacy_gossip.v1";
 /// Native legacy requests service id.
@@ -98,11 +101,8 @@ pub const SERVICE_ID_SERVICE_DISCOVERY: &str = "zakura.service_discovery.v1";
 pub const SUMMARY_TAG_HEADER_SYNC_V1: u16 = 1;
 /// Summary tag for [`DiscoveryServiceSummary`].
 pub const SUMMARY_TAG_DISCOVERY_V1: u16 = 2;
-/// Reserved summary tag for a future block-sync summary.
-///
-/// The block-sync reactor does not exist yet, so this tag is intentionally
-/// skippable and has no typed payload in this version.
-pub const SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED: u16 = 3;
+/// Summary tag for [`BlockSyncServiceSummary`].
+pub const SUMMARY_TAG_BLOCK_SYNC_V1: u16 = 3;
 
 const SIGNATURE_BYTES: usize = 64;
 const NODE_ID_BYTES: usize = 32;
@@ -138,6 +138,12 @@ impl ZakuraServiceId {
     pub fn header_sync() -> Self {
         Self::new(SERVICE_ID_HEADER_SYNC)
             .expect("built-in Zakura header-sync service id is non-empty bounded ASCII")
+    }
+
+    /// Returns the native block-sync service id.
+    pub fn block_sync() -> Self {
+        Self::new(SERVICE_ID_BLOCK_SYNC)
+            .expect("built-in Zakura block-sync service id is non-empty bounded ASCII")
     }
 
     /// Returns the native legacy gossip service id.
@@ -336,6 +342,17 @@ impl ServiceSummaryEnvelope {
         })
     }
 
+    /// Build a block-sync summary envelope.
+    pub fn block_sync(summary: &BlockSyncServiceSummary) -> Result<Self, DiscoveryWireError> {
+        let mut summary_bytes = Vec::new();
+        encode_block_sync_summary(summary, &mut summary_bytes)?;
+        Ok(Self {
+            service_id: ZakuraServiceId::block_sync(),
+            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1,
+            summary_bytes,
+        })
+    }
+
     /// Decode this envelope as a header-sync summary when its tag matches.
     pub fn decode_header_sync(
         &self,
@@ -351,6 +368,15 @@ impl ServiceSummaryEnvelope {
     pub fn decode_discovery(&self) -> Result<Option<DiscoveryServiceSummary>, DiscoveryWireError> {
         if self.summary_tag == SUMMARY_TAG_DISCOVERY_V1 {
             decode_discovery_summary(&self.summary_bytes).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Decode this envelope as a block-sync summary when its tag matches.
+    pub fn decode_block_sync(&self) -> Result<Option<BlockSyncServiceSummary>, DiscoveryWireError> {
+        if self.summary_tag == SUMMARY_TAG_BLOCK_SYNC_V1 {
+            decode_block_sync_summary(&self.summary_bytes).map(Some)
         } else {
             Ok(None)
         }
@@ -432,6 +458,70 @@ impl DiscoveryServiceSummary {
             expected_disconnect_after_exchange,
         }
     }
+}
+
+/// Block-sync live summary used only as a dial/admission hint.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct BlockSyncServiceSummary {
+    /// Earliest committed body height this node can serve.
+    pub servable_low: block::Height,
+    /// Highest committed body height this node can serve.
+    pub servable_high: block::Height,
+    /// Hash of [`servable_high`](Self::servable_high).
+    pub tip_hash: block::Hash,
+    /// Free serving slots for inbound `GetBlocks` requests.
+    pub free_slots: u16,
+    /// Maximum blocks this node will return in one block-sync response.
+    pub max_blocks_per_response: u32,
+    /// Maximum encoded bytes this node will return in one block-sync response.
+    pub max_response_bytes: u32,
+}
+
+impl BlockSyncServiceSummary {
+    /// Build a summary from the block-sync reactor's cheap local status and peer snapshots.
+    pub fn from_status_and_snapshot(status: BlockSyncStatus, peers: ServicePeerSnapshot) -> Self {
+        Self {
+            servable_low: status.servable_low,
+            servable_high: status.servable_high,
+            tip_hash: status.tip_hash,
+            free_slots: saturating_u16(peers.inbound_slots_free),
+            max_blocks_per_response: status.max_blocks_per_response,
+            max_response_bytes: status.max_response_bytes,
+        }
+    }
+
+    /// Returns true if this summary can serve every height in `gap`.
+    pub fn covers_gap(&self, gap: &[block::Height]) -> bool {
+        self.gap_coverage(gap) == BlockSyncGapCoverage::Whole
+    }
+
+    /// Returns how much of `gap` this summary can serve.
+    fn gap_coverage(&self, gap: &[block::Height]) -> BlockSyncGapCoverage {
+        if self.free_slots == 0 {
+            return BlockSyncGapCoverage::None;
+        }
+
+        let Some(first) = gap.iter().min().copied() else {
+            return BlockSyncGapCoverage::None;
+        };
+        let Some(last) = gap.iter().max().copied() else {
+            return BlockSyncGapCoverage::None;
+        };
+        if self.servable_low <= first && last <= self.servable_high {
+            BlockSyncGapCoverage::Whole
+        } else if self.servable_low <= first && first <= self.servable_high {
+            BlockSyncGapCoverage::LowPrefix
+        } else {
+            BlockSyncGapCoverage::None
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum BlockSyncGapCoverage {
+    None,
+    LowPrefix,
+    Whole,
 }
 
 /// Native discovery protocol messages.
@@ -823,7 +913,7 @@ pub struct ZakuraServiceCandidates {
 }
 
 /// Header-sync candidate selection hints owned by the header-sync reactor.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZakuraHeaderSyncCandidateState {
     /// Lowest header height that would make a new peer useful.
     pub target_height: block::Height,
@@ -831,6 +921,25 @@ pub struct ZakuraHeaderSyncCandidateState {
     pub admitted_node_ids: Vec<NodeId>,
     /// Peers in local, non-punitive advisory backoff after failing to confirm usefulness.
     pub backed_off_node_ids: Vec<NodeId>,
+}
+
+impl Default for ZakuraHeaderSyncCandidateState {
+    fn default() -> Self {
+        Self {
+            target_height: block::Height::MIN,
+            admitted_node_ids: Vec::new(),
+            backed_off_node_ids: Vec::new(),
+        }
+    }
+}
+
+/// Block-sync candidate selection hints owned by the block-sync reactor.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ZakuraBlockSyncCandidateState {
+    /// Header-known body heights currently missing from local state.
+    pub missing_block_bodies: Vec<block::Height>,
+    /// Peers already admitted by block sync; advisory "full" summaries do not remove them.
+    pub admitted_node_ids: Vec<NodeId>,
 }
 
 /// The result of importing one signed discovery record.
@@ -1135,7 +1244,25 @@ impl ZakuraActiveServiceEntry {
             }
             match summary.summary {
                 ZakuraLiveServiceSummary::HeaderSync(header_sync) => Some(header_sync),
-                ZakuraLiveServiceSummary::Discovery(_) | ZakuraLiveServiceSummary::Unknown => None,
+                ZakuraLiveServiceSummary::BlockSync(_)
+                | ZakuraLiveServiceSummary::Discovery(_)
+                | ZakuraLiveServiceSummary::Unknown => None,
+            }
+        })
+    }
+
+    fn fresh_block_sync_summary(&self, now_unix_secs: u64) -> Option<BlockSyncServiceSummary> {
+        self.live_summaries.iter().find_map(|summary| {
+            if summary.service_id != ZakuraServiceId::block_sync()
+                || summary.expires_at_unix_secs <= now_unix_secs
+            {
+                return None;
+            }
+            match summary.summary {
+                ZakuraLiveServiceSummary::BlockSync(block_sync) => Some(block_sync),
+                ZakuraLiveServiceSummary::HeaderSync(_)
+                | ZakuraLiveServiceSummary::Discovery(_)
+                | ZakuraLiveServiceSummary::Unknown => None,
             }
         })
     }
@@ -1166,6 +1293,8 @@ impl ZakuraCachedLiveServiceSummary {
             ZakuraLiveServiceSummary::HeaderSync(summary)
         } else if let Some(summary) = envelope.decode_discovery()? {
             ZakuraLiveServiceSummary::Discovery(summary)
+        } else if let Some(summary) = envelope.decode_block_sync()? {
+            ZakuraLiveServiceSummary::BlockSync(summary)
         } else {
             ZakuraLiveServiceSummary::Unknown
         };
@@ -1190,6 +1319,12 @@ impl ZakuraCachedLiveServiceSummary {
             ZakuraLiveServiceSummary::Discovery(summary) => {
                 u32::from(summary.peer_exchange_slots_free)
             }
+            ZakuraLiveServiceSummary::BlockSync(summary) => u32::from(summary.free_slots)
+                .saturating_add(
+                    summary
+                        .max_blocks_per_response
+                        .min(MAX_BS_BLOCKS_PER_REQUEST),
+                ),
             ZakuraLiveServiceSummary::Unknown => 1,
         }
     }
@@ -1202,6 +1337,8 @@ pub enum ZakuraLiveServiceSummary {
     HeaderSync(HeaderSyncServiceSummary),
     /// Discovery exchange hint.
     Discovery(DiscoveryServiceSummary),
+    /// Block-sync dial/admission hint.
+    BlockSync(BlockSyncServiceSummary),
     /// Unknown or reserved summary tag, kept only as a freshness hint.
     Unknown,
 }
@@ -1863,6 +2000,114 @@ impl ZakuraDiscoveryHandle {
                 DialCandidateExclusions {
                     connected_node_ids: &connected_node_ids,
                     in_flight_node_ids: &excluded_node_ids,
+                },
+                now,
+                (dial_backoff_base, dial_backoff_max),
+                &mut rng,
+            );
+        }
+
+        ZakuraServiceCandidates {
+            connected,
+            discovered,
+            used_fallback,
+        }
+    }
+
+    /// Returns block-sync candidates filtered and ordered by first-party advisory summaries.
+    ///
+    /// The returned peers are still advisory only: block-sync `Status`, body hash validation, and
+    /// consensus verification remain authoritative after admission.
+    pub async fn block_sync_candidates(
+        &self,
+        block_sync: &ZakuraBlockSyncCandidateState,
+        allow_fallback: bool,
+        in_flight_node_ids: &[NodeId],
+    ) -> ZakuraServiceCandidates {
+        let connected = self.connected.borrow().clone();
+        let connected_node_ids = connected_peer_node_ids(&connected);
+        let (limit, dial_backoff_base, dial_backoff_max, book_limits) = {
+            let inner = self.inner.lock().await;
+            (
+                discovery_dial_slot_limit(
+                    connected.len(),
+                    in_flight_node_ids.len(),
+                    inner.config.max_zakura_connections,
+                    inner.config.discovery_connection_headroom,
+                    inner.config.max_concurrent_discovery_dials,
+                ),
+                inner.config.dial_backoff_base,
+                inner.config.dial_backoff_max,
+                inner.config.book_limits,
+            )
+        };
+
+        let now = current_unix_secs();
+        let mut inner = self.inner.lock().await;
+        inner.sync_active_services(&connected_node_ids, now);
+
+        let admitted_node_ids: HashSet<_> = block_sync.admitted_node_ids.iter().copied().collect();
+        let block_sync_service = ZakuraServiceId::block_sync();
+        let mut connected_entries: Vec<_> = inner
+            .active_services
+            .iter()
+            .filter_map(|(node_id, entry)| {
+                if !connected_node_ids.contains(node_id)
+                    || !entry.services.contains(&block_sync_service)
+                {
+                    return None;
+                }
+
+                if block_sync.missing_block_bodies.is_empty() {
+                    return Some((
+                        *node_id,
+                        entry.live_summary_preference(&block_sync_service, now),
+                        node_id_sort_key(node_id),
+                    ));
+                }
+
+                let is_admitted = admitted_node_ids.contains(node_id);
+                let summary = entry.fresh_block_sync_summary(now);
+                if summary.is_some_and(|summary| summary.free_slots == 0 && !is_admitted) {
+                    return None;
+                }
+
+                Some((
+                    *node_id,
+                    block_sync_candidate_preference(summary, &block_sync.missing_block_bodies),
+                    node_id_sort_key(node_id),
+                ))
+            })
+            .collect();
+        connected_entries
+            .sort_by_key(|(_, preference, sort_key)| (Reverse(*preference), *sort_key));
+        let connected: Vec<NodeId> = connected_entries
+            .into_iter()
+            .map(|(node_id, _, _)| node_id)
+            .collect();
+
+        let wanted_services =
+            bounded_services(std::slice::from_ref(&block_sync_service), book_limits);
+        let mut rng = rand::thread_rng();
+        let mut discovered = inner.book.dial_candidates(
+            limit,
+            &wanted_services,
+            DialCandidateExclusions {
+                connected_node_ids: &connected_node_ids,
+                in_flight_node_ids,
+            },
+            now,
+            (dial_backoff_base, dial_backoff_max),
+            &mut rng,
+        );
+        let used_fallback = allow_fallback && connected.is_empty() && discovered.is_empty();
+        if used_fallback {
+            discovered = inner.book.dial_candidates(
+                limit,
+                &[],
+                DialCandidateExclusions {
+                    connected_node_ids: &connected_node_ids,
+                    in_flight_node_ids,
                 },
                 now,
                 (dial_backoff_base, dial_backoff_max),
@@ -2807,6 +3052,29 @@ fn header_sync_candidate_preference(
         .saturating_add(useful_height_delta)
 }
 
+fn block_sync_candidate_preference(
+    summary: Option<BlockSyncServiceSummary>,
+    missing_block_bodies: &[block::Height],
+) -> u32 {
+    let Some(summary) = summary else {
+        return 0;
+    };
+
+    let coverage_bonus = match summary.gap_coverage(missing_block_bodies) {
+        BlockSyncGapCoverage::Whole => 1_000_000u32,
+        BlockSyncGapCoverage::LowPrefix => 500_000u32,
+        BlockSyncGapCoverage::None => return 0,
+    };
+
+    coverage_bonus
+        .saturating_add(u32::from(summary.free_slots))
+        .saturating_add(
+            summary
+                .max_blocks_per_response
+                .min(MAX_BS_BLOCKS_PER_REQUEST),
+        )
+}
+
 fn bounded_services(
     services: &[ZakuraServiceId],
     limits: ZakuraDiscoveryBookLimits,
@@ -3145,7 +3413,7 @@ fn validate_summary_service_binding(
     let expected = match summary_tag {
         SUMMARY_TAG_HEADER_SYNC_V1 => Some(ZakuraServiceId::header_sync()),
         SUMMARY_TAG_DISCOVERY_V1 => Some(ZakuraServiceId::discovery()),
-        SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED => None,
+        SUMMARY_TAG_BLOCK_SYNC_V1 => Some(ZakuraServiceId::block_sync()),
         _ => None,
     };
 
@@ -3173,7 +3441,9 @@ fn validate_known_summary_payload(
         SUMMARY_TAG_DISCOVERY_V1 => {
             decode_discovery_summary(summary_bytes)?;
         }
-        SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED => {}
+        SUMMARY_TAG_BLOCK_SYNC_V1 => {
+            decode_block_sync_summary(summary_bytes)?;
+        }
         _ => {}
     }
     Ok(())
@@ -3712,6 +3982,71 @@ fn decode_discovery_summary(bytes: &[u8]) -> Result<DiscoveryServiceSummary, Dis
     })
 }
 
+fn encode_block_sync_summary(
+    summary: &BlockSyncServiceSummary,
+    writer: &mut impl Write,
+) -> Result<(), DiscoveryWireError> {
+    validate_block_sync_summary(summary)?;
+    write_height(writer, summary.servable_low)?;
+    write_height(writer, summary.servable_high)?;
+    writer.write_all(&summary.tip_hash.0)?;
+    writer.write_u16::<LittleEndian>(summary.free_slots)?;
+    writer.write_u32::<LittleEndian>(summary.max_blocks_per_response)?;
+    writer.write_u32::<LittleEndian>(summary.max_response_bytes)?;
+    Ok(())
+}
+
+fn decode_block_sync_summary(bytes: &[u8]) -> Result<BlockSyncServiceSummary, DiscoveryWireError> {
+    if bytes.len() > MAX_SERVICE_SUMMARY_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: bytes.len(),
+            max: MAX_SERVICE_SUMMARY_BYTES,
+        });
+    }
+    let mut reader = Cursor::new(bytes);
+    let servable_low = read_height(&mut reader)?;
+    let servable_high = read_height(&mut reader)?;
+    let mut tip_hash = [0u8; 32];
+    reader.read_exact(&mut tip_hash)?;
+    let free_slots = reader.read_u16::<LittleEndian>()?;
+    let max_blocks_per_response = reader.read_u32::<LittleEndian>()?;
+    let max_response_bytes = reader.read_u32::<LittleEndian>()?;
+    reject_trailing(bytes, &reader)?;
+    let summary = BlockSyncServiceSummary {
+        servable_low,
+        servable_high,
+        tip_hash: block::Hash(tip_hash),
+        free_slots,
+        max_blocks_per_response,
+        max_response_bytes,
+    };
+    validate_block_sync_summary(&summary)?;
+    Ok(summary)
+}
+
+fn validate_block_sync_summary(
+    summary: &BlockSyncServiceSummary,
+) -> Result<(), DiscoveryWireError> {
+    if summary.servable_low > summary.servable_high {
+        return Err(DiscoveryWireError::InvalidProtocolRange);
+    }
+    if summary.max_blocks_per_response == 0
+        || summary.max_blocks_per_response > MAX_BS_BLOCKS_PER_REQUEST
+    {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: usize::try_from(summary.max_blocks_per_response).unwrap_or(usize::MAX),
+            max: usize::try_from(MAX_BS_BLOCKS_PER_REQUEST).unwrap_or(usize::MAX),
+        });
+    }
+    if summary.max_response_bytes == 0 || summary.max_response_bytes > MAX_BS_RESPONSE_BYTES {
+        return Err(DiscoveryWireError::OversizedPayload {
+            actual: usize::try_from(summary.max_response_bytes).unwrap_or(usize::MAX),
+            max: usize::try_from(MAX_BS_RESPONSE_BYTES).unwrap_or(usize::MAX),
+        });
+    }
+    Ok(())
+}
+
 fn write_height(writer: &mut impl Write, height: block::Height) -> Result<(), DiscoveryWireError> {
     writer.write_u32::<LittleEndian>(height.0)?;
     Ok(())
@@ -4039,6 +4374,28 @@ mod tests {
         }
     }
 
+    fn block_sync_summary() -> BlockSyncServiceSummary {
+        BlockSyncServiceSummary {
+            servable_low: block::Height(10),
+            servable_high: block::Height(42),
+            tip_hash: block::Hash([9; 32]),
+            free_slots: 3,
+            max_blocks_per_response: 16,
+            max_response_bytes: MAX_BS_RESPONSE_BYTES,
+        }
+    }
+
+    fn block_sync_status() -> BlockSyncStatus {
+        BlockSyncStatus {
+            servable_low: block::Height(10),
+            servable_high: block::Height(42),
+            tip_hash: block::Hash([9; 32]),
+            max_blocks_per_response: 16,
+            max_inflight_requests: 4,
+            max_response_bytes: MAX_BS_RESPONSE_BYTES,
+        }
+    }
+
     fn services_message(summaries: Vec<ServiceSummaryEnvelope>) -> DiscoveryMessage {
         DiscoveryMessage::Services(Services {
             node_id: secret_key().public(),
@@ -4077,6 +4434,27 @@ mod tests {
             ZakuraServiceId::new("a".repeat(MAX_ZAKURA_SERVICE_ID_BYTES + 1)),
             Err(DiscoveryWireError::OversizedPayload { .. })
         ));
+    }
+
+    #[test]
+    fn block_sync_summary_uses_live_peer_slots() {
+        let limits = ServicePeerLimits {
+            max_inbound_peers: 2,
+            ..ServicePeerLimits::default()
+        };
+        let status = block_sync_status();
+
+        let open = BlockSyncServiceSummary::from_status_and_snapshot(
+            status,
+            ServicePeerSnapshot::new(1, 0, limits),
+        );
+        assert_eq!(open.free_slots, 1);
+
+        let full = BlockSyncServiceSummary::from_status_and_snapshot(
+            status,
+            ServicePeerSnapshot::new(2, 0, limits),
+        );
+        assert_eq!(full.free_slots, 0);
     }
 
     #[test]
@@ -4122,6 +4500,8 @@ mod tests {
             ServiceSummaryEnvelope::header_sync(&header_summary()).expect("summary encodes");
         let discovery_envelope =
             ServiceSummaryEnvelope::discovery(&discovery_summary()).expect("summary encodes");
+        let block_envelope =
+            ServiceSummaryEnvelope::block_sync(&block_sync_summary()).expect("summary encodes");
         let messages = vec![
             DiscoveryMessage::Hello {
                 record: record.clone(),
@@ -4137,7 +4517,7 @@ mod tests {
             DiscoveryMessage::GetServices(GetServices {
                 wanted_services: services,
             }),
-            services_message(vec![header_envelope, discovery_envelope]),
+            services_message(vec![header_envelope, discovery_envelope, block_envelope]),
         ];
 
         for message in messages {
@@ -4150,10 +4530,13 @@ mod tests {
     fn service_summary_envelopes_roundtrip_and_unknown_tags_are_skipped() {
         let header = header_summary();
         let discovery = discovery_summary();
+        let block = block_sync_summary();
         let header_envelope =
             ServiceSummaryEnvelope::header_sync(&header).expect("header summary encodes");
         let discovery_envelope =
             ServiceSummaryEnvelope::discovery(&discovery).expect("discovery summary encodes");
+        let block_envelope =
+            ServiceSummaryEnvelope::block_sync(&block).expect("block summary encodes");
         let unknown_envelope = ServiceSummaryEnvelope {
             service_id: service(99),
             summary_tag: 999,
@@ -4165,11 +4548,13 @@ mod tests {
             discovery_envelope.decode_discovery().unwrap(),
             Some(discovery)
         );
+        assert_eq!(block_envelope.decode_block_sync().unwrap(), Some(block));
 
         let message = services_message(vec![
             unknown_envelope.clone(),
             header_envelope.clone(),
             discovery_envelope.clone(),
+            block_envelope.clone(),
         ]);
         let decoded = DiscoveryMessage::decode(&message.encode().expect("message encodes"))
             .expect("message decodes");
@@ -4186,10 +4571,14 @@ mod tests {
             services.summaries[2].decode_discovery().unwrap(),
             Some(discovery)
         );
+        assert_eq!(
+            services.summaries[3].decode_block_sync().unwrap(),
+            Some(block)
+        );
     }
 
     #[test]
-    fn service_summary_decode_rejects_lying_and_truncated_lengths() {
+    fn service_summary_decode_rejects_lying_truncated_and_oversized_lengths() {
         let node_id = secret_key().public();
         let mut lying = vec![MSG_DISCOVERY_SERVICES];
         lying.write_all(node_id.as_bytes()).unwrap();
@@ -4217,6 +4606,39 @@ mod tests {
         truncated_known.write_u8(0).unwrap();
 
         assert!(DiscoveryMessage::decode(&truncated_known).is_err());
+
+        let mut truncated_block = vec![MSG_DISCOVERY_SERVICES];
+        truncated_block.write_all(node_id.as_bytes()).unwrap();
+        truncated_block.write_u64::<LittleEndian>(NOW + 30).unwrap();
+        truncated_block.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&ZakuraServiceId::block_sync(), &mut truncated_block).unwrap();
+        truncated_block
+            .write_u16::<LittleEndian>(SUMMARY_TAG_BLOCK_SYNC_V1)
+            .unwrap();
+        truncated_block.write_u16::<LittleEndian>(8).unwrap();
+        write_height(&mut truncated_block, block::Height(10)).unwrap();
+        write_height(&mut truncated_block, block::Height(42)).unwrap();
+
+        assert!(DiscoveryMessage::decode(&truncated_block).is_err());
+
+        let mut oversized = vec![MSG_DISCOVERY_SERVICES];
+        oversized.write_all(node_id.as_bytes()).unwrap();
+        oversized.write_u64::<LittleEndian>(NOW + 30).unwrap();
+        oversized.write_u16::<LittleEndian>(1).unwrap();
+        encode_service_id(&ZakuraServiceId::block_sync(), &mut oversized).unwrap();
+        oversized
+            .write_u16::<LittleEndian>(SUMMARY_TAG_BLOCK_SYNC_V1)
+            .unwrap();
+        oversized
+            .write_u16::<LittleEndian>(
+                u16::try_from(MAX_SERVICE_SUMMARY_BYTES + 1).expect("test length fits"),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            DiscoveryMessage::decode(&oversized),
+            Err(DiscoveryWireError::OversizedPayload { .. })
+        ));
     }
 
     #[test]
@@ -4248,6 +4670,15 @@ mod tests {
 
         assert!(matches!(
             DiscoveryMessage::decode(&encoded),
+            Err(DiscoveryWireError::TrailingBytes)
+        ));
+
+        let mut block_envelope =
+            ServiceSummaryEnvelope::block_sync(&block_sync_summary()).expect("summary encodes");
+        block_envelope.summary_bytes.push(0);
+
+        assert!(matches!(
+            services_message(vec![block_envelope]).encode(),
             Err(DiscoveryWireError::TrailingBytes)
         ));
     }
@@ -4527,12 +4958,23 @@ mod tests {
             })
         ));
 
-        let reserved = ServiceSummaryEnvelope {
-            service_id: service(42),
-            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
-            summary_bytes: vec![1, 2, 3],
+        let mismatched_block = ServiceSummaryEnvelope {
+            service_id: ZakuraServiceId::header_sync(),
+            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1,
+            summary_bytes: {
+                let mut bytes = Vec::new();
+                encode_block_sync_summary(&block_sync_summary(), &mut bytes)
+                    .expect("test block summary encodes");
+                bytes
+            },
         };
-        assert!(services_message(vec![reserved]).encode().is_ok());
+        assert!(matches!(
+            services_message(vec![mismatched_block]).encode(),
+            Err(DiscoveryWireError::MismatchedSummaryService {
+                summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -6240,6 +6682,254 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn block_sync_service_candidates_prefer_covering_free_slot_summary() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let now = current_unix_secs();
+        let no_summary = runtime_record_with(1, ZakuraServiceId::block_sync(), test_addr(1));
+        let covering = runtime_record_with(2, ZakuraServiceId::block_sync(), test_addr(2));
+        let prefix = runtime_record_with(3, ZakuraServiceId::block_sync(), test_addr(3));
+        let full = runtime_record_with(4, ZakuraServiceId::block_sync(), test_addr(4));
+        let not_block_sync = runtime_record_with(5, ZakuraServiceId::header_sync(), test_addr(5));
+        let no_summary_id = no_summary.body.node_id;
+        let covering_id = covering.body.node_id;
+        let prefix_id = prefix.body.node_id;
+        let full_id = full.body.node_id;
+        let not_block_sync_id = not_block_sync.body.node_id;
+        connected_tx.send_replace(vec![
+            peer_id_for(no_summary_id),
+            peer_id_for(covering_id),
+            peer_id_for(prefix_id),
+            peer_id_for(full_id),
+            peer_id_for(not_block_sync_id),
+        ]);
+
+        for record in [no_summary, covering, prefix, full, not_block_sync] {
+            let node_id = record.body.node_id;
+            handle
+                .import_connected_peer_record(record, node_id)
+                .await
+                .expect("connected record imports");
+        }
+
+        let mut covering_summary = block_sync_summary();
+        covering_summary.servable_low = block::Height(10);
+        covering_summary.servable_high = block::Height(20);
+        covering_summary.free_slots = 2;
+        let mut prefix_summary = covering_summary;
+        prefix_summary.servable_high = block::Height(12);
+        prefix_summary.free_slots = 4;
+        let mut full_summary = covering_summary;
+        full_summary.free_slots = 0;
+        for (node_id, summary) in [
+            (covering_id, covering_summary),
+            (prefix_id, prefix_summary),
+            (full_id, full_summary),
+        ] {
+            handle
+                .import_connected_peer_services_at(
+                    first_party_services(
+                        node_id,
+                        now + 30,
+                        vec![ServiceSummaryEnvelope::block_sync(&summary)
+                            .expect("test block summary encodes")],
+                    ),
+                    node_id,
+                    now,
+                )
+                .await
+                .expect("first-party block summary imports");
+        }
+
+        let generic = handle
+            .service_candidates(&ZakuraServiceId::block_sync(), false, &[])
+            .await;
+        assert!(generic.connected.contains(&covering_id));
+        assert!(generic.connected.contains(&prefix_id));
+        assert!(generic.connected.contains(&full_id));
+        assert!(generic.connected.contains(&no_summary_id));
+        assert!(!generic.connected.contains(&not_block_sync_id));
+
+        let candidates = handle
+            .block_sync_candidates(
+                &ZakuraBlockSyncCandidateState {
+                    missing_block_bodies: vec![block::Height(10), block::Height(20)],
+                    ..ZakuraBlockSyncCandidateState::default()
+                },
+                false,
+                &[],
+            )
+            .await;
+
+        assert_eq!(candidates.connected[0], covering_id);
+        let prefix_position = candidates
+            .connected
+            .iter()
+            .position(|node_id| node_id == &prefix_id)
+            .expect("prefix-covering peer remains a candidate");
+        let no_summary_position = candidates
+            .connected
+            .iter()
+            .position(|node_id| node_id == &no_summary_id)
+            .expect("no-summary peer remains a candidate");
+        assert!(prefix_position < no_summary_position);
+        assert!(candidates.connected.contains(&no_summary_id));
+        assert!(!candidates.connected.contains(&full_id));
+        assert!(!candidates.connected.contains(&not_block_sync_id));
+
+        let candidates = handle
+            .block_sync_candidates(
+                &ZakuraBlockSyncCandidateState {
+                    missing_block_bodies: vec![block::Height(10), block::Height(20)],
+                    admitted_node_ids: vec![full_id],
+                },
+                false,
+                &[],
+            )
+            .await;
+
+        assert!(candidates.connected.contains(&full_id));
+    }
+
+    #[tokio::test]
+    async fn first_party_block_sync_summary_only_imports_from_authenticated_peer() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let peer_node_id = secret_key().public();
+        let claimed_node_id = secret_key().public();
+        let now = current_unix_secs();
+        connected_tx.send_replace(vec![peer_id_for(peer_node_id)]);
+
+        let error = handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    claimed_node_id,
+                    now + 30,
+                    vec![ServiceSummaryEnvelope::block_sync(&block_sync_summary())
+                        .expect("test block summary encodes")],
+                ),
+                peer_node_id,
+                now,
+            )
+            .await
+            .expect_err("mismatched first-party block summary is rejected");
+
+        assert!(matches!(
+            error,
+            DiscoveryWireError::MismatchedNodeId {
+                field: "services node id"
+            }
+        ));
+        assert_eq!(
+            handle.live_service_summaries_at(peer_node_id, now).await,
+            None
+        );
+        assert_eq!(
+            handle.live_service_summaries_at(claimed_node_id, now).await,
+            None
+        );
+
+        let record = runtime_record_with(10, ZakuraServiceId::block_sync(), test_addr(10));
+        let node_id = record.body.node_id;
+        let message = DiscoveryMessage::Peers {
+            records: vec![record],
+        };
+        let encoded = message.encode().expect("test peers response encodes");
+        let DiscoveryMessage::Peers { records } =
+            DiscoveryMessage::decode(&encoded).expect("test peers response decodes")
+        else {
+            panic!("PEERS response decoded as a different message");
+        };
+
+        handle.import_peer_records(records, None).await;
+        connected_tx.send_replace(vec![peer_id_for(peer_node_id), peer_id_for(node_id)]);
+
+        assert_eq!(handle.live_service_summaries_at(node_id, now).await, None);
+        assert_eq!(handle.active_services(node_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn block_sync_summary_mismatch_changes_selection_without_punitive_state() {
+        let (connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handle = discovery_handle_with_connected(connected_rx);
+        let now = current_unix_secs();
+        let peer = runtime_record_with(1, ZakuraServiceId::block_sync(), test_addr(1));
+        let covering_peer = runtime_record_with(2, ZakuraServiceId::block_sync(), test_addr(2));
+        let peer_id = peer.body.node_id;
+        let covering_peer_id = covering_peer.body.node_id;
+        connected_tx.send_replace(vec![peer_id_for(peer_id), peer_id_for(covering_peer_id)]);
+        for record in [peer, covering_peer] {
+            let node_id = record.body.node_id;
+            handle
+                .import_connected_peer_record(record, node_id)
+                .await
+                .expect("connected record imports");
+        }
+
+        let mut summary = block_sync_summary();
+        summary.servable_low = block::Height(10);
+        summary.servable_high = block::Height(20);
+        summary.free_slots = 3;
+        let mut covering_summary = summary;
+        covering_summary.free_slots = 1;
+        for (node_id, summary) in [(peer_id, summary), (covering_peer_id, covering_summary)] {
+            handle
+                .import_connected_peer_services_at(
+                    first_party_services(
+                        node_id,
+                        now + 30,
+                        vec![ServiceSummaryEnvelope::block_sync(&summary)
+                            .expect("test block summary encodes")],
+                    ),
+                    node_id,
+                    now,
+                )
+                .await
+                .expect("first-party block summary imports");
+        }
+
+        let state = ZakuraBlockSyncCandidateState {
+            missing_block_bodies: vec![block::Height(10), block::Height(20)],
+            ..ZakuraBlockSyncCandidateState::default()
+        };
+        assert_eq!(
+            handle
+                .block_sync_candidates(&state, false, &[])
+                .await
+                .connected
+                .first(),
+            Some(&peer_id)
+        );
+
+        summary.servable_high = block::Height(11);
+        handle
+            .import_connected_peer_services_at(
+                first_party_services(
+                    peer_id,
+                    now + 31,
+                    vec![ServiceSummaryEnvelope::block_sync(&summary)
+                        .expect("test block summary encodes")],
+                ),
+                peer_id,
+                now + 1,
+            )
+            .await
+            .expect("corrected first-party block summary imports");
+
+        let candidates = handle.block_sync_candidates(&state, false, &[]).await;
+        assert_eq!(candidates.connected.first(), Some(&covering_peer_id));
+        assert!(candidates.connected.contains(&peer_id));
+        let cached = handle
+            .live_service_summaries_at(peer_id, now + 1)
+            .await
+            .expect("live summary remains cached");
+        assert_eq!(
+            cached[0].summary,
+            ZakuraLiveServiceSummary::BlockSync(summary)
+        );
+    }
+
+    #[tokio::test]
     async fn live_summaries_expire_independently_of_signed_records() {
         let (connected_tx, connected_rx) = watch::channel(Vec::new());
         let handle = discovery_handle_with_connected(connected_rx);
@@ -6310,7 +7000,7 @@ mod tests {
                         now + 30,
                         vec![ServiceSummaryEnvelope {
                             service_id: service.clone(),
-                            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
+                            summary_tag: 999,
                             summary_bytes: vec![1, 2, 3],
                         }],
                     ),
@@ -6344,7 +7034,7 @@ mod tests {
                         now,
                         vec![ServiceSummaryEnvelope {
                             service_id: service.clone(),
-                            summary_tag: SUMMARY_TAG_BLOCK_SYNC_V1_RESERVED,
+                            summary_tag: 999,
                             summary_bytes: vec![1, 2, 3],
                         }],
                     ),

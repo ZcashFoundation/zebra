@@ -30,6 +30,7 @@ expression: cf_names
   "tx_loc_by_transparent_addr_loc",
   "utxo_by_out_loc",
   "utxo_loc_by_transparent_addr_loc",
+  "zakura_header_body_size_by_height",
   "zakura_header_by_height",
   "zakura_header_hash_by_height",
   "zakura_header_height_by_hash",

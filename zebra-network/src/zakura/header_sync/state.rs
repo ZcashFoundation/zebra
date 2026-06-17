@@ -168,6 +168,7 @@ pub(super) struct PeerHeaderState {
     pub(super) session: HeaderSyncPeerSession,
     pub(super) direction: ServicePeerDirection,
     pub(super) advertised_tip: block::Height,
+    pub(super) advertised_hash: block::Hash,
     pub(super) anchor: block::Height,
     pub(super) max_headers_per_response: u32,
     pub(super) max_inflight_requests: u16,
@@ -184,7 +185,7 @@ pub(super) struct PeerHeaderState {
 impl PeerHeaderState {
     pub(super) fn new(
         session: HeaderSyncPeerSession,
-        anchor: block::Height,
+        anchor: (block::Height, block::Hash),
         local_range: u32,
         local_inflight: u16,
         status_refresh_interval: Duration,
@@ -194,8 +195,9 @@ impl PeerHeaderState {
         Self {
             direction: session.direction(),
             session,
-            advertised_tip: anchor,
-            anchor,
+            advertised_tip: anchor.0,
+            advertised_hash: anchor.1,
+            anchor: anchor.0,
             max_headers_per_response: clamp_advertised_range(local_range),
             max_inflight_requests: local_inflight.clamp(1, LOCAL_MAX_HS_INFLIGHT_PER_PEER),
             received_status: false,

@@ -214,6 +214,18 @@ fn p2p_v2_unknown_future_config_fields_are_rejected() {
         header_sync.to_string().contains("unknown field"),
         "unexpected error for unknown header-sync field: {header_sync}",
     );
+
+    let block_sync = toml::from_str::<Config>(
+        r#"
+        [zakura.block_sync]
+        future_field = true
+        "#,
+    )
+    .expect_err("deny_unknown_fields rejects unknown block-sync fields");
+    assert!(
+        block_sync.to_string().contains("unknown field"),
+        "unexpected error for unknown block-sync field: {block_sync}",
+    );
 }
 
 #[test]
@@ -237,6 +249,11 @@ fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
         max_headers_per_response = 333
         max_inflight_requests = 9
         status_refresh_interval = "45s"
+
+        [zakura.block_sync]
+        replace_legacy_syncer = true
+        max_blocks_per_response = 5
+        status_refresh_interval = "12s"
         "#,
     )
     .unwrap();
@@ -252,6 +269,10 @@ fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
     assert!(serialized.contains("max_headers_per_response = 333"));
     assert!(serialized.contains("max_inflight_requests = 9"));
     assert!(serialized.contains("status_refresh_interval = \"45s\""));
+    assert!(serialized.contains("[zakura.block_sync]"));
+    assert!(serialized.contains("replace_legacy_syncer = true"));
+    assert!(serialized.contains("max_blocks_per_response = 5"));
+    assert!(serialized.contains("status_refresh_interval = \"12s\""));
     assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), config);
 }
 

@@ -21,15 +21,15 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::zakura::{
-    BoxRunFuture, Frame, FramedRecv, FramedSend, HeaderSyncEvent, HeaderSyncHandle,
-    OrderedSendError, Peer, PeerStreamSession, Service, ServiceAdmissionDecision,
+    BlockSyncHandle, BoxRunFuture, Frame, FramedRecv, FramedSend, HeaderSyncEvent,
+    HeaderSyncHandle, OrderedSendError, Peer, PeerStreamSession, Service, ServiceAdmissionDecision,
     ServicePeerDirection, Sink, SinkReject, Stream, StreamMode, ZakuraPeerId,
     LOCAL_MAX_CONTROL_FRAME_BYTES, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
 };
 
 use super::protocol::{
-    DiscoveryBookError, DiscoveryMessage, DiscoveryRecordError, GetServices,
-    HeaderSyncServiceSummary, ServiceSummaryEnvelope, Services, ZakuraDiscoveryHandle,
+    BlockSyncServiceSummary, DiscoveryBookError, DiscoveryMessage, DiscoveryRecordError,
+    GetServices, HeaderSyncServiceSummary, ServiceSummaryEnvelope, Services, ZakuraDiscoveryHandle,
     ZakuraNodeRecord, ZakuraServiceId, MAX_DISCOVERY_RECORDS_PER_RESPONSE,
     ZAKURA_DISCOVERY_STREAM_VERSION, ZAKURA_STREAM_DISCOVERY,
 };
@@ -153,6 +153,7 @@ impl DiscoveryPeerSession {
 pub struct DiscoveryService {
     handle: ZakuraDiscoveryHandle,
     header_sync: Option<HeaderSyncHandle>,
+    block_sync: Option<BlockSyncHandle>,
 }
 
 impl DiscoveryService {
@@ -161,17 +162,20 @@ impl DiscoveryService {
         Self {
             handle,
             header_sync: None,
+            block_sync: None,
         }
     }
 
-    /// Builds a discovery service with a header-sync first-party summary provider.
-    pub(crate) fn with_header_sync(
+    /// Builds a discovery service with header-sync and block-sync summary providers.
+    pub(crate) fn with_sync_services(
         handle: ZakuraDiscoveryHandle,
         header_sync: HeaderSyncHandle,
+        block_sync: Option<BlockSyncHandle>,
     ) -> Self {
         Self {
             handle,
             header_sync: Some(header_sync),
+            block_sync,
         }
     }
 
@@ -230,6 +234,7 @@ impl Service for DiscoveryService {
 
         let handle = self.handle.clone();
         let header_sync = self.header_sync.clone();
+        let block_sync = self.block_sync.clone();
         tokio::spawn(async move {
             let decision = handle
                 .admit_peer(
@@ -251,6 +256,7 @@ impl Service for DiscoveryService {
             spawn_discovery_exchange(DiscoveryExchangeStart {
                 handle,
                 header_sync,
+                block_sync,
                 peer_node_id,
                 discovery_session,
                 recv,
@@ -273,6 +279,7 @@ impl Service for DiscoveryService {
 struct DiscoveryExchangeStart {
     handle: ZakuraDiscoveryHandle,
     header_sync: Option<HeaderSyncHandle>,
+    block_sync: Option<BlockSyncHandle>,
     peer_node_id: NodeId,
     discovery_session: DiscoveryPeerSession,
     recv: FramedRecv,
@@ -285,6 +292,7 @@ fn spawn_discovery_exchange(start: DiscoveryExchangeStart) {
     let DiscoveryExchangeStart {
         handle,
         header_sync,
+        block_sync,
         peer_node_id,
         discovery_session,
         recv,
@@ -298,6 +306,7 @@ fn spawn_discovery_exchange(start: DiscoveryExchangeStart) {
     let sink = DiscoverySink {
         handle: handle.clone(),
         header_sync,
+        block_sync,
         peer_node_id,
         session: discovery_session.clone(),
         progress: progress.clone(),
@@ -349,6 +358,7 @@ fn spawn_discovery_exchange(start: DiscoveryExchangeStart) {
 struct DiscoverySink {
     handle: ZakuraDiscoveryHandle,
     header_sync: Option<HeaderSyncHandle>,
+    block_sync: Option<BlockSyncHandle>,
     peer_node_id: NodeId,
     session: DiscoveryPeerSession,
     progress: Arc<DiscoveryExchangeProgress>,
@@ -427,6 +437,17 @@ impl DiscoverySink {
         if service_wanted(&query.wanted_services, &ZakuraServiceId::discovery()) {
             let summary = self.handle.local_discovery_summary().await;
             summaries.push(ServiceSummaryEnvelope::discovery(&summary).map_err(SinkReject::local)?);
+        }
+
+        if service_wanted(&query.wanted_services, &ZakuraServiceId::block_sync()) {
+            if let Some(block_sync) = &self.block_sync {
+                let summary = BlockSyncServiceSummary::from_status_and_snapshot(
+                    block_sync.local_status(),
+                    block_sync.peer_snapshot(),
+                );
+                summaries
+                    .push(ServiceSummaryEnvelope::block_sync(&summary).map_err(SinkReject::local)?);
+            }
         }
 
         Ok(self.handle.local_services_response(summaries))
@@ -695,11 +716,12 @@ mod tests {
         DiscoveryServiceSummary, ZakuraLiveServiceSummary, ZakuraNodeRecordBody,
     };
     use crate::zakura::{
-        framed_channel, spawn_header_sync_reactor, HeaderSyncAction, HeaderSyncFrontiers,
-        HeaderSyncMessage, HeaderSyncPeerSession, HeaderSyncStartup, HeaderSyncStatus,
-        ServicePeerLimits, ZakuraDiscoveryConfig, ZakuraDiscoveryLocalConfig,
+        framed_channel, spawn_block_sync_reactor, spawn_header_sync_reactor, BlockSyncFrontiers,
+        BlockSyncStartup, HeaderSyncAction, HeaderSyncFrontiers, HeaderSyncMessage,
+        HeaderSyncPeerSession, HeaderSyncStartup, HeaderSyncStatus, ServicePeerLimits,
+        ZakuraBlockSyncConfig, ZakuraDiscoveryConfig, ZakuraDiscoveryLocalConfig,
         ZakuraHandshakeConfig, ZakuraHeaderSyncConfig, LOCAL_MAX_MESSAGE_BYTES,
-        ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
+        MAX_BS_RESPONSE_BYTES, ZAKURA_CAP_BLOCK_SYNC, ZAKURA_CAP_DISCOVERY, ZAKURA_CAP_HEADER_SYNC,
     };
     use zebra_chain::{block, parameters::Network};
 
@@ -807,8 +829,11 @@ mod tests {
             connected_rx,
         )?;
         let (header_sync, header_actions, header_task) = spawn_test_header_sync()?;
-        let service =
-            DiscoveryService::with_header_sync(discovery_handle.clone(), header_sync.clone());
+        let service = DiscoveryService::with_sync_services(
+            discovery_handle.clone(),
+            header_sync.clone(),
+            None,
+        );
         let peer_node_id = SecretKey::from_bytes(&[peer_seed; 32]).public();
         let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
         connected_tx.send_replace(vec![peer_id.clone()]);
@@ -989,7 +1014,10 @@ mod tests {
             .header_sync
             .send(HeaderSyncEvent::WireMessage {
                 peer: fixture.peer_id.clone(),
-                msg: HeaderSyncMessage::Headers(Vec::new()),
+                msg: HeaderSyncMessage::Headers {
+                    headers: Vec::new(),
+                    body_sizes: Vec::new(),
+                },
             })
             .await?;
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1082,6 +1110,109 @@ mod tests {
                 .expect("record response cap fits in u16")
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_services_returns_local_first_party_block_sync_summary(
+    ) -> Result<(), crate::BoxError> {
+        let (_connected_tx, connected_rx) = watch::channel(Vec::new());
+        let handshake = ZakuraHandshakeConfig::for_network(&Network::Mainnet);
+        let local_secret = SecretKey::from_bytes(&[24u8; 32]);
+        let discovery_handle = ZakuraDiscoveryHandle::new(
+            ZakuraDiscoveryLocalConfig {
+                secret_key: local_secret.clone(),
+                direct_addrs: Vec::new(),
+                services: vec![ZakuraServiceId::discovery(), ZakuraServiceId::block_sync()],
+                zakura_protocol_min: handshake.zakura_protocol_min,
+                zakura_protocol_max: handshake.zakura_protocol_max,
+                network_id: handshake.network_id,
+                chain_id: handshake.chain_id,
+                last_authored_sequence: None,
+            },
+            ZakuraDiscoveryConfig::default(),
+            connected_rx,
+        )?;
+        let (header_sync, _header_actions, header_task) = spawn_test_header_sync()?;
+        let (tip_tx, tip_rx) = watch::channel((block::Height(5), block::Hash([5; 32])));
+        drop(tip_tx);
+        let (block_sync, _block_actions, block_task) =
+            spawn_block_sync_reactor(BlockSyncStartup::new(
+                BlockSyncFrontiers {
+                    finalized_height: block::Height(0),
+                    verified_block_tip: block::Height(5),
+                    verified_block_hash: block::Hash([5; 32]),
+                },
+                (block::Height(5), block::Hash([5; 32])),
+                tip_rx,
+                ZakuraBlockSyncConfig::default(),
+            ));
+        let service = DiscoveryService::with_sync_services(
+            discovery_handle,
+            header_sync,
+            Some(block_sync.clone()),
+        );
+        let peer_node_id = SecretKey::from_bytes(&[25u8; 32]).public();
+        let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;
+        let (peer_send, service_recv) = framed_channel(8);
+        let (service_send, mut peer_recv) = framed_channel(8);
+        let streams = HashMap::from([(ZAKURA_STREAM_DISCOVERY, (service_recv, service_send))]);
+
+        service.add_peer(Peer::new(
+            peer_id,
+            None,
+            ZAKURA_CAP_DISCOVERY | ZAKURA_CAP_BLOCK_SYNC,
+            streams,
+            CancellationToken::new(),
+        ));
+
+        peer_send
+            .send(Frame {
+                message_type: DISCOVERY_FRAME_MESSAGE_TYPE,
+                flags: 0,
+                payload: DiscoveryMessage::GetServices(GetServices {
+                    wanted_services: vec![ZakuraServiceId::block_sync()],
+                })
+                .encode()?,
+            })
+            .await?;
+
+        let services = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let frame = peer_recv.recv().await.expect("discovery stream stays open");
+                let message = decode_discovery_frame(&frame).expect("outbound frame decodes");
+                if let DiscoveryMessage::Services(services) = message {
+                    return services;
+                }
+            }
+        })
+        .await
+        .expect("service response is sent");
+
+        assert_eq!(services.node_id, local_secret.public());
+        assert_eq!(services.summaries.len(), 1);
+        assert_eq!(
+            services.summaries[0].service_id,
+            ZakuraServiceId::block_sync()
+        );
+        let summary = services.summaries[0]
+            .decode_block_sync()?
+            .expect("block summary tag decodes");
+        assert_eq!(summary.servable_low, block::Height(0));
+        assert_eq!(summary.servable_high, block::Height(5));
+        assert_eq!(summary.tip_hash, block::Hash([5; 32]));
+        assert_eq!(
+            usize::from(summary.free_slots),
+            block_sync.peer_snapshot().inbound_slots_free
+        );
+        assert_eq!(
+            summary.max_blocks_per_response,
+            ZakuraBlockSyncConfig::default().advertised_max_blocks_per_response()
+        );
+        assert_eq!(summary.max_response_bytes, MAX_BS_RESPONSE_BYTES);
+
+        header_task.abort();
+        block_task.abort();
         Ok(())
     }
 
@@ -1353,8 +1484,11 @@ mod tests {
             connected_rx,
         )?;
         let (header_sync, _header_actions, header_task) = spawn_test_header_sync()?;
-        let service =
-            DiscoveryService::with_header_sync(discovery_handle.clone(), header_sync.clone());
+        let service = DiscoveryService::with_sync_services(
+            discovery_handle.clone(),
+            header_sync.clone(),
+            None,
+        );
         let peer_secret = SecretKey::from_bytes(&[43u8; 32]);
         let peer_node_id = peer_secret.public();
         let peer_id = ZakuraPeerId::new(peer_node_id.as_bytes().to_vec())?;

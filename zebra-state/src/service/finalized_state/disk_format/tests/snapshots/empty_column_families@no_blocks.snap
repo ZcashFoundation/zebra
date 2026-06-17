@@ -29,6 +29,7 @@ expression: empty_column_families
   "tx_loc_by_transparent_addr_loc: no entries",
   "utxo_by_out_loc: no entries",
   "utxo_loc_by_transparent_addr_loc: no entries",
+  "zakura_header_body_size_by_height: no entries",
   "zakura_header_by_height: no entries",
   "zakura_header_hash_by_height: no entries",
   "zakura_header_height_by_hash: no entries",

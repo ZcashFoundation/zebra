@@ -3,7 +3,10 @@ use super::{config::*, error::*, validation::*, *};
 /// Zakura stream kind reserved for native header sync.
 pub const ZAKURA_STREAM_HEADER_SYNC: u16 = 5;
 /// Version of the native header-sync stream.
-pub const ZAKURA_HEADER_SYNC_STREAM_VERSION: u16 = 1;
+///
+/// Version 2 intentionally breaks stream-5 compatibility before header sync is
+/// deployed: `Headers` now carries one advisory body-size hint per header.
+pub const ZAKURA_HEADER_SYNC_STREAM_VERSION: u16 = 2;
 
 /// Peer status advertisement.
 pub const MSG_HS_STATUS: u8 = 1;
@@ -25,6 +28,7 @@ pub const DEFAULT_HS_MAX_INFLIGHT: u16 = 10;
 
 pub(super) const HEADER_SYNC_MESSAGE_TYPE_BYTES: usize = 1;
 pub(super) const HEADER_SYNC_COUNT_BYTES: usize = 4;
+pub(super) const HEADER_SYNC_BODY_SIZE_BYTES: usize = 4;
 pub(super) const COMMON_HEADER_BYTES: usize = 1_487;
 pub(super) const REGTEST_HEADER_BYTES: usize = 177;
 pub(super) const HEADER_SYNC_FANOUT: usize = 3;
@@ -44,7 +48,7 @@ const _: () = assert!(MAX_HS_MESSAGE_BYTES < LOCAL_MAX_MESSAGE_BYTES as usize);
 const _: () = assert!(
     HEADER_SYNC_MESSAGE_TYPE_BYTES
         + HEADER_SYNC_COUNT_BYTES
-        + COMMON_HEADER_BYTES * (DEFAULT_HS_RANGE as usize)
+        + (COMMON_HEADER_BYTES + HEADER_SYNC_BODY_SIZE_BYTES) * (DEFAULT_HS_RANGE as usize)
         < MAX_HS_MESSAGE_BYTES
 );
 
@@ -60,8 +64,15 @@ pub enum HeaderSyncMessage {
         /// Requested header count.
         count: u32,
     },
-    /// A bounded contiguous header run.
-    Headers(Vec<Arc<block::Header>>),
+    /// A bounded contiguous header run with one advisory body-size hint per header.
+    ///
+    /// A `0` size means "unknown"; the hint is not consensus data.
+    Headers {
+        /// Headers in ascending height order.
+        headers: Vec<Arc<block::Header>>,
+        /// Advisory serialized body sizes, parallel to `headers`.
+        body_sizes: Vec<u32>,
+    },
     /// Full block tip-flood payload.
     NewBlock(Arc<block::Block>),
 }
@@ -72,7 +83,7 @@ impl HeaderSyncMessage {
         match self {
             Self::Status(_) => MSG_HS_STATUS,
             Self::GetHeaders { .. } => MSG_HS_GET_HEADERS,
-            Self::Headers(_) => MSG_HS_HEADERS,
+            Self::Headers { .. } => MSG_HS_HEADERS,
             Self::NewBlock(_) => MSG_HS_NEW_BLOCK,
         }
     }
@@ -91,11 +102,16 @@ impl HeaderSyncMessage {
                 write_height(&mut bytes, *start_height)?;
                 bytes.write_u32::<LittleEndian>(*count)?;
             }
-            Self::Headers(headers) => {
+            Self::Headers {
+                headers,
+                body_sizes,
+            } => {
                 validate_headers_len(headers.len(), usize_from_u32(MAX_HS_RANGE, "headers cap")?)?;
+                validate_body_sizes_len(headers.len(), body_sizes.len())?;
                 bytes.write_u32::<LittleEndian>(u32_from_usize(headers.len(), "headers count")?)?;
-                for header in headers {
+                for (header, body_size) in headers.iter().zip(body_sizes) {
                     header.zcash_serialize(&mut bytes)?;
+                    bytes.write_u32::<LittleEndian>(*body_size)?;
                 }
             }
             Self::NewBlock(block) => {
@@ -142,10 +158,15 @@ impl HeaderSyncMessage {
                 };
                 validate_headers_len(count, max_headers)?;
                 let mut headers = Vec::with_capacity(count);
+                let mut body_sizes = Vec::with_capacity(count);
                 for _ in 0..count {
                     headers.push(Arc::new(block::Header::zcash_deserialize(&mut reader)?));
+                    body_sizes.push(reader.read_u32::<LittleEndian>()?);
                 }
-                Self::Headers(headers)
+                Self::Headers {
+                    headers,
+                    body_sizes,
+                }
             }
             MSG_HS_NEW_BLOCK => {
                 Self::NewBlock(Arc::new(block::Block::zcash_deserialize(&mut reader)?))

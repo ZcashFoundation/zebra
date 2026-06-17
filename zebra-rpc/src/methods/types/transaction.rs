@@ -152,7 +152,9 @@ impl TransactionTemplate<NegativeOrZero> {
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         {
             let zip233_amount = if cfg!(zcash_unstable = "zip235") {
-                zip233_amount.unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap())
+                // ZIP235 defaults to 60% of the positive fees paid by selected transactions.
+                // The coinbase template's `fee` field is the negative of this total.
+                zip233_amount.unwrap_or_else(|| ((txs_fee * 6).unwrap() / 10).unwrap())
             } else {
                 zip233_amount.unwrap_or(Amount::zero())
             };
