@@ -974,7 +974,7 @@ fn write_full_block_header_and_transactions(state: &ZebraDb, block: Arc<Block>) 
 
     let mut batch = DiskWriteBatch::new();
     batch
-        .prepare_block_header_and_transaction_data_batch(state, &finalized)
+        .prepare_block_header_and_transaction_data_batch(state, &finalized, true)
         .expect("full block header and transaction batch is valid");
     state.db.write(batch).expect("full block batch writes");
 }
