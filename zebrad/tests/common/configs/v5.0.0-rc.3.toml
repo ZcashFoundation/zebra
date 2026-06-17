@@ -72,10 +72,52 @@ initial_testnet_peers = [
     "dnsseed.testnet.z.cash:18233",
     "testnet.seeder.zfnd.org:18233",
 ]
+legacy_p2p = true
 listen_addr = "[::]:8233"
 max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 100
+v2_p2p = true
+
+[network.zakura]
+bootstrap_peers = []
+listen_addr = "0.0.0.0:8234"
+max_connections = 32
+max_pending_handshakes = 8
+message_rate_per_second = 2048
+stream_open_rate_per_second = 16
+
+[network.zakura.block_sync]
+expected_peers = 8
+fanout = 1
+max_blocks_per_response = 128
+max_inflight_block_bytes = 4294967296
+max_inflight_requests = 16
+max_response_bytes = 33554432
+near_tip_body_download_pause_blocks = 2
+request_timeout = "30s"
+size_deviation_tolerance = 200
+status_refresh_interval = "30s"
+
+[network.zakura.block_sync.peer_limits]
+inbound_queue_depth = 128
+max_inbound_peers = 256
+max_outbound_peers = 256
+max_pending_escalations = 32
+outbound_queue_depth = 128
+
+[network.zakura.header_sync]
+accept_new_blocks = true
+max_headers_per_response = 1000
+max_inflight_requests = 10
+status_refresh_interval = "30s"
+
+[network.zakura.header_sync.peer_limits]
+inbound_queue_depth = 128
+max_inbound_peers = 256
+max_outbound_peers = 256
+max_pending_escalations = 32
+outbound_queue_depth = 128
 
 [rpc]
 cookie_dir = "cache_dir"
@@ -98,6 +140,7 @@ checkpoint_verify_concurrency_limit = 1000
 download_concurrency_limit = 100
 full_verify_concurrency_limit = 20
 parallel_cpu_threads = 0
+zakura_block_apply_concurrency_limit = 32
 
 [tracing]
 buffer_limit = 128000

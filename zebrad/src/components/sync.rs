@@ -132,6 +132,14 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
 
+/// Default combined concurrency for Zakura block-body applies.
+///
+/// Zakura block sync can download checkpoint and full-verification bodies through
+/// separate class limits. This cap bounds their combined apply queue so the
+/// state/verifier backend controls the download window by finishing applies,
+/// rather than accumulating a large backlog.
+pub const DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT: usize = 32;
+
 /// A lower bound on the user-specified concurrency limit.
 ///
 /// If the concurrency limit is 0, Zebra can't download or verify any blocks.
@@ -312,6 +320,14 @@ pub struct Config {
     /// Increasing this value may improve performance on machines with many cores.
     pub full_verify_concurrency_limit: usize,
 
+    /// The combined number of Zakura block-sync bodies submitted in parallel.
+    ///
+    /// This bounds the sum of checkpoint and full-verification block applies
+    /// driven by Zakura block sync. The per-class limits still apply, but this
+    /// cap keeps checkpoint sync from building a deep apply backlog and lets
+    /// block-sync downloads self-throttle through the byte budget.
+    pub zakura_block_apply_concurrency_limit: usize,
+
     /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
     ///
     /// If the number of threads is not configured or zero, Zebra uses the number of logical cores.
@@ -359,6 +375,8 @@ impl Default for Config {
             // - move more disk work to blocking tokio threads,
             //   and CPU work to the rayon thread pool inside blocking tokio threads
             full_verify_concurrency_limit: 20,
+
+            zakura_block_apply_concurrency_limit: DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
 
             // Use one thread per CPU.
             //

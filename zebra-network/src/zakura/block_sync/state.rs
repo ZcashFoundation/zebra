@@ -195,6 +195,7 @@ pub(super) struct BlockSyncState {
     pub(super) schedule: BlockRangeScheduler,
     pub(super) reorder: ReorderBuffer,
     pub(super) applying: BTreeMap<block::Height, ApplyingBlock>,
+    pub(super) submitted_applies: BTreeMap<block::Height, Vec<(block::Hash, usize)>>,
     pub(super) next_apply_token: BlockApplyToken,
     pub(super) budget: ByteBudget,
     pub(super) needed_heights: Vec<block::Height>,
@@ -229,6 +230,7 @@ impl BlockSyncState {
             schedule: BlockRangeScheduler::new(startup.config.fanout),
             reorder: ReorderBuffer::new(),
             applying: BTreeMap::new(),
+            submitted_applies: BTreeMap::new(),
             next_apply_token: 1,
             budget: ByteBudget::new(startup.config.max_inflight_block_bytes),
             needed_heights: Vec::new(),
@@ -381,16 +383,64 @@ impl OutstandingBlockRange {
         self.received.len() == self.request.expected_hashes.len()
     }
 
-    pub(super) fn missing_retry_requests(&self) -> Vec<BlockRangeRequest> {
-        self.request
-            .expected_hashes
+    pub(super) fn missing_retry_requests<F>(&self, mut should_retry: F) -> Vec<BlockRangeRequest>
+    where
+        F: FnMut(block::Height, block::Hash) -> bool,
+    {
+        let mut requests = Vec::new();
+        let mut segment_hashes = Vec::new();
+        let mut segment_bytes = Vec::new();
+
+        for (height, hash) in &self.request.expected_hashes {
+            let retry = !self.received.contains(height) && should_retry(*height, *hash);
+            let contiguous = segment_hashes
+                .last()
+                .and_then(|(last_height, _)| next_height(*last_height))
+                == Some(*height);
+
+            if !retry || (!segment_hashes.is_empty() && !contiguous) {
+                if let Some(request) = Self::retry_request_from_segment(
+                    std::mem::take(&mut segment_hashes),
+                    std::mem::take(&mut segment_bytes),
+                ) {
+                    requests.push(request);
+                }
+            }
+
+            if retry {
+                if let Some(bytes) = self.request.estimated_bytes_for_height(*height) {
+                    segment_hashes.push((*height, *hash));
+                    segment_bytes.push((*height, bytes));
+                }
+            }
+        }
+
+        if let Some(request) = Self::retry_request_from_segment(segment_hashes, segment_bytes) {
+            requests.push(request);
+        }
+
+        requests
+    }
+
+    fn retry_request_from_segment(
+        expected_hashes: Vec<(block::Height, block::Hash)>,
+        expected_bytes: Vec<(block::Height, u64)>,
+    ) -> Option<BlockRangeRequest> {
+        let (start_height, anchor_hash) = *expected_hashes.first()?;
+        let count = u32::try_from(expected_hashes.len())
+            .expect("block-sync retry segment length is bounded by original request count");
+        let estimated_bytes = expected_bytes
             .iter()
-            .filter_map(|(height, _)| {
-                (!self.received.contains(height))
-                    .then(|| self.request.single_height_retry(*height))
-                    .flatten()
-            })
-            .collect()
+            .fold(0u64, |total, (_, bytes)| total.saturating_add(*bytes));
+
+        Some(BlockRangeRequest {
+            start_height,
+            count,
+            anchor_hash,
+            estimated_bytes,
+            expected_hashes,
+            expected_bytes,
+        })
     }
 }
 

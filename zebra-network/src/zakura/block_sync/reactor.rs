@@ -451,18 +451,24 @@ impl BlockSyncReactor {
             .get(&frontiers.verified_block_tip)
             .is_none_or(|applying| applying.hash == frontiers.verified_block_hash);
 
-        // A `Reset` can also be a coalesced forward state update. Preserve
-        // successor bodies only if the new tip is within our contiguous
-        // submitted/downloaded body floor and does not conflict with a submitted
-        // body at the reset height. Otherwise a forward reset can still be a
-        // fork switch, so old-fork bodies must be discarded.
-        if frontiers.verified_block_tip > self.state.verified_block_tip
-            && frontiers.verified_block_tip <= self.state.body_download_floor
+        // A `Reset` can also be a stale or coalesced state update for a tip
+        // already inside our contiguous submitted/downloaded body floor. Do not
+        // destructively clear successor bodies in that case: a stale reset
+        // snapshot can otherwise erase `applying`/covered state and re-request
+        // the same bodies while their first apply is still in flight. Keep
+        // finalized-floor resets destructive so a real restart/reorg from the
+        // base can still re-request the same hash.
+        if frontiers.verified_block_tip > frontiers.finalized_height
+            && frontiers.verified_block_tip < self.state.body_download_floor
             && reset_tip_matches_submitted_body
+            && self.has_active_successor_after(frontiers.verified_block_tip)
         {
             self.handle_state_frontiers_changed(frontiers).await;
             return;
         }
+
+        let remember_released_applies = frontiers.verified_block_tip > frontiers.finalized_height
+            && frontiers.verified_block_tip <= self.state.body_download_floor;
 
         self.state.finalized_height = frontiers.finalized_height;
         self.state.verified_block_tip = frontiers.verified_block_tip;
@@ -473,7 +479,7 @@ impl BlockSyncReactor {
         self.state.servable_hash = frontiers.verified_block_hash;
 
         self.state.reorder.clear(&mut self.state.budget);
-        self.release_all_applying_blocks();
+        self.release_all_applying_blocks_for_reset(remember_released_applies);
         self.state.schedule.clear_covered_from(block::Height::MIN);
         self.drop_ranges_not_in_needed(&HashMap::new());
         self.state.schedule.retain_matching_needed(&HashMap::new());
@@ -489,19 +495,23 @@ impl BlockSyncReactor {
     async fn handle_needed_blocks(&mut self, blocks: Vec<BlockSyncBlockMeta>) {
         // The state reports every header-known, body-missing height above the
         // download floor, but it has no visibility into our in-memory buffers.
-        // Heights already held in the reorder buffer (received, waiting for a
-        // lower gap to fill) or in `applying` (submitted, awaiting commit) must
-        // not be scheduled again: `refresh_needed` builds one maximal contiguous
-        // range and `ensure` rejects any range overlapping a queued/assigned
-        // one, so a held run sitting above an open gap would otherwise block the
-        // gap below it from ever being queued, freezing `body_download_floor`
-        // and re-requesting already-held blocks forever. Only schedule heights
-        // we do not already hold in memory.
+        // Heights already at or below the body download floor, held in the
+        // reorder buffer (received, waiting for a lower gap to fill), or in
+        // `applying` (submitted, awaiting commit) must not be scheduled again:
+        // `refresh_needed` builds one maximal contiguous range and `ensure`
+        // rejects any range overlapping a queued/assigned one, so a held run
+        // sitting above an open gap would otherwise block the gap below it from
+        // ever being queued, freezing `body_download_floor` and re-requesting
+        // already-held blocks forever. Only schedule heights we do not already
+        // hold in memory and have not already submitted contiguously.
         let blocks: Vec<_> = blocks
             .into_iter()
             .filter(|block| {
-                !self.state.reorder.contains(block.height)
+                block.height > self.state.body_download_floor
+                    && !self.state.reorder.contains(block.height)
                     && !self.state.applying.contains_key(&block.height)
+                    && !self.has_submitted_apply(block.height, block.hash)
+                    && !self.has_outstanding_request(block.height, block.hash)
             })
             .collect();
 
@@ -744,9 +754,10 @@ impl BlockSyncReactor {
             self.finish_detached_outstanding(outstanding, OutstandingRangeDisposition::Satisfied);
         }
 
-        if height <= self.state.verified_block_tip
+        if height <= self.state.body_download_floor
             || self.state.reorder.contains(height)
             || self.state.applying.contains_key(&height)
+            || self.has_submitted_apply(height, hash)
         {
             self.release_contiguous_blocks().await;
             self.schedule().await;
@@ -881,7 +892,13 @@ impl BlockSyncReactor {
             }
             OutstandingRangeDisposition::RetryMissing => {
                 self.state.schedule.clear_assignment(&outstanding.request);
-                for request in outstanding.missing_retry_requests().into_iter().rev() {
+                for request in outstanding
+                    .missing_retry_requests(|height, hash| {
+                        self.should_retry_missing_height(height, hash)
+                    })
+                    .into_iter()
+                    .rev()
+                {
                     self.state.schedule.retry(request);
                 }
             }
@@ -910,7 +927,12 @@ impl BlockSyncReactor {
         };
 
         self.trace_range_unavailable(&peer, start_height);
-        self.finish_peer_outstanding_at(&peer, index, OutstandingRangeDisposition::RetryMissing);
+        let disposition = self.stale_adjusted_outstanding_disposition(
+            &peer,
+            index,
+            OutstandingRangeDisposition::RetryOriginal,
+        );
+        self.finish_peer_outstanding_at(&peer, index, disposition);
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
     }
@@ -1032,9 +1054,44 @@ impl BlockSyncReactor {
                 .await;
             return;
         };
-        self.finish_peer_outstanding_at(&peer, index, OutstandingRangeDisposition::RetryMissing);
+        let disposition = self.stale_adjusted_outstanding_disposition(
+            &peer,
+            index,
+            OutstandingRangeDisposition::RetryMissing,
+        );
+        self.finish_peer_outstanding_at(&peer, index, disposition);
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
+    }
+
+    fn stale_adjusted_outstanding_disposition(
+        &mut self,
+        peer: &ZakuraPeerId,
+        index: usize,
+        current: OutstandingRangeDisposition,
+    ) -> OutstandingRangeDisposition {
+        let tip = self.state.body_download_floor;
+        let Some(peer_state) = self.state.peers.get_mut(peer) else {
+            return current;
+        };
+        let Some(outstanding) = peer_state.outstanding.get_mut(index) else {
+            return current;
+        };
+        if outstanding.request.start_height > tip {
+            return current;
+        }
+
+        // A late response can still match an outstanding request after the
+        // verified/download floor has moved through its prefix. Do not retry
+        // already-committed heights; mark the stale prefix as satisfied and
+        // retry only any remaining suffix.
+        let released_bytes = outstanding.mark_received_through(tip);
+        self.state.budget.release(released_bytes);
+        if outstanding.is_complete() {
+            OutstandingRangeDisposition::Satisfied
+        } else {
+            OutstandingRangeDisposition::RetryMissing
+        }
     }
 
     async fn handle_block_range_response_ready(
@@ -1106,6 +1163,7 @@ impl BlockSyncReactor {
         };
 
         let Some(applying) = self.state.applying.get(&height) else {
+            self.decrement_submitted_apply(height, hash);
             if let Some(frontiers) = accepted_local_frontier {
                 self.release_applied_blocks_through(frontiers.verified_block_tip);
             }
@@ -1115,9 +1173,16 @@ impl BlockSyncReactor {
             return;
         };
         if applying.hash != hash || applying.token != token {
+            self.decrement_submitted_apply(height, hash);
             if let Some(frontiers) = accepted_local_frontier {
                 self.release_applied_blocks_through(frontiers.verified_block_tip);
             }
+            if let Some(old_serving_tip) = old_serving_tip {
+                self.finish_frontier_update(old_serving_tip).await;
+            }
+            return;
+        }
+        if matches!(result, BlockApplyResult::Duplicate) && self.state.verified_block_tip < height {
             if let Some(old_serving_tip) = old_serving_tip {
                 self.finish_frontier_update(old_serving_tip).await;
             }
@@ -1130,6 +1195,7 @@ impl BlockSyncReactor {
             .expect("applying entry exists because it was just checked");
 
         self.state.budget.release(applying.bytes);
+        self.decrement_submitted_apply(height, hash);
         self.trace_apply_finished(height, token, result);
         match result {
             BlockApplyResult::Committed | BlockApplyResult::Duplicate => {}
@@ -1414,6 +1480,9 @@ impl BlockSyncReactor {
                 }
                 return;
             }
+            if let Some(applying) = self.state.applying.get(&height) {
+                self.increment_submitted_apply(height, applying.hash);
+            }
             self.trace_body_submitted(height, token);
         }
     }
@@ -1422,6 +1491,86 @@ impl BlockSyncReactor {
         let token = self.state.next_apply_token;
         self.state.next_apply_token = self.state.next_apply_token.checked_add(1).unwrap_or(1);
         token
+    }
+
+    fn has_submitted_apply(&self, height: block::Height, hash: block::Hash) -> bool {
+        self.state
+            .submitted_applies
+            .get(&height)
+            .is_some_and(|entries| entries.iter().any(|(entry_hash, _)| *entry_hash == hash))
+    }
+
+    fn has_outstanding_request(&self, height: block::Height, hash: block::Hash) -> bool {
+        self.state.peers.values().any(|peer| {
+            peer.outstanding
+                .iter()
+                .any(|outstanding| outstanding.request.expected_hash(height) == Some(hash))
+        })
+    }
+
+    fn should_retry_missing_height(&self, height: block::Height, hash: block::Hash) -> bool {
+        height > self.state.body_download_floor
+            && !self.state.reorder.contains(height)
+            && !self.state.applying.contains_key(&height)
+            && !self.has_submitted_apply(height, hash)
+            && !self.has_outstanding_request(height, hash)
+    }
+
+    fn has_active_successor_after(&self, height: block::Height) -> bool {
+        let Some(next) = next_height(height) else {
+            return false;
+        };
+
+        self.state.applying.range(next..).next().is_some()
+            || self.state.submitted_applies.range(next..).next().is_some()
+            || self.state.peers.values().any(|peer| {
+                peer.outstanding
+                    .iter()
+                    .any(|outstanding| outstanding.request.end_height() >= next)
+            })
+    }
+
+    fn increment_submitted_apply(&mut self, height: block::Height, hash: block::Hash) {
+        let entries = self.state.submitted_applies.entry(height).or_default();
+        if let Some((_, count)) = entries
+            .iter_mut()
+            .find(|(entry_hash, _)| *entry_hash == hash)
+        {
+            *count = count.saturating_add(1);
+        } else {
+            entries.push((hash, 1));
+        }
+    }
+
+    fn decrement_submitted_apply(&mut self, height: block::Height, hash: block::Hash) {
+        let Some(entries) = self.state.submitted_applies.get_mut(&height) else {
+            return;
+        };
+        if let Some(index) = entries
+            .iter()
+            .position(|(entry_hash, _)| *entry_hash == hash)
+        {
+            let (_, count) = &mut entries[index];
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                entries.remove(index);
+            }
+        }
+        if entries.is_empty() {
+            self.state.submitted_applies.remove(&height);
+        }
+    }
+
+    fn clear_submitted_applies_from(&mut self, from: block::Height) {
+        let heights: Vec<_> = self
+            .state
+            .submitted_applies
+            .range(from..)
+            .map(|(height, _)| *height)
+            .collect();
+        for height in heights {
+            self.state.submitted_applies.remove(&height);
+        }
     }
 
     fn release_applied_blocks_through(&mut self, tip: block::Height) {
@@ -1438,13 +1587,16 @@ impl BlockSyncReactor {
         }
     }
 
-    fn release_all_applying_blocks(&mut self) {
+    fn release_all_applying_blocks_for_reset(&mut self, keep_submitted_applies: bool) {
         let bytes = self
             .state
             .applying
             .values()
             .map(|applying| applying.bytes)
             .sum();
+        if !keep_submitted_applies {
+            self.state.submitted_applies.clear();
+        }
         self.state.budget.release(bytes);
         self.state.applying.clear();
     }
@@ -1461,6 +1613,7 @@ impl BlockSyncReactor {
                 self.state.budget.release(applying.bytes);
             }
         }
+        self.clear_submitted_applies_from(from);
     }
 
     async fn send_status(&self, peer: &ZakuraPeerId) {

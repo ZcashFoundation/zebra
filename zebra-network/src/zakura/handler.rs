@@ -103,20 +103,13 @@ pub const DEFAULT_ZAKURA_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10)
 /// Minimum age of an incumbent Zakura connection before a duplicate connection
 /// for the same identity is allowed to evict it.
 ///
-/// A duplicate almost always means the peer restarted or redialed (the redial
-/// supervisor skips peers that are already registered). If the incumbent has
-/// been registered longer than this, it is treated as a stale connection left
-/// behind by a restarted peer: that peer's process is gone, so the connection
-/// only lingers until the QUIC idle timeout ([`DEFAULT_ZAKURA_QUIC_IDLE_TIMEOUT`],
-/// ~150s). Evicting it immediately lets the peer's redial take the freed slot in
-/// seconds instead of stalling for the whole idle window.
-///
-/// A younger incumbent is kept: two connections registered close together are a
-/// simultaneous-open race (both sides dialed before either registered), and
-/// evicting on every duplicate would make those flap. The redial backoff
-/// resolves that race instead. This threshold must stay above the worst-case
-/// simultaneous-dial window and below the QUIC idle timeout.
-pub const ZAKURA_DUPLICATE_EVICT_MIN_AGE: Duration = Duration::from_secs(30);
+/// Duplicates can be ordinary redial races while the incumbent is healthy and
+/// actively serving block sync. Evicting those incumbents drops in-flight body
+/// ranges and makes a fresh sync repeatedly re-download the same windows. Keep
+/// the incumbent through the transport idle timeout; genuinely dead connections
+/// are reaped by QUIC idle cleanup, and duplicate redials after that point can
+/// reclaim the slot without disturbing active transfers.
+pub const ZAKURA_DUPLICATE_EVICT_MIN_AGE: Duration = Duration::from_secs(300);
 /// QUIC stream receive window used by Zakura endpoints.
 pub const DEFAULT_ZAKURA_STREAM_RECEIVE_WINDOW: u32 = 512 * 1024;
 /// QUIC connection receive window used by Zakura endpoints.

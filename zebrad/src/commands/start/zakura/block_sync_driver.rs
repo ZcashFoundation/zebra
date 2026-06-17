@@ -101,6 +101,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     max_checkpoint_height: block::Height,
     checkpoint_apply_limit: usize,
     full_apply_limit: usize,
+    combined_apply_limit: usize,
     trace: ZakuraTrace,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) where
@@ -128,6 +129,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
         zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
     );
     let full_apply_limit = full_apply_limit.max(sync::MIN_CONCURRENCY_LIMIT);
+    let combined_apply_limit = combined_apply_limit.max(sync::MIN_CONCURRENCY_LIMIT);
     let mut pending_applies = VecDeque::new();
     let mut in_flight_applies: FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>> =
         FuturesUnordered::new();
@@ -165,6 +167,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         &mut full_in_flight,
                         checkpoint_apply_limit,
                         full_apply_limit,
+                        combined_apply_limit,
                         latest_chain_tip.clone(),
                         endpoint.clone(),
                         read_state.clone(),
@@ -449,6 +452,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                     &mut full_in_flight,
                     checkpoint_apply_limit,
                     full_apply_limit,
+                    combined_apply_limit,
                     latest_chain_tip.clone(),
                     endpoint.clone(),
                     read_state.clone(),
@@ -507,6 +511,7 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
     full_in_flight: &mut usize,
     checkpoint_apply_limit: usize,
     full_apply_limit: usize,
+    combined_apply_limit: usize,
     latest_chain_tip: impl ChainTip + Clone + Send + Sync + 'static,
     endpoint: Option<ZakuraEndpoint>,
     read_state: ReadState,
@@ -527,11 +532,19 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
     BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
     BlockVerifier::Future: Send + 'static,
 {
+    let checkpoint_combined_apply_limit =
+        combined_apply_limit.max(sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT);
     while let Some(index) = pending_applies
         .iter()
         .position(|pending| match pending.class {
-            BlockApplyClass::Checkpoint => *checkpoint_in_flight < checkpoint_apply_limit,
-            BlockApplyClass::Full => *full_in_flight < full_apply_limit,
+            BlockApplyClass::Checkpoint => {
+                *checkpoint_in_flight + *full_in_flight < checkpoint_combined_apply_limit
+                    && *checkpoint_in_flight < checkpoint_apply_limit
+            }
+            BlockApplyClass::Full => {
+                *checkpoint_in_flight + *full_in_flight < combined_apply_limit
+                    && *full_in_flight < full_apply_limit
+            }
         })
     {
         let pending = pending_applies
