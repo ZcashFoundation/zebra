@@ -7,6 +7,11 @@ use iroh::NodeId;
 
 const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 
+#[cfg(test)]
+const ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE: bool = true;
+#[cfg(not(test))]
+const ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE: bool = false;
+
 /// Upper bound on how long the reactor will wait to enqueue a data-plane action
 /// before abandoning it. The bounded `actions` channel is normally drained by
 /// the action driver almost immediately; this deadline only trips when that
@@ -101,7 +106,6 @@ impl BlockSyncReactor {
         self.trace_sync_state();
         loop {
             tokio::select! {
-                biased;
                 _ = self.startup.shutdown.cancelled() => break,
                 event = self.lifecycle.recv() => {
                     let Some(event) = event else { break };
@@ -442,14 +446,28 @@ impl BlockSyncReactor {
     }
 
     async fn handle_chain_tip_reset(&mut self, frontiers: BlockSyncFrontiers) {
+        let reset_tip_matches_local_work = !self.reset_tip_conflicts_with_local_work(
+            &frontiers,
+            frontiers.verified_block_tip <= self.state.body_download_floor,
+        );
+
+        // State can report a forward `Reset` while checkpoint commits advance
+        // under already-submitted or still-downloading successor bodies. Treat
+        // that as verified growth once it is inside our submitted/downloaded
+        // floor, or when we already have successor work in flight. Keep fork
+        // resets destructive when they are not anchored by active successor
+        // work.
+        if frontiers.verified_block_tip > self.state.verified_block_tip
+            && (frontiers.verified_block_tip <= self.state.body_download_floor
+                || self.has_active_successor_after(frontiers.verified_block_tip))
+            && reset_tip_matches_local_work
+        {
+            self.handle_state_frontiers_changed(frontiers).await;
+            return;
+        }
+
         metrics::counter!("sync.block.reorg.reset").increment(1);
         self.trace_chain_tip_reset(frontiers.verified_block_tip);
-
-        let reset_tip_matches_submitted_body = self
-            .state
-            .applying
-            .get(&frontiers.verified_block_tip)
-            .is_none_or(|applying| applying.hash == frontiers.verified_block_hash);
 
         // A `Reset` can also be a stale or coalesced state update for a tip
         // already inside our contiguous submitted/downloaded body floor. Do not
@@ -460,7 +478,7 @@ impl BlockSyncReactor {
         // base can still re-request the same hash.
         if frontiers.verified_block_tip > frontiers.finalized_height
             && frontiers.verified_block_tip < self.state.body_download_floor
-            && reset_tip_matches_submitted_body
+            && reset_tip_matches_local_work
             && self.has_active_successor_after(frontiers.verified_block_tip)
         {
             self.handle_state_frontiers_changed(frontiers).await;
@@ -685,6 +703,12 @@ impl BlockSyncReactor {
             {
                 return;
             }
+            if self
+                .ignore_unmatched_active_body_response(&peer, height, hash)
+                .await
+            {
+                return;
+            }
             self.report_misbehavior(peer, BlockSyncMisbehavior::UnsolicitedBlock)
                 .await;
             return;
@@ -703,7 +727,9 @@ impl BlockSyncReactor {
         let estimated_bytes = outstanding.estimated_bytes_for_height(height).unwrap_or(0);
         let retry_request = outstanding.request.single_height_retry(height);
 
-        if !block_merkle_root_matches_header(block.clone()).await {
+        if ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE
+            && !block_merkle_root_matches_header(block.clone()).await
+        {
             self.finish_peer_outstanding_at(
                 &peer,
                 index,
@@ -999,6 +1025,49 @@ impl BlockSyncReactor {
         true
     }
 
+    async fn ignore_unmatched_active_body_response(
+        &mut self,
+        peer: &ZakuraPeerId,
+        height: block::Height,
+        hash: block::Hash,
+    ) -> bool {
+        if !self.has_outstanding_request(height, hash) {
+            return false;
+        }
+
+        metrics::counter!("sync.block.response.unmatched_active_ignored").increment(1);
+        tracing::debug!(
+            ?peer,
+            ?height,
+            "ignoring unmatched block-sync body for height active on another request"
+        );
+        self.release_contiguous_blocks().await;
+        self.schedule().await;
+        self.release_caught_up_block_sync_peers();
+        true
+    }
+
+    async fn ignore_unmatched_active_terminator_response(
+        &mut self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+    ) -> bool {
+        if !self.has_outstanding_request_start(start_height) {
+            return false;
+        }
+
+        metrics::counter!("sync.block.response.unmatched_active_done_ignored").increment(1);
+        tracing::debug!(
+            ?peer,
+            ?start_height,
+            "ignoring unmatched block-sync terminator for range active on another request"
+        );
+        self.release_contiguous_blocks().await;
+        self.schedule().await;
+        self.release_caught_up_block_sync_peers();
+        true
+    }
+
     fn ignore_disconnected_peer_response(
         &self,
         peer: &ZakuraPeerId,
@@ -1043,6 +1112,12 @@ impl BlockSyncReactor {
             }
             if self
                 .ignore_unmatched_needed_response(&peer, start_height, "terminator")
+                .await
+            {
+                return;
+            }
+            if self
+                .ignore_unmatched_active_terminator_response(&peer, start_height)
                 .await
             {
                 return;
@@ -1104,22 +1179,28 @@ impl BlockSyncReactor {
         let max_response_bytes = u64::from(self.startup.config.advertised_max_response_bytes());
         let mut sent_blocks = 0u32;
         let mut sent_bytes = 0u64;
+        let mut reason = "complete";
 
         for (height, block, size) in blocks {
             let Ok(size) = u64::try_from(size) else {
+                reason = "size_overflow";
                 break;
             };
             let Some(next_bytes) = sent_bytes.checked_add(size) else {
+                reason = "byte_overflow";
                 break;
             };
             if next_bytes > max_response_bytes {
+                reason = "byte_cap";
                 break;
             }
             if height_after_count(start_height, sent_blocks) != Some(height) {
+                reason = "non_contiguous";
                 break;
             }
 
-            if !self.send_block(&peer, block) {
+            if !self.send_block(&peer, block).await {
+                reason = "send_failed";
                 break;
             }
             sent_blocks = sent_blocks.saturating_add(1);
@@ -1127,10 +1208,20 @@ impl BlockSyncReactor {
         }
 
         if sent_blocks == 0 {
-            self.send_range_unavailable(&peer, start_height, requested_count);
+            self.send_range_unavailable_wait(&peer, start_height, requested_count)
+                .await;
         } else {
-            self.send_blocks_done(&peer, start_height, sent_blocks);
+            self.send_blocks_done_wait(&peer, start_height, sent_blocks)
+                .await;
         }
+        self.trace_range_response_sent(
+            &peer,
+            start_height,
+            requested_count,
+            sent_blocks,
+            sent_bytes,
+            reason,
+        );
         self.finish_serving_blocks(&peer);
     }
 
@@ -1155,6 +1246,15 @@ impl BlockSyncReactor {
         result: BlockApplyResult,
         local_frontier: Option<BlockSyncFrontiers>,
     ) {
+        let Some(applying) = self.state.applying.get(&height) else {
+            self.decrement_submitted_apply(height, hash);
+            return;
+        };
+        if applying.hash != hash || applying.token != token {
+            self.decrement_submitted_apply(height, hash);
+            return;
+        }
+
         let (accepted_local_frontier, old_serving_tip) = if let Some(frontiers) = local_frontier {
             let old_serving_tip = self.apply_state_frontiers_changed(frontiers, false).await;
             (old_serving_tip.map(|_| frontiers), old_serving_tip)
@@ -1162,26 +1262,6 @@ impl BlockSyncReactor {
             (None, None)
         };
 
-        let Some(applying) = self.state.applying.get(&height) else {
-            self.decrement_submitted_apply(height, hash);
-            if let Some(frontiers) = accepted_local_frontier {
-                self.release_applied_blocks_through(frontiers.verified_block_tip);
-            }
-            if let Some(old_serving_tip) = old_serving_tip {
-                self.finish_frontier_update(old_serving_tip).await;
-            }
-            return;
-        };
-        if applying.hash != hash || applying.token != token {
-            self.decrement_submitted_apply(height, hash);
-            if let Some(frontiers) = accepted_local_frontier {
-                self.release_applied_blocks_through(frontiers.verified_block_tip);
-            }
-            if let Some(old_serving_tip) = old_serving_tip {
-                self.finish_frontier_update(old_serving_tip).await;
-            }
-            return;
-        }
         if matches!(result, BlockApplyResult::Duplicate) && self.state.verified_block_tip < height {
             if let Some(old_serving_tip) = old_serving_tip {
                 self.finish_frontier_update(old_serving_tip).await;
@@ -1261,6 +1341,9 @@ impl BlockSyncReactor {
         if !self.startup.state_queries_enabled || self.should_pause_new_body_downloads() {
             return false;
         }
+        if self.local_body_work_blocks() >= self.refill_low_water_blocks() {
+            return true;
+        }
         let _ = self
             .dispatch_action(BlockSyncAction::QueryNeededBlocks {
                 verified_block_tip: self.state.body_download_floor,
@@ -1268,6 +1351,54 @@ impl BlockSyncReactor {
             })
             .await;
         true
+    }
+
+    fn local_body_work_blocks(&self) -> usize {
+        let outstanding: usize = self
+            .state
+            .peers
+            .values()
+            .map(|peer| {
+                peer.outstanding
+                    .iter()
+                    .map(|outstanding| {
+                        outstanding
+                            .request
+                            .expected_hashes
+                            .len()
+                            .saturating_sub(outstanding.received.len())
+                    })
+                    .sum::<usize>()
+            })
+            .sum();
+
+        self.state
+            .schedule
+            .queued_block_count()
+            .saturating_add(outstanding)
+            .saturating_add(self.state.reorder.len())
+            .saturating_add(self.state.applying.len())
+    }
+
+    fn refill_low_water_blocks(&self) -> usize {
+        let status_peers = self
+            .state
+            .peers
+            .values()
+            .filter(|peer| peer.received_status)
+            .count()
+            .max(1);
+        let max_blocks_per_response =
+            usize::try_from(self.startup.config.advertised_max_blocks_per_response())
+                .expect("advertised block count fits usize");
+        let max_inflight_per_peer =
+            usize::from(self.startup.config.advertised_max_inflight_requests())
+                .min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER);
+
+        status_peers
+            .saturating_mul(max_inflight_per_peer)
+            .saturating_mul(max_blocks_per_response)
+            .max(max_blocks_per_response)
     }
 
     fn drop_ranges_not_in_needed(&mut self, needed: &HashMap<block::Height, block::Hash>) {
@@ -1363,13 +1494,17 @@ impl BlockSyncReactor {
                 if !peer.received_status || peer.available_slots() == 0 {
                     break;
                 }
-                let Some(request) = self.state.schedule.next_for_peer(
+                let request = match self.state.schedule.next_for_peer(
                     &peer_id,
                     peer,
                     &mut self.state.budget,
                     per_peer_byte_cap,
-                ) else {
-                    break;
+                ) {
+                    Ok(request) => request,
+                    Err(reason) => {
+                        self.trace_schedule_skipped(&peer_id, reason);
+                        break;
+                    }
                 };
 
                 let Some(peer) = self.state.peers.get(&peer_id) else {
@@ -1508,6 +1643,14 @@ impl BlockSyncReactor {
         })
     }
 
+    fn has_outstanding_request_start(&self, start_height: block::Height) -> bool {
+        self.state.peers.values().any(|peer| {
+            peer.outstanding
+                .iter()
+                .any(|outstanding| outstanding.request.start_height == start_height)
+        })
+    }
+
     fn should_retry_missing_height(&self, height: block::Height, hash: block::Hash) -> bool {
         height > self.state.body_download_floor
             && !self.state.reorder.contains(height)
@@ -1521,13 +1664,62 @@ impl BlockSyncReactor {
             return false;
         };
 
-        self.state.applying.range(next..).next().is_some()
+        self.state.reorder.contains_at_or_above(next)
+            || self.state.applying.range(next..).next().is_some()
             || self.state.submitted_applies.range(next..).next().is_some()
             || self.state.peers.values().any(|peer| {
                 peer.outstanding
                     .iter()
                     .any(|outstanding| outstanding.request.end_height() >= next)
             })
+    }
+
+    fn reset_tip_conflicts_with_local_work(
+        &self,
+        frontiers: &BlockSyncFrontiers,
+        ignore_non_material_conflicts: bool,
+    ) -> bool {
+        let height = frontiers.verified_block_tip;
+        let hash = frontiers.verified_block_hash;
+
+        if self
+            .state
+            .reorder
+            .hash(height)
+            .is_some_and(|buffered_hash| buffered_hash != hash)
+        {
+            return true;
+        }
+        if self
+            .state
+            .applying
+            .get(&height)
+            .is_some_and(|applying| applying.hash != hash)
+        {
+            return true;
+        }
+        if !ignore_non_material_conflicts
+            && self
+                .state
+                .submitted_applies
+                .get(&height)
+                .is_some_and(|entries| entries.iter().all(|(entry_hash, _)| *entry_hash != hash))
+        {
+            return true;
+        }
+        if !ignore_non_material_conflicts
+            && self.state.peers.values().any(|peer| {
+                peer.outstanding.iter().any(|outstanding| {
+                    outstanding
+                        .request
+                        .expected_hash(height)
+                        .is_some_and(|expected_hash| expected_hash != hash)
+                })
+            })
+        {
+            return true;
+        }
+        false
     }
 
     fn increment_submitted_apply(&mut self, height: block::Height, hash: block::Hash) {
@@ -1630,34 +1822,67 @@ impl BlockSyncReactor {
             .await;
     }
 
-    fn send_block(&self, peer: &ZakuraPeerId, block: Arc<block::Block>) -> bool {
-        let Some(peer_state) = self.state.peers.get(peer) else {
+    async fn send_block(&self, peer: &ZakuraPeerId, block: Arc<block::Block>) -> bool {
+        let Some(session) = self
+            .state
+            .peers
+            .get(peer)
+            .map(|peer_state| peer_state.session.clone())
+        else {
             return false;
         };
-        if let Err(error) = peer_state.session.try_send_block(block) {
-            tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Block");
-            return false;
+        match time::timeout(ACTION_SEND_TIMEOUT, session.send_block(block)).await {
+            Ok(Ok(())) => {
+                metrics::counter!("sync.block.body.served").increment(1);
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Block");
+                false
+            }
+            Err(_) => {
+                metrics::counter!("sync.block.body.serve_timeout").increment(1);
+                tracing::debug!(?peer, "timed out queueing Zakura block-sync Block");
+                false
+            }
         }
-        metrics::counter!("sync.block.body.served").increment(1);
-        true
     }
 
-    fn send_blocks_done(&self, peer: &ZakuraPeerId, start_height: block::Height, returned: u32) {
+    async fn send_blocks_done_wait(
+        &self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+        returned: u32,
+    ) {
         if returned == 0 {
             return;
         }
-        let Some(peer_state) = self.state.peers.get(peer) else {
+        let Some(session) = self
+            .state
+            .peers
+            .get(peer)
+            .map(|peer_state| peer_state.session.clone())
+        else {
             return;
         };
-        if let Err(error) = peer_state
-            .session
-            .try_send_blocks_done(start_height, returned)
+        match time::timeout(
+            ACTION_SEND_TIMEOUT,
+            session.send_blocks_done(start_height, returned),
+        )
+        .await
         {
-            tracing::debug!(
-                ?peer,
-                ?error,
-                "failed to queue Zakura block-sync BlocksDone"
-            );
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    ?peer,
+                    ?error,
+                    "failed to queue Zakura block-sync BlocksDone"
+                );
+            }
+            Err(_) => {
+                metrics::counter!("sync.block.done.serve_timeout").increment(1);
+                tracing::debug!(?peer, "timed out queueing Zakura block-sync BlocksDone");
+            }
         }
     }
 
@@ -1675,6 +1900,45 @@ impl BlockSyncReactor {
                 ?error,
                 "failed to queue Zakura block-sync RangeUnavailable"
             );
+        }
+    }
+
+    async fn send_range_unavailable_wait(
+        &self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+        count: u32,
+    ) {
+        let count = count.max(1);
+        let Some(session) = self
+            .state
+            .peers
+            .get(peer)
+            .map(|peer_state| peer_state.session.clone())
+        else {
+            return;
+        };
+        match time::timeout(
+            ACTION_SEND_TIMEOUT,
+            session.send_range_unavailable(start_height, count),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    ?peer,
+                    ?error,
+                    "failed to queue Zakura block-sync RangeUnavailable"
+                );
+            }
+            Err(_) => {
+                metrics::counter!("sync.block.unavailable.serve_timeout").increment(1);
+                tracing::debug!(
+                    ?peer,
+                    "timed out queueing Zakura block-sync RangeUnavailable"
+                );
+            }
         }
     }
 
@@ -1792,6 +2056,11 @@ impl BlockSyncReactor {
                 bs_trace::QUEUE_LEN,
                 self.state.schedule.queued_range_count() as u64,
             );
+            bs_insert_u64(
+                row,
+                bs_trace::QUEUE_BLOCKS,
+                self.state.schedule.queued_block_count() as u64,
+            );
             if let Some(start) = self.state.schedule.queued_min_start() {
                 bs_insert_height(row, bs_trace::QUEUE_MIN_START, start);
             }
@@ -1799,6 +2068,16 @@ impl BlockSyncReactor {
                 row,
                 bs_trace::ASSIGNED_LEN,
                 self.state.schedule.assigned_key_count() as u64,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::LOCAL_BODY_WORK,
+                self.local_body_work_blocks() as u64,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::REFILL_LOW_WATER,
+                self.refill_low_water_blocks() as u64,
             );
             if let Some(end) = self.state.schedule.covered_max_end() {
                 bs_insert_height(row, bs_trace::COVERED_MAX_END, end);
@@ -1869,10 +2148,72 @@ impl BlockSyncReactor {
         });
     }
 
+    fn trace_range_response_sent(
+        &self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+        requested_count: u32,
+        sent_count: u32,
+        sent_bytes: u64,
+        reason: &'static str,
+    ) {
+        self.emit_trace(bs_trace::BLOCK_RANGE_RESPONSE_SENT, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_height(row, bs_trace::RANGE_START, start_height);
+            bs_insert_u64(row, bs_trace::RANGE_COUNT, u64::from(sent_count));
+            bs_insert_u64(row, bs_trace::EXPECTED_COUNT, u64::from(requested_count));
+            bs_insert_u64(row, bs_trace::SERIALIZED_BYTES, sent_bytes);
+            bs_insert_str(row, bs_trace::REASON, reason);
+        });
+    }
+
     fn trace_downloads_paused(&self, reason: &'static str) {
         self.emit_trace(bs_trace::BLOCK_DOWNLOADS_PAUSED, |row| {
             bs_insert_str(row, bs_trace::REASON, reason);
             bs_insert_u64(row, bs_trace::BODY_LAG, u64::from(self.body_lag()));
+            bs_insert_u64(
+                row,
+                bs_trace::BUDGET_AVAILABLE,
+                self.state.budget.available(),
+            );
+        });
+    }
+
+    fn trace_schedule_skipped(&self, peer: &ZakuraPeerId, reason: ScheduleSkipReason) {
+        self.emit_trace(bs_trace::BLOCK_SCHEDULE_SKIPPED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, bs_trace::REASON, reason.as_str());
+            if let Some(peer_state) = self.state.peers.get(peer) {
+                bs_insert_u64(row, "available_slots", peer_state.available_slots() as u64);
+                bs_insert_u64(row, "peer_outstanding", peer_state.outstanding.len() as u64);
+                let peer_reserved = peer_state
+                    .outstanding
+                    .iter()
+                    .map(|outstanding| outstanding.reserved_bytes())
+                    .sum::<u64>();
+                bs_insert_u64(row, "peer_reserved", peer_reserved);
+                bs_insert_height(row, "servable_low", peer_state.servable_low);
+                bs_insert_height(row, "servable_high", peer_state.servable_high);
+            }
+            bs_insert_u64(
+                row,
+                bs_trace::QUEUE_LEN,
+                self.state.schedule.queued_range_count() as u64,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::QUEUE_BLOCKS,
+                self.state.schedule.queued_block_count() as u64,
+            );
+            if let Some(start) = self.state.schedule.queued_min_start() {
+                bs_insert_height(row, bs_trace::QUEUE_MIN_START, start);
+            }
+            bs_insert_u64(
+                row,
+                bs_trace::ASSIGNED_LEN,
+                self.state.schedule.assigned_key_count() as u64,
+            );
+            bs_insert_u64(row, bs_trace::BUDGET_RESERVED, self.state.budget.reserved());
             bs_insert_u64(
                 row,
                 bs_trace::BUDGET_AVAILABLE,
@@ -1946,12 +2287,25 @@ impl BlockSyncReactor {
     }
 
     /// Hand a data-plane action to the action driver without letting a slow or
-    /// stalled driver wedge the reactor. A full channel is awaited only up to
-    /// [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the reactor
-    /// keeps draining peer-lifecycle events, request timeouts, and misbehavior
-    /// disconnects. Returns `true` only if the action was accepted.
+    /// stalled driver wedge the reactor. Direct peer-session sends are already
+    /// complete before `SendMessage` actions are mirrored, so those mirrors are
+    /// dropped immediately if the channel is full. Required driver actions wait
+    /// up to [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the
+    /// reactor keeps draining peer-lifecycle events, request timeouts, and
+    /// misbehavior disconnects. Returns `true` only if the action was accepted.
     async fn dispatch_action(&self, action: BlockSyncAction) -> bool {
         self.trace_action_dispatched(&action);
+        if matches!(action, BlockSyncAction::SendMessage { .. }) {
+            return match self.actions.try_send(action) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    metrics::counter!("sync.block.action.send_full_dropped").increment(1);
+                    false
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => false,
+            };
+        }
+
         match time::timeout(ACTION_SEND_TIMEOUT, self.actions.send(action)).await {
             Ok(Ok(())) => true,
             // Receiver dropped: the driver is gone, treat like a send failure.

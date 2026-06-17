@@ -33,6 +33,7 @@ use super::{
 pub(crate) const ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL: Duration =
     Duration::from_secs(5);
 const ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_ATTEMPTS: usize = 24;
+pub(crate) const ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW: u32 = 262_144;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum BlockApplyClass {
@@ -139,7 +140,11 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     let mut checkpoint_frontier_refresh = CheckpointFrontierRefresh::default();
 
     loop {
-        let action = if let Some(action) = deferred_actions.pop_front() {
+        let action = if let Some(action) =
+            coalesce_ready_needed_block_queries(&mut actions, &mut deferred_actions)
+        {
+            action
+        } else if let Some(action) = deferred_actions.pop_front() {
             action
         } else {
             select! {
@@ -465,6 +470,45 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     }
 }
 
+pub(crate) fn coalesce_ready_needed_block_queries(
+    actions: &mut mpsc::Receiver<BlockSyncAction>,
+    deferred_actions: &mut VecDeque<BlockSyncAction>,
+) -> Option<BlockSyncAction> {
+    let mut latest_query = None;
+    let mut retained = VecDeque::new();
+    while let Some(action) = deferred_actions.pop_front() {
+        match action {
+            BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip,
+                best_header_tip,
+            } => {
+                latest_query = Some((verified_block_tip, best_header_tip));
+            }
+            action => retained.push_back(action),
+        }
+    }
+    *deferred_actions = retained;
+
+    while let Ok(action) = actions.try_recv() {
+        match action {
+            BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip,
+                best_header_tip,
+            } => {
+                latest_query = Some((verified_block_tip, best_header_tip));
+            }
+            action => deferred_actions.push_back(action),
+        }
+    }
+
+    latest_query.map(
+        |(verified_block_tip, best_header_tip)| BlockSyncAction::QueryNeededBlocks {
+            verified_block_tip,
+            best_header_tip,
+        },
+    )
+}
+
 pub(crate) fn coalesce_stale_needed_block_queries(
     action: BlockSyncAction,
     actions: &mut mpsc::Receiver<BlockSyncAction>,
@@ -679,7 +723,9 @@ where
             } else {
                 FrontierChange::Snapshot
             };
-        publish_body_frontier(endpoint.as_ref(), frontiers, change);
+        if class == BlockApplyClass::Full || change != FrontierChange::VerifiedGrow {
+            publish_body_frontier(endpoint.as_ref(), frontiers, change);
+        }
     }
     emit_commit_state(
         &trace,
@@ -968,7 +1014,7 @@ fn publish_body_frontier(
     endpoint.publish_sync_frontier_from(update, "block_sync_driver");
 }
 
-async fn query_block_sync_needed_blocks<ReadState>(
+pub(crate) async fn query_block_sync_needed_blocks<ReadState>(
     read_state: ReadState,
     verified_block_tip: block::Height,
     best_header_tip: block::Height,
@@ -988,6 +1034,42 @@ where
         return Ok(Vec::new());
     };
 
+    let mut needed = Vec::new();
+    let mut next_from = from;
+    let mut remaining = limit;
+
+    while remaining > 0 {
+        let chunk_limit = remaining.min(zebra_state::constants::MAX_HEADER_SYNC_HEIGHT_RANGE);
+        needed.extend(
+            query_block_sync_needed_blocks_chunk(read_state.clone(), next_from, chunk_limit)
+                .await?,
+        );
+
+        remaining = remaining.saturating_sub(chunk_limit);
+        let Some(after_chunk) = next_from.0.checked_add(chunk_limit).map(block::Height) else {
+            break;
+        };
+        next_from = after_chunk;
+    }
+
+    Ok(needed)
+}
+
+async fn query_block_sync_needed_blocks_chunk<ReadState>(
+    read_state: ReadState,
+    from: block::Height,
+    limit: u32,
+) -> Result<Vec<BlockSyncBlockMeta>, zebra_state::BoxError>
+where
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    ReadState::Future: Send + 'static,
+{
     let missing = match tokio::time::timeout(
         ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT,
         read_state
@@ -1068,7 +1150,7 @@ pub(crate) fn block_sync_missing_body_window(
     let limit = best_header_tip
         .0
         .saturating_sub(verified_block_tip.0)
-        .clamp(1, zebra_state::MAX_BLOCK_REORG_HEIGHT);
+        .clamp(1, ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW);
     Some((from, limit))
 }
 

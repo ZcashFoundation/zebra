@@ -151,10 +151,16 @@ pub mod block_sync_trace {
     pub const NEEDED_COUNT: &str = "needed_count";
     /// Number of ranges queued in the scheduler.
     pub const QUEUE_LEN: &str = "queue_len";
+    /// Number of block heights queued in the scheduler.
+    pub const QUEUE_BLOCKS: &str = "queue_blocks";
     /// Lowest start height across queued scheduler ranges.
     pub const QUEUE_MIN_START: &str = "queue_min_start";
     /// Number of distinct assigned range keys in the scheduler.
     pub const ASSIGNED_LEN: &str = "assigned_len";
+    /// Count of locally queued, in-flight, buffered, or applying block bodies.
+    pub const LOCAL_BODY_WORK: &str = "local_body_work";
+    /// Local body work threshold below which the reactor refills from state.
+    pub const REFILL_LOW_WATER: &str = "refill_low_water";
     /// Highest end height across the scheduler's covered intervals.
     pub const COVERED_MAX_END: &str = "covered_max_end";
 
@@ -174,8 +180,12 @@ pub mod block_sync_trace {
     pub const BLOCK_APPLY_FINISHED: &str = "block_apply_finished";
     /// Peer reported a requested range as unavailable.
     pub const BLOCK_RANGE_UNAVAILABLE: &str = "block_range_unavailable";
+    /// Local node queued a block range response for transport.
+    pub const BLOCK_RANGE_RESPONSE_SENT: &str = "block_range_response_sent";
     /// New body downloads were paused (lag, near-tip, or budget).
     pub const BLOCK_DOWNLOADS_PAUSED: &str = "block_downloads_paused";
+    /// Scheduler could not issue another request for a peer with free slots.
+    pub const BLOCK_SCHEDULE_SKIPPED: &str = "block_schedule_skipped";
     /// Verified body frontier advanced from state.
     pub const BLOCK_FRONTIERS_CHANGED: &str = "block_frontiers_changed";
     /// Chain tip reset rolled the body frontier back.

@@ -1953,11 +1953,13 @@ mod zakura_header_sync_driver_tests {
         apply_block_sync_body, block_apply_class, block_sync_chain_tip_event,
         block_sync_misbehavior_is_hard, block_sync_missing_body_window,
         block_sync_needed_blocks_from_state, block_verify_error_is_duplicate,
-        body_sizes_for_served_header_range, coalesce_stale_needed_block_queries,
+        body_sizes_for_served_header_range, chain_tip_mirror_frontier_change,
+        coalesce_ready_needed_block_queries, coalesce_stale_needed_block_queries,
         commit_block_sync_body, drive_block_sync_actions, drive_zakura_header_sync_actions,
         header_range_commit_failure_kind, notify_block_sync_header_tip, query_block_sync_frontiers,
-        verified_block_tip_from_state, BlockApplyClass, ZakuraHeaderSyncDriverHandles,
-        ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL, ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT,
+        query_block_sync_needed_blocks, verified_block_tip_from_state, BlockApplyClass,
+        ZakuraHeaderSyncDriverHandles, ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
+        ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT, ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW,
     };
 
     fn mainnet_block(bytes: &[u8]) -> Arc<block::Block> {
@@ -2074,7 +2076,7 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[test]
-    fn block_sync_missing_body_window_stays_inside_reorg_bound() {
+    fn block_sync_missing_body_window_stays_inside_body_sync_bound() {
         assert_eq!(
             block_sync_missing_body_window(block::Height(10), block::Height(10)),
             None
@@ -2086,9 +2088,9 @@ mod zakura_header_sync_driver_tests {
         assert_eq!(
             block_sync_missing_body_window(
                 block::Height(10),
-                block::Height(10 + zebra_state::MAX_BLOCK_REORG_HEIGHT + 100)
+                block::Height(10 + ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW + 100)
             ),
-            Some((block::Height(11), zebra_state::MAX_BLOCK_REORG_HEIGHT))
+            Some((block::Height(11), ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW))
         );
         assert_eq!(
             block_sync_missing_body_window(block::Height(u32::MAX - 1), block::Height(u32::MAX)),
@@ -2129,6 +2131,103 @@ mod zakura_header_sync_driver_tests {
                     hash: block2.hash(),
                     size: BlockSizeEstimate::Advertised(42),
                 },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn block_sync_needed_blocks_chunks_state_range_reads() {
+        let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let header = block.header.clone();
+        let hash = block.hash();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let read_state = {
+            let requests = Arc::clone(&requests);
+            service_fn(move |request| {
+                let requests = Arc::clone(&requests);
+                let header = Arc::clone(&header);
+                async move {
+                    match request {
+                        zebra_state::ReadRequest::MissingBlockBodies { from, limit } => {
+                            requests
+                                .lock()
+                                .expect("request capture mutex is not poisoned")
+                                .push(("missing", from, limit));
+                            let heights = (0..limit)
+                                .filter_map(|offset| from.0.checked_add(offset).map(block::Height))
+                                .collect();
+                            Ok::<_, zebra_state::BoxError>(
+                                zebra_state::ReadResponse::MissingBlockBodies(heights),
+                            )
+                        }
+                        zebra_state::ReadRequest::HeadersByHeightRange { start, count } => {
+                            requests
+                                .lock()
+                                .expect("request capture mutex is not poisoned")
+                                .push(("headers", start, count));
+                            let headers = (0..count)
+                                .filter_map(|offset| {
+                                    start.0.checked_add(offset).map(|height| {
+                                        (block::Height(height), hash, Arc::clone(&header))
+                                    })
+                                })
+                                .collect();
+                            Ok(zebra_state::ReadResponse::Headers(headers))
+                        }
+                        zebra_state::ReadRequest::BlockSizeHints { from, count } => {
+                            requests
+                                .lock()
+                                .expect("request capture mutex is not poisoned")
+                                .push(("hints", from, count));
+                            let hints = (0..count)
+                                .filter_map(|offset| {
+                                    from.0
+                                        .checked_add(offset)
+                                        .map(|height| (block::Height(height), Some(32)))
+                                })
+                                .collect();
+                            Ok(zebra_state::ReadResponse::BlockSizeHints(hints))
+                        }
+                        request => panic!("unexpected read request: {request:?}"),
+                    }
+                }
+            })
+        };
+        let count = zebra_state::constants::MAX_HEADER_SYNC_HEIGHT_RANGE + 2;
+
+        let needed =
+            query_block_sync_needed_blocks(read_state, block::Height(0), block::Height(count))
+                .await
+                .expect("mock read state succeeds");
+
+        assert_eq!(
+            needed.len(),
+            usize::try_from(count).expect("test count fits usize")
+        );
+        assert_eq!(
+            requests
+                .lock()
+                .expect("request capture mutex is not poisoned")
+                .as_slice(),
+            &[
+                (
+                    "missing",
+                    block::Height(1),
+                    zebra_state::constants::MAX_HEADER_SYNC_HEIGHT_RANGE,
+                ),
+                (
+                    "headers",
+                    block::Height(1),
+                    zebra_state::constants::MAX_HEADER_SYNC_HEIGHT_RANGE,
+                ),
+                (
+                    "hints",
+                    block::Height(1),
+                    zebra_state::constants::MAX_HEADER_SYNC_HEIGHT_RANGE,
+                ),
+                ("missing", block::Height(4001), 2),
+                ("headers", block::Height(4001), 2),
+                ("hints", block::Height(4001), 2),
             ]
         );
     }
@@ -2184,6 +2283,48 @@ mod zakura_header_sync_driver_tests {
             ),
             BlockSyncEvent::ChainTipReset(mapped) if mapped == frontiers
         ));
+    }
+
+    #[test]
+    fn chain_tip_mirror_classifies_forward_reset_as_verified_grow() {
+        let tip_block = zebra_state::ChainTipBlock {
+            hash: block::Hash([8; 32]),
+            height: block::Height(8),
+            time: chrono::Utc::now(),
+            transactions: Vec::new(),
+            transaction_hashes: Arc::<[zebra_chain::transaction::Hash]>::from([]),
+            previous_block_hash: block::Hash([7; 32]),
+        };
+        assert_eq!(
+            chain_tip_mirror_frontier_change(
+                &zebra_state::TipAction::Grow { block: tip_block },
+                block::Height(7),
+                block::Height(8),
+            ),
+            zebra_network::zakura::FrontierChange::VerifiedGrow
+        );
+        assert_eq!(
+            chain_tip_mirror_frontier_change(
+                &zebra_state::TipAction::Reset {
+                    height: block::Height(8),
+                    hash: block::Hash([8; 32]),
+                },
+                block::Height(7),
+                block::Height(8),
+            ),
+            zebra_network::zakura::FrontierChange::VerifiedGrow
+        );
+        assert_eq!(
+            chain_tip_mirror_frontier_change(
+                &zebra_state::TipAction::Reset {
+                    height: block::Height(7),
+                    hash: block::Hash([77; 32]),
+                },
+                block::Height(8),
+                block::Height(7),
+            ),
+            zebra_network::zakura::FrontierChange::VerifiedReset
+        );
     }
 
     #[test]
@@ -2446,6 +2587,41 @@ mod zakura_header_sync_driver_tests {
                 peer,
                 reason: BlockSyncMisbehavior::StatusSpam,
             }) if peer == deferred_peer
+        ));
+        assert!(deferred_actions.is_empty());
+        assert!(action_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn block_sync_driver_prioritizes_ready_needed_query_over_submit() {
+        let (action_tx, mut action_rx) = mpsc::channel(8);
+        let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        action_tx
+            .send(BlockSyncAction::SubmitBlock { token: 7, block })
+            .await
+            .expect("submit action queues");
+        action_tx
+            .send(BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(8),
+            })
+            .await
+            .expect("query action queues");
+
+        let mut deferred_actions = VecDeque::new();
+        let action = coalesce_ready_needed_block_queries(&mut action_rx, &mut deferred_actions)
+            .expect("ready query is prioritized");
+
+        assert!(matches!(
+            action,
+            BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(8),
+            }
+        ));
+        assert!(matches!(
+            deferred_actions.pop_front(),
+            Some(BlockSyncAction::SubmitBlock { token: 7, .. })
         ));
         assert!(deferred_actions.is_empty());
         assert!(action_rx.try_recv().is_err());
@@ -2972,7 +3148,7 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[tokio::test]
-    async fn checkpoint_commit_success_refreshes_block_sync_frontiers() {
+    async fn unmatched_checkpoint_commit_success_does_not_refresh_block_sync_frontiers() {
         let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
         let block_hash = block.hash();
         let (tip_tx, tip_rx) =
@@ -3043,19 +3219,11 @@ mod zakura_header_sync_driver_tests {
         )
         .await;
 
-        let action = tokio::time::timeout(Duration::from_secs(1), reactor_actions.recv())
-            .await
-            .expect("reactor emits action after refreshed checkpoint frontier")
-            .expect("reactor action channel remains open");
         assert!(
-            matches!(
-                action,
-                BlockSyncAction::QueryNeededBlocks {
-                    verified_block_tip: block::Height(2),
-                    best_header_tip: block::Height(10),
-                }
-            ),
-            "checkpoint commit success must refresh state frontiers and query the next body window, got {action:?}"
+            tokio::time::timeout(Duration::from_millis(50), reactor_actions.recv())
+                .await
+                .is_err(),
+            "a synthetic commit completion without a matching reactor apply must not refresh frontiers"
         );
 
         reactor_task.abort();

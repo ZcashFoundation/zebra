@@ -90,6 +90,11 @@ impl BlockSyncPeerSession {
         self.try_send_message(BlockSyncMessage::Block(block))
     }
 
+    /// Send one typed block body frame, waiting for transport queue capacity.
+    pub async fn send_block(&self, block: Arc<block::Block>) -> Result<(), OrderedSendError> {
+        self.send_message(BlockSyncMessage::Block(block)).await
+    }
+
     /// Send a typed response terminator.
     pub fn try_send_blocks_done(
         &self,
@@ -100,6 +105,19 @@ impl BlockSyncPeerSession {
             start_height,
             returned,
         })
+    }
+
+    /// Send a typed response terminator, waiting for transport queue capacity.
+    pub async fn send_blocks_done(
+        &self,
+        start_height: block::Height,
+        returned: u32,
+    ) -> Result<(), OrderedSendError> {
+        self.send_message(BlockSyncMessage::BlocksDone {
+            start_height,
+            returned,
+        })
+        .await
     }
 
     /// Send a typed unavailable-range response.
@@ -114,6 +132,19 @@ impl BlockSyncPeerSession {
         })
     }
 
+    /// Send a typed unavailable-range response, waiting for transport queue capacity.
+    pub async fn send_range_unavailable(
+        &self,
+        start_height: block::Height,
+        count: u32,
+    ) -> Result<(), OrderedSendError> {
+        self.send_message(BlockSyncMessage::RangeUnavailable {
+            start_height,
+            count,
+        })
+        .await
+    }
+
     fn try_send_message(&self, msg: BlockSyncMessage) -> Result<(), OrderedSendError> {
         let frame = msg
             .encode_frame()
@@ -123,6 +154,16 @@ impl BlockSyncPeerSession {
             Err(mpsc::error::TrySendError::Full(_frame)) => Err(OrderedSendError::Full),
             Err(mpsc::error::TrySendError::Closed(_frame)) => Err(OrderedSendError::Closed),
         }
+    }
+
+    async fn send_message(&self, msg: BlockSyncMessage) -> Result<(), OrderedSendError> {
+        let frame = msg
+            .encode_frame()
+            .map_err(|error| OrderedSendError::Encode(Box::new(error)))?;
+        self.send
+            .send(frame)
+            .await
+            .map_err(|_error| OrderedSendError::Closed)
     }
 }
 

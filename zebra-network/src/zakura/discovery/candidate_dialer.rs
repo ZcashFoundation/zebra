@@ -22,10 +22,12 @@ use crate::zakura::{ZakuraEndpoint, ZakuraHandlerError, ZakuraLocalLimits, Zakur
 
 /// How often the discovery dialer wakes to look for new candidates.
 const ZAKURA_DISCOVERY_DIAL_INTERVAL: Duration = Duration::from_secs(1);
+const ZAKURA_DISCOVERY_DUPLICATE_SETTLE: Duration = Duration::from_millis(500);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum DiscoveryDialResult {
     Registered,
+    ShortLivedRegistered,
     Failed,
     LocalResourceLimit,
 }
@@ -255,7 +257,12 @@ async fn run_discovery_dial_once(
             .iter()
             .any(|id| id == &peer_id)
         {
-            break DiscoveryDialResult::Registered;
+            break match tokio::time::timeout(ZAKURA_DISCOVERY_DUPLICATE_SETTLE, &mut dial).await {
+                Ok(Ok(Ok(()))) | Ok(Ok(Err(_))) | Ok(Err(_)) => {
+                    DiscoveryDialResult::ShortLivedRegistered
+                }
+                Err(_) => DiscoveryDialResult::Registered,
+            };
         }
 
         tokio::select! {
@@ -263,7 +270,13 @@ async fn run_discovery_dial_once(
                 break match dial_result {
                     // `native_bootstrap_dial` returns `Ok(())` only after the connection
                     // finishes; discovery success is the peer appearing in the registration watch.
-                    Ok(Ok(())) => DiscoveryDialResult::Failed,
+                    Ok(Ok(())) => {
+                        if registered.borrow_and_update().iter().any(|id| id == &peer_id) {
+                            DiscoveryDialResult::ShortLivedRegistered
+                        } else {
+                            DiscoveryDialResult::Failed
+                        }
+                    }
                     Ok(Err(ZakuraHandlerError::ResourceLimit(_))) => {
                         DiscoveryDialResult::LocalResourceLimit
                     }
@@ -301,6 +314,10 @@ async fn apply_discovery_dial_result(
         DiscoveryDialResult::Registered => {
             discovery.mark_dial_success(node_id).await;
             metrics::counter!("zakura.p2p.discovery.dial.succeeded").increment(1);
+        }
+        DiscoveryDialResult::ShortLivedRegistered => {
+            discovery.mark_short_lived_exchange(node_id).await;
+            metrics::counter!("zakura.p2p.discovery.dial.short_lived_registered").increment(1);
         }
         DiscoveryDialResult::Failed => {
             discovery.mark_dial_failure(node_id).await;

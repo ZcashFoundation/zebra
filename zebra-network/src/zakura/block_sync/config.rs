@@ -10,14 +10,14 @@ pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 128;
 ///
 /// Combined with the global byte budget ([`DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES`])
 /// this lets the budget — not a small fixed slot count — pace downloads.
-pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 16;
+pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 4096;
 /// Default expected serving-peer fanout used to derive the per-peer in-flight
 /// byte cap (`max_inflight_block_bytes / expected_peers`).
 ///
 /// Bounds how much of the global byte budget a single peer can reserve so one
 /// fast peer cannot starve the others once the slot cap stops binding. `0`
 /// disables per-peer byte fairness.
-pub const DEFAULT_BS_EXPECTED_PEERS: usize = 8;
+pub const DEFAULT_BS_EXPECTED_PEERS: usize = 1;
 /// Default total response byte target advertised per range response.
 pub const DEFAULT_BS_MAX_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 /// Default global byte budget reserved for later block-download scheduling.
@@ -32,11 +32,12 @@ pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
 pub const DEFAULT_BS_FANOUT: usize = 1;
 /// Default body lag where block sync pauses new downloads and lets block propagation finish.
 pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
-/// Maximum peer-advertised response byte target accepted from stream-6 status.
-pub const MAX_BS_RESPONSE_BYTES: u32 = {
-    // This cast is safe: MAX_BS_MESSAGE_BYTES is asserted below 4 MiB.
-    MAX_BS_MESSAGE_BYTES as u32
-};
+/// Maximum peer-advertised aggregate byte target accepted per requested range.
+///
+/// A range response is sent as one `Block` frame per body, and each body frame
+/// remains independently bounded by `MAX_BS_MESSAGE_BYTES`. This aggregate cap
+/// only controls how many bounded body frames a server sends before `BlocksDone`.
+pub const MAX_BS_RESPONSE_BYTES: u32 = DEFAULT_BS_MAX_RESPONSE_BYTES;
 
 /// Block-sync peer status advertisement.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

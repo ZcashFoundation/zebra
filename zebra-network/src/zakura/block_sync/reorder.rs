@@ -26,6 +26,16 @@ impl ReorderBuffer {
         self.blocks.contains_key(&height)
     }
 
+    pub(super) fn contains_at_or_above(&self, height: block::Height) -> bool {
+        self.blocks.range(height..).next().is_some()
+    }
+
+    pub(super) fn hash(&self, height: block::Height) -> Option<block::Hash> {
+        self.blocks
+            .get(&height)
+            .map(|buffered| buffered.block.hash())
+    }
+
     pub(super) fn insert(
         &mut self,
         height: block::Height,

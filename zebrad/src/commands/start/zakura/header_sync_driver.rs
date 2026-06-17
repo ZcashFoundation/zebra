@@ -937,15 +937,17 @@ pub(crate) async fn mirror_zakura_full_block_commits<ReadState>(
             },
         );
         if let Some(mut update) = endpoint.current_sync_frontier() {
+            let previous_verified_body = update.frontier.verified_body.height;
             if let Some((finalized_height, finalized_hash)) = finalized_tip {
                 update.frontier.finalized = Frontier::new(finalized_height, finalized_hash);
             }
             update.frontier.verified_body =
                 Frontier::new(verified_block_tip.0, verified_block_tip.1);
-            update.change = match action {
-                zebra_state::TipAction::Grow { .. } => FrontierChange::VerifiedGrow,
-                zebra_state::TipAction::Reset { .. } => FrontierChange::VerifiedReset,
-            };
+            update.change = chain_tip_mirror_frontier_change(
+                &action,
+                previous_verified_body,
+                verified_block_tip.0,
+            );
             endpoint.publish_sync_frontier_from(update, "chain_tip_mirror");
             emit_commit_state(
                 &trace,
@@ -1062,6 +1064,20 @@ pub(crate) fn block_sync_chain_tip_event(
     match action {
         zebra_state::TipAction::Grow { .. } => BlockSyncEvent::ChainTipGrow(frontiers),
         zebra_state::TipAction::Reset { .. } => BlockSyncEvent::ChainTipReset(frontiers),
+    }
+}
+
+pub(crate) fn chain_tip_mirror_frontier_change(
+    action: &zebra_state::TipAction,
+    previous_verified_body: block::Height,
+    verified_block_tip: block::Height,
+) -> FrontierChange {
+    match action {
+        zebra_state::TipAction::Grow { .. } => FrontierChange::VerifiedGrow,
+        zebra_state::TipAction::Reset { .. } if verified_block_tip > previous_verified_body => {
+            FrontierChange::VerifiedGrow
+        }
+        zebra_state::TipAction::Reset { .. } => FrontierChange::VerifiedReset,
     }
 }
 

@@ -21,6 +21,29 @@ pub enum BlockSizeEstimate {
     Unknown,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(super) enum ScheduleSkipReason {
+    NoAssignableRange,
+    PeerByteCapExhausted,
+    BudgetExhausted,
+    FirstBlockExceedsByteLimit,
+    ReserveFailed,
+    RequestCountOverflow,
+}
+
+impl ScheduleSkipReason {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            ScheduleSkipReason::NoAssignableRange => "no_assignable_range",
+            ScheduleSkipReason::PeerByteCapExhausted => "peer_byte_cap_exhausted",
+            ScheduleSkipReason::BudgetExhausted => "budget_exhausted",
+            ScheduleSkipReason::FirstBlockExceedsByteLimit => "first_block_exceeds_byte_limit",
+            ScheduleSkipReason::ReserveFailed => "reserve_failed",
+            ScheduleSkipReason::RequestCountOverflow => "request_count_overflow",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct BlockRangeScheduler {
     queue: VecDeque<BlockRange>,
@@ -112,13 +135,17 @@ impl BlockRangeScheduler {
         peer: &PeerBlockState,
         budget: &mut ByteBudget,
         per_peer_byte_cap: u64,
-    ) -> Option<BlockRangeRequest> {
+    ) -> Result<BlockRangeRequest, ScheduleSkipReason> {
         self.prune_covered();
-        let index = self.queue.iter().position(|range| {
-            range.end_height() <= peer.servable_high
-                && range.start_height() >= peer.servable_low
-                && self.can_assign_peer_to_range(peer_id, range)
-        })?;
+        let index = self
+            .queue
+            .iter()
+            .position(|range| {
+                range.end_height() <= peer.servable_high
+                    && range.start_height() >= peer.servable_low
+                    && self.can_assign_peer_to_range(peer_id, range)
+            })
+            .ok_or(ScheduleSkipReason::NoAssignableRange)?;
 
         let range = self.queue[index].clone();
         // Bound this peer's share of the global byte budget so one fast peer
@@ -133,6 +160,13 @@ impl BlockRangeScheduler {
             .available()
             .min(u64::from(peer.max_response_bytes.max(1)))
             .min(peer_headroom);
+        if max_bytes == 0 {
+            return Err(if peer_headroom == 0 {
+                ScheduleSkipReason::PeerByteCapExhausted
+            } else {
+                ScheduleSkipReason::BudgetExhausted
+            });
+        }
         let max_count = peer.max_blocks_per_response.max(1);
         let mut estimated_bytes = 0u64;
         let mut selected = Vec::new();
@@ -146,12 +180,15 @@ impl BlockRangeScheduler {
             selected.push(*block);
         }
 
-        if selected.is_empty() || !budget.try_reserve(estimated_bytes) {
-            return None;
+        if selected.is_empty() {
+            return Err(ScheduleSkipReason::FirstBlockExceedsByteLimit);
+        }
+        if !budget.try_reserve(estimated_bytes) {
+            return Err(ScheduleSkipReason::ReserveFailed);
         }
 
         let count =
-            u32::try_from(selected.len()).expect("selected block count is capped by u32 status");
+            u32::try_from(selected.len()).map_err(|_| ScheduleSkipReason::RequestCountOverflow)?;
         let request = BlockRangeRequest {
             start_height: selected[0].height,
             count,
@@ -183,7 +220,7 @@ impl BlockRangeScheduler {
             .entry(request.key())
             .or_default()
             .insert(peer_id.clone());
-        Some(request)
+        Ok(request)
     }
 
     pub(super) fn retry(&mut self, range: BlockRangeRequest) {
@@ -283,6 +320,11 @@ impl BlockRangeScheduler {
         self.queue.len()
     }
 
+    /// Diagnostics: number of queued (not-yet-assigned-to-fanout) block heights.
+    pub(super) fn queued_block_count(&self) -> usize {
+        self.queue.iter().map(|range| range.blocks.len()).sum()
+    }
+
     /// Diagnostics: lowest start height across all queued ranges.
     ///
     /// A frozen download floor with a non-empty `needed` set but a
@@ -308,14 +350,22 @@ impl BlockRangeScheduler {
             return;
         }
         for range in self.uncovered_segments(range) {
-            if self.queue.iter().any(|queued| queued.overlaps(&range))
-                || self.assigned.keys().any(|assigned| {
-                    assigned.start <= range.end_height() && assigned.end >= range.start_height()
+            let blocked = self
+                .queue
+                .iter()
+                .map(|queued| CoveredRange {
+                    start: queued.start_height(),
+                    end: queued.end_height(),
                 })
-            {
-                continue;
+                .chain(self.assigned.keys().map(|assigned| CoveredRange {
+                    start: assigned.start,
+                    end: assigned.end,
+                }))
+                .collect::<Vec<_>>();
+
+            for segment in Self::uncovered_segments_for(&blocked, range) {
+                self.queue.push_back(segment);
             }
-            self.queue.push_back(range);
         }
     }
 
@@ -437,10 +487,6 @@ impl BlockRange {
             start: self.start_height(),
             end: self.end_height(),
         }
-    }
-
-    fn overlaps(&self, other: &Self) -> bool {
-        self.start_height() <= other.end_height() && self.end_height() >= other.start_height()
     }
 
     fn matches_needed(&self, needed: &HashMap<block::Height, block::Hash>) -> bool {
