@@ -15,8 +15,8 @@ use tempfile::TempDir;
 
 use zebra_chain::{
     block::{Height, HeightDiff, TryIntoHeight},
-    parameters::Network,
     parameters::constants::MAX_BLOCK_REORG_HEIGHT,
+    parameters::Network,
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
