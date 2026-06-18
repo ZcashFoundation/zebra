@@ -865,6 +865,10 @@ criteria = "safe-to-deploy"
 version = "1.1.14"
 criteria = "safe-to-deploy"
 
+[[exemptions.home]]
+version = "0.5.12"
+criteria = "safe-to-deploy"
+
 [[exemptions.hostname]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -1191,6 +1195,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.memchr]]
 version = "2.8.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.memchr]]
+version = "2.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.memuse]]
@@ -1809,6 +1817,10 @@ criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
 
+[[exemptions.rustls-pemfile]]
+version = "2.2.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rustls-pki-types]]
 version = "1.14.1"
 criteria = "safe-to-deploy"
@@ -2023,6 +2035,10 @@ criteria = "safe-to-deploy"
 version = "1.0.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.siphasher]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.sketches-ddsketch]]
 version = "0.3.1"
 criteria = "safe-to-deploy"
@@ -2141,6 +2157,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tiny-keccak]]
 version = "2.0.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.tinystr]]
+version = "0.8.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinyvec]]
@@ -2335,6 +2355,10 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.url]]
+version = "2.5.8"
+criteria = "safe-to-deploy"
+
 [[exemptions.utf8-zero]]
 version = "0.8.1"
 criteria = "safe-to-deploy"
@@ -2516,11 +2540,19 @@ version = "0.52.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
+version = "0.60.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-sys]]
 version = "0.61.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-targets]]
 version = "0.52.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-targets]]
+version = "0.53.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-threading]]
@@ -2535,32 +2567,64 @@ criteria = "safe-to-deploy"
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.windows_aarch64_msvc]]
 version = "0.52.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_gnu]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows_i686_gnu]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.windows_i686_gnullvm]]
 version = "0.52.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows_i686_gnullvm]]
+version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_msvc]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows_i686_msvc]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.windows_x86_64_gnu]]
 version = "0.52.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnullvm]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.windows_x86_64_msvc]]
 version = "0.52.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.winnow]]
@@ -2597,6 +2661,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.yaml-rust2]]
 version = "0.11.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.yoke]]
+version = "0.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.z32]]
@@ -2661,6 +2729,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zeroize_derive]]
 version = "1.4.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.zerotrie]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.zerovec]]
+version = "0.11.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.zip32]]

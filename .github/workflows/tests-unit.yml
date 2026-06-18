@@ -151,7 +151,18 @@ jobs:
         env:
           CXXFLAGS: "-include cstdint"
       - name: Run Zakura regtest PR gate
-        run: cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
+        # `cargo test --test zakura_regtest_e2e` compiles the zebrad bin (cargo
+        # always builds a package's binaries so its integration tests can find
+        # them), and the harness bind-mounts that bin into a stock
+        # `debian:trixie-slim` container with no system RocksDB. With
+        # `ROCKSDB_LIB_DIR` set (by `setup-zebra-build`) that compile relinks the
+        # bin against the runner's librocksdb.so, overwriting the statically
+        # linked binary from the build step above, so every node crashes with
+        # "librocksdb.so.8.9: cannot open shared object file". Unset it here so
+        # the bin compiled by this step stays vendored and statically linked.
+        run: |
+          unset ROCKSDB_LIB_DIR
+          cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
         env:
           CXXFLAGS: "-include cstdint"
           ZAKURA_REGTEST_E2E: "1"
@@ -212,7 +223,13 @@ jobs:
       - name: Run Zakura regtest dual-stack e2e
         # The test is `#[ignore]` and additionally returns early in CI unless
         # `ZAKURA_REGTEST_E2E=1` is set, so both flags are required to force it.
-        run: cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
+        # Unset `ROCKSDB_LIB_DIR` so the zebrad bin that `cargo test` compiles for
+        # the integration test stays statically linked — otherwise it relinks
+        # against the runner's librocksdb.so and crashes in the slim container
+        # (see the PR-gate step above for the full explanation).
+        run: |
+          unset ROCKSDB_LIB_DIR
+          cargo test -p zebrad --test zakura_regtest_e2e -- --ignored --nocapture
         env:
           CXXFLAGS: "-include cstdint"
           ZAKURA_REGTEST_E2E: "1"
