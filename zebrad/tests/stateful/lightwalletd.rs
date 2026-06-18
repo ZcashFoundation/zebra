@@ -1,7 +1,10 @@
+#[cfg(not(target_os = "windows"))]
 use color_eyre::eyre::Result;
 
+#[cfg(not(target_os = "windows"))]
 use crate::common::test_type::TestType::*;
 
+#[cfg(not(target_os = "windows"))]
 use crate::common::lightwalletd::lwd_integration_test;
 
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.

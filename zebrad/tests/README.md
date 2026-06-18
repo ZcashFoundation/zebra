@@ -9,7 +9,7 @@ zebrad/tests/
   main.rs               # Entry point (mod common, unit, integration, stateful, e2e)
   common/               # Shared test helpers (not test functions)
   unit/                 # Fast tests: CLI, config, end-of-support (<1 min)
-  integration/          # Local zebrad/regtest tests, no cached state or public peers (5-15 min)
+  integration/          # Zebrad process, regtest, and bounded sync tests; no cached state
     sync.rs             # Checkpoint sync, restart
     rpc.rs              # RPC/metrics/tracing endpoints
     database.rs         # State format, conflicts, migrations

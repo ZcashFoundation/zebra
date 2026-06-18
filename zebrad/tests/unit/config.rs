@@ -677,7 +677,7 @@ fn non_blocking_logger() -> Result<()> {
         Ok(())
     });
 
-    // Wait until the spawned task finishes up to 45 seconds before shutting down tokio runtime
+    // Wait until the spawned task finishes up to 90 seconds before shutting down tokio runtime.
     if done_rx.recv_timeout(Duration::from_secs(90)).is_ok() {
         rt.shutdown_timeout(Duration::from_secs(3));
     }

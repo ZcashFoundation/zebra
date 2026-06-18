@@ -67,7 +67,7 @@ The module structure maps directly to four tiers:
 zebrad/tests/
   main.rs                 # mod common; mod unit; mod integration; mod stateful; mod e2e;
   unit/                   # Fast: CLI, config, end-of-support (<1 min)
-  integration/            # Local zebrad/regtest behavior, no cached state or public peers (5-15 min)
+  integration/            # Zebrad process, regtest, and bounded sync behavior; no cached state
     sync.rs, rpc.rs, database.rs, regtest.rs, network.rs
   stateful/               # Requires cached blockchain state or runtime lightwalletd (30 min - days)
     sync.rs, rpc.rs, lightwalletd.rs, indexer.rs
@@ -83,6 +83,11 @@ whole-system public-network flow such as peer RPC discovery, trusted-chain
 syncer checks, full sync, large checkpoint sync, checkpoint generation, or
 lightwalletd full sync. Some E2E tests also use cached state, but their
 scheduling risk is the end-to-end flow, so they live under `e2e::`.
+
+Short public-network sync smoke tests can remain under `integration::` when
+they do not need cached state and stay within the PR-CI budget. They are not
+`stateful::` because they do not need persistent disks, and they are not `e2e::`
+unless their scheduling risk comes from a long whole-system flow.
 
 ### Nextest configuration
 

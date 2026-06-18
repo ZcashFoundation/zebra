@@ -154,8 +154,12 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 
     for i in zcashd_test_vectors {
         let res = client.call("z_getsubtreesbyindex", i.1).await?;
-        let body = res.bytes().await;
-        let parsed: Value = serde_json::from_slice(&body.expect("Response is valid json"))?;
+        let body = res
+            .bytes()
+            .await
+            .wrap_err("failed to read z_getsubtreesbyindex response body")?;
+        let parsed: Value =
+            serde_json::from_slice(&body).wrap_err("invalid z_getsubtreesbyindex JSON response")?;
         insta::assert_json_snapshot!(i.0, parsed);
     }
 

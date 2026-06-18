@@ -8,9 +8,9 @@
 //!   No network or state required.
 //!
 //! - **`integration::`** — Tests that launch zebrad, check local endpoints,
-//!   verify database behavior, or exercise regtest mode. No cached blockchain
-//!   state, runtime lightwalletd dependency, or public-network peer availability
-//!   required. (5-15 min)
+//!   verify database behavior, exercise regtest mode, or run bounded sync
+//!   checks. No cached blockchain state or runtime lightwalletd dependency
+//!   required.
 //!
 //! - **`stateful::`** — Tests that require a cached blockchain state directory
 //!   or runtime lightwalletd dependency. Run on GCP VMs with persistent disks.
