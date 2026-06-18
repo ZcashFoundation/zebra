@@ -236,7 +236,6 @@ pub(crate) async fn drive_header_sync_actions(
             HeaderSyncAction::NewBlockReceived {
                 peer,
                 hash,
-                block: _,
                 ..
             } => {
                 tracing::debug!(
