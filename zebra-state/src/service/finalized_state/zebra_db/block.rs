@@ -108,15 +108,17 @@ impl ZebraDb {
     //       move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-        // Only the key (the last transaction's location) is needed to find the
-        // body tip, so read the value as `RawBytes` to avoid deserializing the
-        // chain's last transaction on every `tip()` call.
-        let (last_tx_loc, _raw_tx): (TransactionLocation, RawBytes) =
-            self.db.zs_last_key_value(&tx_by_loc)?;
-
-        self.hash(last_tx_loc.height)
-            .map(|hash| (last_tx_loc.height, hash))
+        // The finalized tip is the highest full block committed to the consensus
+        // `hash_by_height` column family. That CF is written only when a full
+        // block body is committed (header-only Zakura frontier heights live in
+        // the separate `zakura_header_*` CFs), and it is retained through
+        // pruning. Reading it here — instead of the body tip via `tx_by_loc` —
+        // keeps `tip()` correct in pruned storage mode, where checkpoint blocks
+        // below the prune horizon have their `tx_by_loc` rows skipped/removed but
+        // their `hash_by_height` row retained. In non-pruned mode the two are
+        // identical, since every full block writes both rows.
+        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+        self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns `true` if `height` is present in the finalized state.
