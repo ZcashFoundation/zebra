@@ -2871,7 +2871,6 @@ fn block_sync_misbehavior_is_soft(reason: BlockSyncMisbehavior) -> bool {
     matches!(
         reason,
         BlockSyncMisbehavior::SizeMismatch
-            | BlockSyncMisbehavior::UnsolicitedBlock
             | BlockSyncMisbehavior::RangeUnavailable
             | BlockSyncMisbehavior::GetBlocksSpam
     )
