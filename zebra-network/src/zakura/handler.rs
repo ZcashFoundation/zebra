@@ -782,10 +782,10 @@ struct ZakuraSupervisorState {
     outbound_by_peer: HashMap<ZakuraPeerId, ZakuraPeerHandle>,
     disconnect_by_peer: HashMap<ZakuraPeerId, CancellationToken>,
     caps_by_peer: HashMap<ZakuraPeerId, u64>,
-    /// When each authenticated peer's current connection registered, used to
-    /// decide whether a duplicate may evict a stale incumbent (see
+    /// Last application-level activity for each authenticated peer, used to
+    /// decide whether a duplicate may evict an idle incumbent (see
     /// [`ZAKURA_DUPLICATE_EVICT_MIN_AGE`]).
-    registered_at: HashMap<ZakuraPeerId, Instant>,
+    last_active_by_peer: HashMap<ZakuraPeerId, SharedConnectionFreshness>,
     active_by_ip: HashMap<IpAddr, usize>,
     max_connections_per_ip: usize,
 }
@@ -874,7 +874,7 @@ impl ZakuraSupervisorHandle {
                 outbound_by_peer: HashMap::new(),
                 disconnect_by_peer: HashMap::new(),
                 caps_by_peer: HashMap::new(),
-                registered_at: HashMap::new(),
+                last_active_by_peer: HashMap::new(),
                 active_by_ip: HashMap::new(),
                 max_connections_per_ip: max_connections_per_ip.max(1),
             })),
@@ -932,6 +932,7 @@ impl ZakuraSupervisorHandle {
         outbound_handle: ZakuraPeerHandle,
         disconnect_token: CancellationToken,
         accepted_capabilities: u64,
+        last_activity: SharedConnectionFreshness,
     ) -> ZakuraRegistration {
         let mut state = self.inner.lock().await;
         // A re-registration for a peer id that is already active is a duplicate
@@ -978,7 +979,9 @@ impl ZakuraSupervisorHandle {
                 state
                     .caps_by_peer
                     .insert(peer_id.clone(), accepted_capabilities);
-                state.registered_at.insert(peer_id.clone(), Instant::now());
+                state
+                    .last_active_by_peer
+                    .insert(peer_id.clone(), last_activity);
                 let registered_ids: Vec<_> = state.active_by_peer.keys().cloned().collect();
                 set_active_connection_gauge(registered_ids.len());
                 self.peer_set_tx.send_replace(registered_ids);
@@ -995,18 +998,17 @@ impl ZakuraSupervisorHandle {
             }
             ZakuraUpgradeOutcome::Duplicate { .. } => {
                 // A duplicate for an identity that already has a connection is
-                // almost always a restart or redial. If the incumbent has been
-                // registered long enough to be a stale connection left behind by
-                // a restarted peer, cancel it now so it tears down through its
-                // normal cleanup path and frees the slot in milliseconds; the
-                // peer's redial then takes the freed slot instead of waiting for
-                // the dead connection's QUIC idle timeout (~150s). A young
-                // incumbent is kept to avoid flapping on simultaneous-open races.
-                // The newcomer is still closed (its redial reconnects cleanly
-                // once the slot is free), which avoids racing the incumbent's
-                // service-registration teardown.
-                if let Some(registered_at) = state.registered_at.get(&peer_id) {
-                    if registered_at.elapsed() >= ZAKURA_DUPLICATE_EVICT_MIN_AGE {
+                // usually a restart, a redial, or a simultaneous-open race. Only
+                // cancel the incumbent if it has been application-idle long
+                // enough to look stale; age alone is not enough because healthy
+                // long-lived peers can be actively serving block sync for the
+                // whole scratch sync. The newcomer is still closed (its redial
+                // reconnects cleanly once the slot is free), which avoids racing
+                // the incumbent's service-registration teardown.
+                if let Some(last_activity) = state.last_active_by_peer.get(&peer_id) {
+                    if last_connection_activity(last_activity).elapsed()
+                        >= ZAKURA_DUPLICATE_EVICT_MIN_AGE
+                    {
                         if let Some(token) = state.disconnect_by_peer.get(&peer_id) {
                             token.cancel();
                             metrics::counter!("zakura.p2p.conn.duplicate.evicted_stale")
@@ -1026,7 +1028,7 @@ impl ZakuraSupervisorHandle {
         state.outbound_by_peer.remove(peer_id);
         state.disconnect_by_peer.remove(peer_id);
         state.caps_by_peer.remove(peer_id);
-        state.registered_at.remove(peer_id);
+        state.last_active_by_peer.remove(peer_id);
         if let Some(remote_ip) = remote_ip {
             if let Some(count) = state.active_by_ip.get_mut(&remote_ip) {
                 *count = count.saturating_sub(1);
@@ -1134,6 +1136,7 @@ struct StreamAdmission<'a> {
     accepted_capabilities: u64,
     connection_token: CancellationToken,
     freshness_tx: watch::Sender<Instant>,
+    last_activity: SharedConnectionFreshness,
 }
 
 impl StreamAdmission<'_> {
@@ -1158,6 +1161,7 @@ struct RegisteredConnectionServeContext {
     accepted_capabilities: u64,
     opens_ordered_streams: bool,
     direction: ServicePeerDirection,
+    last_activity: SharedConnectionFreshness,
 }
 
 struct StreamWorkerContext {
@@ -1171,12 +1175,37 @@ struct StreamWorkerContext {
     connection_token: CancellationToken,
     stream_token: CancellationToken,
     freshness_tx: watch::Sender<Instant>,
+    last_activity: SharedConnectionFreshness,
 }
 
 impl StreamWorkerContext {
     fn event(&self, event: &'static str) -> ZakuraTraceEvent<'_> {
         self.conn.event(event).stream(self.stream_id)
     }
+}
+
+type SharedConnectionFreshness = Arc<StdMutex<Instant>>;
+
+fn new_connection_freshness() -> SharedConnectionFreshness {
+    Arc::new(StdMutex::new(Instant::now()))
+}
+
+fn last_connection_activity(last_activity: &SharedConnectionFreshness) -> Instant {
+    *last_activity
+        .lock()
+        .expect("connection freshness mutex is not poisoned because it is only updated briefly")
+}
+
+fn record_connection_freshness(
+    freshness_tx: &watch::Sender<Instant>,
+    last_activity: &SharedConnectionFreshness,
+) {
+    let now = Instant::now();
+    *last_activity
+        .lock()
+        .expect("connection freshness mutex is not poisoned because it is only updated briefly") =
+        now;
+    let _ = freshness_tx.send(now);
 }
 
 struct AdmittedOrderedStream {
@@ -1609,7 +1638,8 @@ impl ZakuraProtocolHandler {
         let mut workers = JoinSet::new();
         let mut open_limiter = TokenBucket::new(limits.stream_open_rate_per_second);
         let mut message_buckets = MessageRateBuckets::new();
-        let (freshness_tx, freshness_rx) = watch::channel(Instant::now());
+        let (freshness_tx, freshness_rx) =
+            watch::channel(last_connection_activity(&context.last_activity));
         // Bounded label describing why this connection closed. Updated at each
         // local teardown site and attached to the final `closed.neutral` trace
         // so readers can distinguish idle timeouts, peer-side closes, resource
@@ -1694,6 +1724,7 @@ impl ZakuraProtocolHandler {
                         per_stream_queue_depth,
                         connection_token.clone(),
                         freshness_tx.clone(),
+                        context.last_activity.clone(),
                         conn.clone(),
                         peer_id.clone(),
                     )
@@ -1766,6 +1797,7 @@ impl ZakuraProtocolHandler {
                                 accepted_capabilities,
                                 connection_token: connection_token.clone(),
                                 freshness_tx: freshness_tx.clone(),
+                                last_activity: context.last_activity.clone(),
                             };
                             if let Some(admitted) = self
                                 .admit_bi_stream(send, recv, &mut admission, per_stream_queue_depth)
@@ -1863,6 +1895,8 @@ impl ZakuraProtocolHandler {
                                     message_type,
                                     flags,
                                     payload,
+                                    &freshness_tx,
+                                    &context.last_activity,
                                 ) => result,
                             };
                             match result {
@@ -1923,6 +1957,7 @@ impl ZakuraProtocolHandler {
         per_stream_queue_depth: usize,
         connection_token: CancellationToken,
         freshness_tx: watch::Sender<Instant>,
+        last_activity: SharedConnectionFreshness,
         conn: ZakuraConnTrace,
         peer_id: ZakuraPeerId,
     ) -> Result<AdmittedOrderedStream, ZakuraHandlerError> {
@@ -1967,6 +2002,7 @@ impl ZakuraProtocolHandler {
             connection_token,
             stream_token,
             freshness_tx,
+            last_activity,
         };
 
         metrics::counter!(
@@ -2145,6 +2181,7 @@ impl ZakuraProtocolHandler {
             connection_token: admission.connection_token.clone(),
             stream_token,
             freshness_tx: admission.freshness_tx.clone(),
+            last_activity: admission.last_activity.clone(),
         };
 
         if stream.mode == StreamMode::RequestResponse {
@@ -2216,6 +2253,7 @@ impl ZakuraProtocolHandler {
             sender: outbound_tx,
         };
         let connection_token = self.shutdown.child_token();
+        let last_activity = new_connection_freshness();
         let registration = self
             .supervisor
             .register(
@@ -2225,6 +2263,7 @@ impl ZakuraProtocolHandler {
                 outbound_handle,
                 connection_token.clone(),
                 context.accepted_capabilities,
+                last_activity.clone(),
             )
             .await;
 
@@ -2255,6 +2294,7 @@ impl ZakuraProtocolHandler {
                         accepted_capabilities: context.accepted_capabilities,
                         opens_ordered_streams: context.role == "initiator",
                         direction: context.direction,
+                        last_activity,
                     },
                 )
                 .await
@@ -2796,7 +2836,10 @@ async fn persistent_stream_worker(
             // once, here.
             let message = match frame {
                 Ok(frame) => {
-                    let _ = reader_context.freshness_tx.send(Instant::now());
+                    record_connection_freshness(
+                        &reader_context.freshness_tx,
+                        &reader_context.last_activity,
+                    );
                     match admit_inbound_message(frame.payload.len(), &reader_context, stream_kind) {
                         InboundMessageAdmission::Admit => Ok(frame),
                         InboundMessageAdmission::Oversize => Err(ZakuraHandlerError::Oversize),
@@ -2866,6 +2909,7 @@ async fn persistent_stream_worker(
                             context.connection_token.cancel();
                             break;
                         }
+                        record_connection_freshness(&context.freshness_tx, &context.last_activity);
                     }
                     None => {
                         outbound_rx = None;
@@ -2964,7 +3008,7 @@ async fn request_stream_worker(
         }
     };
 
-    let _ = context.freshness_tx.send(Instant::now());
+    record_connection_freshness(&context.freshness_tx, &context.last_activity);
     match admit_inbound_message(frame.payload.len(), &context, prelude.stream_kind) {
         InboundMessageAdmission::Admit => {}
         InboundMessageAdmission::Oversize => {
@@ -3017,6 +3061,7 @@ async fn request_stream_worker(
             let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_BAD_PRELUDE));
             return;
         }
+        record_connection_freshness(&context.freshness_tx, &context.last_activity);
     }
 
     let _ = send.finish();
@@ -3205,6 +3250,8 @@ async fn write_outbound_request_frame(
     message_type: u16,
     flags: u16,
     payload: Vec<u8>,
+    freshness_tx: &watch::Sender<Instant>,
+    last_activity: &SharedConnectionFreshness,
 ) -> Result<Vec<Frame>, OutboundRequestError> {
     timeout(
         OUTBOUND_REQUEST_RESPONSE_TIMEOUT,
@@ -3216,6 +3263,8 @@ async fn write_outbound_request_frame(
             message_type,
             flags,
             payload,
+            freshness_tx,
+            last_activity,
         ),
     )
     .await
@@ -3230,6 +3279,8 @@ async fn write_outbound_request_frame_inner(
     message_type: u16,
     flags: u16,
     payload: Vec<u8>,
+    freshness_tx: &watch::Sender<Instant>,
+    last_activity: &SharedConnectionFreshness,
 ) -> Result<Vec<Frame>, OutboundRequestError> {
     let budget = LegacyResponseBudget::from_request(message_type, &payload, limits)?;
     let (mut send, mut recv) = timeout(OUTBOUND_STREAM_WRITE_TIMEOUT, connection.open_bi())
@@ -3265,6 +3316,7 @@ async fn write_outbound_request_frame_inner(
         .map_err(|_| -> BoxError { "Zakura outbound request frame write timed out".into() })
         .map_err(OutboundRequestError::Local)?
         .map_err(|error| OutboundRequestError::Local(Box::new(error)))?;
+    record_connection_freshness(freshness_tx, last_activity);
     let _ = send.finish();
 
     let mut frames = Vec::new();
@@ -3278,6 +3330,7 @@ async fn write_outbound_request_frame_inner(
         .await
         {
             Ok(frame) => {
+                record_connection_freshness(freshness_tx, last_activity);
                 state.validate_frame(request_id, &frame)?;
                 frames.push(frame);
             }
@@ -4414,6 +4467,7 @@ mod tests {
                 outbound_handle,
                 disconnect_token,
                 ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                new_connection_freshness(),
             )
             .await;
 
@@ -4421,6 +4475,20 @@ mod tests {
             matches!(registration, ZakuraRegistration::Registered { .. }),
             "test peer should register once"
         );
+    }
+
+    async fn refresh_test_peer(supervisor: &ZakuraSupervisorHandle, peer: &ZakuraPeerId) {
+        let state = supervisor.inner.lock().await;
+        let last_activity = state
+            .last_active_by_peer
+            .get(peer)
+            .expect("test peer activity exists because the peer was registered")
+            .clone();
+        drop(state);
+
+        *last_activity
+            .lock()
+            .expect("connection freshness mutex is not poisoned in tests") = Instant::now();
     }
 
     #[test]
@@ -5177,6 +5245,7 @@ mod tests {
                     outbound_handle,
                     token,
                     ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                    new_connection_freshness(),
                 )
                 .await
         }
@@ -5194,9 +5263,24 @@ mod tests {
             "a young incumbent is kept so simultaneous-open races do not flap",
         );
 
-        // Stale incumbent: once it is older than the threshold, a duplicate
-        // evicts it so a restarted peer's redial can reclaim the slot.
-        let stale_peer = test_peer(9);
+        // Active old incumbent: age alone must not evict a peer that recently
+        // served application traffic, because that drops in-flight body ranges.
+        let active_peer = test_peer(9);
+        let active_incumbent = CancellationToken::new();
+        register_test_peer(&supervisor, active_peer.clone(), active_incumbent.clone()).await;
+        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+        refresh_test_peer(&supervisor, &active_peer).await;
+        let registration =
+            register_duplicate(&supervisor, &active_peer, CancellationToken::new()).await;
+        assert!(matches!(registration, ZakuraRegistration::Duplicate { .. }));
+        assert!(
+            !active_incumbent.is_cancelled(),
+            "a recently active incumbent is kept even when the connection is old",
+        );
+
+        // Stale incumbent: once its last activity is older than the threshold, a
+        // duplicate evicts it so a restarted peer's redial can reclaim the slot.
+        let stale_peer = test_peer(10);
         let stale_incumbent = CancellationToken::new();
         register_test_peer(&supervisor, stale_peer.clone(), stale_incumbent.clone()).await;
         tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
@@ -5246,6 +5330,7 @@ mod tests {
                     outbound_handle,
                     token,
                     ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                    new_connection_freshness(),
                 )
                 .await
         }
@@ -5397,6 +5482,7 @@ mod tests {
             connection_token: connection_token.clone(),
             stream_token: stream_token.clone(),
             freshness_tx,
+            last_activity: new_connection_freshness(),
         };
         let prelude = StreamPrelude {
             magic: STREAM_PRELUDE_MAGIC,
@@ -5888,6 +5974,7 @@ mod tests {
             accepted_capabilities: 0,
             connection_token: connection_token.clone(),
             freshness_tx,
+            last_activity: new_connection_freshness(),
         };
 
         let admitted = handler
@@ -6580,6 +6667,7 @@ mod tests {
                     outbound_handle,
                     CancellationToken::new(),
                     ZAKURA_CAP_LEGACY_GOSSIP | ZAKURA_CAP_HEADER_SYNC,
+                    new_connection_freshness(),
                 )
                 .await
         }
