@@ -1403,6 +1403,12 @@ impl HeaderSyncReactor {
     async fn report_misbehavior(&mut self, peer: ZakuraPeerId, reason: HeaderSyncMisbehavior) {
         if let Some(peer_state) = self.state.peers.get_mut(&peer) {
             peer_state.misbehavior = peer_state.misbehavior.saturating_add(1);
+        }
+        if reason == HeaderSyncMisbehavior::UnsolicitedHeaders {
+            self.trace_peer_violation(&peer, reason);
+            return;
+        }
+        if let Some(peer_state) = self.state.peers.get_mut(&peer) {
             // Prioritized, non-blocking disconnect: tear down the offending
             // peer's header-sync session locally so a saturated or stalled
             // action channel can never delay it. The supervised session

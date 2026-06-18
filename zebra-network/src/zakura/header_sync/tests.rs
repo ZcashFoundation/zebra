@@ -1689,13 +1689,7 @@ async fn peer_disconnect_removes_outstanding_requests_for_that_peer() {
         .await
         .unwrap();
 
-    match next_non_query_action(&mut fixture.actions).await {
-        HeaderSyncAction::Misbehavior { peer, reason } => {
-            assert_eq!(peer, peer_id);
-            assert_eq!(reason, HeaderSyncMisbehavior::UnsolicitedHeaders);
-        }
-        action => panic!("unexpected action: {action:?}"),
-    }
+    assert_no_commit_or_misbehavior(&mut fixture.actions).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -3409,7 +3403,7 @@ async fn header_sync_metrics_record_status_range_new_block_dedup_and_disconnect(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn unsolicited_headers_are_misbehavior_but_empty_headers_retry() {
+async fn unsolicited_headers_are_diagnostic_but_empty_headers_retry() {
     let network = regtest_network();
     let mut fixture = spawn_test_reactor(startup_with_timeout(
         network.clone(),
@@ -3426,13 +3420,7 @@ async fn unsolicited_headers_are_misbehavior_but_empty_headers_retry() {
         })
         .await
         .unwrap();
-    match next_non_query_action(&mut fixture.actions).await {
-        HeaderSyncAction::Misbehavior { peer, reason } => {
-            assert_eq!(peer, peer_id);
-            assert_eq!(reason, HeaderSyncMisbehavior::UnsolicitedHeaders);
-        }
-        action => panic!("unexpected action: {action:?}"),
-    }
+    assert_no_commit_or_misbehavior(&mut fixture.actions).await;
 
     connect_peer(&fixture, peer_id.clone()).await;
     advertise_tip(
