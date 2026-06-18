@@ -10,8 +10,8 @@ release_always = false
 # git-cliff configuration for changelog generation
 changelog_config = "cliff.toml"
 
-# Only prepare releases from commits matching this pattern.
-# Commits not matching are still counted for dependency cascade bumps.
+# These commits trigger version bumps. Other commits can still appear in
+# changelogs or dependency cascades, but do not trigger a release by themselves.
 release_commits = "^(feat|fix|perf|refactor|build)"
 
 # Release PR metadata
@@ -55,8 +55,8 @@ cargo install --locked zebrad@{{ version }}
 
 | Component | Supported |
 |-----------|-----------|
-| Zcash Protocol | All upgrades through NU6.1 |
-| Minimum Rust | 1.85+ |
+| Zcash Protocol | [FILL IN: latest supported network upgrade] |
+| Minimum Rust | [FILL IN: zebrad MSRV and library MSRV] |
 """
 
 # ── zebrad: the node binary ─────────────────────────────────────

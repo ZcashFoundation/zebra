@@ -28,6 +28,11 @@ jobs:
   release-pr:
     name: Create or update Release PR
     runs-on: ubuntu-latest
+    # Avoid racing updates to the single release-plz Release PR branch when
+    # multiple commits land on main while a previous release-pr job is running.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -69,6 +74,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      pull-requests: read
     environment: release
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
