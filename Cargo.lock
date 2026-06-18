@@ -7440,7 +7440,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "10.0.0"
+version = "10.1.0"
 dependencies = [
  "bech32",
  "bitflags 2.11.1",

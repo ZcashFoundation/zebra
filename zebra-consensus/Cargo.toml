@@ -73,7 +73,7 @@ tower-batch-control = { path = "../tower-batch-control/", version = "1.0.1" }
 zebra-script = { path = "../zebra-script", version = "9.0.0" }
 zebra-state = { path = "../zebra-state", version = "9.0.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "8.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "10.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "10.1.0" }
 
 zcash_protocol.workspace = true
 
@@ -98,7 +98,7 @@ tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 zebra-state = { path = "../zebra-state", version = "9.0.1", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "10.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "10.1.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "3.0.0" }
 
 criterion = { workspace = true, features = ["html_reports"] }
