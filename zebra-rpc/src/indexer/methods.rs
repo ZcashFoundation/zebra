@@ -10,7 +10,10 @@ use tower::util::ServiceExt;
 use tracing::Span;
 use zebra_chain::{chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse, ReadState};
+use zebra_state::{
+    constants::MAX_NON_FINALIZED_CHAIN_FORKS, ReadRequest, ReadResponse, ReadState,
+    MAX_BLOCK_REORG_HEIGHT,
+};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
@@ -18,7 +21,17 @@ use super::{
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
-const RESPONSE_BUFFER_SIZE: usize = 64;
+///
+/// Sized to hold the entire non-finalized state, because `non_finalized_state_change`
+/// bursts every non-finalized block to each new subscriber on subscribe: up to
+/// `MAX_NON_FINALIZED_CHAIN_FORKS` chains of up to `MAX_BLOCK_REORG_HEIGHT` blocks each
+/// (forks re-emit their shared prefix). If this buffer is smaller than that burst, a
+/// subscriber near the tip can never assemble the full non-finalized state within one
+/// subscription, which livelocks consumers like `TrustedChainSync`. Derived from the
+/// state constants so it can't silently go stale if the reorg limit changes.
+const RESPONSE_BUFFER_SIZE: usize =
+    // `MAX_BLOCK_REORG_HEIGHT` is a small compile-time constant that always fits `usize`.
+    MAX_NON_FINALIZED_CHAIN_FORKS * MAX_BLOCK_REORG_HEIGHT as usize;
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -114,26 +127,27 @@ where
                 }
             };
 
-            // Notify the client of chain tip changes until the channel is closed
+            // Notify the client of non-finalized state changes until the client disconnects.
+            //
+            // Uses a blocking `send().await` so a slow consumer applies backpressure instead of
+            // having its stream dropped. On initial subscribe the listener bursts the entire
+            // non-finalized state (see `RESPONSE_BUFFER_SIZE`); the old `try_send` would hit
+            // `Full` on that burst and drop the stream, and `TrustedChainSync` would re-subscribe
+            // and re-burst forever (a livelock). Backpressure propagates back into the listener's
+            // own buffered channel, which is sourced from a lossy/coalescing watch, so this
+            // cannot stall state commits in zebrad.
             while let Some((hash, block)) = non_finalized_state_change.recv().await {
-                match response_sender.try_send(Ok(BlockAndHash::new(hash, block))) {
-                    Ok(()) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                        span.in_scope(|| {
-                            tracing::info!(
-                                "client disconnected, dropping non_finalized_state_change task"
-                            );
-                        });
-                        return;
-                    }
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                        span.in_scope(|| {
-                            tracing::warn!(
-                                "slow consumer, dropping non_finalized_state_change stream"
-                            );
-                        });
-                        return;
-                    }
+                if response_sender
+                    .send(Ok(BlockAndHash::new(hash, block)))
+                    .await
+                    .is_err()
+                {
+                    span.in_scope(|| {
+                        tracing::info!(
+                            "client disconnected, dropping non_finalized_state_change task"
+                        );
+                    });
+                    return;
                 }
             }
 

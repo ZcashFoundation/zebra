@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a livelock in the `non_finalized_state_change` indexer gRPC stream that dropped
+  itself as a "slow consumer" near the chain tip, preventing consumers such as
+  `TrustedChainSync` from ever converging. The response buffer is now sized to the
+  non-finalized state and the stream applies backpressure instead of dropping
+  ([#10728](https://github.com/ZcashFoundation/zebra/issues/10728)).
+
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
