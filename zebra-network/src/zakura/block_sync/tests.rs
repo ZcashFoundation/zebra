@@ -3533,6 +3533,108 @@ async fn reactor_does_not_retry_missing_height_already_in_flight() {
 }
 
 #[tokio::test]
+async fn reactor_rescues_body_floor_with_reserved_peer_slot() {
+    let blocks = fake_blocks_in_range(1, 6);
+    let mut config = immediate_body_download_config();
+    config.fanout = 1;
+    config.expected_peers = 0;
+    config.request_timeout = Duration::from_millis(400);
+
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(6), blocks[5].hash()));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(6), blocks[5].hash()),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    let peer_status = |tip_hash| BlockSyncStatus {
+        servable_low: block::Height(1),
+        servable_high: block::Height(6),
+        tip_hash,
+        max_blocks_per_response: 1,
+        max_inflight_requests: 2,
+        max_response_bytes: MAX_BS_RESPONSE_BYTES,
+    };
+    let (peer_a, _inbound_a, _outbound_a) =
+        connect_peer_with_status_message(&service, &mut actions, 70, peer_status(blocks[5].hash()))
+            .await;
+    let (peer_b, _inbound_b, _outbound_b) =
+        connect_peer_with_status_message(&service, &mut actions, 71, peer_status(blocks[5].hash()))
+            .await;
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(
+            blocks.iter().map(block_meta).collect(),
+        ))
+        .await
+        .expect("needed metadata queues");
+
+    let mut requests = Vec::new();
+    while requests.len() < 4 {
+        requests.push(wait_for_getblocks(&mut actions).await);
+    }
+    assert!(
+        requests
+            .iter()
+            .any(|(_, start_height, count)| *start_height == block::Height(1) && *count == 1),
+        "initial scheduling should assign the floor body"
+    );
+    let floor_peer = requests
+        .iter()
+        .find_map(|(peer, start_height, _)| {
+            (*start_height == block::Height(1)).then(|| peer.clone())
+        })
+        .expect("height 1 request is present");
+    let rescue_peer = if floor_peer == peer_a { peer_b } else { peer_a };
+
+    for (peer, start_height, _) in requests {
+        if start_height == block::Height(1) {
+            continue;
+        }
+        let block = blocks
+            .iter()
+            .find(|block| block.coinbase_height() == Some(start_height))
+            .expect("test block exists")
+            .clone();
+        handle
+            .send(BlockSyncEvent::WireMessage {
+                peer,
+                msg: BlockSyncMessage::Block(block),
+            })
+            .await
+            .expect("later body queues");
+    }
+
+    tokio::time::sleep(Duration::from_millis(225)).await;
+
+    let rescued = tokio::time::timeout(Duration::from_millis(100), async {
+        loop {
+            let request = wait_for_getblocks(&mut actions).await;
+            if request.1 == block::Height(1) {
+                break request;
+            }
+        }
+    })
+    .await
+    .expect("floor rescue should be sent before the original request times out");
+
+    assert_eq!(
+        rescued,
+        (rescue_peer, block::Height(1), 1),
+        "floor rescue should route the missing body to a different peer using its reserved slot"
+    );
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
 async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer() {
     const FIRST_NEEDED: u32 = 801;
     const PREFIX_END: u32 = 1072;
