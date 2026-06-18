@@ -864,7 +864,6 @@ pub(crate) fn block_sync_misbehavior_is_hard(reason: BlockSyncMisbehavior) -> bo
     matches!(
         reason,
         BlockSyncMisbehavior::MalformedMessage
-            | BlockSyncMisbehavior::UnsolicitedBlock
             | BlockSyncMisbehavior::GetBlocksTooLong
             | BlockSyncMisbehavior::InvalidBlock
             | BlockSyncMisbehavior::InvalidStatus

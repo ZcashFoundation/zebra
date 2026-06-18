@@ -2241,6 +2241,9 @@ mod zakura_header_sync_driver_tests {
             BlockSyncMisbehavior::RangeUnavailable
         ));
         assert!(!block_sync_misbehavior_is_hard(
+            BlockSyncMisbehavior::UnsolicitedBlock
+        ));
+        assert!(!block_sync_misbehavior_is_hard(
             BlockSyncMisbehavior::GetBlocksSpam
         ));
         assert!(block_sync_misbehavior_is_hard(
