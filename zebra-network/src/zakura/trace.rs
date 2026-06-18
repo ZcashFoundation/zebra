@@ -56,6 +56,12 @@ pub const STREAM_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     file_name: "stream.jsonl",
 };
 
+/// Discovery dialer decisions and backoff classification.
+pub const DISCOVERY_TABLE: ZakuraTraceTable = ZakuraTraceTable {
+    table: "discovery",
+    file_name: "discovery.jsonl",
+};
+
 /// Frame and message rate-limit decisions.
 pub const RATELIMIT_TABLE: ZakuraTraceTable = ZakuraTraceTable {
     table: "ratelimit",
@@ -202,6 +208,19 @@ pub mod block_sync_trace {
     pub const BLOCK_CHAIN_TIP_RESET: &str = "block_chain_tip_reset";
     /// Periodic reactor state snapshot (the key stall-diagnosis row).
     pub const BLOCK_SYNC_STATE: &str = "block_sync_state";
+}
+
+/// Shared discovery trace event names and field keys.
+pub mod discovery_trace {
+    /// Trace row event field.
+    pub const EVENT: &str = "event";
+    /// Peer field.
+    pub const PEER: &str = "peer";
+    /// Dial result label.
+    pub const RESULT: &str = "result";
+
+    /// A discovery dial worker completed and was classified for backoff.
+    pub const DISCOVERY_DIAL_RESULT: &str = "discovery_dial_result";
 }
 
 /// Shared header-sync trace event names and field keys.

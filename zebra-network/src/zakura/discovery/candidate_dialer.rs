@@ -19,7 +19,10 @@ use tracing::debug;
 use super::dialer::native_bootstrap_dial;
 use super::protocol::{ZakuraDiscoveryDialCandidate, ZakuraDiscoveryHandle};
 use super::redial::ZAKURA_REDIAL_HEALTHY_CONNECTION;
-use crate::zakura::{ZakuraEndpoint, ZakuraHandlerError, ZakuraLocalLimits, ZakuraPeerId};
+use crate::zakura::{
+    trace::{discovery_trace as d_trace, peer_label, DISCOVERY_TABLE},
+    ZakuraEndpoint, ZakuraHandlerError, ZakuraLocalLimits, ZakuraPeerId,
+};
 
 /// How often the discovery dialer wakes to look for new candidates.
 const ZAKURA_DISCOVERY_DIAL_INTERVAL: Duration = Duration::from_secs(1);
@@ -30,6 +33,17 @@ enum DiscoveryDialResult {
     ShortLivedRegistered,
     Failed,
     LocalResourceLimit,
+}
+
+impl DiscoveryDialResult {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Registered => "registered",
+            Self::ShortLivedRegistered => "short_lived_registered",
+            Self::Failed => "failed",
+            Self::LocalResourceLimit => "local_resource_limit",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -78,6 +92,7 @@ pub(crate) async fn run_native_discovery_dialer(
     limits: ZakuraLocalLimits,
 ) {
     let shutdown = endpoint.background_shutdown_token();
+    let trace = endpoint.trace();
     let mut registered = endpoint.supervisor().subscribe();
     let mut in_flight = HashSet::new();
     let mut in_flight_by_ip = HashMap::new();
@@ -116,6 +131,7 @@ pub(crate) async fn run_native_discovery_dialer(
                             &discovery,
                             &worker_result.node_id,
                             worker_result.result,
+                            &trace,
                         ).await;
                     }
                     Some(Err(error)) => {
@@ -340,7 +356,26 @@ async fn apply_discovery_dial_result(
     discovery: &ZakuraDiscoveryHandle,
     node_id: &NodeId,
     result: DiscoveryDialResult,
+    trace: &crate::zakura::ZakuraTrace,
 ) {
+    trace.emit_with(DISCOVERY_TABLE, |row| {
+        row.insert(
+            d_trace::EVENT.to_string(),
+            serde_json::Value::String(d_trace::DISCOVERY_DIAL_RESULT.to_string()),
+        );
+        row.insert(
+            d_trace::RESULT.to_string(),
+            serde_json::Value::String(result.label().to_string()),
+        );
+        let peer = ZakuraPeerId::new(node_id.as_bytes().to_vec())
+            .map(|peer_id| peer_label(&peer_id))
+            .ok();
+        row.insert(
+            d_trace::PEER.to_string(),
+            peer.map_or(serde_json::Value::Null, serde_json::Value::String),
+        );
+    });
+
     match result {
         DiscoveryDialResult::Registered => {
             discovery.mark_dial_success(node_id).await;
