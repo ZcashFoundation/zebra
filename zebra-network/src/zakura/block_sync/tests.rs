@@ -2328,6 +2328,79 @@ async fn reactor_ignores_unmatched_body_for_currently_needed_height() {
 }
 
 #[tokio::test]
+async fn reactor_accepts_unmatched_body_for_queued_height() {
+    let blocks = mainnet_blocks_1_to_3();
+    let config = immediate_body_download_config();
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(1), blocks[0].hash()));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(1), blocks[0].hash()),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+    let (_peer_id, inbound_tx, _outbound_rx) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        143,
+        block::Height(1),
+        blocks[0].hash(),
+        1,
+        1,
+    )
+    .await;
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![block_meta(&blocks[0])]))
+        .await
+        .expect("needed metadata queues");
+
+    let no_getblocks = tokio::time::timeout(Duration::from_millis(100), async {
+        loop {
+            if let BlockSyncAction::SendMessage {
+                msg: BlockSyncMessage::GetBlocks { .. },
+                ..
+            } = next_action(&mut actions).await
+            {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(
+        no_getblocks.is_err(),
+        "test setup requires the body to remain queued without an outstanding request",
+    );
+
+    inbound_tx
+        .send(
+            BlockSyncMessage::Block(blocks[0].clone())
+                .encode_frame()
+                .expect("block encodes"),
+        )
+        .await
+        .expect("unmatched queued block queues");
+
+    let submitted = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let BlockSyncAction::SubmitBlock { block, .. } = next_action(&mut actions).await {
+                return block.hash();
+            }
+        }
+    })
+    .await
+    .expect("unmatched queued body is submitted");
+    assert_eq!(submitted, blocks[0].hash());
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
 async fn reactor_queries_needed_blocks_above_submitted_floor() {
     let blocks = mainnet_blocks_1_to_3();
     let block1_size = block_size(&blocks[0]);

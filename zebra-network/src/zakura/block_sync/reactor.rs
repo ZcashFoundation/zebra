@@ -721,6 +721,12 @@ impl BlockSyncReactor {
                 return;
             }
             if self
+                .accept_unmatched_queued_body(&peer, height, hash, block.clone())
+                .await
+            {
+                return;
+            }
+            if self
                 .ignore_unmatched_needed_response(&peer, height, "body")
                 .await
             {
@@ -1016,6 +1022,73 @@ impl BlockSyncReactor {
             response_kind,
             "ignoring stale block-sync response"
         );
+        self.release_contiguous_blocks().await;
+        self.schedule().await;
+        self.release_caught_up_block_sync_peers();
+        true
+    }
+
+    async fn accept_unmatched_queued_body(
+        &mut self,
+        peer: &ZakuraPeerId,
+        height: block::Height,
+        hash: block::Hash,
+        block: Arc<block::Block>,
+    ) -> bool {
+        let Some(peer_state) = self.state.peers.get(peer) else {
+            return false;
+        };
+        if !peer_state.received_status
+            || height < peer_state.servable_low
+            || height > peer_state.servable_high
+        {
+            return false;
+        }
+        if self.state.schedule.queued_hash_for_height(height) != Some(hash) {
+            return false;
+        }
+
+        let serialized_bytes = match block.zcash_serialize_to_vec() {
+            Ok(bytes) => u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            Err(error) => {
+                tracing::debug!(
+                    ?peer,
+                    ?height,
+                    ?error,
+                    "failed to serialize unmatched queued block-sync body"
+                );
+                self.report_misbehavior(peer.clone(), BlockSyncMisbehavior::InvalidBlock)
+                    .await;
+                return true;
+            }
+        };
+
+        metrics::counter!("sync.block.response.unmatched_queued_accepted").increment(1);
+        self.trace_body_received(peer, height, serialized_bytes);
+
+        match self.state.reorder.insert(
+            height,
+            block,
+            serialized_bytes,
+            peer.clone(),
+            &mut self.state.budget,
+        ) {
+            ReorderInsertResult::Inserted => {
+                self.state.schedule.mark_height_covered(height);
+            }
+            ReorderInsertResult::Duplicate => {}
+            ReorderInsertResult::BudgetFull => {
+                tracing::debug!(
+                    ?peer,
+                    ?height,
+                    serialized_bytes,
+                    "dropping unmatched queued block-sync body because local byte budget is full"
+                );
+                self.schedule().await;
+                return true;
+            }
+        }
+
         self.release_contiguous_blocks().await;
         self.schedule().await;
         self.release_caught_up_block_sync_peers();

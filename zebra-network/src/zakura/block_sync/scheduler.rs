@@ -352,6 +352,16 @@ impl BlockRangeScheduler {
             .any(|range| range.blocks.iter().any(|block| block.height == height))
     }
 
+    /// Diagnostics/late-response recovery: expected hash for a queued height.
+    pub(super) fn queued_hash_for_height(&self, height: block::Height) -> Option<block::Hash> {
+        self.queue.iter().find_map(|range| {
+            range
+                .blocks
+                .iter()
+                .find_map(|block| (block.height == height).then_some(block.hash))
+        })
+    }
+
     /// Diagnostics: whether an assigned range key contains `height`.
     pub(super) fn assigned_contains_height(&self, height: block::Height) -> bool {
         self.assigned
