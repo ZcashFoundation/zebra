@@ -16,6 +16,8 @@ use zebra_chain::{
     },
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
+#[cfg(not(target_os = "windows"))]
+use zebra_rpc::client::PeerInfo;
 use zebra_test::{args, net::random_known_port, prelude::*};
 
 #[cfg(not(target_os = "windows"))]
@@ -23,27 +25,12 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
     config::{default_test_config, testdir},
-    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt},
     test_type::TestType::*,
 };
 
 use crate::integration::database::check_config_conflict;
 
-/// Make sure `lightwalletd` works with Zebra, when both their states are empty.
-///
-/// This test only runs when the `TEST_LIGHTWALLETD` env var is set.
-///
-/// This test doesn't work on Windows, so it is always skipped on that platform.
-#[test]
-#[cfg(not(target_os = "windows"))]
-fn lwd_integration() -> Result<()> {
-    crate::common::lightwalletd::lwd_integration_test(LaunchWithEmptyState {
-        launches_lightwalletd: true,
-    })
-}
-
-// NOTE: lwd_integration_test is intentionally not here. See
-// crate::common::lightwalletd::lwd_integration_test for the shared helper.
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
@@ -316,20 +303,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
         });
     }
 
-    tracing::info!("waiting for zebrad nodes to connect");
-
-    // Wait a few seconds for Zebra to start up and make outbound peer connections
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     tracing::info!("checking for peers");
 
-    // Call `getpeerinfo` to check that the zebrad instances have connected
-    let peer_info: Vec<PeerInfo> = rpc_client_2
-        .json_result_from_call("getpeerinfo", "[]")
-        .await
-        .map_err(|err| eyre!(err))?;
-
-    assert!(!peer_info.is_empty(), "should have outbound peer");
+    let peer_info = wait_for_outbound_peer(&rpc_client_2).await?;
 
     tracing::info!(
         ?peer_info,
@@ -382,6 +358,32 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     is_finished.store(true, Ordering::SeqCst);
 
     Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn wait_for_outbound_peer(rpc_client: &RpcRequestClient) -> Result<Vec<PeerInfo>> {
+    tokio::time::timeout(Duration::from_secs(2 * 60), async {
+        loop {
+            match rpc_client
+                .json_result_from_call::<Vec<PeerInfo>>("getpeerinfo", "[]")
+                .await
+            {
+                Ok(peer_info) if !peer_info.is_empty() => {
+                    return Ok::<Vec<PeerInfo>, color_eyre::eyre::Report>(peer_info);
+                }
+                Ok(_) => {
+                    tracing::info!("waiting for outbound peer");
+                }
+                Err(err) => {
+                    tracing::info!(?err, "waiting for RPC endpoint and outbound peer");
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for outbound peer")?
 }
 
 #[cfg(not(target_os = "windows"))]

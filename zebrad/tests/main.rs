@@ -7,17 +7,19 @@
 //! - **`unit::`** — Fast tests for CLI, config, basic functionality (<1 min).
 //!   No network or state required.
 //!
-//! - **`integration::`** — Tests that launch zebrad, check endpoints, verify
-//!   database behavior, or exercise regtest mode. No cached blockchain state
+//! - **`integration::`** — Tests that launch zebrad, check local endpoints,
+//!   verify database behavior, or exercise regtest mode. No cached blockchain
+//!   state, runtime lightwalletd dependency, or public-network peer availability
 //!   required. (5-15 min)
 //!
 //! - **`stateful::`** — Tests that require a cached blockchain state directory
-//!   and/or external services like lightwalletd. Run on GCP VMs with persistent
-//!   disks. (30 min – days)
+//!   or runtime lightwalletd dependency. Run on GCP VMs with persistent disks.
+//!   (30 min – days)
 //!
-//! - **`e2e::`** — Full-system tests such as public-network syncs,
-//!   lightwalletd full syncs, and checkpoint generation. Run on scheduled or
-//!   manually selected GCP jobs. (hours – days)
+//! - **`e2e::`** — Full-system tests that depend on public-network peer
+//!   availability, such as syncs, peer RPCs, trusted-chain checks, checkpoint
+//!   generation, and lightwalletd full syncs. Run on scheduled or manually
+//!   selected GCP jobs. (hours – days)
 //!
 //! ## Running tests
 //!

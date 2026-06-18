@@ -67,21 +67,22 @@ The module structure maps directly to four tiers:
 zebrad/tests/
   main.rs                 # mod common; mod unit; mod integration; mod stateful; mod e2e;
   unit/                   # Fast: CLI, config, end-of-support (<1 min)
-  integration/            # Launches zebrad, no cached state (5-15 min)
-    sync.rs, rpc.rs, database.rs, regtest.rs, mempool.rs, network.rs
-  stateful/               # Requires cached blockchain state (30 min - days)
+  integration/            # Local zebrad/regtest behavior, no cached state or public peers (5-15 min)
+    sync.rs, rpc.rs, database.rs, regtest.rs, network.rs
+  stateful/               # Requires cached blockchain state or runtime lightwalletd (30 min - days)
     sync.rs, rpc.rs, lightwalletd.rs, indexer.rs
   e2e/                    # Full-system public-network flows (hours - days)
-    sync.rs, checkpoints.rs, lightwalletd.rs
+    sync.rs, rpc.rs, trusted_chain.rs, checkpoints.rs, lightwalletd.rs
   common/                 # Shared test helpers (not test functions)
 ```
 
 `stateful::` and `e2e::` are intentionally separate. `stateful::` means the test
-requires pre-existing Zebra or lightwalletd state, usually on a persistent GCP
-disk. `e2e::` means the test validates a whole-system public-network flow such
-as full sync, large checkpoint sync, checkpoint generation, or lightwalletd full
-sync. Some E2E tests also use cached state, but their scheduling risk is the
-end-to-end flow, so they live under `e2e::`.
+requires pre-existing Zebra or lightwalletd state, or a runtime lightwalletd
+dependency, usually on a persistent GCP disk. `e2e::` means the test validates a
+whole-system public-network flow such as peer RPC discovery, trusted-chain
+syncer checks, full sync, large checkpoint sync, checkpoint generation, or
+lightwalletd full sync. Some E2E tests also use cached state, but their
+scheduling risk is the end-to-end flow, so they live under `e2e::`.
 
 ### Nextest configuration
 
@@ -93,7 +94,7 @@ The 23 per-test profiles were replaced with 5 semantic profiles:
 | `ci` | PR CI | `not test(/^stateful::/) and not test(/^e2e::/)` |
 | `ci-stateful` | GCP VMs | `test(/^stateful::/)`; CI also passes exact `--filter-expr` |
 | `ci-e2e` | GCP VMs | `test(/^e2e::/)`; CI also passes exact `--filter-expr` |
-| `check-no-git-dependencies` | Release check | `test(=check_no_git_dependencies)` |
+| `check-no-git-dependencies` | Release check | `test(=unit::end_of_support::check_no_git_dependencies)` |
 
 Per-test timeout overrides in `ci-stateful` and `ci-e2e` handle the varying
 runtime requirements (30 min to 20 days) without one profile per test.
@@ -112,7 +113,9 @@ Feature flags were preserved for tests that add compile-time dependencies:
 - `#[cfg(feature = "zebra-checkpoints")]` — requires the zebra-checkpoints binary
 - `#[cfg(feature = "indexer")]` — requires indexer columns
 
-These gates are applied at the module level in `stateful/mod.rs` and `e2e/mod.rs`, so individual test functions don't need them.
+These gates are applied at the narrowest useful scope: whole modules when every
+test in the module needs the feature, and individual test functions when a
+module mixes runtime-only checks with feature-dependent gRPC or binary checks.
 
 ### CI workflow changes
 

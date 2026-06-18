@@ -1,5 +1,7 @@
 //! Tests that `getpeerinfo` RPC method responds with info about at least 1 peer.
 
+use std::time::Duration;
+
 use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
@@ -38,16 +40,26 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
-    // call `getpeerinfo` RPC method
-    let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
-        .json_result_from_call("getpeerinfo", "[]")
-        .await
-        .map_err(|err| eyre!(err))?;
+    let peer_info = tokio::time::timeout(Duration::from_secs(2 * 60), async {
+        loop {
+            let peer_info: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
+                .json_result_from_call("getpeerinfo", "[]")
+                .await
+                .map_err(|err| eyre!(err))?;
 
-    assert!(
-        !peer_info_result.is_empty(),
-        "getpeerinfo should return info for at least 1 peer"
-    );
+            if !peer_info.is_empty() {
+                return Ok::<Vec<PeerInfo>, color_eyre::eyre::Report>(peer_info);
+            }
+
+            tracing::info!("waiting for getpeerinfo to return at least 1 peer");
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for getpeerinfo to return at least 1 peer")??;
+
+    tracing::info!(?peer_info, "getpeerinfo returned peer info");
 
     zebrad.kill(false)?;
 

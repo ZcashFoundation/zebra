@@ -365,11 +365,3 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     Ok(())
 }
-
-/// Test successful getpeerinfo rpc call
-///
-/// See [`crate::common::get_block_template_rpcs::get_peer_info`] for more information.
-#[tokio::test]
-async fn get_peer_info() -> Result<()> {
-    crate::common::get_block_template_rpcs::get_peer_info::run().await
-}

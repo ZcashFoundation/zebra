@@ -9,20 +9,21 @@ zebrad/tests/
   main.rs               # Entry point (mod common, unit, integration, stateful, e2e)
   common/               # Shared test helpers (not test functions)
   unit/                 # Fast tests: CLI, config, end-of-support (<1 min)
-  integration/          # Tests that launch zebrad, no cached state (5-15 min)
+  integration/          # Local zebrad/regtest tests, no cached state or public peers (5-15 min)
     sync.rs             # Checkpoint sync, restart
     rpc.rs              # RPC/metrics/tracing endpoints
     database.rs         # State format, conflicts, migrations
     regtest.rs          # Regtest mode, chain sync, funding streams
-    mempool.rs          # Mempool activation
-    network.rs          # Port conflicts, lightwalletd integration, peer behavior
+    network.rs          # Port conflicts and local peer behavior
   stateful/             # Tests requiring cached blockchain state (30 min - days)
     sync.rs             # Mandatory checkpoint sync, cached tip updates
     rpc.rs              # Block template, submit block, snapshot tests
-    lightwalletd.rs     # LWD gRPC tests (feature-gated)
+    lightwalletd.rs     # Lightwalletd runtime and gRPC tests
     indexer.rs           # Indexer tests (feature-gated)
   e2e/                  # Full-system public-network flows (hours - days)
-    sync.rs             # Large checkpoint syncs, full syncs
+    sync.rs             # Large checkpoint syncs, mempool activation, full syncs
+    rpc.rs              # Public-network peer RPCs
+    trusted_chain.rs    # Public-network trusted-chain syncer checks
     checkpoints.rs      # Checkpoint generation (feature-gated)
     lightwalletd.rs     # Full lightwalletd sync (feature-gated)
 ```

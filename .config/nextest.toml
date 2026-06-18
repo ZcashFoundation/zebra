@@ -2,9 +2,9 @@
 #
 # Test categories (mapped to module paths in zebrad/tests/):
 #   unit::        Fast CLI, config, basic functionality tests (<1 min)
-#   integration:: Tests requiring zebrad running, no cached state (5-15 min)
-#   stateful::    Tests requiring cached blockchain state (30 min - days)
-#   e2e::         Full-system sync, checkpoint, and wallet flows (hours - days)
+#   integration:: Local zebrad/regtest behavior, no cached state or public-network peers (5-15 min)
+#   stateful::    Cached blockchain state or runtime lightwalletd dependencies (30 min - days)
+#   e2e::         Full-system public-network sync, checkpoint, and wallet flows (hours - days)
 #
 # Profiles:
 #   default       Local dev: runs unit + integration (excludes stateful + e2e)
@@ -16,13 +16,13 @@
 [profile.default]
 fail-fast = true
 status-level = "pass"
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- Platform overrides ---
 
 [[profile.default.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
+filter = "not test(=integration::database::delete_old_databases)"
 
 # --- CI Profile (PRs) ---
 
@@ -30,11 +30,11 @@ filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(dele
 fail-fast = false
 failure-output = "immediate"
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 [[profile.ci.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
+filter = "not test(=integration::database::delete_old_databases)"
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
@@ -45,11 +45,6 @@ slow-timeout = { period = "5m", terminate-after = 2 }
 filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
 retries = 2
 slow-timeout = { period = "30s", terminate-after = 2 }
-
-[[profile.ci.overrides]]
-filter = "test(=integration::regtest::trusted_chain_sync_handles_forks_correctly)"
-retries = 2
-slow-timeout = { period = "5m", terminate-after = 2 }
 
 # --- CI Stateful Profile (GCP VMs) ---
 # CI selects specific tests via --filter-expr / NEXTEST_FILTER. The scoped
@@ -115,4 +110,4 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 # --- Special Profile ---
 
 [profile.check-no-git-dependencies]
-default-filter = 'test(check_no_git_dependencies)'
+default-filter = 'test(=unit::end_of_support::check_no_git_dependencies)'
