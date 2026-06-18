@@ -482,6 +482,10 @@ impl BlockSyncReactor {
             && frontiers.verified_block_tip < self.state.body_download_floor
             && reset_tip_matches_local_work
             && self.has_active_successor_after(frontiers.verified_block_tip)
+            && self.active_successor_links_to_anchor(
+                frontiers.verified_block_tip,
+                frontiers.verified_block_hash,
+            )
         {
             self.handle_state_frontiers_changed(frontiers).await;
             return;
@@ -1709,6 +1713,34 @@ impl BlockSyncReactor {
             })
     }
 
+    /// Returns `false` only when we hold the direct successor body (in
+    /// `applying`) at `height + 1` and that body's `previous_block_hash` does
+    /// not link to `anchor_hash`.
+    ///
+    /// A reset that lands on a tip our already-submitted successor builds on is
+    /// non-destructive growth/coalescing: the successor is still valid work for
+    /// the new anchor, so it must be preserved. A reset that lands on a
+    /// *different* tip hash orphans that successor — its parent is no longer the
+    /// verified tip — so it must be dropped and re-requested against the new
+    /// anchor. We can only make this distinction for bodies we actually hold;
+    /// outstanding/buffered successors have no decoded header here, so they are
+    /// treated as still-anchored (preserved) and re-validated on arrival.
+    fn active_successor_links_to_anchor(
+        &self,
+        height: block::Height,
+        anchor_hash: block::Hash,
+    ) -> bool {
+        let Some(next) = next_height(height) else {
+            return true;
+        };
+
+        self.state
+            .applying
+            .get(&next)
+            .map(|applying| applying.block.header.previous_block_hash == anchor_hash)
+            .unwrap_or(true)
+    }
+
     fn reset_tip_conflicts_with_local_work(
         &self,
         frontiers: &BlockSyncFrontiers,
@@ -1997,11 +2029,18 @@ impl BlockSyncReactor {
             return;
         }
         let now = Instant::now();
-        if !self.state.status_refresh.try_take(now) {
-            return;
-        }
+
+        // A genuine serving-range change is debounced by the global
+        // `status_refresh` meter so a burst of tip changes advertises once per
+        // window. Only consume that window when there is actually a change to
+        // advertise: a flush that exists only to retry a Status to a peer that
+        // has not acknowledged ours must not poison the change window, or the
+        // first real advertisement after connect is silently dropped (the
+        // connect-time retry would have already taken the window).
         let status = self.local_status();
-        let status_changed = status != self.state.last_advertised_status;
+        let status_changed = self.state.pending_status_refresh
+            && status != self.state.last_advertised_status
+            && self.state.status_refresh.try_take(now);
 
         self.state.pending_status_refresh = false;
         if status_changed {
@@ -2014,7 +2053,17 @@ impl BlockSyncReactor {
             .peers
             .iter_mut()
             .filter_map(|(peer_id, peer)| {
-                if (status_changed || !peer.received_status) && peer.unsolicited.try_take(now) {
+                // On a real change, advertise to every peer immediately; the
+                // global meter above already debounced the change, so the
+                // per-peer `unsolicited` meter must not also suppress it. We
+                // still consume the per-peer allowance so a same-window retry to
+                // this peer stays spaced. Otherwise the only reason to send is a
+                // retry to a peer that has not acknowledged our Status, which
+                // stays gated solely by that peer's `unsolicited` meter.
+                if status_changed {
+                    peer.unsolicited.mark_taken(now);
+                    Some(peer_id.clone())
+                } else if !peer.received_status && peer.unsolicited.try_take(now) {
                     Some(peer_id.clone())
                 } else {
                     None
