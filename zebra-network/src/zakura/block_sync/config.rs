@@ -36,7 +36,7 @@ pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30)
 /// Default tolerated size-hint deviation percentage reserved for later soft scoring.
 pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
 /// Default block-sync peer fanout for the same requested range.
-pub const DEFAULT_BS_FANOUT: usize = 3;
+pub const DEFAULT_BS_FANOUT: usize = 2;
 /// Default body lag where block sync pauses new downloads and lets block propagation finish.
 pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
 /// Maximum peer-advertised aggregate byte target accepted per requested range.
