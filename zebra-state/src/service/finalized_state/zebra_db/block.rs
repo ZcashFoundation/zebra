@@ -109,7 +109,10 @@ impl ZebraDb {
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-        let (last_tx_loc, _tx): (TransactionLocation, Transaction) =
+        // Only the key (the last transaction's location) is needed to find the
+        // body tip, so read the value as `RawBytes` to avoid deserializing the
+        // chain's last transaction on every `tip()` call.
+        let (last_tx_loc, _raw_tx): (TransactionLocation, RawBytes) =
             self.db.zs_last_key_value(&tx_by_loc)?;
 
         self.hash(last_tx_loc.height)
@@ -124,11 +127,15 @@ impl ZebraDb {
         self.db.zs_contains(&hash_by_height, &height)
     }
 
-    /// Returns `true` if a full block body is present at `height`.
+    /// Returns `true` if a full block body is present and serveable at `height`.
     ///
-    /// Header-only commits never write transaction rows. Since valid Zcash
-    /// blocks always have at least a coinbase transaction, the first
-    /// transaction location is the body-availability marker.
+    /// Valid Zcash blocks always have at least a coinbase transaction, so the
+    /// presence of the first transaction location is the body-availability
+    /// marker. A `false` result means the body is not serveable: either no body
+    /// has been committed yet (a header-only frontier height above the body tip),
+    /// or the body was committed and later pruned (pruning removes `tx_by_loc`
+    /// rows but retains the header). This is a body predicate, not a
+    /// "header-only" marker.
     #[allow(clippy::unwrap_in_result)]
     pub fn contains_body_at_height(&self, height: block::Height) -> bool {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
@@ -502,20 +509,25 @@ impl ZebraDb {
         self.db.zs_get(&header_by_height, &height)
     }
 
+    // The header readers below resolve from the consensus header column families
+    // (`hash_by_height` / `height_by_hash` / `block_header_by_height`) *ungated*
+    // by body availability, then fall back to the provisional Zakura frontier.
+    // Reading the consensus header rows directly keeps a height's header readable
+    // even when its body is absent because it was pruned (those rows are retained
+    // by pruning, which only deletes `tx_by_loc`).
+
     fn header_hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.body_hash(height)
+        self.hash(height)
             .or_else(|| self.zakura_header_hash(height))
     }
 
     fn header_height(&self, hash: block::Hash) -> Option<block::Height> {
-        self.contains_hash(hash)
-            .then(|| self.height(hash))
-            .flatten()
+        self.height(hash)
             .or_else(|| self.zakura_header_height(hash))
     }
 
     fn header_by_height(&self, height: block::Height) -> Option<(block::Hash, Arc<block::Header>)> {
-        if let Some(hash) = self.body_hash(height) {
+        if let Some(hash) = self.hash(height) {
             return self
                 .block_header(height.into())
                 .map(|header| (hash, header));
@@ -1373,12 +1385,13 @@ impl DiskWriteBatch {
             );
         }
 
-        if zebra_db
-            .config()
-            .enable_zakura_header_seed_from_committed_blocks
-        {
-            self.prepare_zakura_header_from_committed_block(db, *height, block)?;
-        }
+        // Release the provisional Zakura header row for this height: once the
+        // body is committed the authoritative header lives in
+        // `block_header_by_height`, so the Zakura header store only ever holds
+        // heights with no committed body (the frontier above the body tip).
+        // This is unconditional so it also cleans up rows left by a prior run
+        // that had `enable_zakura_header_seed_from_committed_blocks` enabled.
+        self.prepare_zakura_header_release_from_committed_block(db, *height, block)?;
 
         // Index the block header, hash, and height. This also restores the
         // verified full block row after any provisional cleanup above.
@@ -1478,6 +1491,83 @@ impl DiskWriteBatch {
         self.zs_insert(&zakura_header_by_height, height, &block.header);
         self.zs_insert(&zakura_hash_by_height, height, hash);
         self.zs_insert(&zakura_height_by_hash, hash, height);
+
+        Ok(())
+    }
+
+    /// Prepare a database batch that releases the Zakura header store entry for a
+    /// committed full block.
+    ///
+    /// Once a full block body is committed at `height`, its authoritative header
+    /// lives in `block_header_by_height`, so the provisional Zakura header row at
+    /// this height is dropped. This maintains the frontier-overlay invariant: the
+    /// Zakura header store only ever holds heights with no committed body (the
+    /// frontier strictly above the body tip), so it never overlaps pruned history
+    /// and is self-trimming as bodies arrive.
+    ///
+    /// If the committed block's header conflicts with a provisional header at this
+    /// height, the stale provisional descendants above it are truncated as well,
+    /// refusing to touch any height that already has a committed body.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn prepare_zakura_header_release_from_committed_block(
+        &mut self,
+        db: &DiskDb,
+        height: block::Height,
+        block: &Arc<block::Block>,
+    ) -> Result<(), CommitHeaderRangeError> {
+        let zakura_header_by_height = db.cf_handle(ZAKURA_HEADER_BY_HEIGHT).unwrap();
+        let zakura_hash_by_height = db.cf_handle(ZAKURA_HEADER_HASH_BY_HEIGHT).unwrap();
+        let zakura_height_by_hash = db.cf_handle(ZAKURA_HEADER_HEIGHT_BY_HASH).unwrap();
+        let zakura_body_size_by_height = db.cf_handle(ZAKURA_HEADER_BODY_SIZE_BY_HEIGHT).unwrap();
+        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
+
+        let existing_zakura_header: Option<Arc<block::Header>> =
+            db.zs_get(&zakura_header_by_height, &height);
+        let existing_zakura_hash: Option<block::Hash> = db.zs_get(&zakura_hash_by_height, &height);
+
+        // Nothing to release: this height never carried a provisional header.
+        if existing_zakura_header.is_none() && existing_zakura_hash.is_none() {
+            return Ok(());
+        }
+
+        // A committed block whose header conflicts with the provisional chain at
+        // this height invalidates the provisional descendants built on top of it.
+        // Drop them, but never overwrite a height that already has a committed body.
+        if existing_zakura_header.is_some_and(|existing_header| existing_header != block.header) {
+            let zakura_tip: Option<(block::Height, block::Hash)> =
+                db.zs_last_key_value(&zakura_hash_by_height);
+
+            if let Some((zakura_tip, _)) = zakura_tip {
+                for descendant in (height.0 + 1)..=zakura_tip.0 {
+                    let descendant = block::Height(descendant);
+
+                    if db.zs_contains(&tx_by_loc, &TransactionLocation::min_for_height(descendant))
+                    {
+                        return Err(CommitHeaderRangeError::ConflictingFullBlockHeader {
+                            height: descendant,
+                        });
+                    }
+
+                    if let Some(old_hash) =
+                        db.zs_get::<_, _, block::Hash>(&zakura_hash_by_height, &descendant)
+                    {
+                        self.zs_delete(&zakura_height_by_hash, old_hash);
+                    }
+
+                    self.zs_delete(&zakura_hash_by_height, descendant);
+                    self.zs_delete(&zakura_header_by_height, descendant);
+                    self.zs_delete(&zakura_body_size_by_height, descendant);
+                }
+            }
+        }
+
+        // Release the provisional row at this height.
+        if let Some(old_hash) = existing_zakura_hash {
+            self.zs_delete(&zakura_height_by_hash, old_hash);
+        }
+        self.zs_delete(&zakura_hash_by_height, height);
+        self.zs_delete(&zakura_header_by_height, height);
+        self.zs_delete(&zakura_body_size_by_height, height);
 
         Ok(())
     }

@@ -48,7 +48,7 @@ use crate::{
         },
         read,
     },
-    CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock, TransactionLocation,
 };
 
 /// Storage round-trip test for block and transaction data in the finalized state database.
@@ -270,19 +270,26 @@ fn missing_block_bodies_respects_from_limit_and_empty_body_gap() {
 }
 
 #[test]
-fn committed_block_seeds_missing_zakura_header() {
+fn committed_block_does_not_retain_zakura_header() {
     let _init_guard = zebra_test::init();
     let (state, _genesis, block1) = mainnet_state_with_genesis_and_zakura_seed();
+    let zakura_header_by_height = state.db.cf_handle("zakura_header_by_height").unwrap();
 
     assert!(state.headers_by_height_range(Height(1), 1).is_empty());
 
     write_full_block_header_and_transactions(&state, block1.clone());
 
+    // The committed body's header is served from the consensus column families,
+    // and the Zakura header store keeps no row at a height that has a body.
     assert_eq!(state.best_header_tip(), Some((Height(1), block1.hash())));
     assert_eq!(
         state.headers_by_height_range(Height(1), 1),
         vec![(Height(1), block1.hash(), block1.header.clone())],
     );
+    assert!(state
+        .db
+        .zs_get::<_, _, Arc<block::Header>>(&zakura_header_by_height, &Height(1))
+        .is_none());
 }
 
 #[test]
@@ -306,7 +313,7 @@ fn committed_block_does_not_seed_zakura_header_by_default() {
 }
 
 #[test]
-fn committed_block_replaces_mismatched_zakura_header() {
+fn committed_block_releases_and_truncates_mismatched_zakura_headers() {
     let _init_guard = zebra_test::init();
     let (state, genesis, block1) = mainnet_state_with_genesis_and_zakura_seed();
     let block2 = mainnet_block(2);
@@ -342,19 +349,115 @@ fn committed_block_replaces_mismatched_zakura_header() {
         state.headers_by_height_range(Height(1), 2),
         vec![(Height(1), block1.hash(), block1.header.clone())],
     );
+    // The conflicting provisional row at H1 is released and its stale descendant
+    // at H2 is truncated; neither survives in the Zakura header store.
+    assert!(state
+        .db
+        .zs_get::<_, _, Arc<block::Header>>(&header_by_height, &Height(1))
+        .is_none());
+    assert!(state
+        .db
+        .zs_get::<_, _, Arc<block::Header>>(&header_by_height, &Height(2))
+        .is_none());
 }
 
 #[test]
-fn committed_block_with_matching_zakura_header_is_noop() {
+fn committed_block_releases_matching_zakura_header() {
     let _init_guard = zebra_test::init();
     let (state, genesis, block1) = mainnet_state_with_genesis_and_zakura_seed();
+    let zakura_header_by_height = state.db.cf_handle("zakura_header_by_height").unwrap();
 
     commit_header_range(&state, genesis.hash(), std::slice::from_ref(&block1.header));
 
     assert_eq!(state.best_header_tip(), Some((Height(1), block1.hash())));
     write_full_block_header_and_transactions(&state, block1.clone());
 
+    // Committing the matching body releases the provisional row; the header is
+    // now served from the consensus column families.
     assert_eq!(state.best_header_tip(), Some((Height(1), block1.hash())));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+    assert!(state
+        .db
+        .zs_get::<_, _, Arc<block::Header>>(&zakura_header_by_height, &Height(1))
+        .is_none());
+}
+
+/// Committing a body at the bottom of a header-only frontier releases just that
+/// height from the Zakura header store while the higher frontier rows remain,
+/// and reads span the body/frontier boundary.
+#[test]
+fn committed_body_releases_only_its_height_and_keeps_the_frontier() {
+    let _init_guard = zebra_test::init();
+    let (state, genesis, block1) = mainnet_state_with_genesis_and_zakura_seed();
+    let block2 = mainnet_block(2);
+    let zakura_header_by_height = state.db.cf_handle("zakura_header_by_height").unwrap();
+
+    commit_header_range(
+        &state,
+        genesis.hash(),
+        &[block1.header.clone(), block2.header.clone()],
+    );
+    assert_eq!(state.best_header_tip(), Some((Height(2), block2.hash())));
+
+    write_full_block_header_and_transactions(&state, block1.clone());
+
+    // H1 is released (its body is committed); the H2 frontier row survives.
+    assert!(state
+        .db
+        .zs_get::<_, _, Arc<block::Header>>(&zakura_header_by_height, &Height(1))
+        .is_none());
+    assert_eq!(
+        state
+            .db
+            .zs_get::<_, _, Arc<block::Header>>(&zakura_header_by_height, &Height(2)),
+        Some(block2.header.clone()),
+    );
+
+    // best_header_tip still reflects the frontier, and the contiguous read spans
+    // the committed body (H1, from the consensus CFs) and the frontier (H2).
+    assert_eq!(state.best_header_tip(), Some((Height(2), block2.hash())));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 2),
+        vec![
+            (Height(1), block1.hash(), block1.header.clone()),
+            (Height(2), block2.hash(), block2.header.clone()),
+        ],
+    );
+}
+
+/// Pruning-readiness guard: a committed height whose body is removed (as online
+/// pruning deletes `tx_by_loc` rows) keeps its header readable from the retained
+/// consensus `block_header_by_height`, because the header readers are not gated
+/// on body availability.
+#[test]
+fn header_stays_readable_after_body_is_pruned() {
+    let _init_guard = zebra_test::init();
+    let (state, _genesis, block1) = mainnet_state_with_genesis();
+
+    write_full_block_header_and_transactions(&state, block1.clone());
+    assert!(state.contains_body_at_height(Height(1)));
+    assert_eq!(
+        state.headers_by_height_range(Height(1), 1),
+        vec![(Height(1), block1.hash(), block1.header.clone())],
+    );
+
+    // Simulate online pruning, which range-deletes the body's `tx_by_loc` rows
+    // (including the coinbase) but retains the header/hash/height indexes.
+    let tx_by_loc = state.db.cf_handle("tx_by_loc").unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &tx_by_loc,
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(2)),
+    );
+    state.db.write(batch).expect("body prune writes");
+
+    // The body is gone, but the header is still served from the consensus CFs.
+    assert!(!state.contains_body_at_height(Height(1)));
+    assert!(state.block(Height(1).into()).is_none());
     assert_eq!(
         state.headers_by_height_range(Height(1), 1),
         vec![(Height(1), block1.hash(), block1.header.clone())],
