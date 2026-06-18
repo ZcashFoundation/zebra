@@ -100,16 +100,14 @@ pub const DEFAULT_ZAKURA_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_ZAKURA_QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(150);
 /// QUIC keepalive interval used by Zakura endpoints.
 pub const DEFAULT_ZAKURA_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
-/// Minimum age of an incumbent Zakura connection before a duplicate connection
-/// for the same identity is allowed to evict it.
+/// Minimum idle age used to classify duplicate Zakura connections.
 ///
 /// Duplicates can be ordinary redial races while the incumbent is healthy and
 /// actively serving block sync. Evicting those incumbents drops in-flight body
 /// ranges and makes a fresh sync repeatedly re-download the same windows. Keep
 /// the incumbent through the transport idle timeout; genuinely dead connections
-/// are reaped by QUIC idle cleanup, and duplicate redials after that point can
-/// reclaim the slot without disturbing active transfers.
-pub const ZAKURA_DUPLICATE_EVICT_MIN_AGE: Duration = Duration::from_secs(300);
+/// are reaped by QUIC idle cleanup without disturbing active transfers.
+pub const ZAKURA_DUPLICATE_STALE_MIN_IDLE: Duration = Duration::from_secs(300);
 /// QUIC stream receive window used by Zakura endpoints.
 pub const DEFAULT_ZAKURA_STREAM_RECEIVE_WINDOW: u32 = 512 * 1024;
 /// QUIC connection receive window used by Zakura endpoints.
@@ -783,8 +781,8 @@ struct ZakuraSupervisorState {
     disconnect_by_peer: HashMap<ZakuraPeerId, CancellationToken>,
     caps_by_peer: HashMap<ZakuraPeerId, u64>,
     /// Last application-level activity for each authenticated peer, used to
-    /// decide whether a duplicate may evict an idle incumbent (see
-    /// [`ZAKURA_DUPLICATE_EVICT_MIN_AGE`]).
+    /// classify duplicate incumbents as fresh or stale (see
+    /// [`ZAKURA_DUPLICATE_STALE_MIN_IDLE`]).
     last_active_by_peer: HashMap<ZakuraPeerId, SharedConnectionFreshness>,
     active_by_ip: HashMap<IpAddr, usize>,
     max_connections_per_ip: usize,
@@ -937,13 +935,11 @@ impl ZakuraSupervisorHandle {
         let mut state = self.inner.lock().await;
         // A re-registration for a peer id that is already active is a duplicate
         // redial, not a new connection: the incumbent already holds the per-IP
-        // slot, and the duplicate branch below either keeps the incumbent and
-        // closes the newcomer or evicts a stale incumbent in its place, so it
-        // never consumes an additional per-IP slot. Exempting duplicates from the
-        // per-IP cap precheck lets a same-peer redial from an IP already at the cap
-        // reach the stale-incumbent eviction path instead of being rejected as a
-        // resource limit, so a dead incumbent is evicted in milliseconds rather
-        // than blocking the peer until the QUIC idle timeout (~150s).
+        // slot, and the duplicate branch below keeps the incumbent and closes the
+        // newcomer, so it never consumes an additional per-IP slot. Exempting
+        // duplicates from the per-IP cap precheck lets a same-peer redial from an
+        // IP already at the cap reach duplicate handling instead of being
+        // rejected as a resource limit.
         let is_duplicate_redial = state.active_by_peer.contains_key(&peer_id);
         if let Some(remote_ip) = remote_ip {
             if !is_duplicate_redial {
@@ -998,24 +994,20 @@ impl ZakuraSupervisorHandle {
             }
             ZakuraUpgradeOutcome::Duplicate { .. } => {
                 // A duplicate for an identity that already has a connection is
-                // usually a restart, a redial, or a simultaneous-open race. Only
-                // cancel the incumbent if it has been application-idle long
-                // enough to look stale; age alone is not enough because healthy
-                // long-lived peers can be actively serving block sync for the
-                // whole scratch sync. The newcomer is still closed (its redial
-                // reconnects cleanly once the slot is free), which avoids racing
-                // the incumbent's service-registration teardown.
+                // usually a restart, a redial, or a simultaneous-open race.
+                // Actively cancelling incumbents here creates reconnect waves
+                // during scratch sync and drops in-flight body ranges. Keep the
+                // incumbent and close the newcomer neutrally; transport and
+                // application idle cleanup own genuinely dead connections.
                 if let Some(last_activity) = state.last_active_by_peer.get(&peer_id) {
-                    if last_connection_activity(last_activity).elapsed()
-                        >= ZAKURA_DUPLICATE_EVICT_MIN_AGE
-                    {
-                        if let Some(token) = state.disconnect_by_peer.get(&peer_id) {
-                            token.cancel();
-                            metrics::counter!("zakura.p2p.conn.duplicate.evicted_stale")
-                                .increment(1);
-                        }
+                    let idle = last_connection_activity(last_activity).elapsed();
+                    metrics::gauge!("zakura.p2p.conn.duplicate.incumbent_idle_seconds")
+                        .set(idle.as_secs_f64());
+                    if idle >= ZAKURA_DUPLICATE_STALE_MIN_IDLE {
+                        metrics::counter!("zakura.p2p.conn.duplicate.stale_incumbent").increment(1);
                     }
                 }
+                metrics::counter!("zakura.p2p.conn.duplicate.kept_incumbent").increment(1);
                 ZakuraRegistration::Duplicate { peer_id }
             }
             ZakuraUpgradeOutcome::Rejected { reason } => ZakuraRegistration::Rejected(reason),
@@ -5222,12 +5214,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn duplicate_evicts_stale_incumbent_but_keeps_fresh_one() -> Result<(), BoxError> {
+    async fn duplicate_keeps_incumbent_even_when_old_or_idle() -> Result<(), BoxError> {
         // A duplicate connection for an identity that already has one either
-        // means the peer restarted (incumbent is a dead, stale connection that
-        // should be evicted so the redial can reclaim the slot) or that two
-        // connections raced at startup (simultaneous open, both fresh, must NOT
-        // be evicted or they flap). Incumbent age distinguishes the two.
+        // means the peer restarted (the incumbent might be dead and stale) or
+        // that two connections raced at startup (simultaneous open, both fresh).
+        // Duplicate handling keeps the incumbent in both cases and leaves dead
+        // incumbents to idle cleanup.
         let supervisor = ZakuraSupervisorHandle::new(4);
 
         async fn register_duplicate(
@@ -5250,8 +5242,8 @@ mod tests {
                 .await
         }
 
-        // Fresh incumbent: an immediate duplicate is a simultaneous-open race and
-        // must not evict it.
+        // Fresh incumbent: an immediate duplicate is a simultaneous-open race
+        // and must keep it.
         let fresh_peer = test_peer(8);
         let fresh_incumbent = CancellationToken::new();
         register_test_peer(&supervisor, fresh_peer.clone(), fresh_incumbent.clone()).await;
@@ -5263,12 +5255,12 @@ mod tests {
             "a young incumbent is kept so simultaneous-open races do not flap",
         );
 
-        // Active old incumbent: age alone must not evict a peer that recently
+        // Active old incumbent: age alone must not close a peer that recently
         // served application traffic, because that drops in-flight body ranges.
         let active_peer = test_peer(9);
         let active_incumbent = CancellationToken::new();
         register_test_peer(&supervisor, active_peer.clone(), active_incumbent.clone()).await;
-        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+        tokio::time::advance(ZAKURA_DUPLICATE_STALE_MIN_IDLE + Duration::from_secs(1)).await;
         refresh_test_peer(&supervisor, &active_peer).await;
         let registration =
             register_duplicate(&supervisor, &active_peer, CancellationToken::new()).await;
@@ -5278,18 +5270,19 @@ mod tests {
             "a recently active incumbent is kept even when the connection is old",
         );
 
-        // Stale incumbent: once its last activity is older than the threshold, a
-        // duplicate evicts it so a restarted peer's redial can reclaim the slot.
+        // Stale incumbent: even once its last activity is older than the
+        // diagnostic threshold, a duplicate must not actively evict it and start
+        // a reconnect wave.
         let stale_peer = test_peer(10);
         let stale_incumbent = CancellationToken::new();
         register_test_peer(&supervisor, stale_peer.clone(), stale_incumbent.clone()).await;
-        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+        tokio::time::advance(ZAKURA_DUPLICATE_STALE_MIN_IDLE + Duration::from_secs(1)).await;
         let newcomer = CancellationToken::new();
         let registration = register_duplicate(&supervisor, &stale_peer, newcomer.clone()).await;
         assert!(matches!(registration, ZakuraRegistration::Duplicate { .. }));
         assert!(
-            stale_incumbent.is_cancelled(),
-            "a stale incumbent is evicted so the restarted peer's redial reclaims the slot",
+            !stale_incumbent.is_cancelled(),
+            "a stale incumbent is kept so duplicate redials do not create reconnect waves",
         );
         assert!(
             !newcomer.is_cancelled(),
@@ -5306,14 +5299,12 @@ mod tests {
     //
     // Outbound/native-direct dials register with `remote_ip = Some(ip)`, so the
     // per-IP cap precheck runs. A same-peer redial from an IP already at the cap
-    // must NOT be rejected as a resource limit before the duplicate stale-eviction
-    // path runs: the incumbent already occupies the only per-IP slot, so a duplicate
-    // for the same identity cannot consume an additional slot. If the precheck
-    // rejects it first, a dead incumbent keeps its own peer blocked until the QUIC
-    // idle timeout (~150s) instead of being evicted in milliseconds.
+    // must NOT be rejected as a resource limit before duplicate handling runs:
+    // the incumbent already occupies the only per-IP slot, so a duplicate for
+    // the same identity cannot consume an additional slot.
     #[tokio::test(start_paused = true)]
-    async fn same_peer_duplicate_at_per_ip_cap_still_evicts_stale_incumbent() -> Result<(), BoxError>
-    {
+    async fn same_peer_duplicate_at_per_ip_cap_still_reaches_duplicate_handling(
+    ) -> Result<(), BoxError> {
         async fn register_from_ip(
             supervisor: &ZakuraSupervisorHandle,
             peer: &ZakuraPeerId,
@@ -5348,24 +5339,24 @@ mod tests {
             "the first connection from the IP registers",
         );
 
-        // The incumbent ages past the stale-eviction threshold: it is now a likely
-        // dead connection left behind by a peer restart.
-        tokio::time::advance(ZAKURA_DUPLICATE_EVICT_MIN_AGE + Duration::from_secs(1)).await;
+        // The incumbent ages past the stale diagnostic threshold: the duplicate
+        // must still reach duplicate handling instead of being rejected by the
+        // per-IP cap.
+        tokio::time::advance(ZAKURA_DUPLICATE_STALE_MIN_IDLE + Duration::from_secs(1)).await;
 
         // The same peer redials from the same IP. The IP is already at cap 1, but
-        // the duplicate must still reach the stale-eviction path and cancel the dead
-        // incumbent so the redial reclaims the slot in milliseconds.
+        // the duplicate must still reach duplicate handling and close neutrally,
+        // not be rejected as a distinct peer over the per-IP cap.
         let newcomer = CancellationToken::new();
         let registration = register_from_ip(&supervisor, &peer, ip, newcomer.clone()).await;
         assert!(
             matches!(registration, ZakuraRegistration::Duplicate { .. }),
             "a same-peer redial from a capped IP must reach duplicate handling, not be \
-             rejected as a resource limit before stale eviction can run",
+             rejected as a resource limit",
         );
         assert!(
-            incumbent.is_cancelled(),
-            "the stale incumbent must be evicted so the restarted peer's redial reclaims \
-             the slot in milliseconds instead of waiting for the QUIC idle timeout",
+            !incumbent.is_cancelled(),
+            "duplicate handling keeps the incumbent and leaves dead connections to idle cleanup",
         );
         assert!(
             !newcomer.is_cancelled(),
