@@ -30,7 +30,7 @@ pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES: usize =
     zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_HEIGHT_GAP;
 /// Default block-sync request timeout.
-pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default block-sync status refresh interval reserved for later advertisement.
 pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// Default tolerated size-hint deviation percentage reserved for later soft scoring.
