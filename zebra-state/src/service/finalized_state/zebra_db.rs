@@ -115,6 +115,20 @@ impl ZebraDb {
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
+        // A read-only secondary instance cannot create a database. If there's no database on
+        // disk, fail with a clear, actionable error instead of silently "creating" one.
+        //
+        // The read-write path is unaffected: creating a new database is the correct behavior there.
+        if read_only && format_change.is_newly_created() {
+            let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
+            panic!(
+                "cannot open read-only state: no database found at {db_path:?}. \
+                 Hint: a read-only state requires an existing finalized database created by a \
+                 running Zebra node; check that the state cache_dir in the Zebra config points at \
+                 that node's cache directory."
+            );
+        }
+
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
         //
