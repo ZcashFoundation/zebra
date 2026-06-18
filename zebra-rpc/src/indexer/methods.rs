@@ -24,14 +24,14 @@ use super::{
 ///
 /// Sized to hold the entire non-finalized state, because `non_finalized_state_change`
 /// bursts every non-finalized block to each new subscriber on subscribe: up to
-/// `MAX_NON_FINALIZED_CHAIN_FORKS` chains of up to `MAX_BLOCK_REORG_HEIGHT` blocks each
+/// 2 chains of up to `MAX_BLOCK_REORG_HEIGHT` blocks each
 /// (forks re-emit their shared prefix). If this buffer is smaller than that burst, a
 /// subscriber near the tip can never assemble the full non-finalized state within one
 /// subscription, which livelocks consumers like `TrustedChainSync`. Derived from the
 /// state constants so it can't silently go stale if the reorg limit changes.
 const RESPONSE_BUFFER_SIZE: usize =
     // `MAX_BLOCK_REORG_HEIGHT` is a small compile-time constant that always fits `usize`.
-    MAX_NON_FINALIZED_CHAIN_FORKS * MAX_BLOCK_REORG_HEIGHT as usize;
+    2 * MAX_BLOCK_REORG_HEIGHT as usize;
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
