@@ -26,7 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    write_database_format_version_to_disk, BoxError, Config,
+    write_database_format_version_to_disk, BoxError, Config, StateInitError,
 };
 
 use super::disk_format::upgrade::restorable_db_versions;
@@ -99,7 +99,7 @@ impl ZebraDb {
         debug_skip_format_upgrades: bool,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
-    ) -> ZebraDb {
+    ) -> Result<ZebraDb, StateInitError> {
         let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
             &restorable_db_versions(),
             format_version_in_code,
@@ -121,12 +121,7 @@ impl ZebraDb {
         // The read-write path is unaffected: creating a new database is the correct behavior there.
         if read_only && format_change.is_newly_created() {
             let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
-            panic!(
-                "cannot open read-only state: no database found at {db_path:?}. \
-                 Hint: a read-only state requires an existing finalized database created by a \
-                 running Zebra node; check that the state cache_dir in the Zebra config points at \
-                 that node's cache directory."
-            );
+            return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
         }
 
         // Format upgrades try to write to the database, so we always skip them
@@ -135,23 +130,26 @@ impl ZebraDb {
         // We also allow skipping them when we are running tests.
         let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
 
-        // Open the database and do initial checks.
+        // Open the low-level database and do initial checks.
+        //
+        // After the database directory is created, a newly created database temporarily
+        // changes to the default database version. Then we set the correct version in the
+        // upgrade thread. We need to do the version change in this order, because the version
+        // file can only be changed while we hold the RocksDB database lock.
+        let disk_db = DiskDb::new(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+        )?;
+
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
-            // After the database directory is created, a newly created database temporarily
-            // changes to the default database version. Then we set the correct version in the
-            // upgrade thread. We need to do the version change in this order, because the version
-            // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(
-                config,
-                db_kind,
-                format_version_in_code,
-                network,
-                column_families_in_code,
-                read_only,
-            ),
+            db: disk_db,
         };
 
         let zero_location_utxos =
@@ -167,7 +165,7 @@ impl ZebraDb {
 
         db.spawn_format_change(format_change);
 
-        db
+        Ok(db)
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.

@@ -35,7 +35,7 @@ use crate::{
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
-    CheckpointVerifiedBlock, Config, ValidateContextError,
+    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
 };
 
 pub mod column_family;
@@ -151,7 +151,7 @@ impl FinalizedState {
         config: &Config,
         network: &Network,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
-    ) -> Self {
+    ) -> Result<Self, StateInitError> {
         Self::new_with_debug(
             config,
             network,
@@ -172,7 +172,7 @@ impl FinalizedState {
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
-    ) -> Self {
+    ) -> Result<Self, StateInitError> {
         #[cfg(feature = "elasticsearch")]
         let elastic_db = if enable_elastic_db {
             use elasticsearch::{
@@ -211,7 +211,7 @@ impl FinalizedState {
                 .iter()
                 .map(ToString::to_string),
             read_only,
-        );
+        )?;
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
@@ -264,7 +264,7 @@ impl FinalizedState {
             }
         }
 
-        new_state
+        Ok(new_state)
     }
 
     /// Returns the configured network for this database.
