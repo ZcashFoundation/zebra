@@ -41,6 +41,67 @@ pub struct TrustedChainSync {
     non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
 }
 
+async fn update_finalized_chain_tip(
+    db: ZebraDb,
+    mut indexer_rpc_client: IndexerClient<tonic::transport::Channel>,
+    mut finalized_chain_tip_sender: ChainTipSender,
+) {
+    let mut chain_tip_change_stream = None;
+
+    loop {
+        let Some(ref mut chain_tip_change) = chain_tip_change_stream else {
+            chain_tip_change_stream = match indexer_rpc_client
+                .chain_tip_change(Empty {})
+                .await
+                .map(|a| a.into_inner())
+            {
+                Ok(listener) => Some(listener),
+                Err(err) => {
+                    tracing::warn!(?err, "failed to subscribe to non-finalized state changes");
+                    tokio::time::sleep(POLL_DELAY).await;
+                    None
+                }
+            };
+
+            continue;
+        };
+
+        let message = match chain_tip_change.message().await {
+            Ok(Some(block_hash_and_height)) => block_hash_and_height,
+            Ok(None) => {
+                tracing::warn!("chain_tip_change stream ended unexpectedly");
+                chain_tip_change_stream = None;
+                continue;
+            }
+            Err(err) => {
+                tracing::warn!(?err, "error receiving chain tip change");
+                chain_tip_change_stream = None;
+                continue;
+            }
+        };
+
+        let Some((hash, _height)) = message.try_into_hash_and_height() else {
+            tracing::warn!("failed to convert message into a block hash and height");
+            continue;
+        };
+
+        // Skip the chain tip change if catching up to the primary db instance fails.
+        if db.spawn_try_catch_up_with_primary().await.is_err() {
+            continue;
+        }
+
+        // End the task and let the `TrustedChainSync::sync()` method send non-finalized chain tip updates if
+        // the latest chain tip hash is not present in the db.
+        let Some(tip_block) = db.block(hash.into()) else {
+            return;
+        };
+
+        finalized_chain_tip_sender.set_finalized_tip(Some(
+            SemanticallyVerifiedBlock::with_hash(tip_block, hash).into(),
+        ));
+    }
+}
+
 impl TrustedChainSync {
     /// Creates a new [`TrustedChainSync`] with a [`ChainTipSender`], then spawns a task to sync blocks
     /// from the node's non-finalized best chain.
@@ -54,9 +115,9 @@ impl TrustedChainSync {
         let non_finalized_state = NonFinalizedState::new(&db.network());
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &db.network());
-        let mut indexer_rpc_client =
+        let indexer_rpc_client =
             IndexerClient::connect(format!("http://{indexer_rpc_address}")).await?;
-        let mut finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
+        let finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
 
         let mut syncer = Self {
             indexer_rpc_client: indexer_rpc_client.clone(),
@@ -68,63 +129,7 @@ impl TrustedChainSync {
 
         // Spawn a task to send finalized chain tip changes to the chain tip change and latest chain tip channels.
         tokio::spawn(async move {
-            let mut chain_tip_change_stream = None;
-
-            loop {
-                let Some(ref mut chain_tip_change) = chain_tip_change_stream else {
-                    chain_tip_change_stream = match indexer_rpc_client
-                        .chain_tip_change(Empty {})
-                        .await
-                        .map(|a| a.into_inner())
-                    {
-                        Ok(listener) => Some(listener),
-                        Err(err) => {
-                            tracing::warn!(
-                                ?err,
-                                "failed to subscribe to non-finalized state changes"
-                            );
-                            tokio::time::sleep(POLL_DELAY).await;
-                            None
-                        }
-                    };
-
-                    continue;
-                };
-
-                let message = match chain_tip_change.message().await {
-                    Ok(Some(block_hash_and_height)) => block_hash_and_height,
-                    Ok(None) => {
-                        tracing::warn!("chain_tip_change stream ended unexpectedly");
-                        chain_tip_change_stream = None;
-                        continue;
-                    }
-                    Err(err) => {
-                        tracing::warn!(?err, "error receiving chain tip change");
-                        chain_tip_change_stream = None;
-                        continue;
-                    }
-                };
-
-                let Some((hash, _height)) = message.try_into_hash_and_height() else {
-                    tracing::warn!("failed to convert message into a block hash and height");
-                    continue;
-                };
-
-                // Skip the chain tip change if catching up to the primary db instance fails.
-                if db.spawn_try_catch_up_with_primary().await.is_err() {
-                    continue;
-                }
-
-                // End the task and let the `TrustedChainSync::sync()` method send non-finalized chain tip updates if
-                // the latest chain tip hash is not present in the db.
-                let Some(tip_block) = db.block(hash.into()) else {
-                    return;
-                };
-
-                finalized_chain_tip_sender.set_finalized_tip(Some(
-                    SemanticallyVerifiedBlock::with_hash(tip_block, hash).into(),
-                ));
-            }
+            update_finalized_chain_tip(db, indexer_rpc_client, finalized_chain_tip_sender).await
         });
 
         let sync_task = tokio::spawn(async move {
