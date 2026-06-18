@@ -2,6 +2,7 @@
 
 use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
 
+use futures::FutureExt as _;
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
@@ -752,6 +753,69 @@ fn find_blocks_stall_not_tracked_when_at_tip() {
         assert!(
             handle.wants_connection_heartbeats(),
             "peer should not be disconnected when at tip"
+        );
+    });
+}
+
+/// Check that empty `FindBlocks` responses DO trigger stall tracking when the node is syncing,
+/// and that the peer is disconnected after exceeding the stall threshold.
+///
+/// This verifies the security property from GHSA-h9hm-m2xj-4rq9 is preserved: peers that
+/// return only empty responses during initial sync are still detected and disconnected.
+#[test]
+fn find_blocks_stall_tracked_when_syncing() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Simulate being far behind the chain tip, as during initial sync.
+    best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        // Send exactly FIND_RESPONSE_STALL_THRESHOLD empty FindBlocks responses.
+        // Each response emits a stall event; the third one triggers disconnect.
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // One extra poll_ready to drain the final stall event and process the disconnect.
+        // Since there are no remaining ready peers, the future does not resolve.
+        let _ = peer_set.ready().now_or_never();
+
+        // The peer must be disconnected: stall threshold was reached while syncing.
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected after stall threshold is reached while syncing"
         );
     });
 }
