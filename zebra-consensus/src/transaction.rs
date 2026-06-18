@@ -464,39 +464,14 @@ where
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let mut async_checks = match tx.as_ref() {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                    tracing::debug!(?tx, "got transaction with wrong version");
-                    return Err(TransactionError::WrongVersion);
-                }
-                Transaction::V4 {
-                    joinsplit_data,
-                    ..
-                } => Self::verify_v4_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                    joinsplit_data,
-                )?,
-                Transaction::V5 {
-                    ..
-                } => Self::verify_v5_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                )?,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6 {
-                    ..
-                } => Self::verify_v6_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                )?,
-            };
+            // Select version-specific async verification pipeline
+            let mut async_checks = Self::dispatch_version_verification(
+                tx.as_ref(),
+                &req,
+                &network,
+                script_verifier,
+                cached_ffi_transaction.clone()
+            )?;
 
             if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
@@ -854,6 +829,39 @@ where
             request.known_utxos(),
             spent_utxos,
         )
+    }
+
+    /// Dispatches version-specific async verification checks for `tx`.
+    ///
+    /// Returns [`TransactionError::WrongVersion`] for V1-V3 transactions, which
+    /// are not supported by any network upgrade Zebra verifies.
+    fn dispatch_version_verification(
+        tx: &Transaction,
+        req: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        match tx {
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                tracing::debug!(?tx, "got transaction with wrong version");
+                Err(TransactionError::WrongVersion)
+            }
+            Transaction::V4 { joinsplit_data, .. } => Self::verify_v4_transaction(
+                req,
+                network,
+                script_verifier,
+                cached_ffi_transaction,
+                joinsplit_data,
+            ),
+            Transaction::V5 { .. } => {
+                Self::verify_v5_transaction(req, network, script_verifier, cached_ffi_transaction)
+            }
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 { .. } => {
+                Self::verify_v6_transaction(req, network, script_verifier, cached_ffi_transaction)
+            }
+        }
     }
 
     /// Verify a V4 transaction.
