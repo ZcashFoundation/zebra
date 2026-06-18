@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `TrustedChainSync` no longer busy-loops and saturates logs when a block repeatedly
+  fails to commit to the non-finalized state: it now backs off before re-subscribing
+  and only logs the warning on transitions.
+  ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+
 ## [10.0.1] - 2026-06-18
 
 ### Changed
