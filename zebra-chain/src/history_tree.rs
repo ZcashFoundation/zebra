@@ -106,6 +106,7 @@ impl NonEmptyHistoryTree {
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3
             | NetworkUpgrade::Nu7 => {
                 let tree = Tree::<OrchardOnward>::new_from_cache(
                     network,
@@ -176,6 +177,7 @@ impl NonEmptyHistoryTree {
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3
             | NetworkUpgrade::Nu7 => {
                 let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
                     network,

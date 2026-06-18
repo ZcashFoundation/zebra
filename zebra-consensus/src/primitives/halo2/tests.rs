@@ -119,7 +119,11 @@ async fn verifier_for_routes_each_upgrade_to_the_correct_key() {
 
     // NU6.2 and every later upgrade route to the fixed key. Nu7 guards that "NU6.2 and later"
     // does not silently fall back to the insecure verifier for future upgrades.
-    for nu in [NetworkUpgrade::Nu6_2, NetworkUpgrade::Nu7] {
+    for nu in [
+        NetworkUpgrade::Nu6_2,
+        NetworkUpgrade::Nu6_3,
+        NetworkUpgrade::Nu7,
+    ] {
         assert!(
             std::ptr::eq(verifier_for(nu), post),
             "{nu:?} must route to the post-NU6.2 (fixed) verifier"
