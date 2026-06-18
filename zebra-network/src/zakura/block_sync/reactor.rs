@@ -14,25 +14,12 @@ const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 /// driver from wedging the reactor's control plane — peer-lifecycle draining,
 /// request timeouts, and above all misbehavior disconnects.
 const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
-/// Keep one normal scheduling slot available per peer once later bodies are
-/// buffered above the download floor, so a floor rescue can route around the
-/// peer that owns the missing head of the range.
-const FLOOR_RESCUE_SLOT_RESERVE: usize = 1;
-const FLOOR_RESCUE_REASON: &str = "floor_rescue";
-const NORMAL_REQUEST_REASON: &str = "normal";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OutstandingRangeDisposition {
     Satisfied,
     RetryOriginal,
     RetryMissing,
-}
-
-struct FloorRescueCandidate {
-    target: block::Height,
-    request: BlockRangeRequest,
-    current_fanout: usize,
-    ready: bool,
 }
 
 /// Spawn a block-sync reactor and return its handle plus action stream.
@@ -98,14 +85,7 @@ impl BlockSyncReactor {
         let mut header_tip_open = header_tip.is_some();
         let mut frontier_updates = self.startup.frontier_updates.clone();
         let mut frontier_updates_open = frontier_updates.is_some();
-        let mut ticks = time::interval(
-            self.startup
-                .config
-                .request_timeout
-                .checked_div(4)
-                .unwrap_or(self.startup.config.request_timeout)
-                .max(Duration::from_millis(1)),
-        );
+        let mut ticks = time::interval(self.startup.config.request_timeout);
         let mut status_ticks = time::interval(
             self.startup
                 .config
@@ -167,7 +147,6 @@ impl BlockSyncReactor {
                     }
                 }
                 _ = ticks.tick() => {
-                    self.schedule_floor_rescue().await;
                     self.handle_timeouts().await;
                     self.publish_metrics();
                     self.trace_sync_state();
@@ -1553,10 +1532,6 @@ impl BlockSyncReactor {
         peer_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
 
         let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
-        let rescue_fanout = self.startup.config.fanout.max(1).saturating_add(1);
-        let reserve_floor_rescue_slot = self
-            .floor_rescue_candidate()
-            .is_some_and(|candidate| candidate.current_fanout < rescue_fanout);
 
         for peer_id in peer_ids {
             // Fill this peer's available slots in one pass, letting the byte
@@ -1570,11 +1545,7 @@ impl BlockSyncReactor {
                 let Some(peer) = self.state.peers.get(&peer_id) else {
                     break;
                 };
-                let available_slots = peer.available_slots();
-                if !peer.received_status
-                    || available_slots == 0
-                    || (reserve_floor_rescue_slot && available_slots <= FLOOR_RESCUE_SLOT_RESERVE)
-                {
+                if !peer.received_status || peer.available_slots() == 0 {
                     break;
                 }
                 let request = match self.state.schedule.next_for_peer(
@@ -1590,159 +1561,52 @@ impl BlockSyncReactor {
                     }
                 };
 
-                if !self
-                    .send_get_blocks_request(&peer_id, request, NORMAL_REQUEST_REASON)
-                    .await
-                {
+                let Some(peer) = self.state.peers.get(&peer_id) else {
                     break;
                 };
-            }
-        }
-    }
-
-    async fn schedule_floor_rescue(&mut self) {
-        let Some(candidate) = self.floor_rescue_candidate() else {
-            return;
-        };
-        let rescue_fanout = self.startup.config.fanout.max(1).saturating_add(1);
-        if !candidate.ready || candidate.current_fanout >= rescue_fanout {
-            return;
-        }
-
-        let mut peer_ids: Vec<_> = self.state.peers.keys().cloned().collect();
-        peer_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-
-        for peer_id in peer_ids {
-            let Some(peer) = self.state.peers.get(&peer_id) else {
-                continue;
-            };
-            if !peer.received_status
-                || peer.available_slots() == 0
-                || candidate.target < peer.servable_low
-                || candidate.target > peer.servable_high
-                || peer
-                    .outstanding
-                    .iter()
-                    .any(|outstanding| outstanding.request.contains(candidate.target))
-            {
-                continue;
-            }
-            if !self
-                .state
-                .budget
-                .try_reserve(candidate.request.estimated_bytes)
-            {
-                return;
-            }
-            if self
-                .send_get_blocks_request(&peer_id, candidate.request.clone(), FLOOR_RESCUE_REASON)
-                .await
-            {
-                return;
-            }
-        }
-    }
-
-    fn floor_rescue_candidate(&self) -> Option<FloorRescueCandidate> {
-        if self.state.reorder.len() == 0 || self.body_lag() == 0 {
-            return None;
-        }
-        let target = next_height(self.state.body_download_floor)?;
-        if self.state.reorder.contains(target) || self.state.applying.contains_key(&target) {
-            return None;
-        }
-
-        let now = Instant::now();
-        let rescue_after = self
-            .startup
-            .config
-            .request_timeout
-            .checked_div(2)
-            .unwrap_or(self.startup.config.request_timeout);
-        let mut current_fanout = 0usize;
-        let mut ready = false;
-        let mut request = None;
-
-        for peer in self.state.peers.values() {
-            for outstanding in &peer.outstanding {
-                if !outstanding.request.contains(target) || outstanding.has_received(target) {
-                    continue;
+                if let Err(error) = peer
+                    .session
+                    .try_send_get_blocks(request.start_height, request.count)
+                {
+                    tracing::debug!(
+                        peer = ?peer_id,
+                        start_height = ?request.start_height,
+                        count = request.count,
+                        ?error,
+                        "failed to queue Zakura block-sync GetBlocks"
+                    );
+                    peer.session.cancel_token().cancel();
+                    self.state.budget.release(request.estimated_bytes);
+                    self.state.schedule.retry(request);
+                    break;
                 }
-                current_fanout = current_fanout.saturating_add(1);
-                request = request.or_else(|| outstanding.request.single_height_retry(target));
-                if outstanding.deadline.saturating_duration_since(now) <= rescue_after {
-                    ready = true;
+
+                metrics::counter!("sync.block.request.sent").increment(1);
+                self.trace_get_blocks_sent(
+                    &peer_id,
+                    request.start_height,
+                    request.count,
+                    request.estimated_bytes,
+                );
+                let deadline = Instant::now() + self.startup.config.request_timeout;
+                if let Some(peer) = self.state.peers.get_mut(&peer_id) {
+                    peer.outstanding.push(OutstandingBlockRange {
+                        request: request.clone(),
+                        deadline,
+                        received: HashSet::new(),
+                    });
                 }
+                let _ = self
+                    .dispatch_action(BlockSyncAction::SendMessage {
+                        peer: peer_id.clone(),
+                        msg: BlockSyncMessage::GetBlocks {
+                            start_height: request.start_height,
+                            count: request.count,
+                        },
+                    })
+                    .await;
             }
         }
-
-        let request = request?;
-        if self.has_submitted_apply(target, request.anchor_hash) {
-            return None;
-        }
-
-        Some(FloorRescueCandidate {
-            target,
-            request,
-            current_fanout,
-            ready,
-        })
-    }
-
-    async fn send_get_blocks_request(
-        &mut self,
-        peer_id: &ZakuraPeerId,
-        request: BlockRangeRequest,
-        reason: &'static str,
-    ) -> bool {
-        let Some(peer) = self.state.peers.get(peer_id) else {
-            self.state.budget.release(request.estimated_bytes);
-            self.state.schedule.retry(request);
-            return false;
-        };
-        if let Err(error) = peer
-            .session
-            .try_send_get_blocks(request.start_height, request.count)
-        {
-            tracing::debug!(
-                peer = ?peer_id,
-                start_height = ?request.start_height,
-                count = request.count,
-                ?error,
-                "failed to queue Zakura block-sync GetBlocks"
-            );
-            peer.session.cancel_token().cancel();
-            self.state.budget.release(request.estimated_bytes);
-            self.state.schedule.retry(request);
-            return false;
-        }
-
-        metrics::counter!("sync.block.request.sent").increment(1);
-        self.trace_get_blocks_sent(
-            peer_id,
-            request.start_height,
-            request.count,
-            request.estimated_bytes,
-            reason,
-        );
-        let deadline = Instant::now() + self.startup.config.request_timeout;
-        if let Some(peer) = self.state.peers.get_mut(peer_id) {
-            peer.outstanding.push(OutstandingBlockRange {
-                request: request.clone(),
-                deadline,
-                received: HashSet::new(),
-            });
-        }
-        let _ = self
-            .dispatch_action(BlockSyncAction::SendMessage {
-                peer: peer_id.clone(),
-                msg: BlockSyncMessage::GetBlocks {
-                    start_height: request.start_height,
-                    count: request.count,
-                },
-            })
-            .await;
-        true
     }
 
     async fn release_contiguous_blocks(&mut self) {
@@ -2448,14 +2312,12 @@ impl BlockSyncReactor {
         start_height: block::Height,
         count: u32,
         estimated_bytes: u64,
-        reason: &'static str,
     ) {
         self.emit_trace(bs_trace::BLOCK_GET_BLOCKS_SENT, |row| {
             bs_insert_peer(row, bs_trace::PEER, peer);
             bs_insert_height(row, bs_trace::RANGE_START, start_height);
             bs_insert_u64(row, bs_trace::RANGE_COUNT, u64::from(count));
             bs_insert_u64(row, bs_trace::ESTIMATED_BYTES, estimated_bytes);
-            bs_insert_str(row, bs_trace::REASON, reason);
         });
     }
 
