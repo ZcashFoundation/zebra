@@ -42,12 +42,12 @@ retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
 [[profile.ci.overrides]]
-filter = "test(~peer_set_ready) or test(=peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set_route_inv_advertised_registry)"
+filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
 retries = 2
 slow-timeout = { period = "30s", terminate-after = 2 }
 
 [[profile.ci.overrides]]
-filter = "test(=trusted_chain_sync_handles_forks_correctly)"
+filter = "test(=integration::regtest::trusted_chain_sync_handles_forks_correctly)"
 retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
@@ -74,7 +74,7 @@ filter = 'test(=stateful::sync::sync_to_mandatory_checkpoint_mainnet) or test(=s
 slow-timeout = { period = "1500m", terminate-after = 1 }
 
 [[profile.ci-stateful.overrides]]
-filter = 'test(=stateful::sync::sync_past_mandatory_checkpoint_mainnet) or test(=stateful::sync::sync_past_mandatory_checkpoint_testnet) or test(=stateful::rpc::lwd_rpc_test) or test(=stateful::lightwalletd::lightwalletd_test_suite) or test(=stateful::lightwalletd::lwd_grpc_wallet)'
+filter = 'test(=stateful::sync::sync_past_mandatory_checkpoint_mainnet) or test(=stateful::sync::sync_past_mandatory_checkpoint_testnet) or test(=stateful::rpc::rpc_get_block_from_cached_state) or test(=stateful::lightwalletd::lightwalletd_test_suite) or test(=stateful::lightwalletd::lwd_grpc_wallet)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 
 [[profile.ci-stateful.overrides]]

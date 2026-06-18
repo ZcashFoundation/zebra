@@ -294,7 +294,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     output.stdout_line_contains(expect_stdout_line_contains)?;
 
     // [Note on port conflict](#Note on port conflict)
-    output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other acceptance test, zebrad, or zcashd processes running?")?;
+    output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other zebrad tests, zebrad, or zcashd processes running?")?;
 
     assert_with_context!(
         testdir.path().exists(),
@@ -618,7 +618,7 @@ fn stored_configs_work() -> Result<()> {
         // [Note on port conflict](#Note on port conflict)
         output
             .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+            .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
     }
 
     Ok(())
@@ -670,7 +670,7 @@ fn non_blocking_logger() -> Result<()> {
         // [Note on port conflict](#Note on port conflict)
         output
             .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+            .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
         done_tx.send(())?;
 

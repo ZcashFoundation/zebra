@@ -1,4 +1,4 @@
-//! `lightwalletd`-specific shared code for the `zebrad` acceptance tests.
+//! `lightwalletd`-specific shared code for the `zebrad` tests.
 //!
 //! # Warning
 //!
@@ -604,14 +604,14 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
 
         lightwalletd_output
             .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+            .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
     }
 
     let zebrad_output = zebrad.wait_with_output()?.assert_failure()?;
 
     zebrad_output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }

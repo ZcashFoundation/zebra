@@ -87,7 +87,7 @@ async fn metrics_endpoint() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }
@@ -205,7 +205,7 @@ async fn tracing_endpoint() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }
@@ -279,7 +279,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }

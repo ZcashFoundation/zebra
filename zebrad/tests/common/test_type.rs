@@ -1,4 +1,4 @@
-//! Provides TestType enum with shared code for acceptance tests
+//! Provides TestType enum with shared code for zebrad tests
 
 use std::{
     env,

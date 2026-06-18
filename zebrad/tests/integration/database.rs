@@ -158,7 +158,7 @@ where
     // Make sure the first node was killed, rather than exiting with an error.
     output1
         .assert_was_killed()
-        .warning("Possible port conflict. Are there other acceptance tests running?")
+        .warning("Possible port conflict. Are there other zebrad tests running?")
         .context_from(&output2)?;
 
     // Make sure node2 has the expected resource conflict.
@@ -167,7 +167,7 @@ where
         .context_from(&output1)?;
     output2
         .assert_was_not_killed()
-        .warning("Possible port conflict. Are there other acceptance tests running?")
+        .warning("Possible port conflict. Are there other zebrad tests running?")
         .context_from(&output1)?;
 
     Ok(())
@@ -241,7 +241,7 @@ fn delete_old_databases() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }
@@ -349,7 +349,7 @@ async fn state_format_test(
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     // # Apply the fake version if needed
     let mut expect_older_version = false;
@@ -441,7 +441,7 @@ async fn state_format_test(
         // [Note on port conflict](#Note on port conflict)
         output
             .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+            .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
     }
     Ok(())
 }

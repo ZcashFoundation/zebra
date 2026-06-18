@@ -1,4 +1,4 @@
-//! Shared code for the `zebrad` acceptance tests.
+//! Shared code for the `zebrad` tests.
 //!
 //! # Warning
 //!

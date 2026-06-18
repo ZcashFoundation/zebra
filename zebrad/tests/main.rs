@@ -1,4 +1,4 @@
-//! Zebra integration and acceptance tests.
+//! Zebrad tests.
 //!
 //! ## Test categories
 //!

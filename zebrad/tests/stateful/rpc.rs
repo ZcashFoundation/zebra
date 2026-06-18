@@ -34,14 +34,14 @@ async fn rpc_submit_block() -> Result<()> {
 /// Make a synced `getblock` RPC call against cached Zebra state.
 #[tokio::test]
 #[ignore]
-async fn lwd_rpc_test() -> Result<()> {
+async fn rpc_get_block_from_cached_state() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let test_type = TestType::UpdateCachedState;
     let network = Network::Mainnet;
 
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, "lwd_rpc_test", test_type, false)?
+        spawn_zebrad_for_rpc(network, "rpc_get_block_from_cached_state", test_type, false)?
     {
         tracing::info!("running fully synced zebrad RPC test");
 
@@ -51,7 +51,7 @@ async fn lwd_rpc_test() -> Result<()> {
         return Ok(());
     };
 
-    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
+    let zebra_rpc_address = zebra_rpc_address.expect("cached-state RPC test must have RPC port");
 
     zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
@@ -78,8 +78,6 @@ async fn lwd_rpc_test() -> Result<()> {
 }
 
 /// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
-///
-/// This test name must have the same prefix as the `lwd_rpc_test`, so they can be run in the same test job.
 #[tokio::test]
 #[ignore]
 async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
@@ -169,7 +167,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }

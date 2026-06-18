@@ -219,7 +219,7 @@ S::Future: Send + 'static,
 ## Testing Guidelines
 
 - **Unit/property tests**: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
-- **zebrad acceptance tests**: `zebrad/tests/` organized into 4 module tiers:
+- **zebrad tests**: `zebrad/tests/` organized into 4 module tiers:
   - `unit::` — Fast CLI, config tests (<1 min, no network/state)
   - `integration::` — Tests that launch zebrad (5-15 min, no cached state)
   - `stateful::` — Tests requiring cached blockchain state (30 min+, GCP VMs)
