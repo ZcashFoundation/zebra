@@ -123,6 +123,12 @@ pub mod block_sync_trace {
     pub const ESTIMATED_BYTES: &str = "estimated_bytes";
     /// Serialized byte size of a received body.
     pub const SERIALIZED_BYTES: &str = "serialized_bytes";
+    /// End-to-end elapsed milliseconds for a traced operation.
+    pub const ELAPSED_MS: &str = "elapsed_ms";
+    /// Elapsed milliseconds before response frames were ready to send.
+    pub const PREPARE_ELAPSED_MS: &str = "prepare_elapsed_ms";
+    /// Elapsed milliseconds spent enqueueing response frames.
+    pub const SEND_ELAPSED_MS: &str = "send_elapsed_ms";
     /// Commit result label (`committed`, `duplicate`, `rejected`, `timed_out`).
     pub const RESULT: &str = "result";
     /// Reactor-local verifier submission token.
@@ -186,6 +192,10 @@ pub mod block_sync_trace {
     pub const BLOCK_GET_BLOCKS_SENT: &str = "block_get_blocks_sent";
     /// Reactor accepted an inbound event.
     pub const BLOCK_EVENT_RECEIVED: &str = "block_event_received";
+    /// Reactor accepted a decoded inbound block-sync wire message.
+    pub const BLOCK_MESSAGE_RECEIVED: &str = "block_message_received";
+    /// Reactor queued an outbound block-sync wire message for transport.
+    pub const BLOCK_MESSAGE_SENT: &str = "block_message_sent";
     /// Reactor queued an outbound driver action.
     pub const BLOCK_ACTION_DISPATCHED: &str = "block_action_dispatched";
     /// Body received from a peer.

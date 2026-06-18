@@ -1,0 +1,4 @@
+{"event":"sync_frontier_transition","new_finalized_height":1,"new_verified_body_height":1,"result":"accepted","sequence":1,"ts":4000000}
+{"event":"sync_frontier_transition","new_finalized_height":2,"new_verified_body_height":2,"result":"accepted","sequence":2,"ts":5000000}
+{"event":"sync_frontier_transition","new_finalized_height":4,"new_verified_body_height":4,"result":"accepted","sequence":3,"ts":70000000}
+{"event":"sync_frontier_transition","new_finalized_height":5,"new_verified_body_height":5,"result":"ignored","sequence":4,"ts":80000000}

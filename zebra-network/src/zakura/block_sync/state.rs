@@ -288,6 +288,7 @@ pub(super) struct PeerBlockState {
     pub(super) inbound_status: RateMeter,
     pub(super) unsolicited: RateMeter,
     pub(super) served_blocks_inflight: u16,
+    pub(super) served_block_requests: VecDeque<(block::Height, Instant)>,
     pub(super) misbehavior: u32,
 }
 
@@ -308,6 +309,7 @@ impl PeerBlockState {
             ),
             unsolicited: RateMeter::new(config.status_refresh_interval),
             served_blocks_inflight: 0,
+            served_block_requests: VecDeque::new(),
             misbehavior: 0,
         }
     }
@@ -337,16 +339,38 @@ impl PeerBlockState {
             .position(|outstanding| outstanding.request.start_height == start_height)
     }
 
-    pub(super) fn try_start_serving_blocks(&mut self, local_inflight_cap: u16) -> bool {
+    pub(super) fn try_start_serving_blocks(
+        &mut self,
+        local_inflight_cap: u16,
+        start_height: block::Height,
+    ) -> bool {
         if self.served_blocks_inflight >= local_inflight_cap {
             return false;
         }
         self.served_blocks_inflight = self.served_blocks_inflight.saturating_add(1);
+        self.served_block_requests
+            .push_back((start_height, Instant::now()));
         true
     }
 
-    pub(super) fn finish_serving_blocks(&mut self) {
+    pub(super) fn serving_blocks_elapsed(&self, start_height: block::Height) -> Option<Duration> {
+        self.served_block_requests
+            .iter()
+            .find_map(|(start, started)| (*start == start_height).then(|| started.elapsed()))
+    }
+
+    pub(super) fn finish_serving_blocks(
+        &mut self,
+        start_height: block::Height,
+    ) -> Option<Duration> {
+        let elapsed = self
+            .served_block_requests
+            .iter()
+            .position(|(start, _)| *start == start_height)
+            .and_then(|index| self.served_block_requests.remove(index))
+            .map(|(_, started)| started.elapsed());
         self.served_blocks_inflight = self.served_blocks_inflight.saturating_sub(1);
+        elapsed
     }
 }
 

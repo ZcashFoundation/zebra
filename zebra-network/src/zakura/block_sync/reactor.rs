@@ -626,6 +626,7 @@ impl BlockSyncReactor {
             return;
         }
 
+        self.trace_message_received(&peer, &msg);
         match msg {
             BlockSyncMessage::Status(status) => self.handle_status(peer, status).await,
             BlockSyncMessage::Block(block) => self.handle_block(peer, block).await,
@@ -868,7 +869,7 @@ impl BlockSyncReactor {
             return;
         }
 
-        if !peer_state.try_start_serving_blocks(local_inflight_cap) {
+        if !peer_state.try_start_serving_blocks(local_inflight_cap, start_height) {
             let unavailable_count = count.min(inbound_get_blocks_count_limit(&self.startup.config));
             self.send_range_unavailable(&peer, start_height, unavailable_count);
             return;
@@ -878,7 +879,7 @@ impl BlockSyncReactor {
         if requested_count == 0 {
             let unavailable_count = count.min(inbound_get_blocks_count_limit(&self.startup.config));
             self.send_range_unavailable(&peer, start_height, unavailable_count);
-            self.finish_serving_blocks(&peer);
+            self.finish_serving_blocks(&peer, start_height);
             return;
         }
 
@@ -890,7 +891,7 @@ impl BlockSyncReactor {
             })
             .await
         {
-            self.finish_serving_blocks(&peer);
+            self.finish_serving_blocks(&peer, start_height);
         }
     }
 
@@ -1184,6 +1185,8 @@ impl BlockSyncReactor {
         requested_count: u32,
         blocks: Vec<(block::Height, Arc<block::Block>, usize)>,
     ) {
+        let prepare_elapsed = self.serving_blocks_elapsed(&peer, start_height);
+        let send_started = Instant::now();
         let max_response_bytes = u64::from(self.startup.config.advertised_max_response_bytes());
         let mut sent_blocks = 0u32;
         let mut sent_bytes = 0u64;
@@ -1222,6 +1225,7 @@ impl BlockSyncReactor {
             self.send_blocks_done_wait(&peer, start_height, sent_blocks)
                 .await;
         }
+        let total_elapsed = self.finish_serving_blocks(&peer, start_height);
         self.trace_range_response_sent(
             &peer,
             start_height,
@@ -1229,8 +1233,10 @@ impl BlockSyncReactor {
             sent_blocks,
             sent_bytes,
             reason,
+            prepare_elapsed,
+            send_started.elapsed(),
+            total_elapsed,
         );
-        self.finish_serving_blocks(&peer);
     }
 
     async fn handle_block_range_response_finished(
@@ -1243,7 +1249,18 @@ impl BlockSyncReactor {
         if returned_count == 0 {
             self.send_range_unavailable(&peer, start_height, requested_count);
         }
-        self.finish_serving_blocks(&peer);
+        let elapsed = self.finish_serving_blocks(&peer, start_height);
+        self.trace_range_response_sent(
+            &peer,
+            start_height,
+            requested_count,
+            returned_count,
+            0,
+            "driver_finished",
+            elapsed,
+            Duration::ZERO,
+            elapsed,
+        );
     }
 
     async fn handle_block_apply_finished(
@@ -1328,10 +1345,26 @@ impl BlockSyncReactor {
         self.release_caught_up_block_sync_peers();
     }
 
-    fn finish_serving_blocks(&mut self, peer: &ZakuraPeerId) {
-        if let Some(peer_state) = self.state.peers.get_mut(peer) {
-            peer_state.finish_serving_blocks();
-        }
+    fn serving_blocks_elapsed(
+        &self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+    ) -> Option<Duration> {
+        self.state
+            .peers
+            .get(peer)
+            .and_then(|peer_state| peer_state.serving_blocks_elapsed(start_height))
+    }
+
+    fn finish_serving_blocks(
+        &mut self,
+        peer: &ZakuraPeerId,
+        start_height: block::Height,
+    ) -> Option<Duration> {
+        self.state
+            .peers
+            .get_mut(peer)
+            .and_then(|peer_state| peer_state.finish_serving_blocks(start_height))
     }
 
     async fn handle_timeouts(&mut self) {
@@ -1881,17 +1914,21 @@ impl BlockSyncReactor {
         };
         let status = self.local_status();
         let session = peer_state.session.clone();
+        let msg = BlockSyncMessage::Status(status);
+        let started = Instant::now();
         if let Err(error) = session.try_send_status(status) {
             tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Status");
             self.trace_status_send_failed(peer, reason);
+            self.trace_message_sent(peer, &msg, "error", started.elapsed());
             session.cancel_token().cancel();
             return;
         }
+        self.trace_message_sent(peer, &msg, "queued", started.elapsed());
         self.trace_status_sent(peer, reason, status);
         let _ = self
             .dispatch_action(BlockSyncAction::SendMessage {
                 peer: peer.clone(),
-                msg: BlockSyncMessage::Status(status),
+                msg,
             })
             .await;
     }
@@ -1905,19 +1942,24 @@ impl BlockSyncReactor {
         else {
             return false;
         };
+        let msg = BlockSyncMessage::Block(block.clone());
+        let started = Instant::now();
         match time::timeout(ACTION_SEND_TIMEOUT, session.send_block(block)).await {
             Ok(Ok(())) => {
                 metrics::counter!("sync.block.body.served").increment(1);
+                self.trace_message_sent(peer, &msg, "queued", started.elapsed());
                 true
             }
             Ok(Err(error)) => {
                 tracing::debug!(?peer, ?error, "failed to queue Zakura block-sync Block");
+                self.trace_message_sent(peer, &msg, "error", started.elapsed());
                 session.cancel_token().cancel();
                 false
             }
             Err(_) => {
                 metrics::counter!("sync.block.body.serve_timeout").increment(1);
                 tracing::debug!(?peer, "timed out queueing Zakura block-sync Block");
+                self.trace_message_sent(peer, &msg, "timeout", started.elapsed());
                 session.cancel_token().cancel();
                 false
             }
@@ -1941,24 +1983,31 @@ impl BlockSyncReactor {
         else {
             return;
         };
+        let msg = BlockSyncMessage::BlocksDone {
+            start_height,
+            returned,
+        };
+        let started = Instant::now();
         match time::timeout(
             ACTION_SEND_TIMEOUT,
             session.send_blocks_done(start_height, returned),
         )
         .await
         {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => self.trace_message_sent(peer, &msg, "queued", started.elapsed()),
             Ok(Err(error)) => {
                 tracing::debug!(
                     ?peer,
                     ?error,
                     "failed to queue Zakura block-sync BlocksDone"
                 );
+                self.trace_message_sent(peer, &msg, "error", started.elapsed());
                 session.cancel_token().cancel();
             }
             Err(_) => {
                 metrics::counter!("sync.block.done.serve_timeout").increment(1);
                 tracing::debug!(?peer, "timed out queueing Zakura block-sync BlocksDone");
+                self.trace_message_sent(peer, &msg, "timeout", started.elapsed());
                 session.cancel_token().cancel();
             }
         }
@@ -1969,6 +2018,11 @@ impl BlockSyncReactor {
         let Some(peer_state) = self.state.peers.get(peer) else {
             return;
         };
+        let msg = BlockSyncMessage::RangeUnavailable {
+            start_height,
+            count,
+        };
+        let started = Instant::now();
         if let Err(error) = peer_state
             .session
             .try_send_range_unavailable(start_height, count)
@@ -1978,7 +2032,10 @@ impl BlockSyncReactor {
                 ?error,
                 "failed to queue Zakura block-sync RangeUnavailable"
             );
+            self.trace_message_sent(peer, &msg, "error", started.elapsed());
             peer_state.session.cancel_token().cancel();
+        } else {
+            self.trace_message_sent(peer, &msg, "queued", started.elapsed());
         }
     }
 
@@ -1997,19 +2054,25 @@ impl BlockSyncReactor {
         else {
             return;
         };
+        let msg = BlockSyncMessage::RangeUnavailable {
+            start_height,
+            count,
+        };
+        let started = Instant::now();
         match time::timeout(
             ACTION_SEND_TIMEOUT,
             session.send_range_unavailable(start_height, count),
         )
         .await
         {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => self.trace_message_sent(peer, &msg, "queued", started.elapsed()),
             Ok(Err(error)) => {
                 tracing::debug!(
                     ?peer,
                     ?error,
                     "failed to queue Zakura block-sync RangeUnavailable"
                 );
+                self.trace_message_sent(peer, &msg, "error", started.elapsed());
                 session.cancel_token().cancel();
             }
             Err(_) => {
@@ -2018,6 +2081,7 @@ impl BlockSyncReactor {
                     ?peer,
                     "timed out queueing Zakura block-sync RangeUnavailable"
                 );
+                self.trace_message_sent(peer, &msg, "timeout", started.elapsed());
                 session.cancel_token().cancel();
             }
         }
@@ -2270,6 +2334,30 @@ impl BlockSyncReactor {
         });
     }
 
+    fn trace_message_received(&self, peer: &ZakuraPeerId, msg: &BlockSyncMessage) {
+        self.emit_trace(bs_trace::BLOCK_MESSAGE_RECEIVED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, bs_trace::KIND, block_sync_message_label(msg));
+            trace_block_sync_message_fields(row, msg);
+        });
+    }
+
+    fn trace_message_sent(
+        &self,
+        peer: &ZakuraPeerId,
+        msg: &BlockSyncMessage,
+        result: &'static str,
+        elapsed: Duration,
+    ) {
+        self.emit_trace(bs_trace::BLOCK_MESSAGE_SENT, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_str(row, bs_trace::KIND, block_sync_message_label(msg));
+            bs_insert_str(row, bs_trace::RESULT, result);
+            bs_insert_duration_ms(row, bs_trace::ELAPSED_MS, elapsed);
+            trace_block_sync_message_fields(row, msg);
+        });
+    }
+
     fn trace_body_submitted(&self, height: block::Height, token: BlockApplyToken) {
         self.emit_trace(bs_trace::BLOCK_BODY_SUBMITTED, |row| {
             bs_insert_height(row, bs_trace::HEIGHT, height);
@@ -2305,6 +2393,9 @@ impl BlockSyncReactor {
         sent_count: u32,
         sent_bytes: u64,
         reason: &'static str,
+        prepare_elapsed: Option<Duration>,
+        send_elapsed: Duration,
+        total_elapsed: Option<Duration>,
     ) {
         self.emit_trace(bs_trace::BLOCK_RANGE_RESPONSE_SENT, |row| {
             bs_insert_peer(row, bs_trace::PEER, peer);
@@ -2313,6 +2404,13 @@ impl BlockSyncReactor {
             bs_insert_u64(row, bs_trace::EXPECTED_COUNT, u64::from(requested_count));
             bs_insert_u64(row, bs_trace::SERIALIZED_BYTES, sent_bytes);
             bs_insert_str(row, bs_trace::REASON, reason);
+            if let Some(prepare_elapsed) = prepare_elapsed {
+                bs_insert_duration_ms(row, bs_trace::PREPARE_ELAPSED_MS, prepare_elapsed);
+            }
+            bs_insert_duration_ms(row, bs_trace::SEND_ELAPSED_MS, send_elapsed);
+            if let Some(total_elapsed) = total_elapsed {
+                bs_insert_duration_ms(row, bs_trace::ELAPSED_MS, total_elapsed);
+            }
         });
     }
 
@@ -2670,6 +2768,18 @@ fn bs_insert_u64(
     value: u64,
 ) {
     row.insert(key.to_string(), serde_json::Value::from(value));
+}
+
+fn bs_insert_duration_ms(
+    row: &mut serde_json::Map<String, serde_json::Value>,
+    key: &'static str,
+    duration: Duration,
+) {
+    bs_insert_u64(
+        row,
+        key,
+        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+    );
 }
 
 fn bs_insert_frontiers(

@@ -17,7 +17,7 @@
 //! `Service::deliver_frame`; decoded messages still flow to the reactor as
 //! `WireMessage` events.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use super::{events::*, wire::*, *};
 use crate::zakura::{
@@ -185,6 +185,9 @@ pub(super) async fn run_peer(
             }
         }
 
+        let frame_payload_bytes = frame.payload.len();
+        let frame_message_type = frame.message_type;
+        let decode_started = Instant::now();
         let msg = match BlockSyncMessage::decode_frame(frame) {
             Ok(msg) => msg,
             Err(error) => {
@@ -201,7 +204,10 @@ pub(super) async fn run_peer(
                 return Err(SinkReject::protocol(protocol_error));
             }
         };
+        let decode_elapsed = decode_started.elapsed();
+        let kind = block_sync_message_label(&msg);
 
+        let queue_started = Instant::now();
         send_event(
             &events,
             BlockSyncEvent::WireMessage {
@@ -210,6 +216,15 @@ pub(super) async fn run_peer(
             },
         )
         .await?;
+        tracing::trace!(
+            peer = ?peer_id,
+            kind,
+            frame_message_type,
+            payload_bytes = frame_payload_bytes,
+            decode_elapsed_ms = decode_elapsed.as_millis(),
+            queue_elapsed_ms = queue_started.elapsed().as_millis(),
+            "decoded and queued inbound Zakura block-sync message"
+        );
     }
 }
 
@@ -251,6 +266,16 @@ fn forward(events: &mpsc::Sender<BlockSyncEvent>, event: BlockSyncEvent) -> Flow
         Err(error) => Flow::Reject(SinkReject::local(format!(
             "block-sync queue closed: {error}"
         ))),
+    }
+}
+
+fn block_sync_message_label(msg: &BlockSyncMessage) -> &'static str {
+    match msg {
+        BlockSyncMessage::Status(_) => "status",
+        BlockSyncMessage::GetBlocks { .. } => "get_blocks",
+        BlockSyncMessage::Block(_) => "block",
+        BlockSyncMessage::BlocksDone { .. } => "blocks_done",
+        BlockSyncMessage::RangeUnavailable { .. } => "range_unavailable",
     }
 }
 

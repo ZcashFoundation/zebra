@@ -327,6 +327,14 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                 .await
                 {
                     Ok(Ok(zebra_state::ReadResponse::Blocks(blocks))) => {
+                        let returned_count = blocks.len();
+                        let returned_bytes = blocks
+                            .iter()
+                            .try_fold(0u64, |sum, (_, _, size)| {
+                                let size = u64::try_from(*size).unwrap_or(u64::MAX);
+                                sum.checked_add(size)
+                            })
+                            .unwrap_or(u64::MAX);
                         emit_commit_state(
                             &trace,
                             cs_trace::STATE_READ_SUCCESS,
@@ -339,7 +347,13 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                                 );
                                 insert_cs_peer(row, cs_trace::PEER, &peer);
                                 insert_cs_height(row, cs_trace::RANGE_START, start);
-                                insert_cs_u64(row, cs_trace::RANGE_COUNT, blocks.len() as u64);
+                                insert_cs_u64(
+                                    row,
+                                    cs_trace::RANGE_COUNT,
+                                    u64::try_from(returned_count).unwrap_or(u64::MAX),
+                                );
+                                insert_cs_u64(row, "requested_count", u64::from(count));
+                                insert_cs_u64(row, "returned_bytes", returned_bytes);
                                 insert_cs_u64(row, cs_trace::ELAPSED_MS, elapsed_ms(started));
                             },
                         );
