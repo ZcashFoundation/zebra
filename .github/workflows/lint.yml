@@ -14,7 +14,11 @@ on:
       - .github/workflows/lint.yml
 
   push:
-    branches: [main]
+    # Temporarily allow CI on the QEDIT integration branch.
+    # TODO: Remove v4.2.0-dev before merging upstream.
+    branches:
+      - main
+      - v4.2.0-dev
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
