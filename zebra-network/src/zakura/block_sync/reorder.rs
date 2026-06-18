@@ -41,6 +41,7 @@ impl ReorderBuffer {
         height: block::Height,
         block: Arc<block::Block>,
         bytes: u64,
+        source_peer: ZakuraPeerId,
         budget: &mut ByteBudget,
     ) -> ReorderInsertResult {
         if self.blocks.contains_key(&height) {
@@ -50,7 +51,14 @@ impl ReorderBuffer {
             return ReorderInsertResult::BudgetFull;
         }
 
-        self.blocks.insert(height, BufferedBlock { block, bytes });
+        self.blocks.insert(
+            height,
+            BufferedBlock {
+                block,
+                bytes,
+                source_peer,
+            },
+        );
         self.buffered_bytes = self.buffered_bytes.saturating_add(bytes);
         ReorderInsertResult::Inserted
     }
@@ -58,7 +66,7 @@ impl ReorderBuffer {
     pub(super) fn drain_contiguous_prefix(
         &mut self,
         verified_block_tip: block::Height,
-    ) -> Vec<(block::Height, Arc<block::Block>, u64)> {
+    ) -> Vec<(block::Height, Arc<block::Block>, u64, ZakuraPeerId)> {
         let mut released = Vec::new();
         let mut next = match next_height(verified_block_tip) {
             Some(next) => next,
@@ -67,7 +75,7 @@ impl ReorderBuffer {
 
         while let Some(buffered) = self.blocks.remove(&next) {
             self.buffered_bytes = self.buffered_bytes.saturating_sub(buffered.bytes);
-            released.push((next, buffered.block, buffered.bytes));
+            released.push((next, buffered.block, buffered.bytes, buffered.source_peer));
             let Some(after) = next_height(next) else {
                 break;
             };
@@ -121,4 +129,7 @@ pub(super) enum ReorderInsertResult {
 struct BufferedBlock {
     block: Arc<block::Block>,
     bytes: u64,
+    /// The peer that delivered this body, so an apply rejection can be attributed
+    /// back to it for misbehavior scoring.
+    source_peer: ZakuraPeerId,
 }

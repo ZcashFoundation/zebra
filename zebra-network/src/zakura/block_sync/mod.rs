@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, watch},
-    task::{self, JoinHandle},
+    task::JoinHandle,
     time,
 };
 use tokio_util::sync::CancellationToken;

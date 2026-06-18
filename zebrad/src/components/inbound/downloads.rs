@@ -55,7 +55,10 @@ impl AdvertiserSource {
     fn max_in_flight(&self, global_limit: usize) -> usize {
         match self {
             Self::LegacyIp(_) => 1,
-            Self::Zakura(_) => global_limit,
+            // Authenticated Zakura peers get a per-peer slice of the global queue
+            // rather than the whole thing, so one peer cannot monopolize inbound
+            // block gossip admission. Never exceed the global limit on small queues.
+            Self::Zakura(_) => MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER.min(global_limit),
         }
     }
 }
@@ -79,20 +82,32 @@ struct DownloadTask {
 /// block with ~225_000 transparent outputs can take up 9MB of RAM.
 /// The total queue bound is `MAX_INBOUND_CONCURRENCY * 9 MB`. Admission is
 /// bounded globally by [`Downloads::full_verify_concurrency_limit`], deduped by
-/// block hash, and bounded per advertiser source where that source is unauthenticated
-/// legacy TCP. Legacy TCP sources keep the historical one-in-flight per-IP bound;
-/// authenticated Zakura sources are bounded by the global queue and network/gossip
-/// admission. Admitted same-source downloads fetch block bodies promptly, then
+/// block hash, and bounded per advertiser source. Legacy TCP sources keep the
+/// historical one-in-flight per-IP bound; authenticated Zakura sources are bounded
+/// per peer id by [`MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER`], so a single Zakura
+/// peer cannot fill the global queue with distinct gossiped hashes and deny
+/// admission to honest peers (the block-gossip analogue of the mempool fix for
+/// `GHSA-4fc2-h7jh-287c`). Admitted same-source downloads fetch block bodies promptly, then
 /// wait on a fair source-local gate before verification. This preserves
 /// source-local commit order without needing a later inbound request to drain a
 /// passive queue.
-/// Peer-specific spam resistance is handled by the network/gossip layer before
-/// hashes reach this queue.
 /// (See #1880 for more details.)
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
 pub const MAX_INBOUND_CONCURRENCY: usize = 200;
+
+/// The maximum number of concurrent inbound block download tasks attributable to
+/// a single authenticated Zakura advertiser.
+///
+/// Caps how many slots of [`MAX_INBOUND_CONCURRENCY`] (or the configured
+/// `full_verify_concurrency_limit`) one Zakura peer's gossiped block hashes can
+/// occupy, so a single peer cannot saturate the global queue with distinct hashes
+/// and deny gossip-path block admission to honest peers. This mirrors the mempool
+/// per-peer cap added for `GHSA-4fc2-h7jh-287c`. Legacy TCP sources keep their
+/// historical one-in-flight per-IP bound; crawler/sync-driven downloads have no
+/// advertiser source and are not counted against this cap.
+pub const MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER: usize = 5;
 
 /// The action taken in response to a peer's gossiped block hash.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -429,6 +444,22 @@ where
             } else {
                 unreachable!("wrong response to block request");
             };
+
+            // Bind the delivered block to the hash we requested. A peer that
+            // substitutes a different (even valid) block must not be able to
+            // corrupt our hash/source accounting: the verifier returns the
+            // committed block's hash, and queue cleanup keys on it, so a
+            // mismatch would leave the originally requested entry stale.
+            if block.hash() != hash {
+                return Err((
+                    format!(
+                        "peer returned block {} in response to a request for {hash}",
+                        block.hash()
+                    )
+                    .into(),
+                    advertiser_addr,
+                ));
+            }
             metrics::counter!("gossip.downloaded.block.count").increment(1);
 
             // # Security & Performance
@@ -630,6 +661,57 @@ mod tests {
         assert_eq!(
             downloads.download_and_verify(hash(6), None),
             DownloadAction::AlreadyQueued
+        );
+    }
+
+    #[tokio::test]
+    async fn single_zakura_source_cannot_monopolize_inbound_block_queue() {
+        let mut downloads = pending_downloads();
+        let zakura_a = zn::PeerSource::Zakura(
+            zn::zakura::ZakuraPeerId::new(vec![7; 32]).expect("test peer id is within bounds"),
+        );
+        let zakura_b = zn::PeerSource::Zakura(
+            zn::zakura::ZakuraPeerId::new(vec![8; 32]).expect("test peer id is within bounds"),
+        );
+
+        // A single Zakura source may occupy at most
+        // `MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER` slots of the global inbound
+        // queue, even though the global queue still has plenty of room.
+        for index in 0..MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER {
+            let byte = u8::try_from(index).expect("per-peer cap fits in u8");
+            assert_eq!(
+                downloads.download_and_verify(hash(byte), Some(zakura_a.clone())),
+                DownloadAction::AddedToQueue
+            );
+        }
+        assert_eq!(
+            downloads.pending.len(),
+            MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER
+        );
+
+        // The next distinct hash from the same source is rejected: one Zakura peer
+        // cannot keep advertising until it owns the whole global gossip queue.
+        let over_cap = hash(
+            u8::try_from(MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER).expect("per-peer cap fits in u8"),
+        );
+        assert_eq!(
+            downloads.download_and_verify(over_cap, Some(zakura_a)),
+            DownloadAction::FullQueue
+        );
+        assert_eq!(
+            downloads.pending.len(),
+            MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER
+        );
+
+        // A different honest Zakura peer is still admitted while the first is at
+        // its cap, so no single peer monopolizes gossip admission.
+        assert_eq!(
+            downloads.download_and_verify(hash(200), Some(zakura_b)),
+            DownloadAction::AddedToQueue
+        );
+        assert_eq!(
+            downloads.pending.len(),
+            MAX_INBOUND_BLOCK_CONCURRENCY_PER_PEER + 1
         );
     }
 
@@ -877,5 +959,87 @@ mod tests {
             }
         );
         poll_task.abort();
+    }
+
+    #[tokio::test]
+    async fn substituted_block_response_is_rejected_and_cleans_up_requested_hash(
+    ) -> Result<(), BoxError> {
+        let requested_block: Arc<block::Block> =
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+        let substitute_block: Arc<block::Block> =
+            zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+        let requested_hash = requested_block.hash();
+        assert_ne!(requested_hash, substitute_block.hash());
+
+        let peer_id =
+            zn::zakura::ZakuraPeerId::new(vec![7; 32]).expect("test peer id is within bounds");
+        let source = zn::PeerSource::Zakura(peer_id);
+
+        // The peer answers a single-hash request with a *different* valid block.
+        let substitute = substitute_block.clone();
+        let network = BoxCloneService::new(service_fn(move |request: zn::Request| {
+            let substitute = substitute.clone();
+            async move {
+                let (zn::Request::BlocksByHashFrom { .. } | zn::Request::BlocksByHash(_)) = request
+                else {
+                    return Err("unexpected network request".into());
+                };
+                Ok(zn::Response::Blocks(vec![Available((substitute, None))]))
+            }
+        }));
+
+        // The verifier would happily commit whatever block it is handed.
+        let verifier =
+            BoxCloneService::new(service_fn(|request: zebra_consensus::Request| async move {
+                let zebra_consensus::Request::Commit(block) = request else {
+                    return Err("unexpected verifier request".into());
+                };
+                Ok(block.hash())
+            }));
+
+        let (_tip_sender, latest_chain_tip, _tip_change) =
+            zs::ChainTipSender::new(None, &Network::Mainnet);
+        let mut downloads = Downloads::new(
+            MAX_INBOUND_CONCURRENCY,
+            network,
+            verifier,
+            BoxCloneService::new(service_fn(|request| async move {
+                match request {
+                    zs::Request::AnyChainBlock(_) => Ok(zs::Response::Block(None)),
+                    request => Err(format!("unexpected state request: {request:?}").into()),
+                }
+            })),
+            latest_chain_tip,
+        );
+
+        assert_eq!(
+            downloads.download_and_verify(requested_hash, Some(source)),
+            DownloadAction::AddedToQueue
+        );
+
+        // The download must fail rather than accept the substituted block.
+        let result = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+            .await
+            .expect("download completes")
+            .expect("downloads stream is open");
+        assert!(
+            result.is_err(),
+            "a substituted block must be rejected, not accepted as {result:?}",
+        );
+
+        // Cleanup must key on the requested hash: no stale queue or source-count
+        // state may remain under the originally requested hash.
+        assert!(
+            downloads.cancel_handles.is_empty(),
+            "queue entry under the requested hash must be removed",
+        );
+        assert!(
+            downloads.source_counts.is_empty(),
+            "source accounting must be decremented for the requested hash",
+        );
+        assert!(downloads.source_locks.is_empty());
+        assert_eq!(downloads.queue_len(), 0);
+
+        Ok(())
     }
 }

@@ -74,8 +74,8 @@ fn block_with_bad_merkle_root(
 /// `1..=count`.
 ///
 /// Each block is mainnet block 1 with its coinbase height rewritten and its
-/// header merkle root recomputed, so it has a distinct hash and passes the
-/// reactor's `block_merkle_root_matches_header` check. The real test vectors
+/// header merkle root recomputed, so it has a distinct hash and a header that
+/// commits to its transactions. The real test vectors
 /// only cover a handful of contiguous heights, which is too few to flood the
 /// per-peer wire queue, so the body-flood test synthesizes its own chain.
 fn fake_sequential_blocks(count: u32) -> Vec<Arc<block::Block>> {
@@ -112,8 +112,8 @@ fn fake_block_at_height(template: &Arc<block::Block>, height: block::Height) -> 
     }
     block.transactions[0] = coinbase;
 
-    // Rewriting the coinbase changes the merkle root, so recompute it; otherwise
-    // the reactor's merkle check rejects the body before it can be buffered.
+    // Rewriting the coinbase changes the merkle root, so recompute it to keep the
+    // synthesized block internally consistent (its header commits to its txs).
     let merkle_root = block.transactions.iter().collect::<block::merkle::Root>();
     let mut header = *block.header;
     header.merkle_root = merkle_root;
@@ -1194,7 +1194,7 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
 
     assert_eq!(
-        reorder.insert(block::Height(3), block.clone(), 300, &mut budget),
+        reorder.insert(block::Height(3), block.clone(), 300, peer(0), &mut budget),
         ReorderInsertResult::Inserted
     );
     assert!(reorder.drain_contiguous_prefix(block::Height(0)).is_empty());
@@ -1202,14 +1202,14 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     assert_eq!(budget.reserved(), 300);
 
     assert_eq!(
-        reorder.insert(block::Height(1), block.clone(), 100, &mut budget),
+        reorder.insert(block::Height(1), block.clone(), 100, peer(0), &mut budget),
         ReorderInsertResult::Inserted
     );
     let released = reorder.drain_contiguous_prefix(block::Height(0));
     assert_eq!(
         released
             .iter()
-            .map(|(height, _, bytes)| (*height, *bytes))
+            .map(|(height, _, bytes, _)| (*height, *bytes))
             .collect::<Vec<_>>(),
         vec![(block::Height(1), 100)]
     );
@@ -1218,14 +1218,14 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     budget.release(100);
 
     assert_eq!(
-        reorder.insert(block::Height(2), block.clone(), 200, &mut budget),
+        reorder.insert(block::Height(2), block.clone(), 200, peer(0), &mut budget),
         ReorderInsertResult::Inserted
     );
     let released = reorder.drain_contiguous_prefix(block::Height(1));
     assert_eq!(
         released
             .iter()
-            .map(|(height, _, bytes)| (*height, *bytes))
+            .map(|(height, _, bytes, _)| (*height, *bytes))
             .collect::<Vec<_>>(),
         vec![(block::Height(2), 200), (block::Height(3), 300)]
     );
@@ -1233,11 +1233,11 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     budget.release(500);
 
     assert_eq!(
-        reorder.insert(block::Height(2), block.clone(), 200, &mut budget),
+        reorder.insert(block::Height(2), block.clone(), 200, peer(0), &mut budget),
         ReorderInsertResult::Inserted
     );
     assert_eq!(
-        reorder.insert(block::Height(3), block, 300, &mut budget),
+        reorder.insert(block::Height(3), block, 300, peer(0), &mut budget),
         ReorderInsertResult::Inserted
     );
     reorder.drop_from(block::Height(3), &mut budget);
@@ -1251,6 +1251,7 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
             block::Height(3),
             mainnet_block(&BLOCK_MAINNET_1_BYTES),
             300,
+            peer(0),
             &mut budget
         ),
         ReorderInsertResult::Inserted
@@ -1279,10 +1280,16 @@ fn reorder_fuzzes_arrival_order_as_parent_first() {
 
         for height in order {
             assert_eq!(
-                reorder.insert(block::Height(height), block.clone(), 100, &mut budget),
+                reorder.insert(
+                    block::Height(height),
+                    block.clone(),
+                    100,
+                    peer(0),
+                    &mut budget
+                ),
                 ReorderInsertResult::Inserted
             );
-            for (released, _, bytes) in reorder.drain_contiguous_prefix(tip) {
+            for (released, _, bytes, _) in reorder.drain_contiguous_prefix(tip) {
                 assert_eq!(released, block::Height(tip.0 + 1));
                 tip = released;
                 released_all.push(released);
@@ -5448,18 +5455,21 @@ async fn scheduled_get_blocks_is_sent_once_via_session_not_duplicated_by_source(
 }
 
 #[tokio::test]
-async fn reactor_scores_header_valid_merkle_invalid_body_and_accepts_clean_peer() {
+async fn reactor_scores_peer_whose_invalid_body_is_rejected_by_consensus() {
     let request_bytes: u32 = 10_000;
-    let mut config = ZakuraBlockSyncConfig {
+    let config = ZakuraBlockSyncConfig {
         max_inflight_block_bytes: u64::from(request_bytes) * 2,
-        fanout: 2,
         ..immediate_body_download_config()
     };
-    config.peer_limits.max_outbound_peers = 2;
-    config.peer_limits.outbound_queue_depth = 16;
 
     let blocks = mainnet_blocks_1_to_3();
+    // A body that keeps block 1's header (so it passes the reactor's hash and
+    // height gates) but carries an extra transaction, so its merkle root no
+    // longer matches the header. The reactor no longer recomputes the merkle
+    // root at ingress, so this body reaches consensus, which rejects it.
     let bad_body = block_with_bad_merkle_root(&blocks[0], &blocks[1]);
+    assert_eq!(bad_body.hash(), blocks[0].hash());
+
     let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
         BlockSyncFrontiers {
@@ -5477,25 +5487,15 @@ async fn reactor_scores_header_valid_merkle_invalid_body_and_accepts_clean_peer(
         &service,
         &mut actions,
         40,
-        block::Height(2),
-        blocks[1].hash(),
-        1,
-        MAX_BS_RESPONSE_BYTES,
-    )
-    .await;
-    let (good_peer, good_inbound, _good_outbound) = connect_peer_with_status(
-        &service,
-        &mut actions,
-        41,
-        block::Height(2),
-        blocks[1].hash(),
+        block::Height(1),
+        blocks[0].hash(),
         1,
         MAX_BS_RESPONSE_BYTES,
     )
     .await;
 
     tip_tx
-        .send((block::Height(2), blocks[1].hash()))
+        .send((block::Height(1), blocks[0].hash()))
         .expect("tip watch is live");
     while !matches!(
         next_action(&mut actions).await,
@@ -5509,16 +5509,10 @@ async fn reactor_scores_header_valid_merkle_invalid_body_and_accepts_clean_peer(
         }]))
         .await
         .expect("needed metadata queues");
-
-    let mut requested_peers = Vec::new();
-    while requested_peers.len() < 2 {
-        let (peer, start_height, count) = wait_for_getblocks(&mut actions).await;
-        assert_eq!(start_height, block::Height(1));
-        assert_eq!(count, 1);
-        requested_peers.push(peer);
-    }
-    assert!(requested_peers.contains(&bad_peer));
-    assert!(requested_peers.contains(&good_peer));
+    assert_eq!(
+        wait_for_getblocks(&mut actions).await,
+        (bad_peer.clone(), block::Height(1), 1)
+    );
 
     bad_inbound
         .send(
@@ -5529,64 +5523,53 @@ async fn reactor_scores_header_valid_merkle_invalid_body_and_accepts_clean_peer(
         .await
         .expect("bad block frame queues");
 
-    loop {
-        match next_action(&mut actions).await {
-            BlockSyncAction::Misbehavior { peer, reason } => {
-                assert_eq!(peer, bad_peer);
-                assert_eq!(reason, BlockSyncMisbehavior::InvalidBlock);
-                break;
-            }
-            BlockSyncAction::SendMessage { .. } => {}
-            BlockSyncAction::SubmitBlock { block, .. } => {
-                panic!("merkle-invalid block was buffered and submitted: {block:?}");
-            }
-            action => panic!("unexpected action before invalid body scoring: {action:?}"),
-        }
-    }
-
-    good_inbound
-        .send(
-            BlockSyncMessage::Block(blocks[0].clone())
-                .encode_frame()
-                .expect("good block frame encodes"),
-        )
-        .await
-        .expect("good block frame queues");
-
+    // The merkle-invalid body is no longer filtered at ingress: it is buffered
+    // and submitted to consensus.
     let submit_token = loop {
         match next_action(&mut actions).await {
             BlockSyncAction::SubmitBlock { token, block } => {
                 assert_eq!(block.hash(), blocks[0].hash());
-                assert_eq!(block.coinbase_height(), Some(block::Height(1)));
                 break token;
             }
             BlockSyncAction::SendMessage { .. } => {}
-            action => panic!("unexpected action before clean body submit: {action:?}"),
+            action => panic!("unexpected action before invalid body submit: {action:?}"),
         }
     };
 
+    // Consensus rejects the invalid body. The reactor must attribute the
+    // rejection to the peer that delivered it and score the peer as misbehavior,
+    // rather than silently rolling back scheduling state and letting the peer
+    // keep feeding invalid bodies for needed heights.
     handle
         .send(BlockSyncEvent::BlockApplyFinished {
             token: submit_token,
             height: block::Height(1),
             hash: blocks[0].hash(),
-            result: BlockApplyResult::Committed,
+            result: BlockApplyResult::Rejected,
             local_frontier: None,
         })
         .await
         .expect("apply-finished event queues");
 
-    handle
-        .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
-            height: block::Height(2),
-            hash: blocks[1].hash(),
-            size: BlockSizeEstimate::Advertised(request_bytes * 2),
-        }]))
-        .await
-        .expect("follow-up needed metadata queues");
-    let (_peer, start_height, count) = wait_for_getblocks(&mut actions).await;
-    assert_eq!(start_height, block::Height(2));
-    assert_eq!(count, 1);
+    let mut scored = false;
+    loop {
+        match next_action(&mut actions).await {
+            BlockSyncAction::Misbehavior { peer, reason } => {
+                assert_eq!(peer, bad_peer);
+                assert_eq!(reason, BlockSyncMisbehavior::InvalidBlock);
+                scored = true;
+                break;
+            }
+            // Reaching the post-rejection re-query without a misbehavior report
+            // means the peer was not scored.
+            BlockSyncAction::QueryNeededBlocks { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(
+        scored,
+        "a consensus apply rejection must score the peer that delivered the body",
+    );
 
     reactor_task.abort();
 }

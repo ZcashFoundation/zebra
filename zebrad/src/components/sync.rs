@@ -280,6 +280,28 @@ const REGTEST_SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
 /// network requests. If there are a lot of them, it could overwhelm the network.
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
+/// How long the Zakura block-sync replacement waits for the verified tip to
+/// advance before falling back to the legacy `ChainSync` body downloader.
+///
+/// When `v2_p2p` is enabled, the legacy syncer only bootstraps genesis and then
+/// hands body sync to native Zakura sync (see [`ChainSync::bootstrap_genesis_then_pause`]).
+/// If Zakura never makes progress — for example the node's only reachable peers
+/// are legacy-only and do not advertise `NODE_P2P_V2`, or Zakura body sync has no
+/// usable peers — parking the legacy syncer forever would leave the node
+/// connected but stuck at genesis (an eclipse with non-upgrading peers can hold a
+/// node there indefinitely). After this much time with no verified-tip progress,
+/// the legacy syncer resumes as a fallback so legacy peers can drive body sync.
+///
+/// This is generous on purpose: a healthy node advancing its tip (mainnet
+/// produces a block roughly every 75 seconds) resets the timer and never falls
+/// back. Falling back when a node is genuinely caught up is harmless — the legacy
+/// syncer simply finds no new blocks and idles.
+const ZAKURA_BODY_SYNC_STALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How often [`ChainSync::bootstrap_genesis_then_pause`] polls the verified tip
+/// while watching for Zakura body-sync progress.
+const ZAKURA_BODY_SYNC_STALL_POLL: Duration = Duration::from_secs(10);
+
 /// Sync configuration section.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
@@ -670,18 +692,59 @@ where
         }
     }
 
-    /// Downloads and verifies genesis, then parks this legacy syncer.
+    /// Downloads and verifies genesis, then hands body sync to native Zakura sync
+    /// while watching for progress, falling back to the legacy syncer if Zakura
+    /// makes none.
     ///
     /// Zakura block sync uses this bootstrap path because header range validation needs the
     /// committed genesis header before native Zakura header/body sync can advance from scratch.
+    ///
+    /// After genesis, native Zakura sync is expected to drive body downloads. But
+    /// it cannot always: the default config enables both `v2_p2p` and `legacy_p2p`,
+    /// and legacy-only peers (no `NODE_P2P_V2`) still connect, so a node whose
+    /// reachable peers are legacy-only — or one eclipsed by non-upgrading peers —
+    /// would have no usable Zakura body-sync peers. Parking forever there leaves
+    /// the node connected but stuck at genesis. So instead of parking, watch the
+    /// verified tip; if it does not advance for [`ZAKURA_BODY_SYNC_STALL_TIMEOUT`],
+    /// resume the legacy [`ChainSync::sync`] loop as a fallback.
     #[instrument(skip(self))]
     pub async fn bootstrap_genesis_then_pause(mut self) -> Result<(), Report> {
         self.request_genesis().await?;
         info!(
-            "Zakura block sync replacement completed genesis bootstrap; parking legacy ChainSync"
+            "Zakura block sync replacement completed genesis bootstrap; \
+             monitoring for Zakura body-sync progress"
         );
-        std::future::pending::<()>().await;
-        Ok(())
+
+        // Number of consecutive idle polls (no verified-tip progress) that trip
+        // the fallback. `as_secs` is non-zero for both constants, so this is >= 1.
+        let max_idle_polls = (ZAKURA_BODY_SYNC_STALL_TIMEOUT.as_secs()
+            / ZAKURA_BODY_SYNC_STALL_POLL.as_secs())
+        .max(1);
+
+        let mut last_height = self.latest_chain_tip.best_tip_height();
+        let mut idle_polls = 0u64;
+        loop {
+            sleep(ZAKURA_BODY_SYNC_STALL_POLL).await;
+
+            let height = self.latest_chain_tip.best_tip_height();
+            if height > last_height {
+                // Zakura body sync is making progress; keep it as the primary path.
+                last_height = height;
+                idle_polls = 0;
+                continue;
+            }
+
+            idle_polls += 1;
+            if idle_polls >= max_idle_polls {
+                warn!(
+                    state_tip = ?height,
+                    stall = ?ZAKURA_BODY_SYNC_STALL_TIMEOUT,
+                    "Zakura body sync made no progress; falling back to legacy ChainSync \
+                     so legacy peers can drive body sync"
+                );
+                return self.sync().await;
+            }
+        }
     }
 
     /// Tries to synchronize the chain as far as it can.

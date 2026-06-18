@@ -6217,7 +6217,7 @@ mod tests {
             limits.max_frame_bytes,
             limits.max_message_bytes,
         )?;
-        LegacyResponseCodec::decode_response(request_id, request_kind, frames.clone())?;
+        LegacyResponseCodec::decode_response(request_id, request_kind, frames.clone(), None)?;
 
         let mut state = LegacyResponseReadState::new(budget);
         for frame in &frames {
@@ -6507,8 +6507,12 @@ mod tests {
             .expect("nil response encodes");
 
             // The higher decode layer DOES reject NIL for these kinds...
-            let decoded =
-                LegacyResponseCodec::decode_response(request_id, request_kind, nil_frames.clone());
+            let decoded = LegacyResponseCodec::decode_response(
+                request_id,
+                request_kind,
+                nil_frames.clone(),
+                None,
+            );
             assert!(
                 decoded.is_err(),
                 "decode_response must reject a bare NIL for {request_kind:?}",

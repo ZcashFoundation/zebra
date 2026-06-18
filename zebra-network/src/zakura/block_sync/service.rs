@@ -525,7 +525,7 @@ fn spawn_block_sync_source(
     cancel_token: CancellationToken,
     send: FramedSend,
 ) -> JoinHandle<()> {
-    task::spawn(async move {
+    tokio::task::spawn(async move {
         let source = Box::new(BlockSyncSource {
             peer_id,
             actions,

@@ -1,7 +1,7 @@
 //! Legacy Zebra gossip compatibility over Zakura streams.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     future::Future,
     io::Cursor,
@@ -604,6 +604,7 @@ impl LegacyResponseCodec {
         request_id: u64,
         request_kind: LegacyRequestKind,
         frames: Vec<Frame>,
+        requested_block_hashes: Option<&HashSet<block::Hash>>,
     ) -> Result<Response, LegacyGossipError> {
         let mut blocks = Vec::new();
         let mut transactions = Vec::new();
@@ -628,6 +629,17 @@ impl LegacyResponseCodec {
                         let block = Arc::new(Block::zcash_deserialize(&mut Cursor::new(
                             bytes.as_slice(),
                         ))?);
+                        // Bind the delivered block to a hash we actually requested.
+                        // Without this, a peer can substitute any other valid block
+                        // for the one requested, corrupting downstream hash/source
+                        // accounting (the response is correlated only by request id
+                        // and kind, not by hash).
+                        if let Some(requested) = requested_block_hashes {
+                            let hash = block.hash();
+                            if !requested.contains(&hash) {
+                                return Err(LegacyGossipError::UnsolicitedBlock(hash));
+                            }
+                        }
                         blocks.push(InventoryResponse::Available((block, None)));
                     }
                 }
@@ -650,6 +662,12 @@ impl LegacyResponseCodec {
                     }
                     reassembler.reject_if_active()?;
                     for hash in decode_hashes_response(request_id, frame.payload)? {
+                        // A peer may only report blocks we requested as missing.
+                        if let Some(requested) = requested_block_hashes {
+                            if !requested.contains(&hash) {
+                                return Err(LegacyGossipError::UnsolicitedBlock(hash));
+                            }
+                        }
                         blocks.push(InventoryResponse::Missing(hash));
                     }
                 }
@@ -1861,6 +1879,12 @@ impl ZakuraRequestClient {
         request_kind: LegacyRequestKind,
     ) -> Result<Response, BoxError> {
         let request_id = NEXT_LEGACY_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        // Capture the requested block hashes (if any) before consuming the frame,
+        // so the response can be bound to a hash we actually asked for.
+        let requested_block_hashes: Option<HashSet<block::Hash>> = match &frame {
+            LegacyRequestFrame::BlocksByHash(hashes) => Some(hashes.iter().copied().collect()),
+            _ => None,
+        };
         let frame = frame.encode_frame()?;
         trace_legacy_request_start(
             &self.trace,
@@ -1912,21 +1936,25 @@ impl ZakuraRequestClient {
                 return Err(error);
             }
         };
-        let mut response =
-            match LegacyResponseCodec::decode_response(request_id, request_kind, response) {
-                Ok(response) => response,
-                Err(error) => {
-                    trace_legacy_request_error(
-                        &self.trace,
-                        "outbound.decode_error",
-                        Some(handle.peer_id()),
-                        request_id,
-                        request_kind.command(),
-                        error.to_string(),
-                    );
-                    return Err(error.into());
-                }
-            };
+        let mut response = match LegacyResponseCodec::decode_response(
+            request_id,
+            request_kind,
+            response,
+            requested_block_hashes.as_ref(),
+        ) {
+            Ok(response) => response,
+            Err(error) => {
+                trace_legacy_request_error(
+                    &self.trace,
+                    "outbound.decode_error",
+                    Some(handle.peer_id()),
+                    request_id,
+                    request_kind.command(),
+                    error.to_string(),
+                );
+                return Err(error.into());
+            }
+        };
         if request_kind == LegacyRequestKind::Ping {
             // The responder can only acknowledge a Ping; the requester stamps the RTT.
             response = Response::Pong(started_at.elapsed());
@@ -2793,6 +2821,10 @@ pub enum LegacyGossipError {
     /// A request that requires an acknowledgement received none.
     #[error("missing legacy response: {0}")]
     MissingResponse(&'static str),
+    /// The peer returned a block we did not request, so the response is not bound
+    /// to the requested hash. Treated as a peer fault.
+    #[error("legacy block response contained an unrequested block: {0:?}")]
+    UnsolicitedBlock(block::Hash),
     /// Zcash serialization failed.
     #[error(transparent)]
     Serialization(#[from] SerializationError),
@@ -4436,7 +4468,12 @@ mod tests {
             payload: wrong_id_payload,
         };
         assert!(matches!(
-            LegacyResponseCodec::decode_response(1, LegacyRequestKind::Blocks, vec![wrong_id]),
+            LegacyResponseCodec::decode_response(
+                1,
+                LegacyRequestKind::Blocks,
+                vec![wrong_id],
+                None
+            ),
             Err(LegacyGossipError::WrongRequestId {
                 expected: 1,
                 actual: 2
@@ -4456,7 +4493,12 @@ mod tests {
             payload: oversized_payload,
         };
         assert!(matches!(
-            LegacyResponseCodec::decode_response(1, LegacyRequestKind::Blocks, vec![oversized]),
+            LegacyResponseCodec::decode_response(
+                1,
+                LegacyRequestKind::Blocks,
+                vec![oversized],
+                None
+            ),
             Err(LegacyGossipError::OversizedResponse(_))
         ));
     }
@@ -4474,6 +4516,7 @@ mod tests {
                 request_id,
                 LegacyRequestKind::FindBlocks,
                 vec![nil()],
+                None,
             )
             .expect("nil is a valid empty FindBlocks response"),
             Response::BlockHashes(vec![]),
@@ -4483,6 +4526,7 @@ mod tests {
                 request_id,
                 LegacyRequestKind::FindHeaders,
                 vec![nil()],
+                None,
             )
             .expect("nil is a valid empty FindHeaders response"),
             Response::BlockHeaders(vec![]),
@@ -4492,6 +4536,7 @@ mod tests {
                 request_id,
                 LegacyRequestKind::MempoolTransactionIds,
                 vec![nil()],
+                None,
             )
             .expect("nil is a valid empty mempool response"),
             Response::TransactionIds(vec![]),
@@ -4501,6 +4546,7 @@ mod tests {
                 request_id,
                 LegacyRequestKind::PushTransaction,
                 vec![nil()],
+                None,
             )
             .expect("nil acknowledges a pushed transaction"),
             Response::Nil,
@@ -4516,7 +4562,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    LegacyResponseCodec::decode_response(request_id, kind, vec![nil()]),
+                    LegacyResponseCodec::decode_response(request_id, kind, vec![nil()], None),
                     Err(LegacyGossipError::UnexpectedResponse(_)),
                 ),
                 "nil must be rejected for {kind:?} so the caller can fall back",
@@ -4543,7 +4589,8 @@ mod tests {
             frame.encode(max_frame_bytes)?;
         }
 
-        let response = LegacyResponseCodec::decode_response(7, LegacyRequestKind::Blocks, frames)?;
+        let response =
+            LegacyResponseCodec::decode_response(7, LegacyRequestKind::Blocks, frames, None)?;
         let Response::Blocks(blocks) = response else {
             panic!("unexpected response: {response:?}");
         };
@@ -4604,13 +4651,71 @@ mod tests {
         }
 
         // The smaller chunking must still round-trip back to the original block.
-        let response = LegacyResponseCodec::decode_response(7, LegacyRequestKind::Blocks, frames)?;
+        let response =
+            LegacyResponseCodec::decode_response(7, LegacyRequestKind::Blocks, frames, None)?;
         let Response::Blocks(blocks) = response else {
             panic!("unexpected response: {response:?}");
         };
         assert!(matches!(
             blocks.as_slice(),
             [InventoryResponse::Available((received, None))] if received.hash() == block.hash()
+        ));
+
+        Ok(())
+    }
+
+    /// A legacy block response must be bound to a hash we actually requested.
+    ///
+    /// Block responses are correlated only by request id and request kind, so
+    /// without binding, a peer can substitute any other valid block for the one
+    /// requested. The decoder must reject a delivered block whose hash is not in
+    /// the requested set, and accept it when it is.
+    #[test]
+    fn decode_response_binds_blocks_to_requested_hashes() -> Result<(), BoxError> {
+        let block = Arc::new(Block::zcash_deserialize(
+            BLOCK_TESTNET_141042_BYTES.as_slice(),
+        )?);
+        let frame_cap = u32::try_from(MAX_PROTOCOL_MESSAGE_LEN)?;
+        let frames = LegacyResponseCodec::encode_response(
+            7,
+            Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))]),
+            frame_cap,
+            frame_cap,
+        )?;
+
+        // A peer substitutes a real block we never asked for. Bound against a
+        // requested-hash set that does not contain it, the codec rejects it
+        // instead of correlating the response by request id and kind alone.
+        let unrelated: HashSet<block::Hash> = std::iter::once(block_hash(99)).collect();
+        assert!(
+            matches!(
+                LegacyResponseCodec::decode_response(
+                    7,
+                    LegacyRequestKind::Blocks,
+                    frames.clone(),
+                    Some(&unrelated),
+                ),
+                Err(LegacyGossipError::UnsolicitedBlock(_)),
+            ),
+            "a block whose hash was not requested must be rejected",
+        );
+
+        // The same response is accepted when its hash is among those requested.
+        let requested: HashSet<block::Hash> = std::iter::once(block.hash()).collect();
+        let response = LegacyResponseCodec::decode_response(
+            7,
+            LegacyRequestKind::Blocks,
+            frames,
+            Some(&requested),
+        )?;
+        assert!(matches!(
+            response,
+            Response::Blocks(blocks)
+                if matches!(
+                    blocks.as_slice(),
+                    [InventoryResponse::Available((received, None))]
+                        if received.hash() == block.hash()
+                )
         ));
 
         Ok(())
@@ -4699,7 +4804,7 @@ mod tests {
             u32::try_from(MAX_PROTOCOL_MESSAGE_LEN)?,
         )?;
         assert_eq!(
-            LegacyResponseCodec::decode_response(8, LegacyRequestKind::FindBlocks, frames)?,
+            LegacyResponseCodec::decode_response(8, LegacyRequestKind::FindBlocks, frames, None)?,
             block_hash_response
         );
 
@@ -4711,7 +4816,7 @@ mod tests {
             u32::try_from(MAX_PROTOCOL_MESSAGE_LEN)?,
         )?;
         assert_eq!(
-            LegacyResponseCodec::decode_response(9, LegacyRequestKind::FindHeaders, frames)?,
+            LegacyResponseCodec::decode_response(9, LegacyRequestKind::FindHeaders, frames, None)?,
             header_response
         );
 
@@ -4726,7 +4831,8 @@ mod tests {
             LegacyResponseCodec::decode_response(
                 10,
                 LegacyRequestKind::MempoolTransactionIds,
-                frames
+                frames,
+                None,
             )?,
             tx_ids_response
         );
@@ -4738,7 +4844,7 @@ mod tests {
             u32::try_from(MAX_PROTOCOL_MESSAGE_LEN)?,
         )?;
         assert!(matches!(
-            LegacyResponseCodec::decode_response(11, LegacyRequestKind::Ping, frames)?,
+            LegacyResponseCodec::decode_response(11, LegacyRequestKind::Ping, frames, None)?,
             Response::Pong(_)
         ));
 
@@ -4749,7 +4855,12 @@ mod tests {
             u32::try_from(MAX_PROTOCOL_MESSAGE_LEN)?,
         )?;
         assert_eq!(
-            LegacyResponseCodec::decode_response(12, LegacyRequestKind::PushTransaction, frames)?,
+            LegacyResponseCodec::decode_response(
+                12,
+                LegacyRequestKind::PushTransaction,
+                frames,
+                None
+            )?,
             Response::Nil
         );
 

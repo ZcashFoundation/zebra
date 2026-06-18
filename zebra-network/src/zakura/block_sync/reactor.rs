@@ -7,11 +7,6 @@ use iroh::NodeId;
 
 const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 
-#[cfg(test)]
-const ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE: bool = true;
-#[cfg(not(test))]
-const ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE: bool = false;
-
 /// Upper bound on how long the reactor will wait to enqueue a data-plane action
 /// before abandoning it. The bounded `actions` channel is normally drained by
 /// the action driver almost immediately; this deadline only trips when that
@@ -739,18 +734,13 @@ impl BlockSyncReactor {
         let estimated_bytes = outstanding.estimated_bytes_for_height(height).unwrap_or(0);
         let retry_request = outstanding.request.single_height_retry(height);
 
-        if ZAKURA_BLOCK_SYNC_PREFILTER_MERKLE
-            && !block_merkle_root_matches_header(block.clone()).await
-        {
-            self.finish_peer_outstanding_at(
-                &peer,
-                index,
-                OutstandingRangeDisposition::RetryOriginal,
-            );
-            self.report_misbehavior(peer, BlockSyncMisbehavior::InvalidBlock)
-                .await;
-            return;
-        }
+        // The body's transactions are not validated against the header here:
+        // recomputing the merkle root for every received body (including the
+        // common valid case) was measurably expensive, so it is left to
+        // consensus. A body whose merkle root does not match its header is
+        // rejected by consensus during apply, and `handle_block_apply_finished`
+        // attributes that rejection back to the delivering peer for misbehavior
+        // scoring (see the `source_peer` plumbing through the reorder buffer).
 
         let serialized_bytes = match block.zcash_serialize_to_vec() {
             Ok(bytes) => bytes.len() as u64,
@@ -803,11 +793,13 @@ impl BlockSyncReactor {
             return;
         }
 
-        match self
-            .state
-            .reorder
-            .insert(height, block, serialized_bytes, &mut self.state.budget)
-        {
+        match self.state.reorder.insert(
+            height,
+            block,
+            serialized_bytes,
+            peer.clone(),
+            &mut self.state.budget,
+        ) {
             ReorderInsertResult::Inserted => {
                 // A received body is now held in memory. Mark it covered so the
                 // retry path stops re-requesting it. `refresh_needed` already
@@ -1300,6 +1292,19 @@ impl BlockSyncReactor {
                     .max(self.state.verified_block_tip);
                 self.state.schedule.clear_covered_from(height);
                 self.state.reorder.drop_from(height, &mut self.state.budget);
+                // A `Rejected` result means consensus found the body invalid
+                // (e.g. a merkle root that does not match the header). Attribute
+                // it to the peer that delivered the body so repeat offenders are
+                // scored and eventually disconnected, rather than being free to
+                // keep feeding invalid bodies for needed heights. `TimedOut` is a
+                // local apply timeout, not a peer fault, so it is not scored.
+                if matches!(result, BlockApplyResult::Rejected) {
+                    self.report_misbehavior(
+                        applying.source_peer.clone(),
+                        BlockSyncMisbehavior::InvalidBlock,
+                    )
+                    .await;
+                }
             }
             BlockApplyResult::Rejected | BlockApplyResult::TimedOut => {}
         }
@@ -1572,7 +1577,7 @@ impl BlockSyncReactor {
             .state
             .reorder
             .drain_contiguous_prefix(self.state.body_download_floor);
-        for (height, block, bytes) in released {
+        for (height, block, bytes, source_peer) in released {
             let hash = block.hash();
             self.state.body_download_floor = height;
             self.state.schedule.mark_height_covered(height);
@@ -1584,6 +1589,7 @@ impl BlockSyncReactor {
                     block,
                     bytes,
                     submitted: false,
+                    source_peer,
                 },
             );
         }
@@ -2709,18 +2715,4 @@ fn block_sync_misbehavior_is_soft(reason: BlockSyncMisbehavior) -> bool {
             | BlockSyncMisbehavior::RangeUnavailable
             | BlockSyncMisbehavior::GetBlocksSpam
     )
-}
-
-async fn block_merkle_root_matches_header(block: Arc<block::Block>) -> bool {
-    match task::spawn_blocking(move || {
-        block.transactions.iter().collect::<block::merkle::Root>() == block.header.merkle_root
-    })
-    .await
-    {
-        Ok(matches) => matches,
-        Err(error) => {
-            tracing::debug!(?error, "block-sync merkle-root validation task failed");
-            false
-        }
-    }
 }

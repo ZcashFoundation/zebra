@@ -461,6 +461,23 @@ where
                 } else {
                     unreachable!("wrong response to block request");
                 };
+
+                // Bind the delivered block to the requested hash. Legacy-gossip
+                // block responses are correlated only by request id and kind, so
+                // a peer could otherwise substitute a different valid block for
+                // the one requested before it reaches the verifier.
+                if block.hash() != hash {
+                    metrics::histogram!("sync.block.download.duration_seconds", "result" => "failed")
+                        .record(download_start.elapsed().as_secs_f64());
+                    return Err(BlockDownloadVerifyError::DownloadFailed {
+                        error: format!(
+                            "peer returned block {} in response to a request for {hash}",
+                            block.hash()
+                        )
+                        .into(),
+                        hash,
+                    });
+                }
                 metrics::counter!("sync.downloaded.block.count").increment(1);
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
                     .record(download_start.elapsed().as_secs_f64());

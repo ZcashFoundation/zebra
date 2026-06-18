@@ -269,6 +269,9 @@ pub(super) struct ApplyingBlock {
     pub(super) block: Arc<block::Block>,
     pub(super) bytes: u64,
     pub(super) submitted: bool,
+    /// The peer that delivered this body, used to attribute an apply rejection
+    /// for misbehavior scoring.
+    pub(super) source_peer: ZakuraPeerId,
 }
 
 #[derive(Clone, Debug)]
