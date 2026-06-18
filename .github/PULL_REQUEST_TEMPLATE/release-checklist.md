@@ -2,7 +2,7 @@
 name: "Release Checklist"
 about: "Checklist for reviewing and merging a release-plz Release PR"
 title: "Release Zebra (version)"
-labels: "A-release, P-Critical"
+labels: "A-release, P-Critical :ambulance:"
 assignees: ""
 ---
 
@@ -14,23 +14,21 @@ assignees: ""
 - [ ] Root `CHANGELOG.md` summary is clear and user-facing
 - [ ] Per-crate `CHANGELOG.md` entries describe crate-consumer impact
 - [ ] No git dependencies remain in crates that will publish to crates.io (`check-no-git-dependencies`)
-- [ ] Checkpoint data is up to date (if applicable)
-- [ ] End-of-support height is correct (if applicable)
+- [ ] Any required checkpoint, end-of-support height, README, or operational release-note changes already landed before this generated Release PR
 
 ## Verify CI and Release Inputs
 
 - [ ] All CI checks pass on the Release PR
 - [ ] A full-sync test has passed on `main` since the last state change, or a manual full sync is running
 - [ ] Trusted publishing is configured for every crate release-plz will publish
-- [ ] Release-plz release body only contains current release facts; update `[FILL IN]` sections before publishing the draft GitHub Release
+- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are configured for the release environment, so the generated GitHub Release can trigger Docker and GCP workflows
 
 ## Merge and Monitor
 
 - [ ] Merge the Release PR
-- [ ] Verify crates published to crates.io (check release workflow output)
-- [ ] Verify git tags created
-- [ ] Verify draft GitHub Release created
-- [ ] Fill in the `[FILL IN]` sections and click **Publish release**
+- [ ] Verify crates published to crates.io (check the Release workflow output)
+- [ ] Verify git tags were created
+- [ ] Verify the public `zebrad` GitHub Release was created automatically
 - [ ] Verify `zebrad` installs from crates.io: `cargo install --locked --force --version <version> zebrad && ~/.cargo/bin/zebrad`
 - [ ] Verify Docker images built (check release-binaries workflow)
 - [ ] Verify Docker Hub tag appears
@@ -48,7 +46,7 @@ The one case release-plz will not self-heal: on re-run it sees the crate as "don
 gh release create <crate>-v<X.Y.Z> --target <release-commit-sha> --generate-notes
 ```
 
-For `zebrad` the tag is `v<X.Y.Z>`. Promote from draft once verified.
+For `zebrad` the tag is `v<X.Y.Z>`. Create the GitHub Release with the release app token so downstream release workflows run.
 
 ### Roll back a bad release
 

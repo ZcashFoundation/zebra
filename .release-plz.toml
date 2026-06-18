@@ -7,15 +7,17 @@ dependencies_update = false
 # release-plz checks if the current commit is from a release-plz- branch.
 release_always = false
 
-# git-cliff configuration for changelog generation
-changelog_config = "cliff.toml"
+# release-plz still publishes crates and creates git tags. Zebra creates the
+# single public `zebrad` GitHub Release in .github/workflows/release.yml so
+# release-triggered Docker and GCP workflows only run once, for the node binary.
+git_release_enable = false
 
 # These commits trigger version bumps. Other commits can still appear in
 # changelogs or dependency cascades, but do not trigger a release by themselves.
 release_commits = "^(feat|fix|perf|refactor|build)"
 
 # Release PR metadata
-pr_labels = ["A-release", "P-Critical"]
+pr_labels = ["A-release", "P-Critical :ambulance:"]
 
 # Repository URL for changelog links
 repo_url = "https://github.com/ZcashFoundation/zebra"
@@ -23,53 +25,41 @@ repo_url = "https://github.com/ZcashFoundation/zebra"
 # Timeout for waiting for each crate to appear on crates.io after publish
 publish_timeout = "30m"
 
-# GitHub Release body template with operational sections from the changelog guidelines.
-# The {{ changelog }} variable contains the git-cliff generated changelog.
-# The [FILL IN] markers indicate sections the maintainer should complete.
-git_release_body = """
-{{ changelog }}
-
----
-
-## Update Priority
-
-| User Type | Priority | Reason |
-|-----------|----------|--------|
-| All operators | [FILL IN] | [FILL IN] |
-
-## How to Upgrade
-
-### Docker
-
-```
-docker pull zfnd/zebra:{{ version }}
-```
-
-### Source
-
-```
-cargo install --locked zebrad@{{ version }}
-```
-
-## Compatibility
-
-| Component | Supported |
-|-----------|-----------|
-| Zcash Protocol | [FILL IN: latest supported network upgrade] |
-| Minimum Rust | [FILL IN: zebrad MSRV and library MSRV] |
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim | upper_first }}\
+{% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/ZcashFoundation/zebra/pull/{{ commit.remote.pr_number }})){% endif %}
+{%- endfor %}
+{% endfor %}
 """
+trim = true
+postprocessors = [
+    { pattern = "(?m)^- [[:alpha:]]+(\\([^)]*\\))?!?:[[:space:]]*", replace = "- " },
+]
+protect_breaking_commits = true
+sort_commits = "oldest"
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^build\\(deps\\)", group = "Dependencies" },
+    { message = "^build", group = "Build" },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^style", skip = true },
+]
 
 # ── zebrad: the node binary ─────────────────────────────────────
 # Aggregates changelogs from all zebra-* crates for a complete release view.
 # Uses the legacy v-prefixed tag format (v4.3.1) for compatibility with
 # GCP deployment, which parses the tag to extract the semver.
-#
-# git_release_draft splits the automated chain into two stages. release-plz
-# still publishes crates and creates the tag, but the GitHub Release stays
-# in Draft. release-binaries.yml and zfnd-deploy-nodes-gcp.yml key on
-# `released` / `published` events which do not fire for drafts, so a human
-# promotes the draft after verifying crates.io and filling in the
-# [FILL IN] sections of git_release_body.
 [[package]]
 name = "zebrad"
 changelog_include = [
@@ -83,8 +73,6 @@ changelog_include = [
     "zebra-utils",
 ]
 git_tag_name = "v{{ version }}"
-git_release_enable = true
-git_release_draft = true
 changelog_path = "./CHANGELOG.md"
 
 # ── Library crates ──────────────────────────────────────────────
