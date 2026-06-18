@@ -979,7 +979,14 @@ impl DiskDb {
     ) -> DiskDb {
         // If the database is ephemeral, we don't need to check the cache directory.
         if !config.ephemeral {
-            DiskDb::validate_cache_dir(&config.cache_dir);
+            if read_only {
+                // A read-only secondary instance must never create the primary cache
+                // directory: the primary zebrad owns it. At most, verify it already
+                // exists and is readable, and fail with a clear error otherwise.
+                DiskDb::check_cache_dir_readable(&config.cache_dir);
+            } else {
+                DiskDb::validate_cache_dir(&config.cache_dir);
+            }
         }
 
         let db_kind = db_kind.as_ref();
@@ -1664,6 +1671,30 @@ impl DiskDb {
                 self.zs_is_empty(&default_cf),
                 "Zebra should not store data in the 'default' column family"
             );
+        }
+    }
+
+    // Checks that a cache directory already exists and is readable, without creating it.
+    //
+    // Used when opening a read-only secondary instance, which must never create the
+    // primary's cache directory. Panics with a specific error message if the directory
+    // is missing or unreadable.
+    fn check_cache_dir_readable(cache_dir: &std::path::PathBuf) {
+        match fs::read_dir(cache_dir) {
+            Ok(_) => {}
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => panic!(
+                    "Cannot open read-only state: cache directory {cache_dir:?} does not exist. \
+                     Hint: a read-only state requires an existing Zebra cache directory; \
+                     check that the state cache_dir in the Zebra config points at a running \
+                     Zebra node's cache directory."
+                ),
+                std::io::ErrorKind::PermissionDenied => panic!(
+                    "Permission denied reading {cache_dir:?}. \
+                     Hint: check that the cache directory has read permissions."
+                ),
+                _ => panic!("Could not read cache dir {cache_dir:?}: {e}"),
+            },
         }
     }
 
