@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.1] - 2026-06-18
+
 ### Changed
 
-- `MAX_BLOCK_REORG_HEIGHT` increased from 99 to 1000.
+- Increased the local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to 1000
+  blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
 
 ## [9.0.0] - 2026-06-10
 

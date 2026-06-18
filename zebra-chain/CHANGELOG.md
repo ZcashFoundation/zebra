@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.1.0] - 2026-06-18
+
 ### Added
 
 - `parameters::constants::MAX_BLOCK_REORG_HEIGHT`: the maximum chain reorganisation height (1000).
