@@ -4,7 +4,9 @@ on:
   pull_request:
     branches:
       - main
+      # TODO: Temporary ZSA integration branches. Remove before merging to main.
       - zsa-support
+      - v4.2.0-dev
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"

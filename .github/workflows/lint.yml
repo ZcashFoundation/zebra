@@ -4,7 +4,9 @@ on:
   pull_request:
     branches:
       - main
+      # TODO: Temporary ZSA integration branches. Remove before merging to main.
       - zsa-support
+      - v4.2.0-dev
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -14,11 +16,7 @@ on:
       - .github/workflows/lint.yml
 
   push:
-    # Temporarily allow CI on the QEDIT integration branch.
-    # TODO: Remove v4.2.0-dev before merging upstream.
-    branches:
-      - main
-      - v4.2.0-dev
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
