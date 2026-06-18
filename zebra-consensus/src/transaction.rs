@@ -476,21 +476,12 @@ where
 
             tracing::trace!(?tx_id, "passed quick checks");
 
+            // Block transactions are checked against the block's own time directly;
+            // mempool transactions are checked against the next median-time-past from state.
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
             } else {
-                // Skip the state query if we don't need the time for this check.
-                let next_median_time_past = if tx.lock_time_is_time() {
-                    // This state query is much faster than loading UTXOs from the database,
-                    // so it doesn't need to be executed in parallel
-                    let state = state.clone();
-                    Some(Self::mempool_best_chain_next_median_time_past(state).await?.to_chrono())
-                } else {
-                    None
-                };
-
-                // This consensus check makes sure Zebra produces valid block templates.
-                check::lock_time_has_passed(&tx, req.height(), next_median_time_past)?;
+                Self::verify_mempool_lock_time(tx.as_ref(), req.height(), state.clone()).await?;
             }
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
@@ -647,6 +638,33 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    /// Validates mempool lock-time consensus rules.
+    ///
+    /// Queries state only for time-based lock times.
+    async fn verify_mempool_lock_time(
+        tx: &Transaction,
+        height: block::Height,
+        state: Timeout<ZS>,
+    ) -> Result<(), TransactionError> {
+        // Skip the state query if we don't need the time for this check.
+        let next_median_time_past = if tx.lock_time_is_time() {
+            // This state query is much faster than loading UTXOs from the database,
+            // so it doesn't need to be executed in parallel
+            Some(
+                Self::mempool_best_chain_next_median_time_past(state)
+                    .await?
+                    .to_chrono(),
+            )
+        } else {
+            None
+        };
+
+        // This consensus check makes sure Zebra produces valid block templates.
+        check::lock_time_has_passed(tx, height, next_median_time_past)?;
+
+        Ok(())
+    }
+
     /// Fetches the median-time-past of the *next* block after the best state tip.
     ///
     /// This is used to verify that the lock times of mempool transactions
