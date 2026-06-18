@@ -91,6 +91,7 @@ impl ZebraDb {
     /// This argument is only used when running tests, it is ignored in production code.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(
         config: &Config,
         db_kind: impl AsRef<str>,

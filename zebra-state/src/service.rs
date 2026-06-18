@@ -325,7 +325,11 @@ impl StateService {
                     #[cfg(feature = "elasticsearch")]
                     true,
                 )
-                .expect("opening a read-write finalized state database should not fail");
+                .expect(
+                    "opening the read-write finalized state database failed; check that the \
+                     state cache directory is writable and not locked by another Zebra instance, \
+                     and that there is free disk space",
+                );
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -1865,7 +1869,11 @@ pub fn init_read_only(
 }
 
 /// Calls [`init_read_only`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// Returns a [`tokio::task::JoinHandle`] with a read state service and chain tip sender.
+///
+/// Returns a [`tokio::task::JoinHandle`] whose output is a [`Result`]: awaiting it yields a
+/// [`JoinError`](tokio::task::JoinError) if the blocking task panicked or was cancelled, and
+/// otherwise an `Err(`[`StateInitError`]`)` if the read-only state could not be opened (for
+/// example, a missing read-only database).
 pub fn spawn_init_read_only(
     config: Config,
     network: &Network,

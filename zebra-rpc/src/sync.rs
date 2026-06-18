@@ -328,8 +328,9 @@ pub fn init_read_state_with_syncer(
             return Err("standalone read state service cannot be used with ephemeral state".into());
         }
 
-        // The outer `?` propagates a `JoinError` if the blocking task panicked, and the
-        // inner `?` propagates a `StateInitError` (e.g. a missing read-only database).
+        // The outer `?` propagates a `JoinError` if the blocking task panicked or was
+        // cancelled, and the inner `?` propagates a `StateInitError` (e.g. a missing
+        // read-only database).
         let (read_state, db, non_finalized_state_sender) =
             spawn_init_read_only(config, &network).await??;
         let (latest_chain_tip, chain_tip_change, sync_task) =

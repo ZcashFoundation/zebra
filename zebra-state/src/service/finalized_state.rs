@@ -166,6 +166,7 @@ impl FinalizedState {
     /// If there is no existing database, creates a new database on disk.
     ///
     /// This method is intended for use in tests.
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn new_with_debug(
         config: &Config,
         network: &Network,

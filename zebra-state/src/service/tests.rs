@@ -609,3 +609,26 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
             )
         })
 }
+
+/// Opening a read-only state against an existing but empty cache directory (no database on
+/// disk) must fail with [`StateInitError::ReadOnlyDatabaseNotFound`] rather than silently
+/// creating a new, empty database.
+#[test]
+fn read_only_open_with_no_database_returns_error() {
+    let network = Network::Mainnet;
+
+    // An existing, readable, but empty cache directory: it contains no database.
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyDatabaseNotFound { .. }) => {}
+        Err(other) => panic!("expected ReadOnlyDatabaseNotFound, got: {other:?}"),
+        Ok(_) => panic!("expected an error when opening a read-only state with no database"),
+    }
+}
