@@ -117,6 +117,12 @@ pub mod block_sync_trace {
     pub const RANGE_START: &str = "range_start";
     /// Range count field.
     pub const RANGE_COUNT: &str = "range_count";
+    /// Advertised peer range cap field.
+    pub const MAX_BLOCKS_PER_RESPONSE: &str = "max_blocks_per_response";
+    /// Advertised peer in-flight request cap field.
+    pub const MAX_INFLIGHT_REQUESTS: &str = "max_inflight_requests";
+    /// Advertised peer response byte cap field.
+    pub const MAX_RESPONSE_BYTES: &str = "max_response_bytes";
     /// Expected/requested count field.
     pub const EXPECTED_COUNT: &str = "expected_count";
     /// Estimated byte reservation for a requested range.
@@ -137,6 +143,20 @@ pub mod block_sync_trace {
     pub const REASON: &str = "reason";
     /// Highest contiguous body height already submitted for apply.
     pub const BODY_DOWNLOAD_FLOOR: &str = "body_download_floor";
+    /// First height not yet in the contiguous body-download floor.
+    pub const FLOOR_GAP_HEIGHT: &str = "floor_gap_height";
+    /// Reactor-local classification for the first missing body height.
+    pub const FLOOR_GAP_STATE: &str = "floor_gap_state";
+    /// Peers advertising the first missing body height.
+    pub const FLOOR_GAP_SERVABLE_PEERS: &str = "floor_gap_servable_peers";
+    /// Peers with free request slots that advertise the first missing body height.
+    pub const FLOOR_GAP_AVAILABLE_PEERS: &str = "floor_gap_available_peers";
+    /// Peers with outstanding requests that include the first missing body height.
+    pub const FLOOR_GAP_OUTSTANDING_PEERS: &str = "floor_gap_outstanding_peers";
+    /// Age in milliseconds of the oldest outstanding request for the first missing body height.
+    pub const FLOOR_GAP_OLDEST_OUTSTANDING_MS: &str = "floor_gap_oldest_outstanding_ms";
+    /// Remaining milliseconds until the next outstanding request deadline for the first missing body height.
+    pub const FLOOR_GAP_NEXT_DEADLINE_MS: &str = "floor_gap_next_deadline_ms";
     /// Highest verified (committed) block-body height.
     pub const VERIFIED_BLOCK_TIP: &str = "verified_block_tip";
     /// Best header tip driving the body-download target.

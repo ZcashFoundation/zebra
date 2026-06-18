@@ -24,7 +24,7 @@ DEFAULT_TRACE_DIR = Path(
     "/home/evan/src/valar/art/inbox/zakura-blocksync-traces-latest/asia-pacific-0/zakura"
 )
 DEFAULT_OUT_DIR = Path("analysis/zakura_trace_analysis/out")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -110,6 +110,7 @@ def build_cache(
         con.execute("DROP TABLE IF EXISTS frontier_transitions")
         con.execute("DROP TABLE IF EXISTS block_message_sent")
         con.execute("DROP TABLE IF EXISTS block_message_received")
+        con.execute("DROP TABLE IF EXISTS block_status_received")
         con.execute("DROP TABLE IF EXISTS block_range_response_sent")
         con.execute("DROP TABLE IF EXISTS cache_metadata")
 
@@ -156,6 +157,19 @@ def build_cache(
                     AS best_header_tip,
                 TRY_CAST(json_extract_string(json, '$.body_download_floor') AS BIGINT)
                     AS body_download_floor,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_height') AS BIGINT)
+                    AS floor_gap_height,
+                json_extract_string(json, '$.floor_gap_state') AS floor_gap_state,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_servable_peers') AS BIGINT)
+                    AS floor_gap_servable_peers,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_available_peers') AS BIGINT)
+                    AS floor_gap_available_peers,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_outstanding_peers') AS BIGINT)
+                    AS floor_gap_outstanding_peers,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_oldest_outstanding_ms') AS BIGINT)
+                    AS floor_gap_oldest_outstanding_ms,
+                TRY_CAST(json_extract_string(json, '$.floor_gap_next_deadline_ms') AS BIGINT)
+                    AS floor_gap_next_deadline_ms,
                 TRY_CAST(json_extract_string(json, '$.body_lag') AS BIGINT) AS body_lag,
                 TRY_CAST(json_extract_string(json, '$.budget_available') AS BIGINT)
                     AS budget_available,
@@ -228,6 +242,26 @@ def build_cache(
                 TRY_CAST(json_extract_string(json, '$.height') AS BIGINT) AS height
             FROM read_json_objects(?)
             WHERE json_extract_string(json, '$.event') = 'block_message_received'
+            """,
+            [str(paths.block_sync)],
+        )
+        con.execute(
+            """
+            CREATE TABLE block_status_received AS
+            SELECT
+                TRY_CAST(json_extract_string(json, '$.ts') AS BIGINT) AS ts,
+                json_extract_string(json, '$.peer') AS peer,
+                TRY_CAST(json_extract_string(json, '$.range_start') AS BIGINT)
+                    AS servable_low,
+                TRY_CAST(json_extract_string(json, '$.height') AS BIGINT) AS servable_high,
+                TRY_CAST(json_extract_string(json, '$.max_blocks_per_response') AS BIGINT)
+                    AS max_blocks_per_response,
+                TRY_CAST(json_extract_string(json, '$.max_inflight_requests') AS BIGINT)
+                    AS max_inflight_requests,
+                TRY_CAST(json_extract_string(json, '$.max_response_bytes') AS BIGINT)
+                    AS max_response_bytes
+            FROM read_json_objects(?)
+            WHERE json_extract_string(json, '$.event') = 'block_status_received'
             """,
             [str(paths.block_sync)],
         )
@@ -517,8 +551,11 @@ def build_state_intervals(con: duckdb.DuckDBPyConnection, min_ts: int) -> pd.Dat
             ]
         )
 
-    numeric_columns = [column for column in states.columns if column != "ts"]
+    numeric_columns = [
+        column for column in states.columns if column not in ("ts", "floor_gap_state")
+    ]
     states[numeric_columns] = states[numeric_columns].fillna(0)
+    states["floor_gap_state"] = states["floor_gap_state"].fillna("unknown")
     states["next_ts"] = states["ts"].shift(-1)
     states["next_body_download_floor"] = states["body_download_floor"].shift(-1)
     states["start_s"] = (states["ts"] - min_ts) / 1_000_000
@@ -547,6 +584,13 @@ def build_state_intervals(con: duckdb.DuckDBPyConnection, min_ts: int) -> pd.Dat
         "blocking_class",
         "best_header_tip",
         "body_download_floor",
+        "floor_gap_height",
+        "floor_gap_state",
+        "floor_gap_servable_peers",
+        "floor_gap_available_peers",
+        "floor_gap_outstanding_peers",
+        "floor_gap_oldest_outstanding_ms",
+        "floor_gap_next_deadline_ms",
         "verified_block_tip",
         "download_floor_minus_verified",
         "body_lag",
@@ -715,6 +759,8 @@ def build_summary(
         "download_budget_saturated_duration_s": budget_saturated_duration_s,
         "weighted_download_budget_used_pct": weighted_budget_used_pct,
         "blocking_breakdown": blocking,
+        "hol_gap_diagnostics": hol_gap_diagnostics(states),
+        "status_cap_diagnostics": status_cap_diagnostics(con),
         "message_diagnostics": message_diagnostics(con),
     }
 
@@ -732,6 +778,56 @@ def blocking_breakdown(states: pd.DataFrame) -> list[dict[str, Any]]:
         grouped["duration_s"] / total_duration * 100.0 if total_duration > 0 else 0.0
     )
     return grouped.to_dict(orient="records")
+
+
+def hol_gap_diagnostics(states: pd.DataFrame) -> list[dict[str, Any]]:
+    if states.empty or "floor_gap_state" not in states.columns:
+        return []
+
+    hol = states.loc[states["hol_gap_active"]].copy()
+    if hol.empty:
+        return []
+
+    grouped = (
+        hol.groupby("floor_gap_state", as_index=False)
+        .agg(
+            duration_s=("duration_s", "sum"),
+            avg_servable_peers=("floor_gap_servable_peers", "mean"),
+            avg_available_peers=("floor_gap_available_peers", "mean"),
+            avg_outstanding_peers=("floor_gap_outstanding_peers", "mean"),
+            max_oldest_outstanding_ms=("floor_gap_oldest_outstanding_ms", "max"),
+            min_next_deadline_ms=("floor_gap_next_deadline_ms", "min"),
+        )
+        .sort_values("duration_s", ascending=False)
+    )
+    total_duration = float(grouped["duration_s"].sum())
+    grouped["percent"] = (
+        grouped["duration_s"] / total_duration * 100.0 if total_duration > 0 else 0.0
+    )
+    return grouped.to_dict(orient="records")
+
+
+def status_cap_diagnostics(con: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
+    try:
+        caps = con.execute(
+            """
+            SELECT
+                max_blocks_per_response,
+                max_inflight_requests,
+                max_response_bytes,
+                count(*) AS count,
+                count(DISTINCT peer) AS peers
+            FROM block_status_received
+            GROUP BY
+                max_blocks_per_response,
+                max_inflight_requests,
+                max_response_bytes
+            ORDER BY count DESC
+            """
+        ).df()
+    except duckdb.CatalogException:
+        return []
+    return caps.to_dict(orient="records")
 
 
 def message_diagnostics(con: duckdb.DuckDBPyConnection) -> dict[str, list[dict[str, Any]]]:
@@ -785,6 +881,8 @@ def write_summary(path: Path, summary: dict[str, Any]) -> None:
     totals = summary["totals"]
     averages = summary["average_rates"]
     blocking = summary["blocking_breakdown"]
+    hol_diagnostics = summary["hol_gap_diagnostics"]
+    status_caps = summary["status_cap_diagnostics"]
     diagnostics = summary["message_diagnostics"]
 
     lines = [
@@ -850,6 +948,49 @@ def write_summary(path: Path, summary: dict[str, Any]) -> None:
         lines.append(
             f"| {row['blocking_class']} | {row['duration_s']:.3f} | {row['percent']:.2f}% |"
         )
+    lines.extend(
+        [
+            "",
+            "## HoL Gap Diagnostics",
+            "",
+            "| Floor State | Seconds | Percent | Avg Servable Peers | Avg Available Peers | Avg Outstanding Peers | Oldest Outstanding Max ms | Next Deadline Min ms |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in hol_diagnostics:
+        lines.append(
+            "| "
+            f"{_display(row['floor_gap_state'])} | "
+            f"{row['duration_s']:.3f} | "
+            f"{row['percent']:.2f}% | "
+            f"{_format_number(row['avg_servable_peers'])} | "
+            f"{_format_number(row['avg_available_peers'])} | "
+            f"{_format_number(row['avg_outstanding_peers'])} | "
+            f"{_format_number(row['max_oldest_outstanding_ms'])} | "
+            f"{_format_number(row['min_next_deadline_ms'])} |"
+        )
+    if not hol_diagnostics:
+        lines.append("| n/a | 0 | 0.00% | n/a | n/a | n/a | n/a | n/a |")
+    lines.extend(
+        [
+            "",
+            "## Peer Status Caps",
+            "",
+            "| Max Blocks | Max In-Flight | Max Response MiB | Rows | Peers |",
+            "| ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in status_caps:
+        lines.append(
+            "| "
+            f"{_display(row['max_blocks_per_response'])} | "
+            f"{_display(row['max_inflight_requests'])} | "
+            f"{_format_mib(row['max_response_bytes'])} | "
+            f"{row['count']:,} | "
+            f"{row['peers']:,} |"
+        )
+    if not status_caps:
+        lines.append("| n/a | n/a | n/a | 0 | 0 |")
     lines.extend(
         [
             "",

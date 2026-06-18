@@ -22,6 +22,17 @@ enum OutstandingRangeDisposition {
     RetryMissing,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FloorGapDiagnostics {
+    height: block::Height,
+    state: &'static str,
+    servable_peers: usize,
+    available_peers: usize,
+    outstanding_peers: usize,
+    oldest_outstanding_ms: Option<u64>,
+    next_deadline_ms: Option<u64>,
+}
+
 /// Spawn a block-sync reactor and return its handle plus action stream.
 pub fn spawn_block_sync_reactor(
     startup: BlockSyncStartup,
@@ -2172,6 +2183,7 @@ impl BlockSyncReactor {
         if !self.startup.trace.is_enabled() {
             return;
         }
+        let floor_gap = self.floor_gap_diagnostics(Instant::now());
         let outstanding: usize = self
             .state
             .peers
@@ -2207,6 +2219,31 @@ impl BlockSyncReactor {
             bs_insert_u64(row, bs_trace::SUBMITTED_APPLIES, submitted_applies as u64);
             bs_insert_u64(row, bs_trace::REORDER, self.state.reorder.len() as u64);
             bs_insert_u64(row, bs_trace::OUTSTANDING, outstanding as u64);
+            if let Some(floor_gap) = floor_gap {
+                bs_insert_height(row, bs_trace::FLOOR_GAP_HEIGHT, floor_gap.height);
+                bs_insert_str(row, bs_trace::FLOOR_GAP_STATE, floor_gap.state);
+                bs_insert_u64(
+                    row,
+                    bs_trace::FLOOR_GAP_SERVABLE_PEERS,
+                    floor_gap.servable_peers as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    bs_trace::FLOOR_GAP_AVAILABLE_PEERS,
+                    floor_gap.available_peers as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    bs_trace::FLOOR_GAP_OUTSTANDING_PEERS,
+                    floor_gap.outstanding_peers as u64,
+                );
+                if let Some(age) = floor_gap.oldest_outstanding_ms {
+                    bs_insert_u64(row, bs_trace::FLOOR_GAP_OLDEST_OUTSTANDING_MS, age);
+                }
+                if let Some(deadline) = floor_gap.next_deadline_ms {
+                    bs_insert_u64(row, bs_trace::FLOOR_GAP_NEXT_DEADLINE_MS, deadline);
+                }
+            }
             bs_insert_u64(
                 row,
                 bs_trace::BUDGET_AVAILABLE,
@@ -2265,6 +2302,7 @@ impl BlockSyncReactor {
             bs_insert_peer(row, bs_trace::PEER, peer);
             bs_insert_height(row, bs_trace::RANGE_START, status.servable_low);
             bs_insert_height(row, bs_trace::HEIGHT, status.servable_high);
+            bs_insert_status_caps(row, status);
         });
     }
 
@@ -2279,6 +2317,7 @@ impl BlockSyncReactor {
             bs_insert_str(row, bs_trace::REASON, reason);
             bs_insert_height(row, bs_trace::RANGE_START, status.servable_low);
             bs_insert_height(row, bs_trace::HEIGHT, status.servable_high);
+            bs_insert_status_caps(row, status);
         });
     }
 
@@ -2480,6 +2519,84 @@ impl BlockSyncReactor {
         self.emit_trace(bs_trace::BLOCK_CHAIN_TIP_RESET, |row| {
             bs_insert_height(row, bs_trace::VERIFIED_BLOCK_TIP, verified_block_tip);
         });
+    }
+
+    fn floor_gap_diagnostics(&self, now: Instant) -> Option<FloorGapDiagnostics> {
+        let height = next_height(self.state.body_download_floor)?;
+        if height > self.state.best_header_tip {
+            return None;
+        }
+
+        let mut servable_peers = 0usize;
+        let mut available_peers = 0usize;
+        let mut outstanding_peers = 0usize;
+        let mut oldest_outstanding_ms = None;
+        let mut next_deadline_ms = None;
+
+        for peer in self.state.peers.values() {
+            if peer.received_status && peer.servable_low <= height && height <= peer.servable_high {
+                servable_peers = servable_peers.saturating_add(1);
+                if peer.available_slots() > 0 {
+                    available_peers = available_peers.saturating_add(1);
+                }
+            }
+
+            for outstanding in &peer.outstanding {
+                if !outstanding.request.contains(height) {
+                    continue;
+                }
+
+                outstanding_peers = outstanding_peers.saturating_add(1);
+                if let Some(started) = outstanding
+                    .deadline
+                    .checked_sub(self.startup.config.request_timeout)
+                {
+                    let age = u64::try_from(now.saturating_duration_since(started).as_millis())
+                        .unwrap_or(u64::MAX);
+                    oldest_outstanding_ms =
+                        Some(oldest_outstanding_ms.map_or(age, |oldest: u64| oldest.max(age)));
+                }
+                let deadline = u64::try_from(
+                    outstanding
+                        .deadline
+                        .saturating_duration_since(now)
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX);
+                next_deadline_ms =
+                    Some(next_deadline_ms.map_or(deadline, |next: u64| next.min(deadline)));
+            }
+        }
+
+        let state = if self.state.applying.contains_key(&height) {
+            "applying"
+        } else if self.state.submitted_applies.contains_key(&height) {
+            "submitted_apply"
+        } else if self.state.reorder.contains(height) {
+            "reorder"
+        } else if outstanding_peers > 0 {
+            "outstanding"
+        } else if self.state.schedule.queued_contains_height(height) {
+            "queued"
+        } else if self.state.schedule.assigned_contains_height(height) {
+            "assigned_without_outstanding"
+        } else if self.state.needed_heights.binary_search(&height).is_ok() {
+            "needed_unscheduled"
+        } else if self.state.schedule.covered_contains_height(height) {
+            "covered"
+        } else {
+            "absent"
+        };
+
+        Some(FloorGapDiagnostics {
+            height,
+            state,
+            servable_peers,
+            available_peers,
+            outstanding_peers,
+            oldest_outstanding_ms,
+            next_deadline_ms,
+        })
     }
 
     fn publish_metrics(&self) {
@@ -2782,6 +2899,27 @@ fn bs_insert_duration_ms(
     );
 }
 
+fn bs_insert_status_caps(
+    row: &mut serde_json::Map<String, serde_json::Value>,
+    status: BlockSyncStatus,
+) {
+    bs_insert_u64(
+        row,
+        bs_trace::MAX_BLOCKS_PER_RESPONSE,
+        u64::from(status.max_blocks_per_response),
+    );
+    bs_insert_u64(
+        row,
+        bs_trace::MAX_INFLIGHT_REQUESTS,
+        u64::from(status.max_inflight_requests),
+    );
+    bs_insert_u64(
+        row,
+        bs_trace::MAX_RESPONSE_BYTES,
+        u64::from(status.max_response_bytes),
+    );
+}
+
 fn bs_insert_frontiers(
     row: &mut serde_json::Map<String, serde_json::Value>,
     frontiers: &BlockSyncFrontiers,
@@ -2802,6 +2940,7 @@ fn trace_block_sync_message_fields(
         BlockSyncMessage::Status(status) => {
             bs_insert_height(row, bs_trace::RANGE_START, status.servable_low);
             bs_insert_height(row, bs_trace::HEIGHT, status.servable_high);
+            bs_insert_status_caps(row, *status);
         }
         BlockSyncMessage::Block(block) => {
             bs_insert_hash(row, bs_trace::HASH, block.hash());

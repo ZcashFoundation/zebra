@@ -345,6 +345,27 @@ impl BlockRangeScheduler {
         self.covered.iter().map(|covered| covered.end).max()
     }
 
+    /// Diagnostics: whether a not-yet-assigned queued range contains `height`.
+    pub(super) fn queued_contains_height(&self, height: block::Height) -> bool {
+        self.queue
+            .iter()
+            .any(|range| range.blocks.iter().any(|block| block.height == height))
+    }
+
+    /// Diagnostics: whether an assigned range key contains `height`.
+    pub(super) fn assigned_contains_height(&self, height: block::Height) -> bool {
+        self.assigned
+            .keys()
+            .any(|range| range.start <= height && height <= range.end)
+    }
+
+    /// Diagnostics: whether a covered interval contains `height`.
+    pub(super) fn covered_contains_height(&self, height: block::Height) -> bool {
+        self.covered
+            .iter()
+            .any(|covered| covered.start <= height && height <= covered.end)
+    }
+
     fn ensure(&mut self, range: BlockRange) {
         if range.blocks.is_empty() {
             return;
