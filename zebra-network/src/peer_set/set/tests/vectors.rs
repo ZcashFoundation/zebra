@@ -819,3 +819,58 @@ fn find_blocks_stall_tracked_when_syncing() {
         );
     });
 }
+
+/// Check that stall tracking is active when the chain tip state is unknown (empty node state),
+/// so that stalling peers are still disconnected even before the first block is synced.
+#[test]
+fn find_blocks_stall_tracked_when_tip_unknown() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Leave the chain tip in its default state (None height, None distance).
+    // is_at_or_near_network_tip returns false when the tip is unknown, so stall
+    // tracking is active.
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        let _ = peer_set.ready().now_or_never();
+
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected when tip is unknown and stall threshold is reached"
+        );
+    });
+}
