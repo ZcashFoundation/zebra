@@ -233,11 +233,7 @@ pub(crate) async fn drive_header_sync_actions(
                 );
                 let _ = supervisor.disconnect_peer(&peer).await;
             }
-            HeaderSyncAction::NewBlockReceived {
-                peer,
-                hash,
-                ..
-            } => {
+            HeaderSyncAction::NewBlockReceived { peer, hash, .. } => {
                 tracing::debug!(
                     ?peer,
                     ?hash,
