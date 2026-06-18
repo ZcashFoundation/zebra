@@ -402,46 +402,7 @@ where
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do quick checks first
-            check::has_inputs_and_outputs(&tx)?;
-            check::has_enough_orchard_flags(&tx)?;
-            check::consensus_branch_id(&tx, req.height(), &network)?;
-
-            // Soft fork: temporarily require transactions to not contain Orchard actions.
-            //
-            // This soft fork was added while NU 6.1 was the active epoch on the Zcash
-            // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
-            // ported to other chains with a different sequence of NUs.
-            //
-            // This will be treated as "Rules that apply generally before the next NU"
-            // when we add the NU that re-enables Orchard actions.
-            if network.is_orchard_temporarily_disabled(req.height()) && tx.orchard_shielded_data().is_some() {
-                return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
-            }
-
-            // From the network upgrade that re-enables Orchard actions (NU6.2), require
-            // that any Orchard proof has the canonical length for its number of actions.
-            // A proof that is present but not canonically sized can be padded with
-            // arbitrary trailing data without affecting its validity, allowing excess
-            // bandwidth and storage costs to be imposed while paying only fees sized to a
-            // canonical proof (GHSA-jfw5-j458-pfv6).
-            //
-            // This is a constricting rule, so it is gated on that network upgrade:
-            // Orchard actions mined before it, under earlier rules that did not enforce
-            // the proof size, must remain valid so that nodes can sync and reindex the
-            // chain before the soft fork that temporarily disabled Orchard. Orchard
-            // bundles are deserialized leniently, so the size is checked here, where the
-            // block height is available, rather than during parsing.
-            //
-            // The gate activates at the NU6.2 activation height committed in
-            // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
-            // `Network::orchard_canonical_proof_size_rule_active`.
-            if network.orchard_canonical_proof_size_rule_active(req.height()) {
-                if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-                    if !orchard_shielded_data.proof_size_is_canonical() {
-                        return Err(TransactionError::OrchardProofSize);
-                    }
-                }
-            }
+            Self::check_transaction_structure(tx.as_ref(), req.height(), &network)?;
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
@@ -461,18 +422,9 @@ where
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
 
-            // Consensus rule:
-            //
-            // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            check::joinsplit_has_vpub_zero(&tx)?;
-
-            // [Canopy onward]: `vpub_old` MUST be zero.
-            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            check::disabled_add_to_sprout_pool(&tx, req.height(), &network)?;
-
-            check::spend_conflicts(&tx)?;
+            // Transaction invariants that apply regardless of request type or transaction version.
+            // These are pure consensus rules over the transaction structure and must always hold.
+            Self::check_transaction_invariants(tx.as_ref(), req.height(), &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -638,6 +590,80 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    /// Performs basic structural validation and Orchard-related network upgrade rules.
+    fn check_transaction_structure(
+        tx: &Transaction,
+        height: block::Height,
+        network: &Network,
+    ) -> Result<(), TransactionError> {
+        check::has_inputs_and_outputs(tx)?;
+        check::has_enough_orchard_flags(tx)?;
+        check::consensus_branch_id(tx, height, network)?;
+
+        // Soft fork: temporarily require transactions to not contain Orchard actions.
+        //
+        // This soft fork was added while NU 6.1 was the active epoch on the Zcash
+        // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
+        // ported to other chains with a different sequence of NUs.
+        //
+        // This will be treated as "Rules that apply generally before the next NU"
+        // when we add the NU that re-enables Orchard actions.
+        if network.is_orchard_temporarily_disabled(height) && tx.orchard_shielded_data().is_some() {
+            return Err(TransactionError::Other(
+                "transaction has Orchard actions (temporarily disabled)".into(),
+            ));
+        }
+
+        // From the network upgrade that re-enables Orchard actions (NU6.2), require
+        // that any Orchard proof has the canonical length for its number of actions.
+        // A proof that is present but not canonically sized can be padded with
+        // arbitrary trailing data without affecting its validity, allowing excess
+        // bandwidth and storage costs to be imposed while paying only fees sized to a
+        // canonical proof (GHSA-jfw5-j458-pfv6).
+        //
+        // This is a constricting rule, so it is gated on that network upgrade:
+        // Orchard actions mined before it, under earlier rules that did not enforce
+        // the proof size, must remain valid so that nodes can sync and reindex the
+        // chain before the soft fork that temporarily disabled Orchard. Orchard
+        // bundles are deserialized leniently, so the size is checked here, where the
+        // block height is available, rather than during parsing.
+        //
+        // The gate activates at the NU6.2 activation height committed in
+        // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
+        // `Network::orchard_canonical_proof_size_rule_active`.
+        if network.orchard_canonical_proof_size_rule_active(height) {
+            if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+                if !orchard_shielded_data.proof_size_is_canonical() {
+                    return Err(TransactionError::OrchardProofSize);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates transaction invariants.
+    fn check_transaction_invariants(
+        tx: &Transaction,
+        height: block::Height,
+        network: &Network,
+    ) -> Result<(), TransactionError> {
+        // Consensus rule:
+        //
+        // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        check::joinsplit_has_vpub_zero(tx)?;
+
+        // [Canopy onward]: `vpub_old` MUST be zero.
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        check::disabled_add_to_sprout_pool(tx, height, network)?;
+
+        check::spend_conflicts(tx)?;
+
+        Ok(())
+    }
+
     /// Validates mempool lock-time consensus rules.
     ///
     /// Queries state only for time-based lock times.
