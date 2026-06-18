@@ -98,7 +98,7 @@ pub const COMMIT_STATE_TABLE: ZakuraTraceTable = ZakuraTraceTable {
 /// builds (the binary is compiled with `release_max_level_info`, which strips
 /// the `debug!` sites), so these JSONL rows are the only runtime visibility into
 /// scheduling, download, submit, and commit progress. The periodic
-/// [`BLOCK_SYNC_STATE`] snapshot is the single most useful row for diagnosing a
+/// [`BLOCK_SYNC_STATE`](block_sync_trace::BLOCK_SYNC_STATE) snapshot is the single most useful row for diagnosing a
 /// stall: it reports where the body floor, verified tip, and header tip are, how
 /// much is buffered/applying, and whether the byte budget or peer status is
 /// blocking new downloads.

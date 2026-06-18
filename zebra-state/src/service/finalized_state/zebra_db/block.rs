@@ -736,8 +736,8 @@ impl ZebraDb {
     ///
     /// # Correctness
     ///
-    /// `retention` is always at least [`MIN_PRUNING_RETENTION`], which is strictly
-    /// greater than [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT).
+    /// `retention` is always at least [`MIN_PRUNING_RETENTION`](crate::constants::MIN_PRUNING_RETENTION), which is strictly
+    /// greater than [`MAX_BLOCK_REORG_HEIGHT`].
     /// Since the returned range only ever covers heights at or below
     /// `new_tip - retention`, pruning can never delete data that a reorg or
     /// rollback could read.

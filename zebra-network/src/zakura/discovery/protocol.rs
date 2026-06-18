@@ -2673,7 +2673,7 @@ impl ZakuraDiscoveryBook {
             keyed.select_nth_unstable_by(take, |a, b| a.0.cmp(&b.0));
             keyed.truncate(take);
         }
-        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+        keyed.sort_by_key(|a| a.0);
 
         keyed
             .into_iter()

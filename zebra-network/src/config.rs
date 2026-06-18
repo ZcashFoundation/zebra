@@ -201,7 +201,7 @@ pub struct Config {
     /// An optional persistent iroh secret key for Zakura P2P identity.
     ///
     /// This is reserved for Zakura endpoint construction. If unset, a future Zakura endpoint
-    /// implementation will generate an ed25519 iroh [`SecretKey`](iroh::SecretKey) on first use
+    /// implementation will generate an ed25519 iroh [`SecretKey`] on first use
     /// and persist it under [`cache_dir`](Self::cache_dir), beside the peer cache.
     ///
     /// This value is not used by the legacy TCP peer set.
@@ -625,7 +625,7 @@ impl Config {
     ///
     /// Resolution order:
     /// 1. If [`zakura_node_secret_key`](Self::zakura_node_secret_key) is configured,
-    ///    it is parsed and used verbatim. An unparseable value is a hard error.
+    ///    it is parsed and used verbatim. An unparsable value is a hard error.
     /// 2. Otherwise, if [`cache_dir`](Self::cache_dir) is enabled, the persisted key
     ///    file is loaded; when it is missing or unreadable a fresh key is generated
     ///    and written atomically with owner-only (`0o600`) permissions, so every
@@ -665,7 +665,7 @@ fn load_or_generate_zakura_secret_key(key_file: &Path) -> SecretKey {
             Ok(secret_key) => return secret_key,
             Err(_) => warn!(
                 ?key_file,
-                "ignoring unparseable Zakura node secret key file; regenerating a new identity"
+                "ignoring unparsable Zakura node secret key file; regenerating a new identity"
             ),
         },
         Err(error) if error.kind() == ErrorKind::NotFound => {}
