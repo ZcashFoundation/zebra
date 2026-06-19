@@ -6,10 +6,10 @@ use crate::zakura::{
 
 /// Hard ceiling on outbound block-range requests kept in flight to one peer.
 ///
-/// A safety bound only; the binding per-peer concurrency is the peer's advertised
-/// `max_inflight_requests` (config `max_inflight_requests`, clamped to
-/// [`DEFAULT_BS_MAX_INFLIGHT`]).
-pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 16;
+/// A safety bound only; the binding per-peer concurrency is the minimum of this
+/// ceiling, the peer's advertised `max_inflight_requests`, and the peer's
+/// adaptive outbound request window.
+pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 2048;
 
 /// Cached chain frontiers used by the block-sync reactor.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -283,6 +283,7 @@ pub(super) struct PeerBlockState {
     pub(super) max_blocks_per_response: u32,
     pub(super) max_inflight_requests: u16,
     pub(super) max_response_bytes: u32,
+    pub(super) outbound_request_window: usize,
     pub(super) received_status: bool,
     pub(super) outstanding: Vec<OutstandingBlockRange>,
     pub(super) inbound_status: RateMeter,
@@ -302,6 +303,7 @@ impl PeerBlockState {
             max_blocks_per_response: config.advertised_max_blocks_per_response(),
             max_inflight_requests: config.advertised_max_inflight_requests(),
             max_response_bytes: config.advertised_max_response_bytes(),
+            outbound_request_window: usize::from(config.advertised_max_inflight_requests()),
             received_status: false,
             outstanding: Vec::new(),
             inbound_status: RateMeter::new(
@@ -317,7 +319,20 @@ impl PeerBlockState {
     pub(super) fn available_slots(&self) -> usize {
         usize::from(self.max_inflight_requests)
             .min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER)
+            .min(self.outbound_request_window)
             .saturating_sub(self.outstanding.len())
+    }
+
+    pub(super) fn reduce_outbound_window_after_timeout(&mut self) {
+        self.outbound_request_window = self.outbound_request_window.saturating_div(2).max(1);
+    }
+
+    pub(super) fn increase_outbound_window_after_success(&mut self) {
+        let max_window =
+            usize::from(self.max_inflight_requests).min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER);
+        if self.outbound_request_window < max_window {
+            self.outbound_request_window = self.outbound_request_window.saturating_add(1);
+        }
     }
 
     pub(super) fn can_serve_any(&self, heights: &[block::Height]) -> bool {

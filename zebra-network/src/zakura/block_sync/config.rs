@@ -2,16 +2,17 @@ use super::{error::*, wire::*, *};
 
 /// Default number of blocks advertised per response.
 ///
-/// Set to the wire ceiling so block-body requests batch as many blocks as the
-/// per-response byte cap ([`MAX_BS_RESPONSE_BYTES`]) allows. Small early-chain
-/// blocks ride in large counts; large near-tip blocks are byte-capped to fewer.
-pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 128;
-/// Default number of in-flight block requests advertised per peer.
+/// Keep block-body ranges narrow so a missing response only holds one height at
+/// the body-download floor.
+pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 1;
+/// Initial number of in-flight block requests advertised per peer.
 ///
-/// Combined with the global byte budget ([`DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES`])
-/// this gives each peer enough work to keep its stream busy while avoiding a
-/// response-frame backlog that can outlive the connection.
-pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 16;
+/// Outbound scheduling starts at this window and adjusts per peer based on
+/// request timeouts, while peer advertisements can still allow growth up to
+/// [`MAX_BS_INFLIGHT_REQUESTS`].
+pub const DEFAULT_BS_MAX_INFLIGHT: u16 = 512;
+/// Maximum peer-advertised in-flight request count accepted by this node.
+pub const MAX_BS_INFLIGHT_REQUESTS: u16 = 2048;
 /// Default expected serving-peer fanout used to derive the per-peer in-flight
 /// byte cap (`max_inflight_block_bytes / expected_peers`).
 ///
@@ -30,13 +31,13 @@ pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES: usize =
     zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_HEIGHT_GAP;
 /// Default block-sync request timeout.
-pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_BS_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Default block-sync status refresh interval reserved for later advertisement.
 pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// Default tolerated size-hint deviation percentage reserved for later soft scoring.
 pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
 /// Default block-sync peer fanout for the same requested range.
-pub const DEFAULT_BS_FANOUT: usize = 2;
+pub const DEFAULT_BS_FANOUT: usize = 1;
 /// Default body lag where block sync pauses new downloads and lets block propagation finish.
 pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
 /// Maximum peer-advertised aggregate byte target accepted per requested range.
@@ -228,7 +229,7 @@ pub fn clamp_advertised_blocks(count: u32) -> u32 {
 
 /// Clamp an advertised in-flight request count to the local status ceiling.
 pub fn clamp_advertised_inflight(count: u16) -> u16 {
-    count.clamp(1, DEFAULT_BS_MAX_INFLIGHT)
+    count.clamp(1, MAX_BS_INFLIGHT_REQUESTS)
 }
 
 /// Clamp an advertised response byte target to the largest stream-6 message.

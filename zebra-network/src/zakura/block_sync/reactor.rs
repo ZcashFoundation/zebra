@@ -685,6 +685,13 @@ impl BlockSyncReactor {
             clamp_advertised_blocks(status.max_blocks_per_response);
         peer_state.max_inflight_requests = clamp_advertised_inflight(status.max_inflight_requests);
         peer_state.max_response_bytes = clamp_advertised_response_bytes(status.max_response_bytes);
+        peer_state.outbound_request_window = peer_state
+            .outbound_request_window
+            .min(
+                usize::from(peer_state.max_inflight_requests)
+                    .min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER),
+            )
+            .max(1);
         peer_state.received_status = true;
         self.trace_status_received(&peer, status);
         self.publish_candidate_state();
@@ -803,6 +810,7 @@ impl BlockSyncReactor {
                 outstanding.mark_received(height);
                 if outstanding.is_complete() {
                     completed = Some(peer_state.outstanding.remove(index));
+                    peer_state.increase_outbound_window_after_success();
                 }
             }
         }
@@ -1465,6 +1473,7 @@ impl BlockSyncReactor {
             let mut index = 0;
             while index < peer.outstanding.len() {
                 if peer.outstanding[index].deadline <= now {
+                    peer.reduce_outbound_window_after_timeout();
                     timed_out.push(peer.outstanding.remove(index));
                 } else {
                     index += 1;
@@ -1644,6 +1653,7 @@ impl BlockSyncReactor {
                     peer,
                     &mut self.state.budget,
                     per_peer_byte_cap,
+                    self.startup.config.advertised_max_blocks_per_response(),
                 ) {
                     Ok(request) => request,
                     Err(reason) => {
@@ -1655,6 +1665,7 @@ impl BlockSyncReactor {
                 let Some(peer) = self.state.peers.get(&peer_id) else {
                     break;
                 };
+                let queued_at = Instant::now();
                 if let Err(error) = peer
                     .session
                     .try_send_get_blocks(request.start_height, request.count)
@@ -1672,6 +1683,7 @@ impl BlockSyncReactor {
                     break;
                 }
 
+                let deadline = queued_at + self.startup.config.request_timeout;
                 metrics::counter!("sync.block.request.sent").increment(1);
                 self.trace_get_blocks_sent(
                     &peer_id,
@@ -1679,7 +1691,6 @@ impl BlockSyncReactor {
                     request.count,
                     request.estimated_bytes,
                 );
-                let deadline = Instant::now() + self.startup.config.request_timeout;
                 if let Some(peer) = self.state.peers.get_mut(&peer_id) {
                     peer.outstanding.push(OutstandingBlockRange {
                         request: request.clone(),

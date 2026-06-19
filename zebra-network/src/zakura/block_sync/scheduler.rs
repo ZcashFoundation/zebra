@@ -135,6 +135,7 @@ impl BlockRangeScheduler {
         peer: &PeerBlockState,
         budget: &mut ByteBudget,
         per_peer_byte_cap: u64,
+        local_max_blocks_per_request: u32,
     ) -> Result<BlockRangeRequest, ScheduleSkipReason> {
         self.prune_covered();
         let index = self
@@ -167,7 +168,10 @@ impl BlockRangeScheduler {
                 ScheduleSkipReason::BudgetExhausted
             });
         }
-        let max_count = peer.max_blocks_per_response.max(1);
+        let max_count = peer
+            .max_blocks_per_response
+            .min(local_max_blocks_per_request)
+            .max(1);
         let mut estimated_bytes = 0u64;
         let mut selected = Vec::new();
 
