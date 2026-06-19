@@ -49,6 +49,11 @@ const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 /// re-subscribing immediately turns that into a full-speed busy loop that saturates the logs.
 const COMMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// How long to wait for a single `get_block` fetch while bridging the finalized gap before giving
+/// up. A single block fetch from a co-located node should return promptly, so this bounds a wedged
+/// connection without false-triggering; the bridge retries on the next subscription.
+const GET_BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 #[derive(Debug)]
 pub struct TrustedChainSync {
@@ -395,10 +400,14 @@ impl TrustedChainSync {
             },
         };
 
-        self.indexer_rpc_client
-            .clone()
-            .get_block(request)
-            .await?
+        let response = tokio::time::timeout(
+            GET_BLOCK_TIMEOUT,
+            self.indexer_rpc_client.clone().get_block(request),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("get_block request timed out"))??;
+
+        response
             .into_inner()
             .decode()
             .ok_or_else(|| Status::internal("failed to decode block from get_block response"))
