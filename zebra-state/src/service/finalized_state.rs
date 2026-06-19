@@ -101,6 +101,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Ironwood (NU6.3). Always registered so the database format is stable across build
     // flags; these stay empty until NU6.3 transactions appear.
     "ironwood_nullifiers",
+    "ironwood_anchors",
+    "ironwood_note_commitment_tree",
+    "ironwood_note_commitment_subtree",
     // Chain
     "history_tree",
     "tip_chain_value_pool",

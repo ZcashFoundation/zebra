@@ -192,6 +192,13 @@ impl Block {
             .flat_map(|transaction| transaction.orchard_note_commitments())
     }
 
+    /// Access the [ironwood note commitments](pallas::Base) from all transactions in this block.
+    pub fn ironwood_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.ironwood_note_commitments())
+    }
+
     /// Count how many Sapling transactions exist in a block,
     /// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
     /// <https://zips.z.cash/zip-0221#tree-node-specification>.

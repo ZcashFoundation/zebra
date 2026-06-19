@@ -37,6 +37,7 @@ fn construct_empty() {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::zero(),
     );
 }
@@ -50,6 +51,7 @@ fn construct_single() -> Result<()> {
     let mut chain = Chain::new(
         &Network::Mainnet,
         Height(0),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -88,6 +90,7 @@ fn construct_many() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::fake_populated_pool(),
     );
 
@@ -115,6 +118,7 @@ fn ord_matches_work() -> Result<()> {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
         ValueBalance::fake_populated_pool(),
     );
     lesser_chain = lesser_chain.push(less_block.prepare().test_with_zero_spent_utxos())?;
@@ -122,6 +126,7 @@ fn ord_matches_work() -> Result<()> {
     let mut bigger_chain = Chain::new(
         &Network::Mainnet,
         Height(0),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -850,6 +855,7 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     let mut chain = Chain::new(
         &network,
         (block1.coinbase_height().unwrap() - 1).unwrap(),
+        Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),

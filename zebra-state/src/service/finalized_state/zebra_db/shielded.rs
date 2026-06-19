@@ -135,6 +135,14 @@ impl ZebraDb {
         self.db.zs_contains(&orchard_anchors, &orchard_anchor)
     }
 
+    /// Returns `true` if the finalized state contains `ironwood_anchor`.
+    ///
+    /// Ironwood reuses the Orchard tree root type, but anchors live in their own column family.
+    pub fn contains_ironwood_anchor(&self, ironwood_anchor: &orchard::tree::Root) -> bool {
+        let ironwood_anchors = self.db.cf_handle("ironwood_anchors").unwrap();
+        self.db.zs_contains(&ironwood_anchors, &ironwood_anchor)
+    }
+
     // # Sprout trees
 
     /// Returns the Sprout note commitment tree of the finalized tip
@@ -465,6 +473,88 @@ impl ZebraDb {
         Some(subtree_data.with_index(index))
     }
 
+    // Ironwood trees
+    //
+    // Ironwood reuses the Orchard note commitment tree types (`orchard::tree::*`), but commits into
+    // its own column families. These mirror the Orchard tree accessors above.
+
+    /// Returns the Ironwood note commitment tree of the finalized tip or the empty tree if the
+    /// state is empty.
+    pub fn ironwood_tree_for_tip(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
+        let height = match self.finalized_tip_height() {
+            Some(h) => h,
+            None => return Default::default(),
+        };
+
+        self.ironwood_tree_by_height(&height)
+            .expect("Ironwood note commitment tree must exist if there is a finalized tip")
+    }
+
+    /// Returns the Ironwood note commitment tree matching the given block height,
+    /// or `None` if the height is above the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn ironwood_tree_by_height(
+        &self,
+        height: &Height,
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+        let tip_height = self.finalized_tip_height()?;
+
+        // If we're above the tip, searching backwards would always return the tip tree.
+        // But the correct answer is "we don't know that tree yet".
+        if *height > tip_height {
+            return None;
+        }
+
+        let ironwood_trees = self.db.cf_handle("ironwood_note_commitment_tree").unwrap();
+
+        // If we know there must be a tree, search backwards for it.
+        let (_first_duplicate_height, tree) = self
+            .db
+            .zs_prev_key_value_back_from(&ironwood_trees, height)
+            .expect(
+                "Ironwood note commitment trees must exist for all heights below the finalized tip",
+            );
+
+        Some(Arc::new(tree))
+    }
+
+    /// Returns a list of Ironwood [`NoteCommitmentSubtree`]s in the provided range.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn ironwood_subtree_list_by_index_range(
+        &self,
+        range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>> {
+        let ironwood_subtrees = self
+            .db
+            .cf_handle("ironwood_note_commitment_subtree")
+            .unwrap();
+
+        self.db
+            .zs_forward_range_iter(&ironwood_subtrees, range)
+            .collect()
+    }
+
+    /// Get the Ironwood note commitment subtree for the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    fn ironwood_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<orchard::tree::Node>> {
+        let ironwood_subtrees = self
+            .db
+            .cf_handle("ironwood_note_commitment_subtree")
+            .unwrap();
+
+        let (index, subtree_data): (
+            NoteCommitmentSubtreeIndex,
+            NoteCommitmentSubtreeData<orchard::tree::Node>,
+        ) = self.db.zs_last_key_value(&ironwood_subtrees)?;
+
+        let tip_height = self.finalized_tip_height()?;
+        if subtree_data.end_height != tip_height {
+            return None;
+        }
+
+        Some(subtree_data.with_index(index))
+    }
+
     /// Returns the shielded note commitment trees of the finalized tip
     /// or the empty trees if the state is empty.
     /// Additionally, returns the sapling and orchard subtrees for the finalized tip if
@@ -476,6 +566,8 @@ impl ZebraDb {
             sapling_subtree: self.sapling_subtree_for_tip(),
             orchard: self.orchard_tree_for_tip(),
             orchard_subtree: self.orchard_subtree_for_tip(),
+            ironwood: self.ironwood_tree_for_tip(),
+            ironwood_subtree: self.ironwood_subtree_for_tip(),
         }
     }
 }
@@ -580,6 +672,10 @@ impl DiskWriteBatch {
             || zebra_db.orchard_tree_for_tip(),
             |prev_trees| prev_trees.orchard.clone(),
         );
+        let prev_ironwood_tree = prev_note_commitment_trees.as_ref().map_or_else(
+            || zebra_db.ironwood_tree_for_tip(),
+            |prev_trees| prev_trees.ironwood.clone(),
+        );
 
         // Update the Sprout tree and store its anchor only if it has changed
         if height.is_min() || prev_sprout_tree != note_commitment_trees.sprout {
@@ -601,6 +697,15 @@ impl DiskWriteBatch {
 
             if let Some(subtree) = note_commitment_trees.orchard_subtree {
                 self.insert_orchard_subtree(zebra_db, &subtree);
+            }
+        }
+
+        // Store the Ironwood tree, anchor, and any new subtrees only if they have changed
+        if height.is_min() || prev_ironwood_tree != note_commitment_trees.ironwood {
+            self.create_ironwood_tree(zebra_db, height, &note_commitment_trees.ironwood);
+
+            if let Some(subtree) = note_commitment_trees.ironwood_subtree {
+                self.insert_ironwood_subtree(zebra_db, &subtree);
             }
         }
 
@@ -759,6 +864,39 @@ impl DiskWriteBatch {
             .cf_handle("orchard_note_commitment_subtree")
             .unwrap();
         self.zs_insert(&orchard_subtree_cf, subtree.index, subtree.into_data());
+    }
+
+    // Ironwood tree methods (Ironwood reuses the Orchard tree types, in its own column families)
+
+    /// Inserts or overwrites the Ironwood note commitment tree at the given [`Height`],
+    /// and the Ironwood anchors.
+    pub fn create_ironwood_tree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        height: &Height,
+        tree: &orchard::tree::NoteCommitmentTree,
+    ) {
+        let ironwood_anchors = zebra_db.db.cf_handle("ironwood_anchors").unwrap();
+        let ironwood_tree_cf = zebra_db
+            .db
+            .cf_handle("ironwood_note_commitment_tree")
+            .unwrap();
+
+        self.zs_insert(&ironwood_anchors, tree.root(), ());
+        self.zs_insert(&ironwood_tree_cf, height, tree);
+    }
+
+    /// Inserts the Ironwood note commitment subtree into the batch.
+    pub fn insert_ironwood_subtree(
+        &mut self,
+        zebra_db: &ZebraDb,
+        subtree: &NoteCommitmentSubtree<orchard::tree::Node>,
+    ) {
+        let ironwood_subtree_cf = zebra_db
+            .db
+            .cf_handle("ironwood_note_commitment_subtree")
+            .unwrap();
+        self.zs_insert(&ironwood_subtree_cf, subtree.index, subtree.into_data());
     }
 
     /// Deletes the Orchard note commitment tree at the given [`Height`].

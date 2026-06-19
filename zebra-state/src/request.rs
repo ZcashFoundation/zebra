@@ -347,12 +347,15 @@ pub struct Treestate {
 
 impl Treestate {
     #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
+        ironwood: Arc<orchard::tree::NoteCommitmentTree>,
         sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
         orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+        ironwood_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
         Self {
@@ -362,6 +365,8 @@ impl Treestate {
                 sapling_subtree,
                 orchard,
                 orchard_subtree,
+                ironwood,
+                ironwood_subtree,
             },
             history_tree,
         }

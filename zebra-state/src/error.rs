@@ -395,6 +395,19 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error(
+        "unknown Ironwood anchor: {anchor:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
+    )]
+    #[non_exhaustive]
+    UnknownIronwoodAnchor {
+        // Ironwood reuses the Orchard tree root type.
+        anchor: orchard::tree::Root,
+        height: Option<block::Height>,
+        tx_index_in_block: Option<usize>,
+        transaction_hash: transaction::Hash,
+    },
 }
 
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {
