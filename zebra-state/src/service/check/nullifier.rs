@@ -56,6 +56,12 @@ pub(crate) fn no_duplicates_in_finalized_chain(
         }
     }
 
+    for nullifier in semantically_verified.block.ironwood_nullifiers() {
+        if finalized_state.contains_ironwood_nullifier(&nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -124,6 +130,16 @@ pub(crate) fn tx_no_duplicates_in_chain(
         |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
         non_finalized_chain
             .map(|chain| |nullifier| chain.orchard_nullifiers.contains_key(nullifier)),
+    )?;
+
+    // `Transaction::ironwood_nullifiers` yields owned `ironwood::Nullifier`s (the Ironwood-pool
+    // newtype), so collect them to hand `find_duplicate_nullifier` the `&Nullifier`s it expects.
+    let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
+    find_duplicate_nullifier(
+        ironwood_nullifiers.iter(),
+        |nullifier| finalized_chain.contains_ironwood_nullifier(nullifier),
+        non_finalized_chain
+            .map(|chain| |nullifier| chain.ironwood_nullifiers.contains_key(nullifier)),
     )?;
 
     Ok(())

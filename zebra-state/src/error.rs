@@ -10,7 +10,7 @@ use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTreeError,
-    orchard, sapling, sprout, transaction, transparent,
+    ironwood, orchard, sapling, sprout, transaction, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     work::difficulty::CompactDifficulty,
 };
@@ -275,6 +275,13 @@ pub enum ValidateContextError {
         in_finalized_state: bool,
     },
 
+    #[error("ironwood double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
+    #[non_exhaustive]
+    DuplicateIronwoodNullifier {
+        nullifier: ironwood::Nullifier,
+        in_finalized_state: bool,
+    },
+
     #[error(
         "the remaining value in the transparent transaction value pool MUST be nonnegative:\n\
          {amount_error:?},\n\
@@ -423,6 +430,15 @@ impl DuplicateNullifierError for sapling::Nullifier {
 impl DuplicateNullifierError for orchard::Nullifier {
     fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
         ValidateContextError::DuplicateOrchardNullifier {
+            nullifier: *self,
+            in_finalized_state,
+        }
+    }
+}
+
+impl DuplicateNullifierError for ironwood::Nullifier {
+    fn duplicate_nullifier_error(&self, in_finalized_state: bool) -> ValidateContextError {
+        ValidateContextError::DuplicateIronwoodNullifier {
             nullifier: *self,
             in_finalized_state,
         }

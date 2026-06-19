@@ -19,7 +19,7 @@ use std::{
 
 use zebra_chain::{
     block::Height,
-    orchard,
+    ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -61,6 +61,13 @@ impl ZebraDb {
         self.db.zs_contains(&orchard_nullifiers, &orchard_nullifier)
     }
 
+    /// Returns `true` if the finalized state contains `ironwood_nullifier`.
+    pub fn contains_ironwood_nullifier(&self, ironwood_nullifier: &ironwood::Nullifier) -> bool {
+        let ironwood_nullifiers = self.db.cf_handle("ironwood_nullifiers").unwrap();
+        self.db
+            .zs_contains(&ironwood_nullifiers, &ironwood_nullifier)
+    }
+
     /// Returns the [`TransactionLocation`] of the transaction that revealed
     /// the given [`sprout::Nullifier`], if it is revealed in the finalized state and its
     /// spending transaction hash has been indexed.
@@ -95,6 +102,18 @@ impl ZebraDb {
     ) -> Option<TransactionLocation> {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
         self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)?
+    }
+
+    /// Returns the [`TransactionLocation`] of the transaction that revealed
+    /// the given [`ironwood::Nullifier`], if it is revealed in the finalized state and its
+    /// spending transaction hash has been indexed.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn ironwood_revealing_tx_loc(
+        &self,
+        ironwood_nullifier: &ironwood::Nullifier,
+    ) -> Option<TransactionLocation> {
+        let ironwood_nullifiers = self.db.cf_handle("ironwood_nullifiers").unwrap();
+        self.db.zs_get(&ironwood_nullifiers, &ironwood_nullifier)?
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
@@ -505,13 +524,14 @@ impl DiskWriteBatch {
         let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
         let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
+        let ironwood_nullifiers = db.cf_handle("ironwood_nullifiers").unwrap();
 
         #[cfg(feature = "indexer")]
         let insert_value = transaction_location;
         #[cfg(not(feature = "indexer"))]
         let insert_value = ();
 
-        // Mark sprout, sapling and orchard nullifiers as spent
+        // Mark sprout, sapling, orchard, and ironwood nullifiers as spent
         for sprout_nullifier in transaction.sprout_nullifiers() {
             self.zs_insert(&sprout_nullifiers, sprout_nullifier, insert_value);
         }
@@ -520,6 +540,9 @@ impl DiskWriteBatch {
         }
         for orchard_nullifier in transaction.orchard_nullifiers() {
             self.zs_insert(&orchard_nullifiers, orchard_nullifier, insert_value);
+        }
+        for ironwood_nullifier in transaction.ironwood_nullifiers() {
+            self.zs_insert(&ironwood_nullifiers, ironwood_nullifier, insert_value);
         }
     }
 

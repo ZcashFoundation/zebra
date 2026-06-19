@@ -102,7 +102,15 @@ fn format_upgrades(
             Version::new(26, 0, 0),
         )),
         Box::new(block_info_and_address_received::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 5])
+        // The NU6.3 Ironwood shielded pool adds new (initially empty) column families and widens
+        // the chain value pool serialization. Both are created/read in place when the database is
+        // opened, so no data migration is needed and the upgrade is restorable from the previous
+        // major database format version.
+        Box::new(no_migration::NoMigration::new(
+            "add ironwood shielded pool state",
+            Version::new(28, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 6])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

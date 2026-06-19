@@ -17,7 +17,7 @@ use zebra_chain::{
     block::{self, Height},
     block_info::BlockInfo,
     history_tree::HistoryTree,
-    orchard,
+    ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
@@ -204,6 +204,9 @@ pub struct ChainInner {
     /// The Orchard nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
     pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, SpendingTransactionId>,
+    /// The Ironwood nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) ironwood_nullifiers: HashMap<ironwood::Nullifier, SpendingTransactionId>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -264,6 +267,7 @@ impl Chain {
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
+            ironwood_nullifiers: Default::default(),
             partial_transparent_transfers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
@@ -1333,6 +1337,7 @@ impl Chain {
             Spend::Sprout(nullifier) => self.sprout_nullifiers.get(nullifier),
             Spend::Sapling(nullifier) => self.sapling_nullifiers.get(nullifier),
             Spend::Orchard(nullifier) => self.orchard_nullifiers.get(nullifier),
+            Spend::Ironwood(nullifier) => self.ironwood_nullifiers.get(nullifier),
         }
         .cloned()
     }
@@ -1645,6 +1650,16 @@ impl Chain {
                     &transaction_hash,
                 ))?;
                 self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+
+                // The Ironwood pool reuses `orchard::ShieldedData`, so its nullifiers can't go
+                // through a distinct `UpdateWith` impl (it would collide with the Orchard one).
+                // Add them inline into the Ironwood-only nullifier set instead.
+                let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
+                check::nullifier::add_to_non_finalized_chain_unique(
+                    &mut self.ironwood_nullifiers,
+                    ironwood_nullifiers.iter(),
+                    transaction_hash,
+                )?;
             }
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -1846,6 +1861,14 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 position,
             );
             self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
+
+            // Remove the Ironwood nullifiers added inline above (see the matching comment in
+            // `update_chain_tip_with_block_except_trees`).
+            let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.ironwood_nullifiers,
+                ironwood_nullifiers.iter(),
+            );
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?

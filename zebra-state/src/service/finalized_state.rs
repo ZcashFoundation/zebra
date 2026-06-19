@@ -98,6 +98,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "orchard_anchors",
     "orchard_note_commitment_tree",
     "orchard_note_commitment_subtree",
+    // Ironwood (NU6.3). Always registered so the database format is stable across build
+    // flags; these stay empty until NU6.3 transactions appear.
+    "ironwood_nullifiers",
     // Chain
     "history_tree",
     "tip_chain_value_pool",

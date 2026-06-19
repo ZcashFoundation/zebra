@@ -46,7 +46,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 27;
+const DATABASE_FORMAT_VERSION: u64 = 28;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -57,9 +57,12 @@ const DATABASE_FORMAT_VERSION: u64 = 27;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
-/// - 27.1.0: chain value pool balances gained the NU6.3 `ironwood` pool, widening the
-///   `ValueBalance` serialization from 40 to 48 bytes (read code accepts 32/40/48-byte records).
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+/// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
+///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
+///   the `ironwood` pool (read code accepts 32/40/48-byte records). New CFs are created and the
+///   wider records are read in place when the database is opened, so this is a major bump that is
+///   restorable from the previous major database format version (no resync, no data migration).
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
