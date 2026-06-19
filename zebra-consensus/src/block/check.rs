@@ -329,11 +329,15 @@ pub fn miner_fees_are_valid(
         .map_err(|e| BlockError::Other(format!("invalid transparent value balance: {e}")))?;
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
+    // [NU6.3 onward] The Ironwood pool is shielded too, so its value balance affects the coinbase
+    // output value exactly like Sapling and Orchard. This is zero for pre-v6 coinbase transactions
+    // (no Ironwood bundle), so it is a no-op before NU6.3.
+    let ironwood_value_balance = coinbase_tx.ironwood_value_balance().ironwood_amount();
 
     // # Consensus
     //
     // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
-    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, plus totalDeferredOutput(height);
+    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, minus vbalanceIronwood, plus totalDeferredOutput(height);
     // > – define the total input value of its coinbase transaction to be the value in zatoshi of the block subsidy,
     // >   plus the transaction fees paid by transactions in the block.
     //
@@ -341,10 +345,12 @@ pub fn miner_fees_are_valid(
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    let total_output_value =
-        (transparent_value_balance - sapling_value_balance - orchard_value_balance
-            + expected_deferred_pool_balance_change.value())
-        .map_err(|_| SubsidyError::Overflow)?;
+    let total_output_value = (transparent_value_balance
+        - sapling_value_balance
+        - orchard_value_balance
+        - ironwood_value_balance
+        + expected_deferred_pool_balance_change.value())
+    .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
