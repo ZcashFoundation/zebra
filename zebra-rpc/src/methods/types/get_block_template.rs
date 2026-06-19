@@ -27,7 +27,7 @@ use zcash_script::{
     opcode::{Evaluable, PushValue},
     pv::push_value,
 };
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
@@ -281,7 +281,7 @@ impl BlockTemplateResponse {
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
     ) -> Self {
@@ -339,7 +339,7 @@ impl BlockTemplateResponse {
                 height,
                 miner_params,
                 txs_fee,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                 zip233_amount,
             )
             .expect("valid coinbase tx")

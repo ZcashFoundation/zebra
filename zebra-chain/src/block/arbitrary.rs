@@ -598,7 +598,7 @@ where
                 sapling_shielded_data,
                 ..
             } => *sapling_shielded_data = None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
             Transaction::V6 {
                 sapling_shielded_data,
                 ..

@@ -1603,7 +1603,7 @@ impl Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                 V6 {
                     inputs,
                     outputs,
@@ -1798,7 +1798,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                 V6 {
                     inputs,
                     outputs,

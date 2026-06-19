@@ -235,12 +235,14 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
     (Nu6_2, ConsensusBranchId(0x5437f330)),
-    // TODO: set the real NU6.3 (Ironwood) branch id once it is published and set in librustzcash.
+    // TODO: set the real NU6.3 (Ironwood) branch id once it is published. This placeholder matches
+    // the placeholder `BranchId::Nu6_3 = 0xffff_ffff` in the librustzcash Ironwood fork, so that
+    // `Transaction::to_librustzcash` resolves v6 transactions to the fork's NU6.3 branch id.
     #[cfg(any(test, feature = "zebra-test"))]
-    (Nu6_3, ConsensusBranchId(0xfffffffe)),
+    (Nu6_3, ConsensusBranchId(0xffffffff)),
     // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
     #[cfg(any(test, feature = "zebra-test"))]
-    (Nu7, ConsensusBranchId(0xffffffff)),
+    (Nu7, ConsensusBranchId(0xfffffffe)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xffffffff)),
 ];
@@ -533,6 +535,8 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_2 => Self::Nu6_2,
+            #[cfg(zcash_unstable = "nu6.3")]
+            zcash_protocol::consensus::NetworkUpgrade::Nu6_3 => Self::Nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
             #[cfg(zcash_unstable = "zfuture")]

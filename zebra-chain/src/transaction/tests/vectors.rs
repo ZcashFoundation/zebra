@@ -1011,7 +1011,7 @@ fn binding_signatures() {
                             at_least_one_v5_checked = true;
                         }
                     }
-                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                     Transaction::V6 {
                         sapling_shielded_data,
                         ..
@@ -1050,6 +1050,43 @@ fn binding_signatures() {
         assert!(at_least_one_v4_checked);
         assert!(at_least_one_v5_checked);
     }
+}
+
+/// Check that a v6 (Ironwood / NU6.3) transaction computes a txid and round-trips through
+/// serialization.
+///
+/// Computing the txid drives [`Transaction::to_librustzcash`] into the librustzcash Ironwood fork's
+/// v6 (ZIP-244) digest path, which is the runtime path that does not work against released
+/// librustzcash. The branch id resolves to the fork's `BranchId::Nu6_3`.
+#[test]
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+fn v6_ironwood_txid_and_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let tx = Transaction::V6 {
+        network_upgrade: NetworkUpgrade::Nu6_3,
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        ironwood_shielded_data: None,
+    };
+
+    // Drives the librustzcash Ironwood fork's v6 digest computation.
+    let txid = tx.hash();
+
+    // The v6 wire format round-trips through Zebra's own (de)serializer.
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("v6 transaction serializes");
+    let tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("v6 transaction deserializes");
+
+    assert_eq!(tx, tx2);
+    assert_eq!(tx2.hash(), txid, "txid is stable across serialization");
 }
 
 #[test]
