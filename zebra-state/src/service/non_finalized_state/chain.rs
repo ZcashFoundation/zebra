@@ -1588,7 +1588,7 @@ impl Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, None),
                 V5 {
                     inputs,
                     outputs,
@@ -1601,7 +1601,7 @@ impl Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data.as_ref(),
                 ),
                 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                 V6 {
@@ -1616,7 +1616,7 @@ impl Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data.as_ref().map(|data| &data.0),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
@@ -1783,7 +1783,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, None),
                 V5 {
                     inputs,
                     outputs,
@@ -1796,7 +1796,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data.as_ref(),
                 ),
                 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
                 V6 {
@@ -1811,7 +1811,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data.as_ref().map(|data| &data.0),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
@@ -2191,12 +2191,12 @@ where
     }
 }
 
-impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Chain {
+impl UpdateWith<(Option<&orchard::ShieldedData>, &SpendingTransactionId)> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
         &(orchard_shielded_data, revealing_tx_id): &(
-            &Option<orchard::ShieldedData>,
+            Option<&orchard::ShieldedData>,
             &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
@@ -2221,7 +2221,7 @@ impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Ch
     fn revert_chain_with(
         &mut self,
         (orchard_shielded_data, _revealing_tx_id): &(
-            &Option<orchard::ShieldedData>,
+            Option<&orchard::ShieldedData>,
             &SpendingTransactionId,
         ),
         _position: RevertPosition,

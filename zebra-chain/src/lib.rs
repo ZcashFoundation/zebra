@@ -28,6 +28,8 @@ pub mod diagnostic;
 pub mod error;
 pub mod fmt;
 pub mod history_tree;
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+pub mod ironwood;
 pub mod orchard;
 pub mod parallel;
 pub mod parameters;

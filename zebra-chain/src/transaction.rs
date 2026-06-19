@@ -58,6 +58,9 @@ use crate::{
     Error,
 };
 
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+use crate::ironwood;
+
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -167,16 +170,16 @@ pub enum Transaction {
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
         ///
-        /// In a v6 transaction this is serialized in the NU6.3 flag-byte format via
-        /// [`orchard::ShieldedDataV6`]; in memory it is the same [`orchard::ShieldedData`] as a v5
-        /// Orchard bundle.
-        orchard_shielded_data: Option<orchard::ShieldedData>,
+        /// Wrapped in [`orchard::ShieldedDataV6`] to select the NU6.3 flag-byte format (which
+        /// permits the `enableCrossAddress` flag) on the wire; the inner bundle is the same
+        /// [`orchard::ShieldedData`] as a v5 Orchard bundle.
+        orchard_shielded_data: Option<orchard::ShieldedDataV6>,
         /// The Ironwood data for this transaction, if any (NU6.3 onward).
         ///
-        /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape (serialized in the
-        /// NU6.3 format like the v6 Orchard bundle) but commits into a separate note commitment tree
-        /// and nullifier set.
-        ironwood_shielded_data: Option<orchard::ShieldedData>,
+        /// The Ironwood bundle reuses the v6 Orchard bundle shape ([`orchard::ShieldedDataV6`])
+        /// but commits into a separate note commitment tree and nullifier set, so it has its own
+        /// [`ironwood::ShieldedData`] newtype.
+        ironwood_shielded_data: Option<ironwood::ShieldedData>,
     },
 }
 
@@ -1102,7 +1105,7 @@ impl Transaction {
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data.as_ref(),
+            } => orchard_shielded_data.as_ref().map(|data| &data.0),
 
             // No Orchard shielded data
             Transaction::V1 { .. }
@@ -1162,7 +1165,7 @@ impl Transaction {
             Transaction::V6 {
                 ironwood_shielded_data,
                 ..
-            } => ironwood_shielded_data.as_ref(),
+            } => ironwood_shielded_data.as_ref().map(|data| &data.0 .0),
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -1890,7 +1893,7 @@ impl Transaction {
             Transaction::V6 {
                 orchard_shielded_data: Some(orchard_shielded_data),
                 ..
-            } => Some(orchard_shielded_data),
+            } => Some(&mut orchard_shielded_data.0),
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }

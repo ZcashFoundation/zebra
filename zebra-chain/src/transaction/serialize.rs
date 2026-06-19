@@ -360,23 +360,28 @@ fn deserialize_v5_sapling_shielded_data<R: io::Read>(
     }))
 }
 
-impl ZcashSerialize for Option<orchard::ShieldedData> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        match self {
-            None => {
-                // Denoted as `nActionsOrchard` in the spec.
-                zcash_serialize_empty_list(writer)?;
+/// Serializes an optional Orchard-protocol bundle (v5 Orchard, v6 Orchard, or Ironwood).
+///
+/// All three share the same wire encoding: an empty action list (`nActions = 0`) when the bundle is
+/// absent, otherwise the bundle's fields.
+///
+/// "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard, proofsOrchard,
+/// and bindingSigOrchard are present if and only if nActionsOrchard > 0." — `§` note of the second
+/// table of <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
+fn zcash_serialize_optional_orchard_bundle<W: io::Write>(
+    shielded_data: Option<&orchard::ShieldedData>,
+    mut writer: W,
+) -> Result<(), io::Error> {
+    match shielded_data {
+        // Denoted as `nActionsOrchard` in the spec.
+        None => zcash_serialize_empty_list(&mut writer),
+        Some(shielded_data) => shielded_data.zcash_serialize(&mut writer),
+    }
+}
 
-                // We don't need to write anything else here.
-                // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
-                // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
-                // `§` note of the second table of https://zips.z.cash/protocol/protocol.pdf#txnencoding
-            }
-            Some(orchard_shielded_data) => {
-                orchard_shielded_data.zcash_serialize(&mut writer)?;
-            }
-        }
-        Ok(())
+impl ZcashSerialize for Option<orchard::ShieldedData> {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        zcash_serialize_optional_orchard_bundle(self.as_ref(), writer)
     }
 }
 
@@ -415,10 +420,11 @@ impl ZcashSerialize for orchard::ShieldedData {
     }
 }
 
-// A v6 (NU6.3) Orchard/Ironwood bundle differs from a v5 Orchard bundle only in its flag-byte
+// A v6 (NU6.3) Orchard or Ironwood bundle differs from a v5 Orchard bundle only in its flag-byte
 // format on *deserialization* (the NU6.3 format permits `enableCrossAddress`). It encodes
-// identically on the wire (the flag byte is written as-is), so `Option<orchard::ShieldedDataV6>`
-// reuses the `Option<orchard::ShieldedData>` serializer above and only needs its own deserializer.
+// identically on the wire (the flag byte is written as-is), so the v6 Orchard and Ironwood
+// (de)serializers below delegate to the v5 Orchard bundle codec, only wrapping/unwrapping their
+// newtypes (`orchard::ShieldedDataV6` and `ironwood::ShieldedData`).
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
@@ -426,6 +432,30 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
             deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
                 .map(orchard::ShieldedDataV6),
         )
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| &data.0), writer)
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ZcashDeserialize for Option<ironwood::ShieldedData> {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(
+            Option::<orchard::ShieldedDataV6>::zcash_deserialize(reader)?
+                .map(ironwood::ShieldedData),
+        )
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ZcashSerialize for Option<ironwood::ShieldedData> {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| &data.0 .0), writer)
     }
 }
 
@@ -1133,16 +1163,14 @@ impl ZcashDeserialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. The
                 // `ShieldedDataV6` codec uses the NU6.3 flag-byte format (`enableCrossAddress`
-                // permitted); we unwrap it to the in-memory `orchard::ShieldedData`.
+                // permitted).
                 let orchard_shielded_data = (&mut limited_reader)
-                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?
-                    .map(|data| data.0);
+                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?;
 
                 // The Ironwood bundle: the same field layout and NU6.3 flag format as the Orchard
                 // bundle above (`nActionsIronwood` .. `bindingSigIronwood`).
                 let ironwood_shielded_data = (&mut limited_reader)
-                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?
-                    .map(|data| data.0);
+                    .zcash_deserialize_into::<Option<ironwood::ShieldedData>>()?;
 
                 Ok(Transaction::V6 {
                     network_upgrade,
