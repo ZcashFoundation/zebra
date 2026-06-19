@@ -1040,7 +1040,7 @@ where
             cached_ffi_transaction,
         )?
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
-        .and(Self::verify_orchard_v6(orchard_bundle, &sighash)))
+        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash)))
     }
 
     /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
@@ -1281,7 +1281,7 @@ where
     /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
     /// network upgrade (v6 transactions only exist from NU6.3 onward).
     #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-    fn verify_orchard_v6(
+    fn verify_orchard_v6_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
     ) -> AsyncChecks {
