@@ -87,6 +87,7 @@ pub enum TestType {
     ///
     /// This test requires a cached Zebra and lightwalletd state.
     // Only used with the `lightwalletd-grpc-tests` feature.
+    // Only used with the `lightwalletd-grpc-tests` feature.
     #[allow(dead_code)]
     UpdateCachedState,
 
