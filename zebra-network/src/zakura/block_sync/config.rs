@@ -2,9 +2,9 @@ use super::{error::*, wire::*, *};
 
 /// Default number of blocks advertised per response.
 ///
-/// Keep block-body ranges narrow so a missing response only holds one height at
-/// the body-download floor.
-pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 1;
+/// Keep block-body ranges narrow enough to route around missing responses while
+/// still filling old peers that advertise only a small in-flight request cap.
+pub const DEFAULT_BS_BLOCKS_PER_RESPONSE: u32 = 16;
 /// Initial number of in-flight block requests advertised per peer.
 ///
 /// Outbound scheduling starts at this window and adjusts per peer based on

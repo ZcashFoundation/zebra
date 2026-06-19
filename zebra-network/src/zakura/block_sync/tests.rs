@@ -497,7 +497,7 @@ fn block_meta(block: &Arc<block::Block>) -> BlockSyncBlockMeta {
 #[test]
 fn block_sync_near_tip_pause_config_defaults_and_round_trips() {
     let default = ZakuraBlockSyncConfig::default();
-    assert_eq!(default.max_blocks_per_response, 1);
+    assert_eq!(default.max_blocks_per_response, 16);
     assert_eq!(default.max_inflight_requests, 512);
     assert_eq!(default.near_tip_body_download_pause_blocks, 2);
     assert_eq!(
@@ -3054,7 +3054,7 @@ async fn reactor_pauses_new_body_downloads_near_tip_by_default() {
         .expect("needed metadata queues");
     assert_eq!(
         wait_for_getblocks(&mut actions).await,
-        (peer_id, block::Height(1), 1)
+        (peer_id, block::Height(1), 3)
     );
 
     reactor_task.abort();
