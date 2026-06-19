@@ -703,6 +703,12 @@ impl BlockSyncReactor {
         };
 
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
+            if self
+                .accept_unmatched_queued_body(&peer, height, hash, block.clone())
+                .await
+            {
+                return;
+            }
             if self.ignore_disconnected_peer_response(&peer, "body") {
                 return;
             }
@@ -1035,16 +1041,17 @@ impl BlockSyncReactor {
         hash: block::Hash,
         block: Arc<block::Block>,
     ) -> bool {
-        let Some(peer_state) = self.state.peers.get(peer) else {
-            return false;
-        };
-        if !peer_state.received_status
-            || height < peer_state.servable_low
-            || height > peer_state.servable_high
-        {
+        if self.state.schedule.queued_hash_for_height(height) != Some(hash) {
             return false;
         }
-        if self.state.schedule.queued_hash_for_height(height) != Some(hash) {
+        if let Some(peer_state) = self.state.peers.get(peer) {
+            if !peer_state.received_status
+                || height < peer_state.servable_low
+                || height > peer_state.servable_high
+            {
+                return false;
+            }
+        } else if !self.state.disconnected_peers.contains(peer) {
             return false;
         }
 
