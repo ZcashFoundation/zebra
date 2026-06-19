@@ -1375,7 +1375,6 @@ impl Service<ReadRequest> for ReadStateService {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
             let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
-                self.network.clone(),
                 self.non_finalized_state_receiver.clone(),
                 known_chain_tips,
             );
