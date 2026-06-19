@@ -243,8 +243,11 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
     #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0xfffffffe)),
+    // Distinct test placeholder so it never collides with the `Nu6_3`/`Nu7` placeholders above
+    // (which are gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
+    // the `branch_id_bijective` test under `--cfg zcash_unstable="zfuture"`.
     #[cfg(zcash_unstable = "zfuture")]
-    (ZFuture, ConsensusBranchId(0xffffffff)),
+    (ZFuture, ConsensusBranchId(0xfffffffd)),
 ];
 
 /// The target block spacing before Blossom.
