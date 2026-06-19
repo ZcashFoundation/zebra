@@ -13,8 +13,8 @@ use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
 
 use super::{
-    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
-    MempoolChangeMessage, NonFinalizedStateChangeRequest,
+    block_request, indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight,
+    BlockRequest, Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -212,6 +212,47 @@ where
         });
 
         Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn get_block(
+        &self,
+        request: tonic::Request<BlockRequest>,
+    ) -> Result<Response<BlockAndHash>, Status> {
+        let hash_or_height = match request.into_inner().hash_or_height {
+            Some(block_request::HashOrHeight::Hash(hash)) => {
+                let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
+                    Status::invalid_argument(format!(
+                        "invalid block hash length: expected 32 bytes, got {}",
+                        hash.len()
+                    ))
+                })?;
+                zebra_state::HashOrHeight::Hash(block::Hash::from_bytes_in_display_order(&bytes))
+            }
+            Some(block_request::HashOrHeight::Height(height)) => {
+                zebra_state::HashOrHeight::Height(block::Height(height))
+            }
+            None => {
+                return Err(Status::invalid_argument(
+                    "block request must specify a hash or height",
+                ));
+            }
+        };
+
+        match self
+            .read_state
+            .clone()
+            .oneshot(ReadRequest::Block(hash_or_height))
+            .await
+        {
+            Ok(ReadResponse::Block(Some(block))) => {
+                Ok(Response::new(BlockAndHash::new(block.hash(), block)))
+            }
+            Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => Err(Status::unavailable(format!(
+                "failed to read block: {error}"
+            ))),
+        }
     }
 }
 
