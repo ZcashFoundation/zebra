@@ -150,7 +150,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
 - **Release Drafter** (`release-drafter.yml`): Automates release notes
-- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, cached disks, lwd flows
+- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
@@ -174,24 +174,24 @@ Our test execution is centralized through our Docker [entrypoint script](../../d
 We use `nextest` profiles defined in [`.config/nextest.toml`](../../.config/nextest.toml) to manage test suites. A single environment variable, `NEXTEST_PROFILE`, selects the profile to run.
 
 ```bash
-# Run the full test suite using the 'all-tests' profile
-docker run --rm -e NEXTEST_PROFILE=all-tests zebra-tests
+# Run unit + integration tests using the 'ci' profile
+docker run --rm -e NEXTEST_PROFILE=ci zebra-tests
 
-# Run a specific test suite, like the lightwalletd integration tests
-docker run --rm -e NEXTEST_PROFILE=lwd-integration zebra-tests
+# Run a specific stateful test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-stateful -e "NEXTEST_FILTER=test(=stateful::sync::sync_update_mainnet)" zebra-tests
+
+# Run a specific E2E test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-e2e -e "NEXTEST_FILTER=test(=e2e::sync::sync_full_mainnet)" zebra-tests
 ```
 
 #### Test Categories
 
-Our tests are organized into different categories:
+The canonical test tier definitions and local nextest examples live in
+[`zebrad/tests/main.rs`](../../zebrad/tests/main.rs). The nextest profile filters
+live in [`.config/nextest.toml`](../../.config/nextest.toml).
 
-- **Unit & Integration Tests**: Basic functionality and component testing
-- **Network Sync Tests**: Testing blockchain synchronization from various states
-- **Lightwalletd Tests**: Integration with the lightwalletd service
-- **RPC Tests**: JSON-RPC endpoint functionality
-- **Checkpoint Tests**: Blockchain checkpoint generation and validation
-
-Each test category has specific profiles that can be run individually using the `NEXTEST_PROFILE` environment variable.
+The `ci` profile runs the fast PR test set. The `ci-stateful` and `ci-e2e`
+profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests.
 
 ### Pull Request Testing
 
