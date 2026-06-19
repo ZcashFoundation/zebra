@@ -86,6 +86,7 @@ pub enum TestType {
     /// Sync to tip from a lightwalletd cached state.
     ///
     /// This test requires a cached Zebra and lightwalletd state.
+    // Only used with the `lightwalletd-grpc-tests` feature.
     #[allow(dead_code)]
     UpdateCachedState,
 

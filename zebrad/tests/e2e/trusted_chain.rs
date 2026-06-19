@@ -25,6 +25,8 @@ use crate::common::{
     regtest::MiningRpcMethods,
 };
 
+const TIP_CHANGE_TIMEOUT: Duration = Duration::from_secs(1);
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
@@ -82,7 +84,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         rpc_client.submit_block(block.clone()).await?;
 
         blocks.push(block);
-        let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
+        let tip_action =
+            timeout(TIP_CHANGE_TIMEOUT, chain_tip_change.wait_for_tip_change()).await??;
 
         assert_eq!(
             tip_action.best_tip_height(),

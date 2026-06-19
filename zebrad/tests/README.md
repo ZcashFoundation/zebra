@@ -1,6 +1,9 @@
 # Zebrad Test Architecture
 
-Tests are organized into a single binary (`zebrad-tests`) with four module tiers.
+Tests are organized into a single binary (`zebrad-tests`) with module-based
+tiers. The canonical tier definitions and local `cargo nextest` examples live in
+[`main.rs`](main.rs). Nextest profile filters and timeouts live in
+[`../../.config/nextest.toml`](../../.config/nextest.toml).
 
 ## Structure
 
@@ -8,24 +11,10 @@ Tests are organized into a single binary (`zebrad-tests`) with four module tiers
 zebrad/tests/
   main.rs               # Entry point (mod common, unit, integration, stateful, e2e)
   common/               # Shared test helpers (not test functions)
-  unit/                 # Fast tests: CLI, config, end-of-support (<1 min)
-  integration/          # Zebrad process, regtest, and bounded sync tests; no cached state
-    sync.rs             # Checkpoint sync, restart
-    rpc.rs              # RPC/metrics/tracing endpoints
-    database.rs         # State format, conflicts, migrations
-    regtest.rs          # Regtest mode, chain sync, funding streams
-    network.rs          # Port conflicts and local peer behavior
-  stateful/             # Tests requiring cached blockchain state (30 min - days)
-    sync.rs             # Mandatory checkpoint sync, cached tip updates
-    rpc.rs              # Block template, submit block, snapshot tests
-    lightwalletd.rs     # Lightwalletd runtime and gRPC tests
-    indexer.rs           # Indexer tests (feature-gated)
-  e2e/                  # Full-system public-network flows (hours - days)
-    sync.rs             # Large checkpoint syncs, mempool activation, full syncs
-    rpc.rs              # Public-network peer RPCs
-    trusted_chain.rs    # Public-network trusted-chain syncer checks
-    checkpoints.rs      # Checkpoint generation (feature-gated)
-    lightwalletd.rs     # Full lightwalletd sync (feature-gated)
+  unit/                 # Fast local tests
+  integration/          # Zebrad process, regtest, RPC, database, and bounded sync tests
+  stateful/             # Cached-state and runtime lightwalletd tests
+  e2e/                  # Full-system public-network tests
 ```
 
 ## Adding a new test
@@ -33,29 +22,6 @@ zebrad/tests/
 1. Put the test function in the appropriate module file
 2. Use `#[ignore]` on stateful and E2E tests as a `cargo test` safety net
 3. No nextest configuration changes needed (module paths handle filtering)
-
-## Running tests
-
-```bash
-# Default: unit + integration tests (excludes stateful and E2E)
-cargo nextest run
-
-# Specific category
-cargo nextest run -E 'test(/^unit::/)'
-cargo nextest run -E 'test(/^integration::/)'
-cargo nextest run -E 'test(/^stateful::/)'
-cargo nextest run -E 'test(/^e2e::/)'
-
-# Specific test
-cargo nextest run -E 'test(=integration::sync::sync_one_checkpoint_mainnet)'
-
-# CI profiles
-cargo nextest run --profile ci              # PR tests (unit + integration)
-cargo nextest run --profile ci-stateful \
-  -E 'test(=stateful::sync::sync_update_mainnet)'
-cargo nextest run --profile ci-e2e \
-  -E 'test(=e2e::sync::sync_full_mainnet)'
-```
 
 ## Nextest profiles
 

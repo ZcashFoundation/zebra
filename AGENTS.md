@@ -97,17 +97,7 @@ cargo test -p zebra-chain -- test_name
 # CI-like nextest profile (unit + integration, excludes stateful and E2E)
 cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
-# Run specific test category
-cargo nextest run -E 'test(/^unit::/)'
-cargo nextest run -E 'test(/^integration::/)'
-cargo nextest run -E 'test(/^stateful::/)'
-cargo nextest run -E 'test(/^e2e::/)'
-
-# Run a specific stateful test (GCP)
-cargo nextest run --profile ci-stateful -E 'test(=stateful::sync::sync_update_mainnet)' --run-ignored=all
-
-# Run a specific E2E test (GCP)
-cargo nextest run --profile ci-e2e -E 'test(=e2e::sync::sync_full_mainnet)' --run-ignored=all
+# Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```
 
 ## Commit & Pull Request Guidelines
@@ -219,12 +209,8 @@ S::Future: Send + 'static,
 ## Testing Guidelines
 
 - **Unit/property tests**: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
-- **zebrad tests**: `zebrad/tests/` organized into 4 module tiers:
-  - `unit::` — Fast CLI, config tests (<1 min, no network/state)
-  - `integration::` — Tests that launch zebrad, including bounded sync checks (no cached state)
-  - `stateful::` — Tests requiring cached blockchain state (30 min+, GCP VMs)
-  - `e2e::` — Full-system sync, checkpoint, and wallet flows (hours+, GCP VMs)
-- **Adding new tests**: Place in the appropriate module. No nextest config changes needed.
+- **zebrad tests**: `zebrad/tests/main.rs` is the canonical source for test tiers and local `cargo nextest` examples.
+- **Adding new zebrad tests**: Place the test in the appropriate module tier. No nextest config changes needed.
 - Async tests: `#[tokio::test]` with timeouts for long-running tests
 - Test configs must match real network parameters (don't rely on defaults)
 
@@ -235,11 +221,7 @@ cargo test --workspace
 # zebrad unit + integration tests (default nextest profile excludes stateful and E2E)
 cargo nextest run
 
-# Specific test category
-cargo nextest run -E 'test(/^unit::/)'
-cargo nextest run -E 'test(/^integration::/)'
-cargo nextest run -E 'test(/^stateful::/)'
-cargo nextest run -E 'test(/^e2e::/)'
+# Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```
 
 ## Metrics & Observability

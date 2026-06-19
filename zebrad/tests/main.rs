@@ -30,16 +30,16 @@
 //! # Specific category:
 //! cargo nextest run -E 'test(/^unit::/)'
 //! cargo nextest run -E 'test(/^integration::/)'
-//! cargo nextest run -E 'test(/^stateful::/)'
-//! cargo nextest run -E 'test(/^e2e::/)'
+//! cargo nextest run --profile ci-stateful --run-ignored=all -E 'test(/^stateful::/)'
+//! cargo nextest run --profile ci-e2e --run-ignored=all -E 'test(/^e2e::/)'
 //!
 //! # Specific test:
 //! cargo nextest run -E 'test(=integration::sync::sync_one_checkpoint_mainnet)'
 //!
 //! # CI profiles:
 //! cargo nextest run --profile ci                                           # PR tests
-//! cargo nextest run --profile ci-stateful -E 'test(=stateful::sync::sync_update_mainnet)'
-//! cargo nextest run --profile ci-e2e -E 'test(=e2e::sync::sync_full_mainnet)'
+//! cargo nextest run --profile ci-stateful --run-ignored=all -E 'test(=stateful::sync::sync_update_mainnet)'
+//! cargo nextest run --profile ci-e2e --run-ignored=all -E 'test(=e2e::sync::sync_full_mainnet)'
 //! ```
 
 #![allow(clippy::unwrap_in_result)]

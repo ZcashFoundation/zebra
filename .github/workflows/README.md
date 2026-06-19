@@ -186,14 +186,12 @@ docker run --rm -e NEXTEST_PROFILE=ci-e2e -e "NEXTEST_FILTER=test(=e2e::sync::sy
 
 #### Test Categories
 
-Tests are organized into module-based tiers in `zebrad/tests/`:
+The canonical test tier definitions and local nextest examples live in
+[`zebrad/tests/main.rs`](../../zebrad/tests/main.rs). The nextest profile filters
+live in [`.config/nextest.toml`](../../.config/nextest.toml).
 
-- **`unit::`**: CLI, config, end-of-support (<1 min)
-- **`integration::`**: Launches zebrad, no cached state (5-15 min)
-- **`stateful::`**: Requires cached blockchain state, runs on GCP (30 min - days)
-- **`e2e::`**: Full-system sync, checkpoint, and wallet flows, runs on GCP (hours - days)
-
-The `ci` profile runs `unit::` and `integration::` tests on every PR. The `ci-stateful` and `ci-e2e` profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests. Adding a new test to `unit::` or `integration::` automatically includes it in PR CI.
+The `ci` profile runs the fast PR test set. The `ci-stateful` and `ci-e2e`
+profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests.
 
 ### Pull Request Testing
 

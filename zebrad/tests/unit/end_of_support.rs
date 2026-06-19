@@ -1,4 +1,4 @@
-use std::{fs, time::Duration};
+use std::{fs, path::Path, time::Duration};
 
 use color_eyre::eyre::Result;
 
@@ -23,21 +23,17 @@ const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
     let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
-    let mut child = testdir.spawn_child(args!["start"])?;
+    let mut child = testdir
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(30));
 
-    // Give enough time to start up the eos task.
-    std::thread::sleep(Duration::from_secs(30));
+    child.expect_stdout_line_matches("Starting zebrad")?;
+    child.expect_stdout_line_matches("Starting end of support task")?;
 
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    // Zebra started
-    output.stdout_line_contains("Starting zebrad")?;
-
-    // End of support task started.
-    output.stdout_line_contains("Starting end of support task")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
@@ -49,8 +45,12 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 #[test]
 #[ignore]
 fn check_no_git_dependencies() {
-    let cargo_lock_contents =
-        fs::read_to_string("../Cargo.lock").expect("should have Cargo.lock file in root dir");
+    let workspace_cargo_lock_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("zebrad manifest directory should have a workspace root parent")
+        .join("Cargo.lock");
+    let cargo_lock_contents = fs::read_to_string(workspace_cargo_lock_path)
+        .expect("workspace root should have Cargo.lock file");
 
     if cargo_lock_contents.contains(r#"source = "git+"#) {
         panic!("Cargo.lock includes git sources")

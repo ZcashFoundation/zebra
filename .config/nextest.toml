@@ -1,11 +1,5 @@
 # Nextest configuration for Zebra
 #
-# Test categories (mapped to module paths in zebrad/tests/):
-#   unit::        Fast CLI, config, basic functionality tests (<1 min)
-#   integration:: Zebrad process, RPC, database, regtest, and bounded sync tests; no cached state
-#   stateful::    Cached blockchain state or runtime lightwalletd dependencies (30 min - days)
-#   e2e::         Full-system public-network sync, checkpoint, and wallet flows (hours - days)
-#
 # Profiles:
 #   default       Local dev: runs unit + integration (excludes stateful + e2e)
 #   ci            PR CI: same scope, CI-tuned output
