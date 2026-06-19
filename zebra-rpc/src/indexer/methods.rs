@@ -239,13 +239,7 @@ where
     ) -> Result<Response<BlockAndHash>, Status> {
         let hash_or_height = match request.into_inner().hash_or_height {
             Some(block_request::HashOrHeight::Hash(hash)) => {
-                let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
-                    Status::invalid_argument(format!(
-                        "invalid block hash length: expected 32 bytes, got {}",
-                        hash.len()
-                    ))
-                })?;
-                zebra_state::HashOrHeight::Hash(block::Hash::from_bytes_in_display_order(&bytes))
+                zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash)?)
             }
             Some(block_request::HashOrHeight::Height(height)) => {
                 zebra_state::HashOrHeight::Height(block::Height(height))
@@ -299,16 +293,20 @@ fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<blo
 
     chain_tip_hashes
         .into_iter()
-        .map(|hash| {
-            let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
-                Status::invalid_argument(format!(
-                    "invalid chain tip hash length: expected 32 bytes, got {}",
-                    hash.len()
-                ))
-            })?;
-            Ok(block::Hash::from_bytes_in_display_order(&bytes))
-        })
+        .map(hash_from_display_bytes)
         .collect()
+}
+
+/// Decodes a 32-byte block hash in display order, rejecting wrong-length input.
+fn hash_from_display_bytes(hash: Vec<u8>) -> Result<block::Hash, Status> {
+    let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
+        Status::invalid_argument(format!(
+            "invalid block hash length: expected 32 bytes, got {}",
+            hash.len()
+        ))
+    })?;
+
+    Ok(block::Hash::from_bytes_in_display_order(&bytes))
 }
 
 #[cfg(test)]

@@ -428,16 +428,8 @@ impl TrustedChainSync {
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
-    ///
-    /// Logs a warning on failure: a secondary that repeatedly can't catch up will serve an
-    /// increasingly stale finalized state, so the failure should be visible rather than silent.
     async fn try_catch_up_with_primary(&self) {
-        if let Err(error) = self.db.spawn_try_catch_up_with_primary().await {
-            tracing::warn!(
-                ?error,
-                "failed to catch up to the primary database; the finalized state may be stale"
-            );
-        }
+        let _ = self.db.spawn_try_catch_up_with_primary().await;
     }
 
     /// Reads the finalized tip block from the secondary db instance and converts it to a [`ChainTipBlock`].
