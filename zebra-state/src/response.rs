@@ -31,6 +31,9 @@ use crate::{
     WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
