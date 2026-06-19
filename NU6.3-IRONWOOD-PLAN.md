@@ -63,11 +63,30 @@ zcash/ironwood (the Ironwood Book).
     `tx_v6` block-template/mining path is **pre-broken on `main`** (verified by
     stashing) and relies on librustzcash's `set_zip233_amount`; left as-is.
 
-### Remaining (Phase 4 state storage, now unblocked by Phase 2)
-With v6 carrying an Ironwood bundle, the note-commitment-tree / nullifier-set
-state storage (non-finalized `Chain` maps + finalized column families, reusing
-orchard tree/nullifier types) can now consume `ironwood_note_commitments()` /
-`ironwood_nullifiers()`. This is the next concrete chunk.
+- **Phase 4 (value pool + tests) ✅** — confirmed and locked in that the ironwood
+  chain value pool is already enforced end-to-end: `add_chain_value_pool_change`
+  rejects a negative ironwood balance (ZIP-209), and `remaining_transaction_value`
+  includes ironwood. Added fixed-vector tests
+  (`value_balance/tests/vectors.rs`). So the **ZIP-209 ironwood pool rule is done**
+  (it rides the generic `ValueBalance` machinery from Phase 3).
+
+### Phase 4 state storage (nullifier sets + note-commitment trees) — UPSTREAM-GATED
+Scoped in detail; deferred deliberately rather than guessed:
+- **Note-commitment tree:** the orchard tree is bound to the
+  `z.cash:Orchard-MerkleCRH` personalization. Whether Ironwood reuses it or gets a
+  new personalization is **not yet settled upstream** (librustzcash#52 *pins*
+  orchard for the bundle API but *defers* the orchard Ironwood pool). Mirroring the
+  real tree type later avoids rework.
+- **Nullifier sets:** fully scoped (~15 files: non-finalized `Chain` map +
+  inline update/revert, finalized `ironwood_nullifiers` CF, `Spend` enum +
+  `revealing_tx_loc`, `prepare_nullifier_batch`, `contains_*`, format-version bump,
+  `column_family_names`/`empty_column_families` snapshots, `check::nullifier`
+  both functions, `Block::ironwood_nullifiers`). Disjointness is correct via
+  separate storage, but ironwood reuses `orchard::Nullifier`, so the
+  `DuplicateNullifierError` would mislabel as "orchard" — wanting a newtype that
+  ideally mirrors whatever type the orchard Ironwood pool exposes upstream.
+  => Build once librustzcash#52 + the orchard Ironwood pool land, to mirror real
+  types instead of guessing.
 
 ---
 
