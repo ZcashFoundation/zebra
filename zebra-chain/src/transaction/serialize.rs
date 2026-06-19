@@ -415,6 +415,20 @@ impl ZcashSerialize for orchard::ShieldedData {
     }
 }
 
+// A v6 (NU6.3) Orchard/Ironwood bundle differs from a v5 Orchard bundle only in its flag-byte
+// format on *deserialization* (the NU6.3 format permits `enableCrossAddress`). It encodes
+// identically on the wire (the flag byte is written as-is), so `Option<orchard::ShieldedDataV6>`
+// reuses the `Option<orchard::ShieldedData>` serializer above and only needs its own deserializer.
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(
+            deserialize_orchard_shielded_data(reader, orchard::shielded_data::FlagFormat::Nu6_3)?
+                .map(orchard::ShieldedDataV6),
+        )
+    }
+}
+
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
@@ -1111,19 +1125,18 @@ impl ZcashDeserialize for Transaction {
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. A v6 Orchard
-                // bundle uses the NU6.3 flag-byte format (`enableCrossAddress` permitted).
-                let orchard_shielded_data = deserialize_orchard_shielded_data(
-                    &mut limited_reader,
-                    orchard::shielded_data::FlagFormat::Nu6_3,
-                )?;
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. The
+                // `ShieldedDataV6` codec uses the NU6.3 flag-byte format (`enableCrossAddress`
+                // permitted); we unwrap it to the in-memory `orchard::ShieldedData`.
+                let orchard_shielded_data = (&mut limited_reader)
+                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?
+                    .map(|data| data.0);
 
-                // The Ironwood bundle: the same field layout as the Orchard bundle above
-                // (`nActionsIronwood` .. `bindingSigIronwood`), also using the NU6.3 flag format.
-                let ironwood_shielded_data = deserialize_orchard_shielded_data(
-                    &mut limited_reader,
-                    orchard::shielded_data::FlagFormat::Nu6_3,
-                )?;
+                // The Ironwood bundle: the same field layout and NU6.3 flag format as the Orchard
+                // bundle above (`nActionsIronwood` .. `bindingSigIronwood`).
+                let ironwood_shielded_data = (&mut limited_reader)
+                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?
+                    .map(|data| data.0);
 
                 Ok(Transaction::V6 {
                     network_upgrade,

@@ -166,11 +166,16 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
+        ///
+        /// In a v6 transaction this is serialized in the NU6.3 flag-byte format via
+        /// [`orchard::ShieldedDataV6`]; in memory it is the same [`orchard::ShieldedData`] as a v5
+        /// Orchard bundle.
         orchard_shielded_data: Option<orchard::ShieldedData>,
         /// The Ironwood data for this transaction, if any (NU6.3 onward).
         ///
-        /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape but commits into
-        /// a separate note commitment tree and nullifier set.
+        /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape (serialized in the
+        /// NU6.3 format like the v6 Orchard bundle) but commits into a separate note commitment tree
+        /// and nullifier set.
         ironwood_shielded_data: Option<orchard::ShieldedData>,
     },
 }
@@ -192,11 +197,6 @@ impl fmt::Display for Transaction {
         if let Some(expiry_height) = self.expiry_height() {
             fmter.field("expiry_height", &expiry_height);
         }
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-        fmter.field(
-            "has_ironwood_shielded_data",
-            &self.has_ironwood_shielded_data(),
-        );
 
         fmter.field("transparent_inputs", &self.inputs().len());
         fmter.field("transparent_outputs", &self.outputs().len());
@@ -204,6 +204,7 @@ impl fmt::Display for Transaction {
         fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
         fmter.field("sapling_outputs", &self.sapling_outputs().count());
         fmter.field("orchard_actions", &self.orchard_actions().count());
+        fmter.field("ironwood_actions", &self.ironwood_actions().count());
 
         fmter.field("unmined_id", &self.unmined_id());
 

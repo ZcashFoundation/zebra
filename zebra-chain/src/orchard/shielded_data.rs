@@ -56,6 +56,17 @@ pub struct ShieldedData {
     pub binding_sig: Signature<Binding>,
 }
 
+/// A v6 (NU6.3) Orchard-protocol shielded bundle — used for both the Orchard and the Ironwood pool.
+///
+/// This newtype wraps [`ShieldedData`] to give it the NU6.3 flag-byte serialization
+/// ([`FlagFormat::Nu6_3`], which permits the `enableCrossAddress` flag), distinct from the
+/// pre-NU6.3 serialization that the bare [`ShieldedData`] uses for v5 Orchard bundles. The two
+/// formats differ only in which flag bits are reserved; encoding the format in the type keeps the
+/// v5 and v6 (de)serialization paths from being confused.
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ShieldedDataV6(pub ShieldedData);
+
 impl fmt::Display for ShieldedData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");

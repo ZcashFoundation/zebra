@@ -23,3 +23,6 @@ pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+pub use shielded_data::ShieldedDataV6;
