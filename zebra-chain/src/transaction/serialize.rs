@@ -715,14 +715,14 @@ impl ZcashSerialize for Transaction {
                 network_upgrade,
                 lock_time,
                 expiry_height,
-                zip233_amount,
                 inputs,
                 outputs,
                 sapling_shielded_data,
                 orchard_shielded_data,
+                ironwood_shielded_data,
             } => {
-                // Transaction V6 spec:
-                // https://zips.z.cash/zip-0230#specification
+                // Transaction V6 (Ironwood / NU6.3) spec:
+                // https://github.com/zcash/zips/pull/1301
 
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
@@ -740,9 +740,6 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
-                // Denoted as `zip233_amount` in the spec.
-                zip233_amount.zcash_serialize(&mut writer)?;
-
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
 
@@ -759,6 +756,12 @@ impl ZcashSerialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
+
+                // The Ironwood bundle: the same field layout as the Orchard bundle above, denoted
+                // `nActionsIronwood`, `vActionsIronwood`, `flagsIronwood`, `valueBalanceIronwood`,
+                // `anchorIronwood`, `sizeProofsIronwood`, `proofsIronwood`, `vSpendAuthSigsIronwood`,
+                // and `bindingSigIronwood`.
+                ironwood_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -1075,9 +1078,6 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
-                // Denoted as `zip233_amount` in the spec.
-                let zip233_amount = (&mut limited_reader).zcash_deserialize_into()?;
-
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
 
@@ -1099,15 +1099,19 @@ impl ZcashDeserialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
+                // The Ironwood bundle: the same field layout as the Orchard bundle above
+                // (`nActionsIronwood` .. `bindingSigIronwood`).
+                let ironwood_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
                 Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,
                     expiry_height,
-                    zip233_amount,
                     inputs,
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    ironwood_shielded_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

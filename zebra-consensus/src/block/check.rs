@@ -330,25 +330,12 @@ pub fn miner_fees_are_valid(
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
-    // Coinbase transaction can still have a NSM deposit
-    #[cfg(zcash_unstable = "zip235")]
-    let zip233_amount: Amount<NegativeAllowed> = coinbase_tx
-        .zip233_amount()
-        .constrain()
-        .map_err(|_| SubsidyError::InvalidZip233Amount)?;
-
-    #[cfg(not(zcash_unstable = "zip235"))]
-    let zip233_amount = Amount::zero();
-
-    #[cfg(zcash_unstable = "zip235")]
-    if let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) {
-        if height >= nsm_activation_height {
-            let minimum_zip233_amount = ((block_miner_fees * 6).unwrap() / 10).unwrap();
-            if zip233_amount < minimum_zip233_amount {
-                Err(SubsidyError::InvalidZip233Amount)?
-            }
-        }
-    }
+    // TODO(NU6.3/NSM): the ZIP-233 burn amount was removed from the v6 transaction format when v6
+    // was redefined for Ironwood (NU6.3). The ZIP-233/ZIP-235 Network Sustainability Mechanism must
+    // re-source the burn amount (e.g. from a coinbase/header field) before this enforcement can be
+    // reinstated. Until then the burn is treated as zero so the coinbase balance equation is
+    // unaffected.
+    let zip233_amount: Amount<NegativeAllowed> = Amount::zero();
 
     // # Consensus
     //

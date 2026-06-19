@@ -1,6 +1,6 @@
 # NU6.3 / Ironwood — Implementation Plan for Zebra
 
-Status: **Phases 1 & 3 landed** · Branch: `nu63-ironwood` (worktree, off `main` @ v5.1.0)
+Status: **Phases 1, 2, 3 & 4-foundation landed** · Branch: `nu63-ironwood` (worktree, off `main` @ v5.1.0)
 Sources: zcash/zips#1300 (spec refactor), zcash/zips#1301 (v6 tx format),
 zcash/ironwood (the Ironwood Book).
 
@@ -42,13 +42,32 @@ zcash/ironwood (the Ironwood Book).
   Orchard tree/nullifier *types* (same Pallas/Sinsemilla MerkleCRH), so no
   duplicated tree module is needed; the pools differ only by storage instance.
 
-### Coupling discovered (gates the heavy Phase 4 state work)
-The note-commitment-tree / nullifier-set **state storage** (non-finalized
-`Chain` maps + finalized column families) has nothing to consume until Phase 2
-makes v6 transactions carry an Ironwood bundle, so Phase 4-state and Phase 2 are
-coupled. Phase 2 in turn must resolve the librustzcash v6 collision (the existing
-`Transaction::V6` carries `zip233_amount` and maps to `zcash_primitives` v6 via
-`to_librustzcash`). Decision needed before proceeding — see repo discussion.
+- **Phase 2 ✅ (gated)** — `Transaction::V6` reshaped to the Ironwood format under
+  its `zcash_unstable="nu7"` + `tx_v6` gate: dropped `zip233_amount`, added
+  `ironwood_shielded_data: Option<orchard::ShieldedData>` serialized after the
+  orchard bundle (identical wire shape). `ironwood_shielded_data()` now returns
+  the v6 field; `has_shielded_inputs`/`has_shielded_outputs` count ironwood
+  actions (so an ironwood-only v6 tx has inputs/outputs). Removed the
+  `zip233_amount()`/`has_zip233_amount()` accessors and the consensus burn
+  subtraction in the tx-fee path; simplified `has_inputs_and_outputs`. Neutralized
+  the orphaned `zip235` NSM burn enforcement in `block/check.rs` (burn treated as
+  zero, with a TODO to re-source it post-Ironwood) and removed the three obsolete
+  `zip233` NSM tests.
+  - Validated: default `--workspace --all-targets` build + clippy `-D warnings` +
+    zebra-chain/-consensus tests green; `nu7`+`tx_v6` compiles for
+    zebra-chain/-state/-consensus (lib + tests).
+  - **Known gaps (upstream librustzcash):** `to_librustzcash` is a
+    serialize→parse roundtrip, so v6 `txid`/`auth_digest`/`sighash` fail at
+    *runtime* until `zcash_primitives`' v6 parser matches Ironwood (v6 wire
+    (de)serialization in Zebra is self-contained and correct). The `zebra-rpc`
+    `tx_v6` block-template/mining path is **pre-broken on `main`** (verified by
+    stashing) and relies on librustzcash's `set_zip233_amount`; left as-is.
+
+### Remaining (Phase 4 state storage, now unblocked by Phase 2)
+With v6 carrying an Ironwood bundle, the note-commitment-tree / nullifier-set
+state storage (non-finalized `Chain` maps + finalized column families, reusing
+orchard tree/nullifier types) can now consume `ironwood_note_commitments()` /
+`ironwood_nullifiers()`. This is the next concrete chunk.
 
 ---
 

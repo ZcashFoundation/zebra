@@ -159,8 +159,6 @@ pub enum Transaction {
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
-        /// The burn amount for this transaction, if any.
-        zip233_amount: Amount<NonNegative>,
         /// The transparent inputs to the transaction.
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
@@ -169,6 +167,11 @@ pub enum Transaction {
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
+        /// The Ironwood data for this transaction, if any (NU6.3 onward).
+        ///
+        /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape but commits into
+        /// a separate note commitment tree and nullifier set.
+        ironwood_shielded_data: Option<orchard::ShieldedData>,
     },
 }
 
@@ -190,7 +193,10 @@ impl fmt::Display for Transaction {
             fmter.field("expiry_height", &expiry_height);
         }
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        fmter.field("zip233_amount", &self.zip233_amount());
+        fmter.field(
+            "has_ironwood_shielded_data",
+            &self.has_ironwood_shielded_data(),
+        );
 
         fmter.field("transparent_inputs", &self.inputs().len());
         fmter.field("transparent_outputs", &self.outputs().len());
@@ -320,13 +326,13 @@ impl Transaction {
                     .orchard_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_SPENDS))
+            || (self.ironwood_actions().count() > 0
+                && self
+                    .ironwood_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_SPENDS))
     }
 
-    /// Does this transaction have zip233_amount output?
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    pub fn has_zip233_amount(&self) -> bool {
-        self.zip233_amount() > Amount::<NonNegative>::zero()
-    }
     /// Does this transaction have shielded outputs?
     ///
     /// See [`Self::has_transparent_or_shielded_outputs`] for details.
@@ -336,6 +342,11 @@ impl Transaction {
             || (self.orchard_actions().count() > 0
                 && self
                     .orchard_flags()
+                    .unwrap_or_else(orchard::Flags::empty)
+                    .contains(orchard::Flags::ENABLE_OUTPUTS))
+            || (self.ironwood_actions().count() > 0
+                && self
+                    .ironwood_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
     }
@@ -1130,12 +1141,21 @@ impl Transaction {
     /// regardless of version.
     ///
     /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape but commits into a
-    /// separate note commitment tree and nullifier set. It only appears in v6 transactions; the v6
-    /// Ironwood bundle field is added in a later change, so this currently returns [`None`] for
-    /// every transaction version.
+    /// separate note commitment tree and nullifier set. It only appears in v6 transactions.
     pub fn ironwood_shielded_data(&self) -> Option<&orchard::ShieldedData> {
-        // TODO: return the v6 Ironwood bundle once `Transaction::V6` carries it (Phase 2).
-        None
+        match self {
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 {
+                ironwood_shielded_data,
+                ..
+            } => ironwood_shielded_data.as_ref(),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => None,
+        }
     }
 
     /// Iterate over the Ironwood [`orchard::Action`]s in this transaction, if there are any,
@@ -1610,19 +1630,6 @@ impl Transaction {
             Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
-        }
-    }
-
-    /// Access the zip233 amount field of this transaction, regardless of version.
-    pub fn zip233_amount(&self) -> Amount<NonNegative> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 { .. } => Amount::zero(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { zip233_amount, .. } => *zip233_amount,
         }
     }
 }
