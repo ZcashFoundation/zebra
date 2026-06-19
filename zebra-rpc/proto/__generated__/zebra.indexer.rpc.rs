@@ -25,6 +25,19 @@ pub struct BlockAndHash {
     #[prost(bytes = "vec", tag = "2")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+/// A request to subscribe to non-finalized state changes.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NonFinalizedStateChangeRequest {
+    /// The hashes of the chain tips the caller already has, in display order.
+    ///
+    /// The server streams only the non-finalized blocks that come after these
+    /// tips, skipping any block at or below a provided tip on the same chain.
+    /// If empty, every block currently in the non-finalized state is sent, so an
+    /// empty request is equivalent to the previous no-argument behavior.
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub chain_tip_hashes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Represents a change in the mempool.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -204,9 +217,13 @@ pub mod indexer_client {
             self.inner.server_streaming(req, path, codec).await
         }
         /// Notifies listeners of new blocks in the non-finalized state.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams blocks after those tips. An empty request streams every
+        /// block currently in the non-finalized state.
         pub async fn non_finalized_state_change(
             &mut self,
-            request: impl tonic::IntoRequest<super::Empty>,
+            request: impl tonic::IntoRequest<super::NonFinalizedStateChangeRequest>,
         ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::BlockAndHash>>,
             tonic::Status,
@@ -294,9 +311,13 @@ pub mod indexer_server {
             + std::marker::Send
             + 'static;
         /// Notifies listeners of new blocks in the non-finalized state.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams blocks after those tips. An empty request streams every
+        /// block currently in the non-finalized state.
         async fn non_finalized_state_change(
             &self,
-            request: tonic::Request<super::Empty>,
+            request: tonic::Request<super::NonFinalizedStateChangeRequest>,
         ) -> std::result::Result<
             tonic::Response<Self::NonFinalizedStateChangeStream>,
             tonic::Status,
@@ -439,8 +460,11 @@ pub mod indexer_server {
                 "/zebra.indexer.rpc.Indexer/NonFinalizedStateChange" => {
                     #[allow(non_camel_case_types)]
                     struct NonFinalizedStateChangeSvc<T: Indexer>(pub Arc<T>);
-                    impl<T: Indexer> tonic::server::ServerStreamingService<super::Empty>
-                    for NonFinalizedStateChangeSvc<T> {
+                    impl<
+                        T: Indexer,
+                    > tonic::server::ServerStreamingService<
+                        super::NonFinalizedStateChangeRequest,
+                    > for NonFinalizedStateChangeSvc<T> {
                         type Response = super::BlockAndHash;
                         type ResponseStream = T::NonFinalizedStateChangeStream;
                         type Future = BoxFuture<
@@ -449,7 +473,9 @@ pub mod indexer_server {
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::Empty>,
+                            request: tonic::Request<
+                                super::NonFinalizedStateChangeRequest,
+                            >,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {

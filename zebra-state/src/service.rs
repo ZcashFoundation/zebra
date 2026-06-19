@@ -1371,12 +1371,13 @@ impl Service<ReadRequest> for ReadStateService {
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
 
-        if req == ReadRequest::NonFinalizedBlocksListener {
+        if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
             let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
                 self.network.clone(),
                 self.non_finalized_state_receiver.clone(),
+                known_chain_tips,
             );
 
             return async move {
@@ -1771,7 +1772,7 @@ impl Service<ReadRequest> for ReadStateService {
                 ))
             }
 
-            ReadRequest::NonFinalizedBlocksListener => {
+            ReadRequest::NonFinalizedBlocksListener { .. } => {
                 unreachable!("should return early");
             }
 

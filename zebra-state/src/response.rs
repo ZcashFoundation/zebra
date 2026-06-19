@@ -1,6 +1,9 @@
 //! State [`tower::Service`] response types.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 
@@ -215,16 +218,23 @@ impl NonFinalizedBlocksListener {
     /// Spawns a task to listen for changes in the non-finalized state and sends any blocks in the non-finalized state
     /// to the caller that have not already been sent.
     ///
+    /// `known_chain_tips` holds the hashes of chain tips the caller already has. Walking each
+    /// non-finalized chain from its tip downwards, blocks are sent until a hash in this set is
+    /// reached, so any block at or below a known tip on the same chain is skipped. If it is empty,
+    /// every block currently in the non-finalized state is sent.
+    ///
     /// Returns a new instance of [`NonFinalizedBlocksListener`] for the caller to listen for new blocks in the non-finalized state.
     pub fn spawn(
         network: Network,
         mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+        known_chain_tips: HashSet<block::Hash>,
     ) -> Self {
         let (sender, receiver) = tokio::sync::mpsc::channel(NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE);
 
         tokio::spawn(async move {
-            // Start with an empty non-finalized state with the expectation that the caller doesn't yet have
-            // any blocks from the non-finalized state.
+            // Start with an empty non-finalized state. Any blocks the caller already has are
+            // identified by the `known_chain_tips` hashes below, so by default we assume the
+            // caller doesn't yet have any blocks from the non-finalized state.
             let mut prev_non_finalized_state = NonFinalizedState::new(&network);
 
             loop {
@@ -249,6 +259,7 @@ impl NonFinalizedBlocksListener {
                             .rev()
                             .take_while(|cv_block| {
                                 !prev_non_finalized_state.any_chain_contains(&cv_block.hash)
+                                    && !known_chain_tips.contains(&cv_block.hash)
                             })
                             .collect();
                         new_blocks.reverse();

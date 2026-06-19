@@ -5,7 +5,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
 use tower::BoxError;
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{block::Height, parameters::Network, serialization::BytesInDisplayOrder};
 use zebra_state::{
     spawn_init_read_only, ChainTipBlock, ChainTipChange, ChainTipSender, CheckpointVerifiedBlock,
     LatestChainTip, NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock,
@@ -14,7 +14,9 @@ use zebra_state::{
 
 use zebra_chain::diagnostic::task::WaitForPanics;
 
-use crate::indexer::{indexer_client::IndexerClient, BlockAndHash, Empty};
+use crate::indexer::{
+    indexer_client::IndexerClient, BlockAndHash, Empty, NonFinalizedStateChangeRequest,
+};
 
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_secs(5);
@@ -193,7 +195,7 @@ impl TrustedChainSync {
             };
 
             if self.non_finalized_state.any_chain_contains(&hash) {
-                tracing::info!(?hash, "non-finalized state already contains block");
+                tracing::warn!(?hash, "non-finalized state already contains block");
                 continue;
             }
 
@@ -201,17 +203,6 @@ impl TrustedChainSync {
             match self.try_commit(block.clone()).await {
                 Ok(()) => {
                     last_failed_commit_hash = None;
-
-                    while self
-                        .non_finalized_state
-                        .root_height()
-                        .expect("just successfully inserted a non-finalized block above")
-                        <= self.db.finalized_tip_height().unwrap_or(Height::MIN)
-                    {
-                        tracing::trace!("finalizing block past the reorg limit");
-                        self.non_finalized_state.finalize();
-                    }
-
                     self.update_channels();
                 }
                 Err(error) => {
@@ -227,8 +218,6 @@ impl TrustedChainSync {
                         last_failed_commit_hash = Some(hash);
                     }
 
-                    // TODO: Investigate whether it would be correct to ignore some errors here instead of
-                    //       trying every block in the non-finalized state again.
                     non_finalized_blocks_listener = None;
 
                     // Back off before re-subscribing so a persistently failing block doesn't turn
@@ -244,22 +233,35 @@ impl TrustedChainSync {
         block: SemanticallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         self.try_catch_up_with_primary().await;
+        self.prune_finalized();
 
         if self.db.finalized_tip_hash() == block.block.header.previous_block_hash {
             self.non_finalized_state.commit_new_chain(block, &self.db)
         } else {
-            self.non_finalized_state.commit_block(block, &self.db)
+            self.non_finalized_state.commit_block(block, &self.db)?;
+            Ok(())
         }
     }
 
-    /// Calls `non_finalized_state_change()` method on the indexer gRPC client to subscribe
+    /// Calls the `non_finalized_state_change()` method on the indexer gRPC client to subscribe
     /// to non-finalized state changes, and returns the response stream.
+    ///
+    /// Passes the tip hashes of every chain currently in this syncer's non-finalized state so the
+    /// server only streams blocks after the tips we already have, instead of re-sending the whole
+    /// non-finalized state on every (re)subscription. When the non-finalized state is empty, the
+    /// request carries no tips and the server streams every non-finalized block.
     async fn subscribe_to_non_finalized_state_change(
         &mut self,
     ) -> Result<Streaming<BlockAndHash>, Status> {
         self.indexer_rpc_client
             .clone()
-            .non_finalized_state_change(Empty {})
+            .non_finalized_state_change(NonFinalizedStateChangeRequest {
+                chain_tip_hashes: self
+                    .non_finalized_state
+                    .chain_iter()
+                    .map(|c| c.non_finalized_tip_hash().bytes_in_display_order().to_vec())
+                    .collect(),
+            })
             .await
             .map(|a| a.into_inner())
     }
@@ -280,6 +282,24 @@ impl TrustedChainSync {
         })
         .wait_for_panics()
         .await
+    }
+
+    /// Finalizes any non-finalized blocks that are at or below the finalized tip height.
+    ///
+    /// The secondary's finalized state follows the primary, so after catching up it may have
+    /// advanced past the root of the non-finalized state. This drops those now-finalized blocks so
+    /// the non-finalized state only tracks blocks above the finalized tip. Does nothing when the
+    /// non-finalized state is empty.
+    fn prune_finalized(&mut self) {
+        let finalized_tip_height = self.db.finalized_tip_height().unwrap_or(Height::MIN);
+        while self
+            .non_finalized_state
+            .root_height()
+            .is_some_and(|root_height| root_height <= finalized_tip_height)
+        {
+            tracing::trace!("finalizing block past the reorg limit");
+            self.non_finalized_state.finalize();
+        }
     }
 
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
