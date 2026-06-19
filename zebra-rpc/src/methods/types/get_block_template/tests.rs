@@ -81,8 +81,6 @@ fn coinbase() -> anyhow::Result<()> {
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
                         Amount::zero(),
-                        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-                        None,
                     )?
                     .data()
                     .as_ref()

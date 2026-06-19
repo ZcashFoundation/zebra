@@ -2513,8 +2513,6 @@ where
             miner_params,
             mempool_txs,
             mempool_tx_deps,
-            #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-            None,
         );
 
         tracing::debug!(
@@ -2535,8 +2533,6 @@ where
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-            None,
         )
         .into())
     }

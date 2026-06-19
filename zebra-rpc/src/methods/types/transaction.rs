@@ -130,9 +130,6 @@ impl TransactionTemplate<NegativeOrZero> {
         height: Height,
         miner_params: &MinerParams,
         txs_fee: Amount<NonNegative>,
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))] zip233_amount: Option<
-            Amount<NonNegative>,
-        >,
     ) -> Result<Self, TransactionError> {
         let block_subsidy = block_subsidy(height, net)?;
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
@@ -149,16 +146,9 @@ impl TransactionTemplate<NegativeOrZero> {
         let default_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-        {
-            let zip233_amount = if cfg!(zcash_unstable = "zip235") {
-                zip233_amount.unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap())
-            } else {
-                zip233_amount.unwrap_or(Amount::zero())
-            };
-
-            builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
-        }
+        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. If the
+        // Network Sustainability Mechanism re-introduces a burn, it will be plumbed back through
+        // explicitly at that point.
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {

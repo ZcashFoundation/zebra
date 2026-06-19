@@ -24,12 +24,6 @@ use zebra_node_services::mempool::TransactionDependencies;
 
 use crate::methods::types::transaction::TransactionTemplate;
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-use crate::methods::Amount;
-
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-use zebra_chain::amount::NonNegative;
-
 #[cfg(test)]
 mod tests;
 
@@ -63,21 +57,12 @@ pub fn select_mempool_transactions(
     miner_params: &MinerParams,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))] zip233_amount: Option<
-        Amount<NonNegative>,
-    >,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
-    let fake_coinbase_tx = TransactionTemplate::new_coinbase(
-        net,
-        height,
-        miner_params,
-        Amount::zero(),
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
-        zip233_amount,
-    )
-    .expect("valid coinbase transaction template");
+    let fake_coinbase_tx =
+        TransactionTemplate::new_coinbase(net, height, miner_params, Amount::zero())
+            .expect("valid coinbase transaction template");
 
     let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
