@@ -54,6 +54,10 @@ const COMMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// connection without false-triggering; the bridge retries on the next subscription.
 const GET_BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long to wait to establish a gRPC subscription stream before assuming the request is wedged
+/// and retrying. The subscription handshake should complete promptly.
+const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 #[derive(Debug)]
 pub struct TrustedChainSync {
@@ -78,14 +82,20 @@ async fn update_finalized_chain_tip(
 
     loop {
         let Some(ref mut chain_tip_change) = chain_tip_change_stream else {
-            chain_tip_change_stream = match indexer_rpc_client
-                .chain_tip_change(Empty {})
-                .await
-                .map(|a| a.into_inner())
+            chain_tip_change_stream = match tokio::time::timeout(
+                SUBSCRIBE_TIMEOUT,
+                indexer_rpc_client.chain_tip_change(Empty {}),
+            )
+            .await
             {
-                Ok(listener) => Some(listener),
-                Err(err) => {
+                Ok(Ok(response)) => Some(response.into_inner()),
+                Ok(Err(err)) => {
                     tracing::warn!(?err, "failed to subscribe to chain tip changes");
+                    tokio::time::sleep(POLL_DELAY).await;
+                    None
+                }
+                Err(_) => {
+                    tracing::warn!("timed out subscribing to chain tip changes");
                     tokio::time::sleep(POLL_DELAY).await;
                     None
                 }
@@ -94,32 +104,33 @@ async fn update_finalized_chain_tip(
             continue;
         };
 
-        let message =
-            match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()).await {
-                Ok(Ok(Some(block_hash_and_height))) => block_hash_and_height,
-                Ok(Ok(None)) => {
-                    tracing::warn!("chain_tip_change stream ended unexpectedly");
-                    chain_tip_change_stream = None;
-                    continue;
-                }
-                Ok(Err(err)) => {
-                    tracing::warn!(?err, "error receiving chain tip change");
-                    chain_tip_change_stream = None;
-                    continue;
-                }
-                Err(_) => {
-                    tracing::debug!("chain tip change stream timed out, re-subscribing");
-                    chain_tip_change_stream = None;
-                    continue;
-                }
-            };
+        // The message is only a signal that the primary's best chain advanced. We publish our own
+        // finalized tip below, not the primary's (non-finalized) best tip, so the hash is unused.
+        match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()).await {
+            Ok(Ok(Some(_block_hash_and_height))) => {}
+            Ok(Ok(None)) => {
+                tracing::warn!("chain_tip_change stream ended unexpectedly");
+                chain_tip_change_stream = None;
+                continue;
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(?err, "error receiving chain tip change");
+                chain_tip_change_stream = None;
+                continue;
+            }
+            Err(_) => {
+                tracing::debug!("chain tip change stream timed out, re-subscribing");
+                chain_tip_change_stream = None;
+                continue;
+            }
+        }
 
-        let Some((hash, _height)) = message.try_into_hash_and_height() else {
-            tracing::warn!("failed to convert message into a block hash and height");
-            continue;
-        };
-
-        // Skip the chain tip change if catching up to the primary db instance fails.
+        // Catch the secondary's finalized state up to the primary, then publish its finalized tip.
+        //
+        // This keeps the finalized tip current while the secondary is still catching up. Once
+        // `TrustedChainSync::sync()` commits its first non-finalized block, the chain tip sender
+        // switches to the non-finalized tip and these finalized updates become no-ops, so this task
+        // doesn't need to stop itself once the syncer has taken over.
         if let Err(error) = db.spawn_try_catch_up_with_primary().await {
             tracing::debug!(
                 ?error,
@@ -128,16 +139,24 @@ async fn update_finalized_chain_tip(
             continue;
         }
 
-        // End the task and let the `TrustedChainSync::sync()` method send non-finalized chain tip updates if
-        // the latest chain tip hash is not present in the db.
-        let Some(tip_block) = db.block(hash.into()) else {
-            return;
-        };
-
-        finalized_chain_tip_sender.set_finalized_tip(Some(
-            SemanticallyVerifiedBlock::with_hash(tip_block, hash).into(),
-        ));
+        if let Some(tip_block) = finalized_chain_tip_block(&db).await {
+            finalized_chain_tip_sender.set_finalized_tip(tip_block);
+        }
     }
+}
+
+/// Reads the finalized tip block from the secondary db instance and converts it to a
+/// [`ChainTipBlock`].
+async fn finalized_chain_tip_block(db: &ZebraDb) -> Option<ChainTipBlock> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || {
+        let (height, hash) = db.tip()?;
+        db.block(height.into())
+            .map(|block| CheckpointVerifiedBlock::with_hash(block, hash))
+            .map(ChainTipBlock::from)
+    })
+    .wait_for_panics()
+    .await
 }
 
 impl TrustedChainSync {
@@ -195,7 +214,7 @@ impl TrustedChainSync {
         // same warning at full rate while a block persistently fails to commit.
         let mut last_failed_commit_hash = None;
         self.try_catch_up_with_primary().await;
-        if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
+        if let Some(finalized_tip_block) = finalized_chain_tip_block(&self.db).await {
             self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
         }
 
@@ -423,35 +442,30 @@ impl TrustedChainSync {
     async fn subscribe_to_non_finalized_state_change(
         &mut self,
     ) -> Result<Streaming<BlockAndHash>, Status> {
-        self.indexer_rpc_client
-            .clone()
-            .non_finalized_state_change(NonFinalizedStateChangeRequest {
-                chain_tip_hashes: self
-                    .non_finalized_state
-                    .chain_iter()
-                    .map(|c| c.non_finalized_tip_hash().bytes_in_display_order().to_vec())
-                    .collect(),
-            })
-            .await
-            .map(|a| a.into_inner())
+        let request = NonFinalizedStateChangeRequest {
+            chain_tip_hashes: self
+                .non_finalized_state
+                .chain_iter()
+                .map(|c| c.non_finalized_tip_hash().bytes_in_display_order().to_vec())
+                .collect(),
+        };
+
+        tokio::time::timeout(
+            SUBSCRIBE_TIMEOUT,
+            self.indexer_rpc_client
+                .clone()
+                .non_finalized_state_change(request),
+        )
+        .await
+        .map_err(|_| {
+            Status::deadline_exceeded("non_finalized_state_change subscription timed out")
+        })?
+        .map(|a| a.into_inner())
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
     async fn try_catch_up_with_primary(&self) {
         let _ = self.db.spawn_try_catch_up_with_primary().await;
-    }
-
-    /// Reads the finalized tip block from the secondary db instance and converts it to a [`ChainTipBlock`].
-    async fn finalized_chain_tip_block(&self) -> Option<ChainTipBlock> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            let (height, hash) = db.tip()?;
-            db.block(height.into())
-                .map(|block| CheckpointVerifiedBlock::with_hash(block, hash))
-                .map(ChainTipBlock::from)
-        })
-        .wait_for_panics()
-        .await
     }
 
     /// Finalizes any non-finalized blocks that are at or below the finalized tip height.
