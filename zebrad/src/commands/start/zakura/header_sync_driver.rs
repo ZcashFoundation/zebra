@@ -831,6 +831,11 @@ pub(crate) fn header_range_commit_failure_kind(
         zebra_state::CommitHeaderRangeError::StorageWriteError { .. }
         | zebra_state::CommitHeaderRangeError::MissingGenesisAnchor { .. }
         | zebra_state::CommitHeaderRangeError::SendCommitRequestFailed
+        // A lower-work conflicting range is individually valid (each header passed
+        // PoW, difficulty, and contextual checks); the peer simply offered a worse
+        // fork. Treat it as non-scoring so this stays a liveness/correctness guard,
+        // not peer punishment.
+        | zebra_state::CommitHeaderRangeError::LowerWorkConflict { .. }
         | zebra_state::CommitHeaderRangeError::CommitResponseDropped => {
             HeaderSyncCommitFailureKind::Local
         }

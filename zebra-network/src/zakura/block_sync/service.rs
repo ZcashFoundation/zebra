@@ -338,6 +338,31 @@ impl BlockSyncService {
         };
         count < cap
     }
+
+    /// Whether `add_peer` may install a session for this peer. A peer that is
+    /// already registered may always *replace* its session (the
+    /// connection-symmetry collision where both sides opened a block-sync stream
+    /// resolves to the winner's stream by replacing the loser's already-counted
+    /// session); only genuinely new peers are held to the per-direction cap.
+    fn can_admit_peer(&self, peer_id: &ZakuraPeerId, direction: ServicePeerDirection) -> bool {
+        let peers = self
+            .inner
+            .peers
+            .lock()
+            .expect("block-sync peer map mutex is never poisoned");
+        if peers.contains_key(peer_id) {
+            return true;
+        }
+        let count = peers
+            .values()
+            .filter(|record| record.direction == direction)
+            .count();
+        let cap = match direction {
+            ServicePeerDirection::Inbound => self.inner.config.peer_limits.max_inbound_peers,
+            ServicePeerDirection::Outbound => self.inner.config.peer_limits.max_outbound_peers,
+        };
+        count < cap
+    }
 }
 
 impl Service for BlockSyncService {
@@ -359,7 +384,7 @@ impl Service for BlockSyncService {
     }
 
     fn add_peer(&self, mut peer: Peer) {
-        if !self.peer_slots_free(peer.direction) {
+        if !self.can_admit_peer(&peer.id, peer.direction) {
             return;
         }
 

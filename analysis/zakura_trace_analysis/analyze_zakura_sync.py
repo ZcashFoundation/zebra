@@ -108,6 +108,7 @@ def build_cache(
         con.execute("DROP TABLE IF EXISTS block_body_first_seen")
         con.execute("DROP TABLE IF EXISTS block_sync_states")
         con.execute("DROP TABLE IF EXISTS frontier_transitions")
+        con.execute("DROP TABLE IF EXISTS block_get_blocks_sent")
         con.execute("DROP TABLE IF EXISTS block_message_sent")
         con.execute("DROP TABLE IF EXISTS block_message_received")
         con.execute("DROP TABLE IF EXISTS block_status_received")
@@ -182,6 +183,24 @@ def build_cache(
                 TRY_CAST(json_extract_string(json, '$.peers') AS BIGINT) AS peers,
                 TRY_CAST(json_extract_string(json, '$.peers_with_status') AS BIGINT)
                     AS peers_with_status,
+                TRY_CAST(json_extract_string(json, '$.inbound_peers') AS BIGINT)
+                    AS inbound_peers,
+                TRY_CAST(json_extract_string(json, '$.outbound_peers') AS BIGINT)
+                    AS outbound_peers,
+                TRY_CAST(json_extract_string(json, '$.inbound_peers_with_status') AS BIGINT)
+                    AS inbound_peers_with_status,
+                TRY_CAST(json_extract_string(json, '$.outbound_peers_with_status') AS BIGINT)
+                    AS outbound_peers_with_status,
+                TRY_CAST(json_extract_string(json, '$.request_slot_capacity') AS BIGINT)
+                    AS request_slot_capacity,
+                TRY_CAST(json_extract_string(json, '$.request_slot_effective_window') AS BIGINT)
+                    AS request_slot_effective_window,
+                TRY_CAST(json_extract_string(json, '$.request_slot_available') AS BIGINT)
+                    AS request_slot_available,
+                TRY_CAST(json_extract_string(json, '$.request_slot_timeout_recovery') AS BIGINT)
+                    AS request_slot_timeout_recovery,
+                TRY_CAST(json_extract_string(json, '$.request_slot_saturated_peers') AS BIGINT)
+                    AS request_slot_saturated_peers,
                 TRY_CAST(json_extract_string(json, '$.queue_blocks') AS BIGINT) AS queue_blocks,
                 TRY_CAST(json_extract_string(json, '$.queue_len') AS BIGINT) AS queue_len,
                 TRY_CAST(json_extract_string(json, '$.refill_low_water') AS BIGINT)
@@ -212,6 +231,32 @@ def build_cache(
             WHERE json_extract_string(json, '$.event') = 'sync_frontier_transition'
             """,
             [str(paths.commit_state)],
+        )
+        con.execute(
+            """
+            CREATE TABLE block_get_blocks_sent AS
+            SELECT
+                TRY_CAST(json_extract_string(json, '$.ts') AS BIGINT) AS ts,
+                json_extract_string(json, '$.peer') AS peer,
+                json_extract_string(json, '$.direction') AS direction,
+                TRY_CAST(json_extract_string(json, '$.range_start') AS BIGINT) AS range_start,
+                TRY_CAST(json_extract_string(json, '$.range_count') AS BIGINT) AS range_count,
+                TRY_CAST(json_extract_string(json, '$.estimated_bytes') AS BIGINT)
+                    AS estimated_bytes,
+                TRY_CAST(json_extract_string(json, '$.available_slots') AS BIGINT)
+                    AS available_slots,
+                TRY_CAST(json_extract_string(json, '$.peer_outstanding') AS BIGINT)
+                    AS peer_outstanding,
+                TRY_CAST(json_extract_string(json, '$.hard_outbound_capacity') AS BIGINT)
+                    AS hard_outbound_capacity,
+                TRY_CAST(json_extract_string(json, '$.outbound_request_window') AS BIGINT)
+                    AS outbound_request_window,
+                TRY_CAST(json_extract_string(json, '$.timeout_recovery_slots') AS BIGINT)
+                    AS timeout_recovery_slots
+            FROM read_json_objects(?)
+            WHERE json_extract_string(json, '$.event') = 'block_get_blocks_sent'
+            """,
+            [str(paths.block_sync)],
         )
         con.execute(
             """
@@ -570,6 +615,19 @@ def build_state_intervals(con: duckdb.DuckDBPyConnection, min_ts: int) -> pd.Dat
     states["download_budget_saturated"] = (
         (states["budget_available"] == 0) | (states["download_budget_used_pct"] >= 95.0)
     )
+    states["request_slot_used_pct"] = np.where(
+        states["request_slot_capacity"] > 0,
+        states["outstanding"] / states["request_slot_capacity"] * 100.0,
+        0.0,
+    )
+    states["request_window_used_pct"] = np.where(
+        states["request_slot_effective_window"] > 0,
+        states["outstanding"] / states["request_slot_effective_window"] * 100.0,
+        0.0,
+    )
+    states["request_slots_saturated"] = (
+        (states["request_slot_capacity"] > 0) & (states["request_slot_used_pct"] >= 95.0)
+    )
     states["hol_gap_active"] = states.apply(is_hol_gap_interval, axis=1)
     states["hol_gap_reorder_blocks"] = states["reorder"].where(states["hol_gap_active"], 0)
     states["blocking_class"] = states.apply(classify_state_interval, axis=1)
@@ -603,12 +661,24 @@ def build_state_intervals(con: duckdb.DuckDBPyConnection, min_ts: int) -> pd.Dat
         "refill_low_water",
         "peers",
         "peers_with_status",
+        "inbound_peers",
+        "outbound_peers",
+        "inbound_peers_with_status",
+        "outbound_peers_with_status",
         "budget_reserved",
         "budget_available",
         "download_budget_used_pct",
         "download_budget_saturated",
         "assigned_len",
         "outstanding",
+        "request_slot_capacity",
+        "request_slot_effective_window",
+        "request_slot_available",
+        "request_slot_timeout_recovery",
+        "request_slot_saturated_peers",
+        "request_slot_used_pct",
+        "request_window_used_pct",
+        "request_slots_saturated",
         "queue_blocks",
         "queue_len",
         "needed_count",
@@ -712,11 +782,26 @@ def build_summary(
         if not states.empty
         else 0.0
     )
+    request_slots_saturated_duration_s = (
+        float(states.loc[states["request_slots_saturated"], "duration_s"].sum())
+        if not states.empty
+        else 0.0
+    )
     if states.empty or states["duration_s"].sum() <= 0:
         weighted_budget_used_pct = 0.0
+        weighted_request_slot_used_pct = 0.0
+        weighted_request_window_used_pct = 0.0
     else:
         weighted_budget_used_pct = float(
             (states["download_budget_used_pct"] * states["duration_s"]).sum()
+            / states["duration_s"].sum()
+        )
+        weighted_request_slot_used_pct = float(
+            (states["request_slot_used_pct"] * states["duration_s"]).sum()
+            / states["duration_s"].sum()
+        )
+        weighted_request_window_used_pct = float(
+            (states["request_window_used_pct"] * states["duration_s"]).sum()
             / states["duration_s"].sum()
         )
 
@@ -758,9 +843,25 @@ def build_summary(
         "hol_gap_duration_s": hol_gap_duration_s,
         "download_budget_saturated_duration_s": budget_saturated_duration_s,
         "weighted_download_budget_used_pct": weighted_budget_used_pct,
+        "request_slots_saturated_duration_s": request_slots_saturated_duration_s,
+        "weighted_request_slot_used_pct": weighted_request_slot_used_pct,
+        "weighted_request_window_used_pct": weighted_request_window_used_pct,
+        "peak_request_slot_capacity": int(states["request_slot_capacity"].max())
+        if not states.empty
+        else 0,
+        "peak_request_slot_available": int(states["request_slot_available"].max())
+        if not states.empty
+        else 0,
+        "peak_request_slot_used_pct": float(states["request_slot_used_pct"].max())
+        if not states.empty
+        else 0.0,
+        "peak_request_window_used_pct": float(states["request_window_used_pct"].max())
+        if not states.empty
+        else 0.0,
         "blocking_breakdown": blocking,
         "hol_gap_diagnostics": hol_gap_diagnostics(states),
         "status_cap_diagnostics": status_cap_diagnostics(con),
+        "get_blocks_sent_diagnostics": get_blocks_sent_diagnostics(con),
         "message_diagnostics": message_diagnostics(con),
     }
 
@@ -830,6 +931,32 @@ def status_cap_diagnostics(con: duckdb.DuckDBPyConnection) -> list[dict[str, Any
     return caps.to_dict(orient="records")
 
 
+def get_blocks_sent_diagnostics(con: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
+    try:
+        diagnostics = con.execute(
+            """
+            SELECT
+                coalesce(direction, 'unknown') AS direction,
+                count(*) AS count,
+                count(DISTINCT peer) AS peers,
+                avg(range_count) AS avg_count,
+                avg(estimated_bytes) AS avg_estimated_bytes,
+                avg(available_slots) AS avg_available_slots_before_send,
+                max(available_slots) AS max_available_slots_before_send,
+                avg(peer_outstanding) AS avg_peer_outstanding_before_send,
+                max(peer_outstanding) AS max_peer_outstanding_before_send,
+                max(hard_outbound_capacity) AS max_hard_outbound_capacity,
+                max(outbound_request_window) AS max_outbound_request_window
+            FROM block_get_blocks_sent
+            GROUP BY coalesce(direction, 'unknown')
+            ORDER BY count DESC, direction
+            """
+        ).df()
+    except duckdb.CatalogException:
+        return []
+    return diagnostics.to_dict(orient="records")
+
+
 def message_diagnostics(con: duckdb.DuckDBPyConnection) -> dict[str, list[dict[str, Any]]]:
     sent_by_kind_result = con.execute(
         """
@@ -883,7 +1010,40 @@ def write_summary(path: Path, summary: dict[str, Any]) -> None:
     blocking = summary["blocking_breakdown"]
     hol_diagnostics = summary["hol_gap_diagnostics"]
     status_caps = summary["status_cap_diagnostics"]
+    get_blocks_sent = summary["get_blocks_sent_diagnostics"]
     diagnostics = summary["message_diagnostics"]
+    slot_trace_available = summary["peak_request_slot_capacity"] > 0
+    slot_weighted_pct = (
+        f"{summary['weighted_request_slot_used_pct']:.2f}%"
+        if slot_trace_available
+        else "n/a"
+    )
+    window_weighted_pct = (
+        f"{summary['weighted_request_window_used_pct']:.2f}%"
+        if slot_trace_available
+        else "n/a"
+    )
+    slot_saturated_duration = (
+        f"{summary['request_slots_saturated_duration_s']:.3f} seconds"
+        if slot_trace_available
+        else "n/a"
+    )
+    peak_slot_pct = (
+        f"{summary['peak_request_slot_used_pct']:.2f}%"
+        if slot_trace_available
+        else "n/a"
+    )
+    peak_window_pct = (
+        f"{summary['peak_request_window_used_pct']:.2f}%"
+        if slot_trace_available
+        else "n/a"
+    )
+    peak_slot_capacity = (
+        f"{summary['peak_request_slot_capacity']:,}" if slot_trace_available else "n/a"
+    )
+    peak_available_slots = (
+        f"{summary['peak_request_slot_available']:,}" if slot_trace_available else "n/a"
+    )
 
     lines = [
         "# Zakura Sync Throughput Summary",
@@ -939,6 +1099,16 @@ def write_summary(path: Path, summary: dict[str, Any]) -> None:
         "- Time with reserved download budget >= 95%: "
         f"{summary['download_budget_saturated_duration_s']:.3f} seconds",
         "",
+        "## Request Slot Utilization",
+        "",
+        f"- Wall-clock weighted hard slot utilization: {slot_weighted_pct}",
+        f"- Wall-clock weighted adaptive-window utilization: {window_weighted_pct}",
+        f"- Time with hard request slots >= 95% full: {slot_saturated_duration}",
+        f"- Peak hard request slot utilization: {peak_slot_pct}",
+        f"- Peak adaptive-window utilization: {peak_window_pct}",
+        f"- Peak hard request slot capacity: {peak_slot_capacity}",
+        f"- Peak available request slots: {peak_available_slots}",
+        "",
         "## Blocking Breakdown",
         "",
         "| Class | Seconds | Percent |",
@@ -991,6 +1161,32 @@ def write_summary(path: Path, summary: dict[str, Any]) -> None:
         )
     if not status_caps:
         lines.append("| n/a | n/a | n/a | 0 | 0 |")
+    lines.extend(
+        [
+            "",
+            "## GetBlocks Send Diagnostics",
+            "",
+            "| Direction | Sends | Peers | Avg Count | Avg Est MiB | Avg Slots Before | Max Slots Before | Avg Peer Out Before | Max Peer Out Before | Max Hard Cap | Max Window |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in get_blocks_sent:
+        lines.append(
+            "| "
+            f"{_display(row['direction'])} | "
+            f"{row['count']:,} | "
+            f"{row['peers']:,} | "
+            f"{_format_number(row['avg_count'])} | "
+            f"{_format_mib(row['avg_estimated_bytes'])} | "
+            f"{_format_number(row['avg_available_slots_before_send'])} | "
+            f"{_display(row['max_available_slots_before_send'])} | "
+            f"{_format_number(row['avg_peer_outstanding_before_send'])} | "
+            f"{_display(row['max_peer_outstanding_before_send'])} | "
+            f"{_display(row['max_hard_outbound_capacity'])} | "
+            f"{_display(row['max_outbound_request_window'])} |"
+        )
+    if not get_blocks_sent:
+        lines.append("| n/a | 0 | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |")
     lines.extend(
         [
             "",

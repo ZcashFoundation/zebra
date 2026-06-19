@@ -52,6 +52,13 @@ pub(super) struct BlockRangeScheduler {
     fanout: usize,
     ewma_fallback_bytes: u64,
     floor_estimate_bytes: u64,
+    /// Single-pass bias: a range re-queued after a request timeout records the
+    /// peer that just timed it out, so the next fill pass prefers a *different*
+    /// servable peer for it (e.g. the contiguous floor block is not immediately
+    /// re-assigned to the same slow holder). The reactor clears these after each
+    /// fill pass; `next_for_peer` falls back to the recorded peer if it is the
+    /// only servable option, so a sole peer never stalls.
+    timeout_retry_avoid: HashMap<BlockRangeKey, ZakuraPeerId>,
 }
 
 impl BlockRangeScheduler {
@@ -63,6 +70,7 @@ impl BlockRangeScheduler {
             fanout: fanout.max(1),
             ewma_fallback_bytes: DEFAULT_BS_EWMA_SEED_BYTES,
             floor_estimate_bytes: DEFAULT_BS_SIZE_FLOOR_BYTES,
+            timeout_retry_avoid: HashMap::new(),
         }
     }
 
@@ -138,17 +146,30 @@ impl BlockRangeScheduler {
         local_max_blocks_per_request: u32,
     ) -> Result<BlockRangeRequest, ScheduleSkipReason> {
         self.prune_covered();
+        let servable_and_assignable = |range: &BlockRange| {
+            range.end_height() <= peer.servable_high
+                && range.start_height() >= peer.servable_low
+                && self.can_assign_peer_to_range(peer_id, range)
+        };
+        // Prefer a range this peer did not just time out, so a slow holder of
+        // the contiguous floor does not immediately re-grab it while another
+        // servable peer could take it. Fall back to an avoided range only when
+        // this peer has no other assignable work, so a sole servable peer never
+        // stalls the floor.
         let index = self
             .queue
             .iter()
             .position(|range| {
-                range.end_height() <= peer.servable_high
-                    && range.start_height() >= peer.servable_low
-                    && self.can_assign_peer_to_range(peer_id, range)
+                servable_and_assignable(range)
+                    && self.timeout_retry_avoid.get(&range.key()) != Some(peer_id)
             })
+            .or_else(|| self.queue.iter().position(servable_and_assignable))
             .ok_or(ScheduleSkipReason::NoAssignableRange)?;
 
         let range = self.queue[index].clone();
+        // Once this range is being assigned to someone, the single-pass timeout
+        // bias for it has done its job.
+        self.timeout_retry_avoid.remove(&range.key());
         // Bound this peer's share of the global byte budget so one fast peer
         // cannot reserve the whole window and starve the others.
         let peer_reserved: u64 = peer
@@ -227,6 +248,34 @@ impl BlockRangeScheduler {
         Ok(request)
     }
 
+    /// Re-queue a range after a request timeout, biasing the next fill pass
+    /// away from the peer that just timed it out (see `timeout_retry_avoid`).
+    pub(super) fn retry_after_timeout(
+        &mut self,
+        range: BlockRangeRequest,
+        timed_out_peer: ZakuraPeerId,
+    ) {
+        if self.is_covered(range.start_height, range.end_height()) {
+            return;
+        }
+        let key = range.key();
+        self.retry(range);
+        // Only record the bias if the range actually returned to the queue
+        // (`retry` drops fully-covered or split-away ranges). A stale entry is
+        // harmless — `next_for_peer` only consults keys still in the queue — but
+        // keeping it tight avoids unbounded growth across a long sync.
+        if self.queue.iter().any(|queued| queued.key() == key) {
+            self.timeout_retry_avoid.insert(key, timed_out_peer);
+        }
+    }
+
+    /// Drop all single-pass timeout-retry biases. The reactor calls this at the
+    /// end of each fill pass so a bias only steers the pass that follows the
+    /// timeout that set it.
+    pub(super) fn clear_timeout_avoid(&mut self) {
+        self.timeout_retry_avoid.clear();
+    }
+
     pub(super) fn retry(&mut self, range: BlockRangeRequest) {
         if self.is_covered(range.start_height, range.end_height()) {
             return;
@@ -251,8 +300,8 @@ impl BlockRangeScheduler {
                 })
                 .collect(),
         };
-        for segment in self.uncovered_segments(retry_range).into_iter().rev() {
-            self.queue.push_front(segment);
+        for segment in self.uncovered_segments(retry_range) {
+            self.insert_queued_range(segment);
         }
     }
 
@@ -278,7 +327,9 @@ impl BlockRangeScheduler {
     }
 
     pub(super) fn clear_assignment(&mut self, range: &BlockRangeRequest) {
-        self.assigned.remove(&range.key());
+        let key = range.key();
+        self.assigned.remove(&key);
+        self.timeout_retry_avoid.remove(&key);
     }
 
     pub(super) fn mark_height_covered(&mut self, height: block::Height) {
@@ -399,9 +450,23 @@ impl BlockRangeScheduler {
                 .collect::<Vec<_>>();
 
             for segment in Self::uncovered_segments_for(&blocked, range) {
-                self.queue.push_back(segment);
+                self.insert_queued_range(segment);
             }
         }
+    }
+
+    fn insert_queued_range(&mut self, range: BlockRange) {
+        if range.blocks.is_empty() {
+            return;
+        }
+
+        let start = range.start_height();
+        let index = self
+            .queue
+            .iter()
+            .position(|queued| queued.start_height() > start)
+            .unwrap_or(self.queue.len());
+        self.queue.insert(index, range);
     }
 
     fn estimate_bytes(&self, estimate: BlockSizeEstimate) -> u64 {

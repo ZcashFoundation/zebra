@@ -226,6 +226,20 @@ pub enum CommitHeaderRangeError {
         best_header_tip: block::Height,
     },
 
+    /// A conflicting header range carried no more cumulative work than the existing
+    /// header chain it would replace, so it was rejected to keep the most-work chain.
+    #[error(
+        "conflicting header range at {height:?} has cumulative work {new_work} <= existing work {existing_work}"
+    )]
+    LowerWorkConflict {
+        /// Height where the new range first conflicts with the stored chain.
+        height: block::Height,
+        /// Cumulative work of the existing conflicting suffix.
+        existing_work: u128,
+        /// Cumulative work of the new conflicting suffix.
+        new_work: u128,
+    },
+
     /// A header conflicts with a trusted checkpoint hash.
     #[error("checkpoint conflict at {height:?}: expected {expected}, got {actual}")]
     CheckpointConflict {

@@ -408,9 +408,10 @@ fn peer_outbound_request_window_halves_on_timeout_and_grows_on_success() {
         state.reduce_outbound_window_after_timeout();
     }
     assert_eq!(state.outbound_request_window, 1);
-    assert_eq!(state.available_slots(), 0);
+    assert_eq!(state.available_slots(), state.timeout_recovery_slots);
 
     state.outstanding.clear();
+    state.timeout_recovery_slots = 0;
     state.increase_outbound_window_after_success();
     assert_eq!(state.outbound_request_window, 2);
 
@@ -420,6 +421,199 @@ fn peer_outbound_request_window_halves_on_timeout_and_grows_on_success() {
         state.outbound_request_window,
         usize::from(MAX_BS_INFLIGHT_REQUESTS)
     );
+}
+
+#[test]
+fn peer_timeout_recovery_slot_replaces_timed_out_request_above_reduced_window() {
+    let (_peer, mut state) = peer_state(45);
+    state.max_inflight_requests = 8;
+    state.outbound_request_window = 8;
+
+    for height in 1u32..=8 {
+        let byte = u8::try_from(height).expect("test heights fit in u8");
+        state.outstanding.push(OutstandingBlockRange {
+            request: BlockRangeRequest {
+                start_height: block::Height(height),
+                count: 1,
+                anchor_hash: block::Hash([byte; 32]),
+                estimated_bytes: 1,
+                expected_hashes: vec![(block::Height(height), block::Hash([byte; 32]))],
+                expected_bytes: vec![(block::Height(height), 1)],
+            },
+            deadline: Instant::now(),
+            received: HashSet::new(),
+        });
+    }
+
+    assert_eq!(state.available_slots(), 0);
+
+    state.reduce_outbound_window_after_timeout();
+    assert_eq!(state.outbound_request_window, 4);
+    assert_eq!(state.timeout_recovery_slots, 1);
+    assert_eq!(
+        state.available_slots(),
+        0,
+        "the advertised hard cap is still full until the timed-out request is removed"
+    );
+
+    state.outstanding.remove(0);
+    assert_eq!(
+        state.available_slots(),
+        1,
+        "a timeout recovery slot lets the retry replace the timed-out request"
+    );
+
+    state.record_outbound_request_scheduled();
+    assert_eq!(state.timeout_recovery_slots, 0);
+    state.outstanding.push(OutstandingBlockRange {
+        request: BlockRangeRequest {
+            start_height: block::Height(9),
+            count: 1,
+            anchor_hash: block::Hash([9; 32]),
+            estimated_bytes: 1,
+            expected_hashes: vec![(block::Height(9), block::Hash([9; 32]))],
+            expected_bytes: vec![(block::Height(9), 1)],
+        },
+        deadline: Instant::now(),
+        received: HashSet::new(),
+    });
+    assert_eq!(
+        state.available_slots(),
+        0,
+        "regular scheduling remains held below the reduced adaptive window"
+    );
+}
+
+#[test]
+fn state_expires_due_timeouts_without_waiting_for_tick() {
+    let startup = BlockSyncStartup::inert(ZakuraBlockSyncConfig::default());
+    let mut state = BlockSyncState::new(&startup);
+    let now = Instant::now();
+    let request = BlockRangeRequest {
+        start_height: block::Height(1),
+        count: 1,
+        anchor_hash: block::Hash([1; 32]),
+        estimated_bytes: 100,
+        expected_hashes: vec![(block::Height(1), block::Hash([1; 32]))],
+        expected_bytes: vec![(block::Height(1), 100)],
+    };
+
+    let (timed_out_peer, mut timed_out_state) = peer_state(47);
+    timed_out_state.max_blocks_per_response = 1;
+    timed_out_state.max_inflight_requests = 512;
+    timed_out_state.outstanding.push(OutstandingBlockRange {
+        request: request.clone(),
+        deadline: now - Duration::from_millis(1),
+        received: HashSet::new(),
+    });
+
+    let (retry_peer, mut retry_state) = peer_state(48);
+    retry_state.max_blocks_per_response = 1;
+    retry_state.max_inflight_requests = 512;
+    retry_state.servable_low = block::Height(1);
+    retry_state.servable_high = block::Height(1);
+
+    assert!(state.budget.try_reserve(request.estimated_bytes));
+    state.peers.insert(timed_out_peer.clone(), timed_out_state);
+    state.peers.insert(retry_peer.clone(), retry_state);
+
+    assert!(
+        state.expire_due_timeouts(now),
+        "due request timeouts should be drained synchronously from hot paths",
+    );
+    assert_eq!(state.budget.reserved(), 0);
+    assert!(state
+        .peers
+        .get(&timed_out_peer)
+        .expect("timed-out peer remains connected")
+        .outstanding
+        .is_empty());
+
+    let retry_peer_state = state
+        .peers
+        .get(&retry_peer)
+        .expect("retry peer exists")
+        .clone();
+    let retry = state
+        .schedule
+        .next_for_peer(
+            &retry_peer,
+            &retry_peer_state,
+            &mut state.budget,
+            u64::MAX,
+            1,
+        )
+        .expect("expired floor request should be immediately requestable");
+    assert_eq!(retry.start_height, block::Height(1));
+    assert_eq!(retry.count, 1);
+}
+
+#[test]
+fn scheduler_retry_after_timeout_prefers_a_different_peer() {
+    // Two separate needed ranges: the contiguous floor (h1) and unrelated work
+    // (h5). Single-block requests keep each range one height.
+    let mut scheduler = BlockRangeScheduler::new(1);
+    scheduler.set_estimator_for_tests(100, 1);
+    scheduler.refresh_needed(vec![
+        needed(1, BlockSizeEstimate::Advertised(100)),
+        needed(5, BlockSizeEstimate::Advertised(100)),
+    ]);
+    let (slow_peer, mut slow_state) = peer_state(47);
+    slow_state.max_blocks_per_response = 1;
+    let (healthy_peer, mut healthy_state) = peer_state(48);
+    healthy_state.max_blocks_per_response = 1;
+    let mut budget = ByteBudget::new(10_000);
+
+    // The slow peer first downloads the floor (h1)...
+    let floor = scheduler
+        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
+        .expect("floor range is assignable");
+    assert_eq!(floor.start_height, block::Height(1));
+
+    // ...then that request times out on it.
+    budget.release(floor.estimated_bytes);
+    scheduler.retry_after_timeout(floor, slow_peer.clone());
+
+    // Asked again, the slow peer takes its *other* servable work (h5) rather
+    // than immediately re-grabbing the floor it just timed out.
+    let slow_next = scheduler
+        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
+        .expect("slow peer still has other assignable work");
+    assert_eq!(
+        slow_next.start_height,
+        block::Height(5),
+        "the slow peer must avoid re-grabbing the floor it just timed out",
+    );
+
+    // The floor is left for a different, healthy peer to pick up promptly.
+    let healthy_next = scheduler
+        .next_for_peer(&healthy_peer, &healthy_state, &mut budget, u64::MAX, 1)
+        .expect("healthy peer can take the floor");
+    assert_eq!(healthy_next.start_height, block::Height(1));
+}
+
+#[test]
+fn scheduler_retry_after_timeout_falls_back_to_sole_servable_peer() {
+    let mut scheduler = BlockRangeScheduler::new(1);
+    scheduler.set_estimator_for_tests(100, 1);
+    scheduler.refresh_needed(vec![needed(1, BlockSizeEstimate::Advertised(100))]);
+    let (slow_peer, mut slow_state) = peer_state(47);
+    slow_state.max_blocks_per_response = 1;
+    let mut budget = ByteBudget::new(10_000);
+
+    let floor = scheduler
+        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
+        .expect("floor range is assignable");
+    budget.release(floor.estimated_bytes);
+    scheduler.retry_after_timeout(floor, slow_peer.clone());
+
+    // With no other servable peer and no other work, the slow peer must still
+    // retry the floor — the bias is a preference, not a hard exclusion, so a
+    // single servable peer never stalls.
+    let retry = scheduler
+        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
+        .expect("sole servable peer falls back to the avoided floor");
+    assert_eq!(retry.start_height, block::Height(1));
 }
 
 async fn connect_peer_with_status(
@@ -497,7 +691,7 @@ fn block_meta(block: &Arc<block::Block>) -> BlockSyncBlockMeta {
 #[test]
 fn block_sync_near_tip_pause_config_defaults_and_round_trips() {
     let default = ZakuraBlockSyncConfig::default();
-    assert_eq!(default.max_blocks_per_response, 16);
+    assert_eq!(default.max_blocks_per_response, 1);
     assert_eq!(default.max_inflight_requests, 512);
     assert_eq!(default.near_tip_body_download_pause_blocks, 2);
     assert_eq!(
@@ -1007,6 +1201,118 @@ async fn reactor_fill_loop_saturates_multiple_slots_in_one_pass() {
     reactor_task.abort();
 }
 
+/// Every connected peer that advertises an in-flight window must have that
+/// window filled in one scheduling pass when there is enough needed work to go
+/// around — not just the first peer.
+///
+/// This is the multi-peer complement to
+/// `reactor_fill_loop_saturates_multiple_slots_in_one_pass`: with three peers
+/// each advertising four concurrent single-block slots and twelve needed
+/// heights, the fill loop must fan out four requests to *each* peer rather than
+/// pouring all twelve into the lowest-id peer (or stopping after one peer's
+/// window). A regression here is what makes download budget collect on a single
+/// peer while the rest sit idle with free slots.
+#[tokio::test]
+async fn reactor_fill_loop_saturates_every_peer_window_not_just_one() {
+    let config = immediate_body_download_config();
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Three peers, each willing to serve heights 1..=12 and accept four
+    // concurrent single-block requests. Distinct id bytes keep the scheduler's
+    // sorted-peer iteration deterministic.
+    let mut peer_ids = Vec::new();
+    // Keep every peer's stream handles alive for the whole test: dropping them
+    // closes the channels and tears the peer down before it can serve.
+    let mut peer_streams = Vec::new();
+    for byte in [41u8, 42, 43] {
+        let (peer_id, inbound, outbound) = connect_peer_with_status_message(
+            &service,
+            &mut actions,
+            byte,
+            BlockSyncStatus {
+                servable_low: block::Height(1),
+                servable_high: block::Height(12),
+                tip_hash: block::Hash([12; 32]),
+                max_blocks_per_response: 1,
+                max_inflight_requests: 4,
+                max_response_bytes: MAX_BS_RESPONSE_BYTES,
+            },
+        )
+        .await;
+        peer_ids.push(peer_id);
+        peer_streams.push((inbound, outbound));
+    }
+
+    tip_tx
+        .send((block::Height(12), block::Hash([12; 32])))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(
+            (1..=12)
+                .map(|height| BlockSyncBlockMeta {
+                    height: block::Height(height),
+                    hash: block::Hash([height as u8; 32]),
+                    size: BlockSizeEstimate::Advertised(1_000),
+                })
+                .collect(),
+        ))
+        .await
+        .expect("needed metadata queues");
+
+    // Collect all twelve requests and tally them per peer. With fanout=1 each
+    // height is assignable to exactly one peer, so a correct fill loop hands
+    // four distinct heights to each of the three peers.
+    let mut per_peer: HashMap<ZakuraPeerId, Vec<u32>> = HashMap::new();
+    for _ in 0..12 {
+        let (peer, start_height, count) = wait_for_getblocks(&mut actions).await;
+        assert_eq!(count, 1);
+        per_peer.entry(peer).or_default().push(start_height.0);
+    }
+
+    assert_eq!(
+        per_peer.len(),
+        3,
+        "all three peers must receive requests, not just the first; got {per_peer:?}"
+    );
+    for peer_id in &peer_ids {
+        let issued = per_peer
+            .get(peer_id)
+            .unwrap_or_else(|| panic!("peer {peer_id:?} received no requests: {per_peer:?}"));
+        assert_eq!(
+            issued.len(),
+            4,
+            "peer {peer_id:?} window of 4 was not saturated: {per_peer:?}"
+        );
+    }
+
+    let mut all_heights: Vec<u32> = per_peer.values().flatten().copied().collect();
+    all_heights.sort_unstable();
+    assert_eq!(
+        all_heights,
+        (1..=12).collect::<Vec<_>>(),
+        "every needed height must be requested exactly once across peers"
+    );
+
+    reactor_task.abort();
+}
+
 #[test]
 fn scheduler_partial_requests_clear_the_issued_assignment_key() {
     let mut scheduler = BlockRangeScheduler::new(1);
@@ -1273,6 +1579,63 @@ fn scheduler_retries_only_uncovered_suffix() {
         "covered retry prefix must not be requested again",
     );
     assert_eq!(retry.count, 2);
+}
+
+#[test]
+fn scheduler_keeps_queued_retries_and_missing_ranges_ordered_by_height() {
+    let (peer, mut state) = peer_state(46);
+    state.max_blocks_per_response = 10;
+    let mut budget = ByteBudget::new(10_000);
+
+    let mut scheduler = BlockRangeScheduler::new(1);
+    scheduler.set_estimator_for_tests(750, 1);
+    scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(100))]);
+    scheduler.refresh_needed(vec![needed(10, BlockSizeEstimate::Advertised(100))]);
+
+    let request = scheduler
+        .next_for_peer(
+            &peer,
+            &state,
+            &mut budget,
+            u64::MAX,
+            MAX_BS_BLOCKS_PER_REQUEST,
+        )
+        .expect("lowest missing range is requestable");
+    assert_eq!(
+        request.start_height,
+        block::Height(10),
+        "new lower missing work must not sit behind later queued work",
+    );
+
+    let mut scheduler = BlockRangeScheduler::new(1);
+    scheduler.set_estimator_for_tests(750, 1);
+    scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(100))]);
+    scheduler.retry(BlockRangeRequest {
+        start_height: block::Height(10),
+        count: 2,
+        anchor_hash: block::Hash([10; 32]),
+        estimated_bytes: 200,
+        expected_hashes: vec![
+            (block::Height(10), block::Hash([10; 32])),
+            (block::Height(11), block::Hash([11; 32])),
+        ],
+        expected_bytes: vec![(block::Height(10), 100), (block::Height(11), 100)],
+    });
+
+    let retry = scheduler
+        .next_for_peer(
+            &peer,
+            &state,
+            &mut budget,
+            u64::MAX,
+            MAX_BS_BLOCKS_PER_REQUEST,
+        )
+        .expect("lowest retried range is requestable");
+    assert_eq!(
+        retry.start_height,
+        block::Height(10),
+        "timed-out lower work must not sit behind later queued work",
+    );
 }
 
 #[test]
@@ -2187,6 +2550,183 @@ async fn reactor_keeps_submitted_body_budget_until_apply_finishes() {
     reactor_task.abort();
 }
 
+/// A stalled commit must not pace downloads. The refill low-water mark counts
+/// only the download pipeline (`queued` + `outstanding`), never the commit
+/// pipeline (`reorder` + `applying`), so a block stuck in `applying` (submitted
+/// but never apply-finished) does not stop the reactor from re-querying and
+/// downloading higher heights — downloads run ahead of commit, bounded only by
+/// the in-flight byte budget.
+///
+/// A/B: before the decoupling, block 1 held in `applying` satisfies the
+/// low-water mark (sized to one block here), so the reactor never issues the
+/// second `QueryNeededBlocks` and this test times out waiting for it.
+#[tokio::test]
+async fn reactor_downloads_run_ahead_of_stalled_commit() {
+    let blocks = mainnet_blocks_1_to_3();
+    let mut config = immediate_body_download_config();
+    // Low-water mark = 1 status peer * advertised inflight (1) * advertised
+    // blocks-per-response (1) = 1 block, so a single block held in the commit
+    // pipeline is enough to (before the fix) satisfy it. The default 4 GiB byte
+    // budget stays far from binding for these tiny blocks.
+    config.max_inflight_requests = 1;
+    config.max_blocks_per_response = 1;
+
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    let (peer_id, inbound_tx, _outbound_rx) = connect_peer_with_status_message(
+        &service,
+        &mut actions,
+        41,
+        BlockSyncStatus {
+            servable_low: block::Height(1),
+            servable_high: block::Height(3),
+            tip_hash: blocks[2].hash(),
+            max_blocks_per_response: 1,
+            max_inflight_requests: 4,
+            max_response_bytes: MAX_BS_RESPONSE_BYTES,
+        },
+    )
+    .await;
+
+    // A header tip above the verified tip opens the download window.
+    tip_tx
+        .send((block::Height(3), blocks[2].hash()))
+        .expect("tip watch is live");
+    wait_for_query_needed_blocks(&mut actions, block::Height(0), block::Height(3)).await;
+
+    // Supply only height 1, download it, and submit it — then leave it stuck in
+    // `applying` by never sending BlockApplyFinished (a stalled commit).
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![block_meta(&blocks[0])]))
+        .await
+        .expect("needed metadata queues");
+    assert_eq!(
+        wait_for_getblocks(&mut actions).await,
+        (peer_id.clone(), block::Height(1), 1)
+    );
+    inbound_tx
+        .send(
+            BlockSyncMessage::Block(blocks[0].clone())
+                .encode_frame()
+                .expect("block encodes"),
+        )
+        .await
+        .expect("block queues");
+    let _submit_token = loop {
+        match next_action(&mut actions).await {
+            BlockSyncAction::SubmitBlock { token, block } => {
+                assert_eq!(block.hash(), blocks[0].hash());
+                break token;
+            }
+            BlockSyncAction::SendMessage { .. } => {}
+            action => panic!("unexpected action before submit: {action:?}"),
+        }
+    };
+
+    // The commit is now stalled: block 1 sits in `applying` (awaiting an
+    // apply-finished that never comes), holding its byte reservation. The
+    // download floor advanced to 1 on submit, but `queued` and `outstanding`
+    // are both empty. A header-tip bump must still make the reactor re-query
+    // and download height 2 — the download pipeline is empty even though the
+    // commit pipeline is not.
+    tip_tx
+        .send((block::Height(4), block::Hash([4; 32])))
+        .expect("tip watch is live");
+    wait_for_query_needed_blocks(&mut actions, block::Height(1), block::Height(4)).await;
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![block_meta(&blocks[1])]))
+        .await
+        .expect("needed metadata queues");
+    assert_eq!(
+        wait_for_getblocks(&mut actions).await,
+        (peer_id, block::Height(2), 1),
+        "the reactor must download height 2 ahead of the stalled commit of height 1",
+    );
+
+    reactor_task.abort();
+}
+
+fn add_outbound_block_sync_peer(
+    service: &BlockSyncService,
+    byte: u8,
+    held: &mut Vec<(FramedSend, FramedRecv)>,
+) -> ZakuraPeerId {
+    let peer_id = peer(byte);
+    let (inbound_tx, inbound_rx) = framed_channel(8);
+    let (outbound_tx, outbound_rx) = framed_channel(8);
+    let streams = HashMap::from([(ZAKURA_STREAM_BLOCK_SYNC, (inbound_rx, outbound_tx))]);
+    service.add_peer(Peer::new_with_direction(
+        peer_id.clone(),
+        None,
+        ZAKURA_CAP_BLOCK_SYNC,
+        ServicePeerDirection::Outbound,
+        streams,
+        CancellationToken::new(),
+    ));
+    held.push((inbound_tx, outbound_rx));
+    peer_id
+}
+
+/// A connection-symmetry collision resolves by the loser re-registering an
+/// already-present peer (adopting the winner's incoming stream). That
+/// replacement must succeed even when the per-direction cap is full — the peer
+/// is already counted — while a genuinely new peer at the cap is still rejected.
+#[tokio::test]
+async fn block_sync_add_peer_replaces_same_peer_even_at_full_cap() {
+    let mut config = immediate_body_download_config();
+    config.peer_limits.max_outbound_peers = 1;
+    config.peer_limits.max_inbound_peers = 0;
+    let (service, mut events) = BlockSyncService::new_for_test(config);
+
+    // Keep every stream handle alive so the per-peer pipes are not torn down.
+    let mut held = Vec::new();
+
+    // Peer A fills the only outbound slot.
+    let peer_a = add_outbound_block_sync_peer(&service, 41, &mut held);
+    match next_event(&mut events).await {
+        BlockSyncEvent::PeerConnected(session) => assert_eq!(session.peer_id(), &peer_a),
+        event => panic!("expected PeerConnected for peer A, got {event:?}"),
+    }
+    assert_eq!(service.peer_count(), 1);
+
+    // A distinct, new peer at the full cap is rejected: no session is created.
+    let _peer_b = add_outbound_block_sync_peer(&service, 42, &mut held);
+    let quiet = tokio::time::timeout(Duration::from_millis(100), events.recv()).await;
+    assert!(
+        quiet.is_err(),
+        "a new peer at a full per-direction cap must be rejected",
+    );
+    assert_eq!(service.peer_count(), 1);
+
+    // Re-registering peer A (the collision adoption) replaces its session even
+    // though the cap is full, because A is already counted. The stale-session
+    // teardown keys on the session id, so only a fresh PeerConnected is emitted.
+    let peer_a_again = add_outbound_block_sync_peer(&service, 41, &mut held);
+    assert_eq!(peer_a_again, peer_a);
+    match next_event(&mut events).await {
+        BlockSyncEvent::PeerConnected(session) => assert_eq!(session.peer_id(), &peer_a),
+        event => panic!("expected PeerConnected for replaced peer A, got {event:?}"),
+    }
+    assert_eq!(
+        service.peer_count(),
+        1,
+        "the replacement must not leave two sessions for the same peer",
+    );
+}
+
 #[tokio::test]
 async fn reactor_keeps_applying_body_after_non_advancing_duplicate_result() {
     let blocks = mainnet_blocks_1_to_3();
@@ -3054,7 +3594,7 @@ async fn reactor_pauses_new_body_downloads_near_tip_by_default() {
         .expect("needed metadata queues");
     assert_eq!(
         wait_for_getblocks(&mut actions).await,
-        (peer_id, block::Height(1), 3)
+        (peer_id, block::Height(1), 1)
     );
 
     reactor_task.abort();
@@ -5580,6 +6120,67 @@ async fn reactor_accepts_rapid_status_growth_without_spam_score() {
 }
 
 #[tokio::test]
+async fn reactor_ignores_redundant_status_burst_without_spam_score() {
+    let config = ZakuraBlockSyncConfig::default();
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    drop(tip_tx);
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle);
+    let peer_id = peer(47);
+    let (inbound_tx, inbound_rx) = framed_channel(8);
+    let (outbound_tx, _outbound_rx) = framed_channel(8);
+    let streams = HashMap::from([(ZAKURA_STREAM_BLOCK_SYNC, (inbound_rx, outbound_tx))]);
+    service.add_peer(Peer::new_with_direction(
+        peer_id.clone(),
+        None,
+        ZAKURA_CAP_BLOCK_SYNC,
+        ServicePeerDirection::Outbound,
+        streams,
+        CancellationToken::new(),
+    ));
+    assert_eq!(wait_for_connect_status(&mut actions).await, peer_id);
+
+    let status = BlockSyncMessage::Status(BlockSyncStatus {
+        servable_low: block::Height(1),
+        servable_high: block::Height(1),
+        tip_hash: block::Hash([1; 32]),
+        max_blocks_per_response: 4,
+        max_inflight_requests: 1,
+        max_response_bytes: MAX_BS_RESPONSE_BYTES,
+    })
+    .encode_frame()
+    .expect("status encodes");
+    for _ in 0..3 {
+        inbound_tx
+            .send(status.clone())
+            .await
+            .expect("redundant status queues");
+    }
+
+    let quiet = tokio::time::timeout(Duration::from_millis(100), async {
+        while let Some(action) = actions.recv().await {
+            if let BlockSyncAction::Misbehavior { reason, .. } = action {
+                panic!("redundant status burst was misclassified: {reason:?}");
+            }
+        }
+    })
+    .await;
+    assert!(quiet.is_err());
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
 async fn reactor_rejects_block_hash_mismatch_without_hard_drop_for_size_mismatch() {
     let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -7004,6 +7605,117 @@ async fn reactor_retries_matched_range_unavailable_without_scoring_peer() {
         "unmatched RangeUnavailable should be treated as advisory backpressure"
     );
     assert_eq!(handle.peer_snapshot().outbound_peers, 1);
+
+    reactor_task.abort();
+}
+
+/// Regression guard for F-88604: two misbehaving peers that sort ahead of an honest
+/// peer and spam `RangeUnavailable` for a contested range do **not** wedge body sync
+/// — the honest peer is still offered the range and makes progress.
+///
+/// The audit flagged the unpenalized retry path as a possible wedge (two peers
+/// re-occupying the whole fanout). Verified here that it is not: `handle_range_unavailable`
+/// reschedules immediately after each response, and with one in-flight request per
+/// peer the other misbehaving peer is still busy holding its stale request when the
+/// first frees its slot, so the honest peer claims the freed companion slot. The
+/// behavior is bounded churn, not a liveness wedge, so no peer-scoring guard is added.
+/// This test fails if a future change ever lets the fanout peers lock the honest peer
+/// out.
+#[tokio::test]
+async fn reactor_does_not_wedge_honest_peer_under_range_unavailable_spam() {
+    let blocks = mainnet_blocks_1_to_3();
+    let mut config = immediate_body_download_config();
+    config.fanout = 2;
+    // A long request timeout ensures the timeout-driven retry self-heal cannot mask
+    // the wedge within the test window.
+    config.request_timeout = Duration::from_secs(300);
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(2), blocks[1].hash()));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(2), blocks[1].hash()),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Two misbehaving peers (ids 0x01, 0x02 sort first) and one honest peer (0x03).
+    let (m1, m1_in, _m1_out) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        0x01,
+        block::Height(2),
+        blocks[1].hash(),
+        1,
+        MAX_BS_RESPONSE_BYTES,
+    )
+    .await;
+    let (m2, m2_in, _m2_out) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        0x02,
+        block::Height(2),
+        blocks[1].hash(),
+        1,
+        MAX_BS_RESPONSE_BYTES,
+    )
+    .await;
+    let (h, _h_in, _h_out) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        0x03,
+        block::Height(2),
+        blocks[1].hash(),
+        1,
+        MAX_BS_RESPONSE_BYTES,
+    )
+    .await;
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![
+            block_meta(&blocks[0]),
+            block_meta(&blocks[1]),
+        ]))
+        .await
+        .expect("needed metadata queues");
+
+    // Every time a misbehaving peer is offered the range it answers RangeUnavailable.
+    // The honest peer must eventually be offered the range.
+    let range_unavailable = || {
+        BlockSyncMessage::RangeUnavailable {
+            start_height: block::Height(1),
+            count: 2,
+        }
+        .encode_frame()
+        .expect("RangeUnavailable frame encodes")
+    };
+    let mut honest_offered = false;
+    for _ in 0..16 {
+        let (peer, _start, _count) = wait_for_getblocks(&mut actions).await;
+        if peer == h {
+            honest_offered = true;
+            break;
+        } else if peer == m1 {
+            m1_in
+                .send(range_unavailable())
+                .await
+                .expect("m1 RangeUnavailable queues");
+        } else if peer == m2 {
+            m2_in
+                .send(range_unavailable())
+                .await
+                .expect("m2 RangeUnavailable queues");
+        }
+    }
+
+    assert!(
+        honest_offered,
+        "honest peer must be offered the contested range after both fanout peers fail it"
+    );
 
     reactor_task.abort();
 }

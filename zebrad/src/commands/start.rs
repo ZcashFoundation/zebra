@@ -899,7 +899,11 @@ impl StartCmd {
         }
         let syncer_task_handle = if use_zakura_block_sync(&config.network) {
             info!("Zakura block sync is replacing the legacy ChainSync body downloader");
-            tokio::spawn(syncer.bootstrap_genesis_then_pause().in_current_span())
+            tokio::spawn(
+                syncer
+                    .bootstrap_genesis_then_pause(read_only_state_service.clone())
+                    .in_current_span(),
+            )
         } else {
             tokio::spawn(syncer.sync().in_current_span())
         };

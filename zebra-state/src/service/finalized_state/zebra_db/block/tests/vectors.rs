@@ -464,6 +464,45 @@ fn header_stays_readable_after_body_is_pruned() {
     );
 }
 
+/// `Request::KnownBlock` must report a finalized block as known even after its body
+/// is pruned: pruning removes `tx_by_loc` but keeps the hash index, and membership is
+/// decided by the hash index, not body availability (F-88603). Otherwise sync and
+/// inbound gossip re-download a body we already finalized only to reject it as behind
+/// the finalized tip.
+#[test]
+fn known_block_reports_finalized_block_after_body_pruned() {
+    let _init_guard = zebra_test::init();
+    let (state, _genesis, block1) = mainnet_state_with_genesis();
+
+    write_full_block_header_and_transactions(&state, block1.clone());
+    assert!(state.contains_body_at_height(Height(1)));
+    assert_eq!(
+        read::finalized_state_contains_block_hash(&state, block1.hash()),
+        Some(crate::KnownBlock::Finalized),
+    );
+
+    // Prune the body (range-delete `tx_by_loc` for height 1), keeping the hash index.
+    let tx_by_loc = state.db.cf_handle("tx_by_loc").unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &tx_by_loc,
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(2)),
+    );
+    state.db.write(batch).expect("body prune writes");
+
+    // The body-availability predicate (what KnownBlock used before the fix) now
+    // reports the block as absent...
+    assert!(!state.contains_body_at_height(Height(1)));
+    assert!(!state.contains_hash(block1.hash()));
+
+    // ...but KnownBlock still reports it as a known finalized block.
+    assert_eq!(
+        read::finalized_state_contains_block_hash(&state, block1.hash()),
+        Some(crate::KnownBlock::Finalized),
+    );
+}
+
 #[test]
 fn header_range_commit_rejects_finalized_or_body_conflicts() {
     let _init_guard = zebra_test::init();
@@ -524,8 +563,12 @@ fn header_range_commit_accepts_matching_checkpoint_hash() {
     );
 }
 
+/// A conflicting header range with *less* cumulative work than the chain it would
+/// overwrite must be rejected, leaving the existing higher-work chain intact (the
+/// F-88605 most-work guard). Before that guard, a single height-2 header replaced a
+/// height-3 chain purely because it conflicted, silently dropping height 3.
 #[test]
-fn header_range_reorg_replaces_shorter_range_without_stale_indexes() {
+fn header_range_reorg_rejects_shorter_lower_work_range() {
     let _init_guard = zebra_test::init();
     let (state, genesis, block1) = mainnet_state_with_genesis();
     let block2 = mainnet_block(2);
@@ -541,33 +584,66 @@ fn header_range_reorg_replaces_shorter_range_without_stale_indexes() {
         ],
     );
 
-    let old_block2_hash = block2.hash();
-    let old_block3_hash = block3.hash();
+    // A single replacement header at height 2 conflicts with the stored chain but,
+    // dropping height 3, carries strictly less cumulative work than {block2, block3}.
     let alternate_block2 = alternate_header(block1.hash(), &block2.header, 1);
 
-    let alternate_block2_hash = commit_header_range(
-        &state,
-        block1.hash(),
-        std::slice::from_ref(&alternate_block2),
+    let mut batch = DiskWriteBatch::new();
+    assert!(
+        matches!(
+            batch.prepare_header_range_batch(
+                &state,
+                block1.hash(),
+                std::slice::from_ref(&alternate_block2),
+                &[0],
+            ),
+            Err(CommitHeaderRangeError::LowerWorkConflict { height, .. }) if height == Height(2)
+        ),
+        "a shorter lower-work conflicting range must be rejected"
     );
 
-    assert_eq!(alternate_block2_hash, block::Hash::from(&*alternate_block2));
-    assert_eq!(
-        state.best_header_tip(),
-        Some((Height(2), alternate_block2_hash))
-    );
-    assert_eq!(state.height(old_block2_hash), None);
-    assert_eq!(state.height(old_block3_hash), None);
-    assert!(!state.contains_hash(old_block2_hash));
-    assert!(state.block(old_block2_hash.into()).is_none());
-
+    // The existing higher-work chain is untouched.
+    assert_eq!(state.best_header_tip(), Some((Height(3), block3.hash())),);
     assert_eq!(
         state.headers_by_height_range(Height(1), 3),
         vec![
             (Height(1), block1.hash(), block1.header.clone()),
-            (Height(2), alternate_block2_hash, alternate_block2),
+            (Height(2), block2.hash(), block2.header.clone()),
+            (Height(3), block3.hash(), block3.header.clone()),
         ],
     );
+}
+
+/// A conflicting header range carrying the *same* cumulative work as the existing
+/// chain (an equal-length fork) is also rejected: the incumbent chain wins ties, so
+/// equal-work peers cannot churn the best header chain. Both chains are synthetic so
+/// their per-height difficulties — and therefore cumulative work — are identical by
+/// construction.
+#[test]
+fn header_range_reorg_rejects_equal_work_range() {
+    let _init_guard = zebra_test::init();
+    let genesis = mainnet_block(0);
+    let network = no_extra_checkpoint_test_network(genesis.hash());
+    let state = state_with_genesis(&network, genesis.clone());
+
+    let original = synthetic_headers_from_state(&state, Height(0), genesis.hash(), 2, 1);
+    let original_tip = block::Hash::from(&**original.last().unwrap());
+    commit_header_range(&state, genesis.hash(), &original);
+
+    // A different equal-length fork conflicting at height 1.
+    let fork = synthetic_headers_from_state(&state, Height(0), genesis.hash(), 2, 9);
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(
+        matches!(
+            batch.prepare_header_range_batch(&state, genesis.hash(), &fork, &[0, 0]),
+            Err(CommitHeaderRangeError::LowerWorkConflict { height, existing_work, new_work })
+                if height == Height(1) && new_work == existing_work
+        ),
+        "an equal-work conflicting range must be rejected (incumbent wins ties)"
+    );
+
+    assert_eq!(state.best_header_tip(), Some((Height(2), original_tip)));
 }
 
 #[test]
@@ -662,29 +738,28 @@ fn header_range_reorg_accepts_boundary_adjacent_overwrite() {
     commit_header_range(&state, genesis.hash(), &original_headers);
 
     let conflict_height = Height(1);
-    let old_conflict_hash = block::Hash::from(&*original_headers[0]);
-    let conflicting_header = synthetic_headers_from_state(&state, Height(0), genesis.hash(), 1, 2)
-        .pop()
-        .expect("one synthetic conflicting header was generated");
-    let conflicting_hash = block::Hash::from(&*conflicting_header);
+    // The reorg starts at the maximum allowed depth (height 1, exactly the boundary
+    // from a best header tip of MAX_BLOCK_REORG_HEIGHT). With the most-work guard it
+    // must also carry strictly more work than the chain it replaces, so use a fork
+    // that is one block longer.
+    let replacement =
+        synthetic_headers_from_state(&state, Height(0), genesis.hash(), tip_height.0 + 1, 2);
+    let new_conflict_hash = block::Hash::from(&*replacement[0]);
+    let new_tip_height = Height(tip_height.0 + 1);
+    let new_tip_hash = block::Hash::from(&**replacement.last().unwrap());
 
-    let committed_hash = commit_header_range(
-        &state,
-        genesis.hash(),
-        std::slice::from_ref(&conflicting_header),
-    );
+    let committed_hash = commit_header_range(&state, genesis.hash(), &replacement);
 
-    assert_eq!(committed_hash, conflicting_hash);
+    assert_eq!(committed_hash, new_tip_hash);
     assert_eq!(
         state.best_header_tip(),
-        Some((conflict_height, conflicting_hash)),
+        Some((new_tip_height, new_tip_hash)),
     );
-    assert_eq!(state.height(old_conflict_hash), None);
-    assert_eq!(state.hash(Height(2)), None);
-    assert_eq!(
-        state.headers_by_height_range(Height(1), 2),
-        vec![(Height(1), conflicting_hash, conflicting_header)],
-    );
+    // The boundary conflict height was overwritten with the higher-work fork.
+    let height_1 = state.headers_by_height_range(conflict_height, 1);
+    assert_eq!(height_1.len(), 1);
+    assert_eq!(height_1[0].0, conflict_height);
+    assert_eq!(height_1[0].1, new_conflict_hash);
 }
 
 #[test]

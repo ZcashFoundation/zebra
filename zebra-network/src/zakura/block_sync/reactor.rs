@@ -15,6 +15,11 @@ const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 /// request timeouts, and above all misbehavior disconnects.
 const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How many requests the fill loop issues between hot-path timeout sweeps, so a
+/// large fill pass still reclaims overdue requests promptly instead of waiting
+/// for the periodic tick.
+const SCHEDULE_TIMEOUT_CHECK_INTERVAL: usize = 64;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OutstandingRangeDisposition {
     Satisfied,
@@ -398,6 +403,13 @@ impl BlockSyncReactor {
                 }
             }
         }
+
+        // Frontier advances do not otherwise reschedule, so reclaim any overdue
+        // requests here too rather than waiting for the periodic tick.
+        if self.expire_due_timeouts(Instant::now()) {
+            self.schedule().await;
+            self.release_caught_up_block_sync_peers();
+        }
     }
 
     async fn handle_state_frontiers_changed(&mut self, frontiers: BlockSyncFrontiers) {
@@ -674,8 +686,6 @@ impl BlockSyncReactor {
         let servable_range_grew = status.servable_high > peer_state.servable_high
             || status.servable_low < peer_state.servable_low;
         if !peer_state.inbound_status.try_take(now) && !servable_range_grew {
-            self.report_misbehavior(peer, BlockSyncMisbehavior::StatusSpam)
-                .await;
             return;
         }
         let send_status_reply = peer_state.unsolicited.try_take(now);
@@ -687,11 +697,11 @@ impl BlockSyncReactor {
         peer_state.max_response_bytes = clamp_advertised_response_bytes(status.max_response_bytes);
         peer_state.outbound_request_window = peer_state
             .outbound_request_window
-            .min(
-                usize::from(peer_state.max_inflight_requests)
-                    .min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER),
-            )
+            .min(peer_state.hard_outbound_capacity())
             .max(1);
+        peer_state.timeout_recovery_slots = peer_state
+            .timeout_recovery_slots
+            .min(peer_state.hard_outbound_capacity());
         peer_state.received_status = true;
         self.trace_status_received(&peer, status);
         self.publish_candidate_state();
@@ -1467,28 +1477,15 @@ impl BlockSyncReactor {
     }
 
     async fn handle_timeouts(&mut self) {
-        let now = Instant::now();
-        let mut timed_out = Vec::new();
-        for peer in self.state.peers.values_mut() {
-            let mut index = 0;
-            while index < peer.outstanding.len() {
-                if peer.outstanding[index].deadline <= now {
-                    peer.reduce_outbound_window_after_timeout();
-                    timed_out.push(peer.outstanding.remove(index));
-                } else {
-                    index += 1;
-                }
-            }
-        }
-
-        for outstanding in timed_out {
-            self.finish_detached_outstanding(
-                outstanding,
-                OutstandingRangeDisposition::RetryOriginal,
-            );
-        }
+        self.expire_due_timeouts(Instant::now());
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
+    }
+
+    /// Reclaim every overdue outstanding request synchronously. Returns whether
+    /// any expired, so hot-path callers can decide to reschedule.
+    fn expire_due_timeouts(&mut self, now: Instant) -> bool {
+        self.state.expire_due_timeouts(now)
     }
 
     async fn query_needed_blocks(&mut self) -> bool {
@@ -1526,12 +1523,20 @@ impl BlockSyncReactor {
             })
             .sum();
 
+        // Count only the download pipeline (queued + in-flight requests) against
+        // the refill low-water mark, never the commit pipeline (`reorder` +
+        // `applying`). Downloads are bounded by the in-flight byte budget
+        // (`should_pause_new_body_downloads` pauses at `budget.available() == 0`)
+        // and per-peer slots, not by how fast commit/verify drains. Including
+        // reorder/applying here would pace downloads to commit speed: a slow
+        // commit lets those buffers grow, the low-water gate stops refilling, and
+        // `outstanding` collapses. The byte budget already bounds memory because
+        // reorder/applying hold their reservation until apply-finish, so downloads
+        // may legitimately run far ahead of commit up to that budget.
         self.state
             .schedule
             .queued_block_count()
             .saturating_add(outstanding)
-            .saturating_add(self.state.reorder.len())
-            .saturating_add(self.state.applying.len())
     }
 
     fn refill_low_water_blocks(&self) -> usize {
@@ -1615,6 +1620,7 @@ impl BlockSyncReactor {
 
     async fn schedule(&mut self) {
         self.submit_pending_blocks().await;
+        self.expire_due_timeouts(Instant::now());
 
         if self.should_pause_new_body_downloads() {
             let reason = if self.body_lag() == 0 {
@@ -1632,6 +1638,7 @@ impl BlockSyncReactor {
         peer_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
 
         let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
+        let mut scheduled_since_timeout_check = 0usize;
 
         for peer_id in peer_ids {
             // Fill this peer's available slots in one pass, letting the byte
@@ -1692,6 +1699,7 @@ impl BlockSyncReactor {
                     request.estimated_bytes,
                 );
                 if let Some(peer) = self.state.peers.get_mut(&peer_id) {
+                    peer.record_outbound_request_scheduled();
                     peer.outstanding.push(OutstandingBlockRange {
                         request: request.clone(),
                         deadline,
@@ -1707,8 +1715,19 @@ impl BlockSyncReactor {
                         },
                     })
                     .await;
+                scheduled_since_timeout_check = scheduled_since_timeout_check.saturating_add(1);
+                if scheduled_since_timeout_check >= SCHEDULE_TIMEOUT_CHECK_INTERVAL {
+                    self.expire_due_timeouts(Instant::now());
+                    scheduled_since_timeout_check = 0;
+                    tokio::task::yield_now().await;
+                }
             }
         }
+
+        // The timeout-retry bias only steers the pass that follows the timeout
+        // that set it; drop the marks now that this pass has placed (or
+        // deferred) every range.
+        self.state.schedule.clear_timeout_avoid();
     }
 
     async fn release_contiguous_blocks(&mut self) {
@@ -2281,6 +2300,47 @@ impl BlockSyncReactor {
             .values()
             .map(|peer| peer.outstanding.len())
             .sum();
+        let mut slot_capacity = 0usize;
+        let mut slot_effective_window = 0usize;
+        let mut slot_available = 0usize;
+        let mut slot_timeout_recovery = 0usize;
+        let mut slot_saturated_peers = 0usize;
+        let mut inbound_peers = 0usize;
+        let mut outbound_peers = 0usize;
+        let mut inbound_peers_with_status = 0usize;
+        let mut outbound_peers_with_status = 0usize;
+        for peer in self.state.peers.values() {
+            match peer.direction {
+                ServicePeerDirection::Inbound => {
+                    inbound_peers += 1;
+                    if peer.received_status {
+                        inbound_peers_with_status += 1;
+                    }
+                }
+                ServicePeerDirection::Outbound => {
+                    outbound_peers += 1;
+                    if peer.received_status {
+                        outbound_peers_with_status += 1;
+                    }
+                }
+            }
+
+            if !peer.received_status {
+                continue;
+            }
+
+            let hard_capacity = peer.hard_outbound_capacity();
+            let effective_window = hard_capacity.min(peer.outbound_request_window);
+            let available_slots = peer.available_slots();
+            slot_capacity = slot_capacity.saturating_add(hard_capacity);
+            slot_effective_window = slot_effective_window.saturating_add(effective_window);
+            slot_available = slot_available.saturating_add(available_slots);
+            slot_timeout_recovery =
+                slot_timeout_recovery.saturating_add(peer.timeout_recovery_slots);
+            if available_slots == 0 {
+                slot_saturated_peers = slot_saturated_peers.saturating_add(1);
+            }
+        }
         let peers_with_status = self
             .state
             .peers
@@ -2343,6 +2403,35 @@ impl BlockSyncReactor {
             bs_insert_u64(row, bs_trace::BUDGET_RESERVED, self.state.budget.reserved());
             bs_insert_u64(row, bs_trace::PEERS, self.state.peers.len() as u64);
             bs_insert_u64(row, bs_trace::PEERS_WITH_STATUS, peers_with_status as u64);
+            bs_insert_u64(row, "inbound_peers", inbound_peers as u64);
+            bs_insert_u64(row, "outbound_peers", outbound_peers as u64);
+            bs_insert_u64(
+                row,
+                "inbound_peers_with_status",
+                inbound_peers_with_status as u64,
+            );
+            bs_insert_u64(
+                row,
+                "outbound_peers_with_status",
+                outbound_peers_with_status as u64,
+            );
+            bs_insert_u64(row, "request_slot_capacity", slot_capacity as u64);
+            bs_insert_u64(
+                row,
+                "request_slot_effective_window",
+                slot_effective_window as u64,
+            );
+            bs_insert_u64(row, "request_slot_available", slot_available as u64);
+            bs_insert_u64(
+                row,
+                "request_slot_timeout_recovery",
+                slot_timeout_recovery as u64,
+            );
+            bs_insert_u64(
+                row,
+                "request_slot_saturated_peers",
+                slot_saturated_peers as u64,
+            );
             // Scheduling visibility: distinguishes "gap not in `needed`"
             // (state/filter) from "gap in `needed` but never queued" (`ensure`
             // rejected it) from "queued but never requested" (starvation).
@@ -2448,6 +2537,26 @@ impl BlockSyncReactor {
             bs_insert_height(row, bs_trace::RANGE_START, start_height);
             bs_insert_u64(row, bs_trace::RANGE_COUNT, u64::from(count));
             bs_insert_u64(row, bs_trace::ESTIMATED_BYTES, estimated_bytes);
+            if let Some(peer_state) = self.state.peers.get(peer) {
+                bs_insert_str(row, "direction", peer_state.direction.trace_label());
+                bs_insert_u64(row, "available_slots", peer_state.available_slots() as u64);
+                bs_insert_u64(row, "peer_outstanding", peer_state.outstanding.len() as u64);
+                bs_insert_u64(
+                    row,
+                    "hard_outbound_capacity",
+                    peer_state.hard_outbound_capacity() as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    "outbound_request_window",
+                    peer_state.outbound_request_window as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    "timeout_recovery_slots",
+                    peer_state.timeout_recovery_slots as u64,
+                );
+            }
         });
     }
 
@@ -2561,8 +2670,24 @@ impl BlockSyncReactor {
             bs_insert_peer(row, bs_trace::PEER, peer);
             bs_insert_str(row, bs_trace::REASON, reason.as_str());
             if let Some(peer_state) = self.state.peers.get(peer) {
+                bs_insert_str(row, "direction", peer_state.direction.trace_label());
                 bs_insert_u64(row, "available_slots", peer_state.available_slots() as u64);
                 bs_insert_u64(row, "peer_outstanding", peer_state.outstanding.len() as u64);
+                bs_insert_u64(
+                    row,
+                    "hard_outbound_capacity",
+                    peer_state.hard_outbound_capacity() as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    "outbound_request_window",
+                    peer_state.outbound_request_window as u64,
+                );
+                bs_insert_u64(
+                    row,
+                    "timeout_recovery_slots",
+                    peer_state.timeout_recovery_slots as u64,
+                );
                 let peer_reserved = peer_state
                     .outstanding
                     .iter()

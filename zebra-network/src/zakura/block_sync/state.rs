@@ -260,6 +260,34 @@ impl BlockSyncState {
             .count();
         ServicePeerSnapshot::new(inbound, outbound, limits)
     }
+
+    /// Drain every outstanding request whose deadline has passed, releasing its
+    /// byte reservation and re-queuing the range for retry. Returns whether any
+    /// request expired so callers can reschedule. Invoked from scheduling hot
+    /// paths (not just the periodic tick) so a stuck floor block is reclaimed
+    /// within the request timeout rather than after the next tick.
+    pub(super) fn expire_due_timeouts(&mut self, now: Instant) -> bool {
+        let mut timed_out = Vec::new();
+        for (peer_id, peer) in self.peers.iter_mut() {
+            let mut index = 0;
+            while index < peer.outstanding.len() {
+                if peer.outstanding[index].deadline <= now {
+                    peer.reduce_outbound_window_after_timeout();
+                    timed_out.push((peer_id.clone(), peer.outstanding.remove(index)));
+                } else {
+                    index += 1;
+                }
+            }
+        }
+
+        let expired_any = !timed_out.is_empty();
+        for (peer_id, outstanding) in timed_out {
+            self.budget.release(outstanding.reserved_bytes());
+            self.schedule
+                .retry_after_timeout(outstanding.request, peer_id);
+        }
+        expired_any
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -284,6 +312,7 @@ pub(super) struct PeerBlockState {
     pub(super) max_inflight_requests: u16,
     pub(super) max_response_bytes: u32,
     pub(super) outbound_request_window: usize,
+    pub(super) timeout_recovery_slots: usize,
     pub(super) received_status: bool,
     pub(super) outstanding: Vec<OutstandingBlockRange>,
     pub(super) inbound_status: RateMeter,
@@ -304,6 +333,7 @@ impl PeerBlockState {
             max_inflight_requests: config.advertised_max_inflight_requests(),
             max_response_bytes: config.advertised_max_response_bytes(),
             outbound_request_window: usize::from(config.advertised_max_inflight_requests()),
+            timeout_recovery_slots: 0,
             received_status: false,
             outstanding: Vec::new(),
             inbound_status: RateMeter::new(
@@ -317,22 +347,43 @@ impl PeerBlockState {
     }
 
     pub(super) fn available_slots(&self) -> usize {
-        usize::from(self.max_inflight_requests)
-            .min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER)
-            .min(self.outbound_request_window)
-            .saturating_sub(self.outstanding.len())
+        let hard_capacity = self.hard_outbound_capacity();
+        let adaptive_limit = hard_capacity.min(self.outbound_request_window);
+        let adaptive_slots = adaptive_limit.saturating_sub(self.outstanding.len());
+        if adaptive_slots > 0 {
+            return adaptive_slots;
+        }
+
+        self.timeout_recovery_slots
+            .min(hard_capacity.saturating_sub(self.outstanding.len()))
     }
 
     pub(super) fn reduce_outbound_window_after_timeout(&mut self) {
         self.outbound_request_window = self.outbound_request_window.saturating_div(2).max(1);
+        self.timeout_recovery_slots = self
+            .timeout_recovery_slots
+            .saturating_add(1)
+            .min(self.hard_outbound_capacity());
     }
 
     pub(super) fn increase_outbound_window_after_success(&mut self) {
-        let max_window =
-            usize::from(self.max_inflight_requests).min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER);
+        let max_window = self.hard_outbound_capacity();
         if self.outbound_request_window < max_window {
             self.outbound_request_window = self.outbound_request_window.saturating_add(1);
         }
+    }
+
+    pub(super) fn record_outbound_request_scheduled(&mut self) {
+        let adaptive_limit = self
+            .hard_outbound_capacity()
+            .min(self.outbound_request_window);
+        if self.outstanding.len() >= adaptive_limit && self.timeout_recovery_slots > 0 {
+            self.timeout_recovery_slots = self.timeout_recovery_slots.saturating_sub(1);
+        }
+    }
+
+    pub(super) fn hard_outbound_capacity(&self) -> usize {
+        usize::from(self.max_inflight_requests).min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER)
     }
 
     pub(super) fn can_serve_any(&self, heights: &[block::Height]) -> bool {

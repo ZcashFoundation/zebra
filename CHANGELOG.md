@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `--force` gate).
 - Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
   1000 blocks as a defence-in-depth measure against sustained consensus splits.
+- Decouple Zakura block-sync downloads from commit speed. The body-download
+  refill mark now counts only the download pipeline (queued and in-flight
+  requests), not the commit pipeline (reorder and applying buffers), so a slow
+  commit/verify no longer throttles downloads. Download depth is bounded by the
+  in-flight byte budget (`network.zakura.block_sync.max_inflight_block_bytes`)
+  and per-peer slots, letting downloads run ahead of commit.
+- Open a Zakura block-sync stream from both ends of a connection regardless of
+  who dialed, so a node can serve and download over every peer instead of only
+  peers that proactively opened the stream toward it. A block-sync stream opened
+  by both sides is resolved to one survivor by a deterministic node-id tiebreak,
+  never by dropping the connection. Other ordered services are unchanged.
 
 ### Fixed
 
@@ -107,12 +118,44 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   long head-of-line freezes on thin-peer draws. New `pool.route_inv.*` metrics
   break down single-block routing outcomes (advertiser / maybe / synthetic
   not-found by cause) to diagnose peer-scarcity stalls.
+- Report a finalized block as known for `Request::KnownBlock` even after its body
+  has been pruned, deciding membership from the retained hash index rather than
+  body availability. Without this, a pruned-mode node treated already-finalized
+  historical blocks whose bodies were pruned as unknown and re-downloaded them over
+  Zakura sync and inbound gossip only to reject them as behind the finalized tip.
+- Stop a legitimately quiet Zakura ordered stream from tearing down the whole
+  connection it shares with an actively-transferring stream. The per-frame read
+  deadline was the connection idle timeout and was treated as fatal, so a stream
+  that is normally quiet during catch-up sync (e.g. gossip while far below the
+  tip) disconnected the peer every idle-timeout window even while block sync was
+  downloading on the same connection, causing constant re-dial and
+  duplicate-connection churn. Inter-frame quiet on a persistent ordered stream is
+  now tolerated; connection-level idleness remains owned by the freshness reaper
+  and the QUIC idle timeout.
+- Reclaim overdue Zakura block-sync requests on the scheduling hot path instead
+  of only on the periodic timeout tick, and bias a timed-out range's retry away
+  from the peer that just timed it out (falling back to that peer only when no
+  other peer can serve the range). A single slow peer holding the contiguous
+  floor block can no longer stall the commit pipeline for far longer than the
+  request timeout.
 
 ### Security
 
 - Write RPC authentication cookies through a freshly created private temporary
   file before replacing `.cookie`, so pre-existing permissive cookie files cannot
   expose the generated RPC authentication secret.
+- The Zakura body-sync fallback watchdog now distinguishes genuine block-sync
+  progress — the verified tip closing the gap to the best-header network frontier —
+  from inbound gossip that only nudges the tip. A peer trickling occasional
+  next-height blocks can no longer keep the node from falling back to legacy sync
+  while it stays materially behind the network tip.
+- Zakura header sync now compares cumulative chain work before replacing an
+  existing header chain: a conflicting header range is rejected unless it carries
+  strictly more work than the chain it would overwrite. Previously a shorter or
+  lower-work conflicting range (for example a low-difficulty header flood with
+  manipulated timestamps past the last checkpoint) could replace a longer,
+  higher-work header chain by height alone and steer body-gap discovery off the
+  real chain.
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 

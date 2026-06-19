@@ -29,6 +29,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
+    work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{
@@ -1687,6 +1688,50 @@ impl DiskWriteBatch {
             recent_headers.truncate(check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN);
 
             validated_headers.push((height, hash, header, body_size));
+        }
+
+        // Before overwriting a conflicting header suffix, require the new range to
+        // carry strictly more cumulative work than the chain it would replace. The
+        // per-header checks above only validate each header's own difficulty
+        // threshold and contextual difficulty; without this most-work gate, a
+        // lower-work fork — for example a low-difficulty header flood built with
+        // manipulated timestamps past the last checkpoint — could replace a longer,
+        // higher-work header chain purely because it conflicts within the reorg
+        // window, steering body-gap discovery off the real chain. Heights below
+        // `first_conflicting_height` are shared by both chains, so comparing the
+        // conflicting suffixes is equivalent to comparing total chain work.
+        if let (Some(first_conflicting_height), Some(best_header_tip)) =
+            (first_conflicting_height, best_header_tip)
+        {
+            let mut existing_work = PartialCumulativeWork::zero();
+            for height in first_conflicting_height.0..=best_header_tip.0 {
+                if let Some((_hash, existing_header)) =
+                    zebra_db.header_by_height(block::Height(height))
+                {
+                    // A stored header passed difficulty validation when committed, so
+                    // its threshold always converts to work; skip defensively if not.
+                    if let Some(work) = existing_header.difficulty_threshold.to_work() {
+                        existing_work += work;
+                    }
+                }
+            }
+
+            let mut new_work = PartialCumulativeWork::zero();
+            for (height, _hash, header, _body_size) in &validated_headers {
+                if *height >= first_conflicting_height {
+                    if let Some(work) = header.difficulty_threshold.to_work() {
+                        new_work += work;
+                    }
+                }
+            }
+
+            if new_work <= existing_work {
+                return Err(CommitHeaderRangeError::LowerWorkConflict {
+                    height: first_conflicting_height,
+                    existing_work: existing_work.as_u128(),
+                    new_work: new_work.as_u128(),
+                });
+            }
         }
 
         if let (Some(first_conflicting_height), Some(best_header_tip)) =

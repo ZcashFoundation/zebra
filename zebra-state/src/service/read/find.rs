@@ -177,8 +177,15 @@ pub fn non_finalized_state_contains_block_hash(
 
 /// Returns the location of the block if present in the finalized state.
 /// Returns None if the block hash is not found in the finalized state.
+///
+/// Membership is decided by the retained hash index, not by body availability: a
+/// finalized block whose body was pruned (pruning removes `tx_by_loc` rows but keeps
+/// `height_by_hash`) is still a known finalized block. Using `contains_hash` here —
+/// which also requires the body — would report pruned historical blocks as unknown,
+/// so `Request::KnownBlock` callers (sync, inbound gossip) would re-download a full
+/// body we already finalized only to reject it as behind the finalized tip.
 pub fn finalized_state_contains_block_hash(db: &ZebraDb, hash: block::Hash) -> Option<KnownBlock> {
-    db.contains_hash(hash).then_some(KnownBlock::Finalized)
+    db.height(hash).map(|_| KnownBlock::Finalized)
 }
 
 /// Return the height for the block at `hash`, if `hash` is in `chain` or `db`.
