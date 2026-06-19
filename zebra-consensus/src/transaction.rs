@@ -402,7 +402,7 @@ where
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do quick checks first
-            Self::check_transaction_structure(tx.as_ref(), req.height(), &network)?;
+            Self::check_structure_and_network_rules(tx.as_ref(), req.height(), &network)?;
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
@@ -566,7 +566,7 @@ where
     Mempool::Future: Send + 'static,
 {
     /// Performs basic structural validation and Orchard-related network upgrade rules.
-    fn check_transaction_structure(
+    fn check_structure_and_network_rules(
         tx: &Transaction,
         height: block::Height,
         network: &Network,
