@@ -33,6 +33,22 @@ zcash/ironwood (the Ironwood Book).
   `-D warnings`, and value_balance/disk_format tests green.
   Note: getblockchaininfo's `valuePools` is still a 5-pool array (zcashd-compat)
   — adding the ironwood pool there is deferred to Phase 9.
+- **Phase 4 (foundation) ✅** — `Transaction` ironwood accessor surface added,
+  mirroring the orchard accessors: `ironwood_shielded_data` (returns `None`
+  until the v6 bundle field lands in Phase 2), `ironwood_actions`,
+  `ironwood_nullifiers`, `ironwood_note_commitments`, `ironwood_flags`,
+  `has_ironwood_shielded_data`, and `ironwood_value_balance` — the last now
+  folded into `value_balance_from_outputs` (zero today). Ironwood reuses the
+  Orchard tree/nullifier *types* (same Pallas/Sinsemilla MerkleCRH), so no
+  duplicated tree module is needed; the pools differ only by storage instance.
+
+### Coupling discovered (gates the heavy Phase 4 state work)
+The note-commitment-tree / nullifier-set **state storage** (non-finalized
+`Chain` maps + finalized column families) has nothing to consume until Phase 2
+makes v6 transactions carry an Ironwood bundle, so Phase 4-state and Phase 2 are
+coupled. Phase 2 in turn must resolve the librustzcash v6 collision (the existing
+`Transaction::V6` carries `zip233_amount` and maps to `zcash_primitives` v6 via
+`to_librustzcash`). Decision needed before proceeding — see repo discussion.
 
 ---
 

@@ -1124,6 +1124,57 @@ impl Transaction {
         self.orchard_shielded_data().is_some()
     }
 
+    // ironwood
+
+    /// Access the Ironwood shielded data in this transaction (NU6.3 onward), if there is any,
+    /// regardless of version.
+    ///
+    /// The Ironwood bundle reuses the Orchard [`orchard::ShieldedData`] shape but commits into a
+    /// separate note commitment tree and nullifier set. It only appears in v6 transactions; the v6
+    /// Ironwood bundle field is added in a later change, so this currently returns [`None`] for
+    /// every transaction version.
+    pub fn ironwood_shielded_data(&self) -> Option<&orchard::ShieldedData> {
+        // TODO: return the v6 Ironwood bundle once `Transaction::V6` carries it (Phase 2).
+        None
+    }
+
+    /// Iterate over the Ironwood [`orchard::Action`]s in this transaction, if there are any,
+    /// regardless of version.
+    pub fn ironwood_actions(&self) -> impl Iterator<Item = &orchard::Action> {
+        self.ironwood_shielded_data()
+            .into_iter()
+            .flat_map(orchard::ShieldedData::actions)
+    }
+
+    /// Access the Ironwood [`orchard::Nullifier`]s in this transaction, if there are any,
+    /// regardless of version.
+    pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+        self.ironwood_shielded_data()
+            .into_iter()
+            .flat_map(orchard::ShieldedData::nullifiers)
+    }
+
+    /// Access the Ironwood note commitments in this transaction, if there are any,
+    /// regardless of version.
+    pub fn ironwood_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.ironwood_shielded_data()
+            .into_iter()
+            .flat_map(orchard::ShieldedData::note_commitments)
+    }
+
+    /// Access the Ironwood [`orchard::shielded_data::Flags`] in this transaction, if there is any,
+    /// regardless of version.
+    pub fn ironwood_flags(&self) -> Option<orchard::shielded_data::Flags> {
+        self.ironwood_shielded_data()
+            .map(|ironwood_shielded_data| ironwood_shielded_data.flags)
+    }
+
+    /// Return if the transaction has any Ironwood shielded data,
+    /// regardless of version.
+    pub fn has_ironwood_shielded_data(&self) -> bool {
+        self.ironwood_shielded_data().is_some()
+    }
+
     // value balances
 
     /// Return the transparent value balance,
@@ -1457,6 +1508,23 @@ impl Transaction {
         ValueBalance::from_orchard_amount(orchard_value_balance)
     }
 
+    /// Return the Ironwood value balance (NU6.3 onward), the change in the transaction value pool
+    /// due to Ironwood [`orchard::Action`]s.
+    ///
+    /// Positive values are added to this transaction's value pool, and removed from the Ironwood
+    /// chain value pool. Negative values are removed from this transaction, and added to the
+    /// Ironwood pool. This is zero for transactions without an Ironwood bundle.
+    ///
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
+    pub fn ironwood_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let ironwood_value_balance = self
+            .ironwood_shielded_data()
+            .map(|shielded_data| shielded_data.value_balance)
+            .unwrap_or_else(Amount::zero);
+
+        ValueBalance::from_ironwood_amount(ironwood_value_balance)
+    }
+
     /// Returns the value balances for this transaction using the provided transparent outputs.
     pub(crate) fn value_balance_from_outputs(
         &self,
@@ -1466,6 +1534,7 @@ impl Transaction {
             + self.sprout_value_balance()?
             + self.sapling_value_balance()
             + self.orchard_value_balance()
+            + self.ironwood_value_balance()
     }
 
     /// Returns the value balances for this transaction.
