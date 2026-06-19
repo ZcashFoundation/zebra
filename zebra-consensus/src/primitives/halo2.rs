@@ -50,19 +50,23 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
-// NU6.2 re-enables Orchard actions and ships the *fixed* variable-base
-// scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to be temporarily
-// disabled; see GHSA-jfw5-j458-pfv6). The fix changes the Orchard Action circuit, and therefore
-// its verifying key: a proof produced under one circuit version does not verify under the other
-// key. So we keep BOTH keys, each in its own dedicated verifier, and route each bundle to the
-// correct verifier by the block's network upgrade (see [`verifier_for`]):
+// The Orchard Action circuit — and therefore its verifying key — has changed across upgrades, and
+// a proof produced under one circuit version does not verify under another. We keep one key per
+// circuit version, each in its own dedicated verifier, and route each bundle to the correct one by
+// its circuit version (see [`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]):
 //
-//   * Orchard bundles mined before NU6.2 (NU5..NU6.2) were produced by the historical, insecure
-//     circuit and only verify under the [`InsecurePreNu6_2`] key. These must keep verifying so
-//     that nodes can re-sync and reindex pre-soft-fork Orchard history.
+//   * Orchard bundles before NU6.2 (NU5..NU6.2) were produced by the historical, insecure circuit
+//     and only verify under the [`InsecurePreNu6_2`] key. These must keep verifying so that nodes
+//     can re-sync and reindex pre-soft-fork Orchard history.
 //
-//   * Orchard bundles mined at NU6.2 onward are produced by the fixed circuit and only verify
-//     under the [`FixedPostNu6_2`] key.
+//   * Orchard bundles from NU6.2 onward in *v5* transactions use the fixed circuit and only verify
+//     under the [`FixedPostNu6_2`] key — including at NU6.3, since the v5 format predates the NU6.3
+//     circuit.
+//
+//   * *v6* Orchard bundles (NU6.3 onward, `enableCrossAddress = 0`) and Ironwood bundles use the
+//     NU6.3 cross-address circuit and verify under the [`PostNu6_3`] key.
+//
+// Routing therefore depends on the transaction version, not just the block's upgrade.
 //
 // NOTE: this deliberately does NOT copy zcashd PR #176's WIP shortcut of validating everything
 // against the fixed key; that is incorrect for re-syncing pre-soft-fork Orchard blocks, whose
@@ -203,10 +207,11 @@ impl Service<Item> for OrchardFallback {
 
 /// The concrete type of a global Halo2 verification service.
 ///
-/// Each Orchard circuit era gets its own instance — see [`VERIFIER_PRE_NU6_2`] and
-/// [`VERIFIER_POST_NU6_2`] — so that batches, fallbacks, and verifying keys are fully separated
-/// per era.
-type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
+/// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
+/// [`VERIFIER_POST_NU6_2`], and [`VERIFIER_POST_NU6_3`] — so that batches, fallbacks, and verifying
+/// keys are fully separated per circuit version. The Orchard verifier routing functions
+/// ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the matching one.
+pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
 
 /// Builds a global Halo2 verifier that validates every item against `vk`.
 ///
@@ -260,21 +265,25 @@ pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
 pub static VERIFIER_POST_NU6_3: Lazy<VerifierService> =
     Lazy::new(|| batch_verifier(&VERIFYING_KEY_POST_NU6_3));
 
-/// Returns the global Halo2 verifier for Orchard bundles in blocks at `network_upgrade`.
+/// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
+/// block at `network_upgrade`.
 ///
-/// The Orchard Action circuit — and therefore its verifying key — changed at NU6.2 (the fixed
-/// variable-base scalar-multiplication circuit; see GHSA-jfw5-j458-pfv6), and a proof produced
-/// under one circuit does not verify under the other key. So each bundle must be checked against
-/// the key for the upgrade of the block it appears in:
+/// The verifying key is selected by the bundle's circuit version, which for the Orchard pool is
+/// determined by the *transaction version*, not just the block's upgrade: a v5 transaction always
+/// carries a pre-NU6.3-format Orchard bundle, so even when mined at NU6.3 it commits to the
+/// pre-NU6.3 circuit (the fixed circuit from NU6.2, or the historical insecure circuit before it) —
+/// **never** the NU6.3 cross-address circuit. v6 Orchard bundles are handled separately by
+/// [`orchard_v6_verifier`].
 ///
-///   * upgrades before NU6.2 are routed to [`VERIFIER_PRE_NU6_2`] (the historical insecure key),
-///     so pre-soft-fork Orchard history still verifies on re-sync;
-///   * NU6.2 and every later upgrade are routed to [`VERIFIER_POST_NU6_2`] (the fixed key).
+///   * upgrades before NU6.2 → [`VERIFIER_PRE_NU6_2`] (the historical insecure key), so
+///     pre-soft-fork Orchard history still verifies on re-sync;
+///   * NU6.2 onward → [`VERIFIER_POST_NU6_2`] (the fixed key); a v5 Orchard bundle never uses the
+///     NU6.3 circuit.
 ///
-/// The mapping is an explicit, exhaustive `match` on every [`NetworkUpgrade`] variant: there is
-/// no version-comparison fallthrough and no default-to-insecure arm, so adding a future upgrade
-/// is a compile error here until it is bound to a key on purpose.
-pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService {
+/// The mapping is an explicit, exhaustive `match` on every [`NetworkUpgrade`] variant: there is no
+/// version-comparison fallthrough and no default arm, so adding a future upgrade is a compile error
+/// here until it is bound to a key on purpose.
+pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService {
     use NetworkUpgrade::*;
 
     match network_upgrade {
@@ -284,22 +293,25 @@ pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService
         Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5
         | Nu6 | Nu6_1 => &VERIFIER_PRE_NU6_2,
 
-        // NU6.2 ships the fixed circuit. Bundles mined at NU6.2 (before NU6.3) verify under the
-        // fixed key.
-        Nu6_2 => &VERIFIER_POST_NU6_2,
+        // NU6.2 onward: a v5 Orchard bundle uses the fixed circuit. It does NOT use the NU6.3
+        // cross-address circuit even when mined at NU6.3+, because the v5 format predates it.
+        Nu6_2 | Nu6_3 | Nu7 => &VERIFIER_POST_NU6_2,
 
-        // NU6.3 ships the Action circuit update that adds the cross-address restriction (shared by
-        // the Orchard and Ironwood pools), and every later upgrade inherits it, so all of them
-        // verify under the NU6.3 key.
-        Nu6_3 | Nu7 => &VERIFIER_POST_NU6_3,
-
-        // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.3
-        // upgrade, so it inherits the NU6.3 circuit and is bound to that key here on purpose
-        // (rather than via a wildcard) to keep this match exhaustive and fail-closed under every
-        // build configuration.
+        // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. A v5 Orchard bundle
+        // there still uses the fixed circuit; bound explicitly (not via a wildcard) to keep this
+        // match exhaustive and fail-closed under every build configuration.
         #[cfg(zcash_unstable = "zfuture")]
-        ZFuture => &VERIFIER_POST_NU6_3,
+        ZFuture => &VERIFIER_POST_NU6_2,
     }
+}
+
+/// Returns the global Halo2 verifier for **v6** Orchard-pool and Ironwood-pool bundles.
+///
+/// v6 transactions exist only from NU6.3 onward, and both their Orchard bundle (with
+/// `enableCrossAddress = 0`) and their Ironwood bundle commit to the NU6.3 Action circuit, which
+/// adds the cross-address restriction. Both therefore verify under [`VERIFYING_KEY_POST_NU6_3`].
+pub fn orchard_v6_verifier() -> &'static VerifierService {
+    &VERIFIER_POST_NU6_3
 }
 
 /// Halo2 proof verifier implementation

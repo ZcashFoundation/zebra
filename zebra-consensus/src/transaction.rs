@@ -963,7 +963,12 @@ where
             cached_ffi_transaction,
         )?
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
-        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash, nu)))
+        .and(Self::verify_orchard_bundle(
+            orchard_bundle,
+            &sighash,
+            // A v5 transaction's Orchard bundle uses the pre-NU6.3 circuit for its era.
+            primitives::halo2::orchard_v5_verifier_for(nu),
+        )))
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -1008,7 +1013,11 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    /// Verifies a V6 (NU6.3 / Ironwood) transaction's shielded data.
+    ///
+    /// Differs from [`Self::verify_v5_transaction`] in the Orchard verifier: a v6 Orchard bundle
+    /// commits to the NU6.3 cross-address circuit, so it (and the Ironwood bundle) verify under the
+    /// NU6.3 key, not the v5 fixed key.
     #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
@@ -1016,7 +1025,64 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+        let transaction = request.transaction();
+        let nu = request.upgrade(network);
+
+        Self::verify_v6_transaction_network_upgrade(&transaction, nu)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        // TODO(NU6.3): also verify the Ironwood bundle's Halo2 proof under the NU6.3 key, once the
+        // librustzcash fork exposes the v6 Ironwood bundle accessor (tracked separately).
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            request,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_bundle(
+            orchard_bundle,
+            &sighash,
+            // A v6 Orchard bundle uses the NU6.3 cross-address circuit.
+            primitives::halo2::orchard_v6_verifier(),
+        )))
+    }
+
+    /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
+    ///
+    /// V6 transactions are only valid from NU6.3 onward.
+    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // V6 transactions are not valid before NU6.3.
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1184,20 +1250,19 @@ where
         async_checks
     }
 
-    /// Verifies a transaction's Orchard shielded data.
+    /// Verifies a transaction's Orchard or Ironwood shielded data against the given `verifier`.
     ///
-    /// `network_upgrade` is the network upgrade active at the verified transaction's block
-    /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
-    /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
-    /// (GHSA-jfw5-j458-pfv6), so pre-NU6.2 bundles must be verified against the historical
-    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
-    /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
-    /// the verifier holding the matching key; the two verifiers keep separate batches, so eras
-    /// are never mixed.
+    /// The caller selects `verifier` to hold the verifying key for this bundle's circuit version.
+    /// The Orchard Action circuit (and its verifying key) changed at NU6.2 (GHSA-jfw5-j458-pfv6)
+    /// and again at NU6.3 (the cross-address circuit), and a proof from one circuit version does
+    /// not verify under another's key, so the key depends on the *transaction version*, not just
+    /// the block's upgrade: a v5 Orchard bundle uses [`primitives::halo2::orchard_v5_verifier_for`]
+    /// while a v6 Orchard bundle and the Ironwood bundle use [`primitives::halo2::orchard_v6_verifier`].
+    /// Each verifier keeps a separate batch, so circuit versions are never mixed.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
-        network_upgrade: NetworkUpgrade,
+        verifier: &'static primitives::halo2::VerifierService,
     ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
@@ -1214,10 +1279,12 @@ where
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
             //
-            // Route the bundle to the verifier for its circuit era: pre-NU6.2 bundles only
-            // verify under the insecure key, NU6.2+ bundles only under the fixed key.
+            // The caller selects `verifier` to hold the verifying key for this bundle's circuit
+            // version (which for the Orchard pool depends on the transaction version, and for the
+            // Ironwood pool is always the NU6.3 key); verifiers keep separate batches, so circuit
+            // versions are never mixed.
             async_checks.push(
-                primitives::halo2::verifier_for(network_upgrade)
+                verifier
                     .clone()
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
