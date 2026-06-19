@@ -5,17 +5,22 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
 use tower::BoxError;
-use zebra_chain::{block::Height, parameters::Network, serialization::BytesInDisplayOrder};
+use zebra_chain::{
+    block::{self, Block, Height},
+    parameters::Network,
+    serialization::BytesInDisplayOrder,
+};
 use zebra_state::{
     spawn_init_read_only, ChainTipBlock, ChainTipChange, ChainTipSender, CheckpointVerifiedBlock,
-    LatestChainTip, NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock,
+    HashOrHeight, LatestChainTip, NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock,
     ValidateContextError, ZebraDb,
 };
 
 use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::indexer::{
-    indexer_client::IndexerClient, BlockAndHash, Empty, NonFinalizedStateChangeRequest,
+    block_request, indexer_client::IndexerClient, BlockAndHash, BlockRequest, Empty,
+    NonFinalizedStateChangeRequest,
 };
 
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
@@ -203,7 +208,6 @@ impl TrustedChainSync {
             match self.try_commit(block.clone()).await {
                 Ok(()) => {
                     last_failed_commit_hash = None;
-                    self.update_channels();
                 }
                 Err(error) => {
                     // Only log on transitions to avoid saturating the logs when the same block
@@ -234,14 +238,128 @@ impl TrustedChainSync {
     ) -> Result<(), ValidateContextError> {
         self.try_catch_up_with_primary().await;
 
+        // When the non-finalized state is empty and the incoming block doesn't build directly on
+        // the secondary's finalized tip, the secondary's finalized state is lagging the primary's.
+        // The streamed non-finalized blocks start at the primary's finalized tip, which can be
+        // several blocks above ours, so the incoming block has no parent to attach to. Bridge that
+        // gap by fetching the missing (already-finalized) blocks from the primary, so the incoming
+        // block has a contiguous chain to commit onto.
+        if self.non_finalized_state.best_chain().is_none()
+            && self.db.finalized_tip_hash() != block.block.header.previous_block_hash
+        {
+            self.fill_finalized_gap(block.height).await;
+        }
+
+        self.commit(block)
+    }
+
+    /// Commits `block` to the non-finalized state, starting a new chain if it builds on the
+    /// finalized tip or extending an existing chain otherwise, prunes newly-finalized blocks, and
+    /// publishes the updated chain tip and non-finalized state.
+    ///
+    /// Updating the channels here (rather than only after `try_commit` returns) means the bridge
+    /// blocks committed by [`Self::fill_finalized_gap`] also advance the published chain tip.
+    fn commit(&mut self, block: SemanticallyVerifiedBlock) -> Result<(), ValidateContextError> {
         if self.db.finalized_tip_hash() == block.block.header.previous_block_hash {
             self.prune_finalized();
-            self.non_finalized_state.commit_new_chain(block, &self.db)
+            self.non_finalized_state.commit_new_chain(block, &self.db)?;
         } else {
             self.non_finalized_state.commit_block(block, &self.db)?;
             self.prune_finalized();
-            Ok(())
         }
+
+        self.update_channels();
+
+        Ok(())
+    }
+
+    /// Fetches the blocks between the secondary's finalized tip and `target_height` (exclusive)
+    /// from the primary and commits them to the non-finalized state.
+    ///
+    /// These blocks are finalized on the primary but not yet on the lagging secondary. Committing
+    /// them as non-finalized bridge blocks gives the block at `target_height` a contiguous chain to
+    /// attach to; they are dropped again by [`Self::prune_finalized`] as the secondary catches up.
+    ///
+    /// This is best-effort: if a block can't be fetched or committed, it returns early and lets the
+    /// caller's commit fail so the block is retried on the next subscription.
+    async fn fill_finalized_gap(&mut self, target_height: Height) {
+        loop {
+            // Try to advance the secondary's finalized state first: if it catches up to the gap on
+            // its own, we can stop fetching blocks. This also drops any bridge blocks the secondary
+            // has since finalized, so the next height is recomputed from where we actually are.
+            self.try_catch_up_with_primary().await;
+            self.prune_finalized();
+
+            // The next height to bridge is just above the highest block we already have: the
+            // non-finalized tip if we've committed bridge blocks, otherwise the finalized tip.
+            let Some(highest) = self
+                .non_finalized_state
+                .best_tip()
+                .map(|(height, _hash)| height)
+                .or_else(|| self.db.finalized_tip_height())
+            else {
+                return;
+            };
+
+            let Ok(next_height) = highest.next() else {
+                return;
+            };
+
+            // Stop once the chain reaches the streamed block's parent, whether by the finalized
+            // state catching up or by the bridge blocks we fetched.
+            if next_height >= target_height {
+                return;
+            }
+
+            let (block, hash) = match self.get_block(next_height.into()).await {
+                Ok(block_and_hash) => block_and_hash,
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        ?next_height,
+                        "failed to fetch a block while bridging the finalized gap; \
+                         will retry on the next subscription"
+                    );
+                    return;
+                }
+            };
+
+            let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            if let Err(error) = self.commit(block) {
+                tracing::warn!(
+                    ?error,
+                    ?next_height,
+                    "failed to commit a block while bridging the finalized gap; \
+                     will retry on the next subscription"
+                );
+                return;
+            }
+        }
+    }
+
+    /// Fetches a single block from the primary by hash or height via the indexer gRPC.
+    async fn get_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<(Block, block::Hash), Status> {
+        let request = match hash_or_height {
+            HashOrHeight::Hash(hash) => BlockRequest {
+                hash_or_height: Some(block_request::HashOrHeight::Hash(
+                    hash.bytes_in_display_order().to_vec(),
+                )),
+            },
+            HashOrHeight::Height(height) => BlockRequest {
+                hash_or_height: Some(block_request::HashOrHeight::Height(height.0)),
+            },
+        };
+
+        self.indexer_rpc_client
+            .clone()
+            .get_block(request)
+            .await?
+            .into_inner()
+            .decode()
+            .ok_or_else(|| Status::internal("failed to decode block from get_block response"))
     }
 
     /// Calls the `non_finalized_state_change()` method on the indexer gRPC client to subscribe
