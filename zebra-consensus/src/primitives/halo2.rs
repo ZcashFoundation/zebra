@@ -78,15 +78,15 @@ lazy_static::lazy_static! {
     /// Bundles mined before NU6.2 committed to this circuit and only verify under this key, so it
     /// MUST be retained to re-verify pre-NU6.2 history on resync. It must never be used to verify
     /// post-NU6.2 bundles.
-    pub static ref VERIFYING_KEY_PRE_NU6_2: ItemVerifyingKey =
+    pub static ref VERIFYING_KEY_V5_PRE_NU6_2: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::InsecurePreNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.2+** (fixed) circuit.
     ///
     /// Built from the fixed variable-base scalar-multiplication Orchard Action circuit shipped in
     /// NU6.2. Bundles mined at or after the NU6.2 activation height commit to this circuit and
-    /// only verify under this key. See [`VERIFYING_KEY_PRE_NU6_2`] for the era split.
-    pub static ref VERIFYING_KEY_POST_NU6_2: ItemVerifyingKey =
+    /// only verify under this key. See [`VERIFYING_KEY_V5_PRE_NU6_2`] for the era split.
+    pub static ref VERIFYING_KEY_V5_POST_NU6_2: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.3+** (Ironwood) circuit.
@@ -94,7 +94,7 @@ lazy_static::lazy_static! {
     /// Built from the NU6.3 Action circuit, which adds the cross-address restriction capability
     /// (`enableCrossAddress`) shared by the Orchard and Ironwood pools. Bundles mined at or after
     /// the NU6.3 activation height commit to this circuit and only verify under this key.
-    pub static ref VERIFYING_KEY_POST_NU6_3: ItemVerifyingKey =
+    pub static ref VERIFYING_KEY_V6: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
 }
 
@@ -234,36 +234,36 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
 
 /// Global batch verification context for **pre-NU6.2** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_PRE_NU6_2`] (the insecure circuit
+/// Items routed here are verified against [`VERIFYING_KEY_V5_PRE_NU6_2`] (the insecure circuit
 /// retained for historical blocks). This service transparently batches contemporaneous proof
 /// verifications, handling batch failures by falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_PRE_NU6_2));
 
 /// Global batch verification context for **NU6.2+** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_POST_NU6_2`] (the fixed circuit). This
+/// Items routed here are verified against [`VERIFYING_KEY_V5_POST_NU6_2`] (the fixed circuit). This
 /// service transparently batches contemporaneous proof verifications, handling batch failures by
 /// falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_POST_NU6_2));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_POST_NU6_2));
 
 /// Global batch verification context for **NU6.3+** (Ironwood) Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_POST_NU6_3`] (the NU6.3 Action circuit
+/// Items routed here are verified against [`VERIFYING_KEY_V6`] (the NU6.3 Action circuit
 /// with cross-address restriction support). This service transparently batches contemporaneous
 /// proof verifications, handling batch failures by falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_POST_NU6_3: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_POST_NU6_3));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V6));
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
 /// block at `network_upgrade`.
@@ -309,7 +309,7 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
 ///
 /// v6 transactions exist only from NU6.3 onward, and both their Orchard bundle (with
 /// `enableCrossAddress = 0`) and their Ironwood bundle commit to the NU6.3 Action circuit, which
-/// adds the cross-address restriction. Both therefore verify under [`VERIFYING_KEY_POST_NU6_3`].
+/// adds the cross-address restriction. Both therefore verify under [`VERIFYING_KEY_V6`].
 pub fn orchard_v6_verifier() -> &'static VerifierService {
     &VERIFIER_POST_NU6_3
 }

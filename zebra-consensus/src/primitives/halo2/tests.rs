@@ -27,7 +27,7 @@ use zebra_chain::{
 
 use super::{
     orchard_v5_verifier_for, orchard_v6_verifier, Item, VERIFIER_POST_NU6_2, VERIFIER_POST_NU6_3,
-    VERIFIER_PRE_NU6_2, VERIFYING_KEY_POST_NU6_2, VERIFYING_KEY_PRE_NU6_2,
+    VERIFIER_PRE_NU6_2, VERIFYING_KEY_V5_POST_NU6_2, VERIFYING_KEY_V5_PRE_NU6_2,
 };
 
 /// Returns one real pre-NU6.2 Orchard bundle and its sighash, extracted from the mainnet test
@@ -35,7 +35,7 @@ use super::{
 ///
 /// These mainnet blocks are NU5-era Orchard history, mined long before NU6.2, so their proofs
 /// were produced by the historical (insecure) circuit and only verify under
-/// [`VERIFYING_KEY_PRE_NU6_2`]. Transactions with transparent inputs are skipped because their
+/// [`VERIFYING_KEY_V5_PRE_NU6_2`]. Transactions with transparent inputs are skipped because their
 /// sighash needs the previous outputs they spend, which are not in the test vectors.
 fn pre_nu6_2_bundle_and_sighash() -> (Bundle<Authorized, ZatBalance>, SigHash) {
     for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
@@ -77,13 +77,13 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
 
     // Correct era key: the historical proof must verify, so pre-NU6.2 history still re-syncs.
     assert!(
-        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2),
+        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_V5_PRE_NU6_2),
         "a real pre-NU6.2 Orchard proof must verify under the pre-NU6.2 (insecure) key"
     );
 
     // Wrong era key: the same proof must be rejected. This is the not-fail-open guarantee.
     assert!(
-        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_POST_NU6_2),
+        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_V5_POST_NU6_2),
         "a pre-NU6.2 Orchard proof must be REJECTED by the post-NU6.2 (fixed) key; \
          verifying it would mean the era selection is fail-open"
     );
