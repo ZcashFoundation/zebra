@@ -1120,6 +1120,11 @@ impl ZcashDeserialize for Transaction {
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
                 // `bindingSigSapling`.
+                //
+                // The v6 Sapling bundle has the same *wire* format as v5: the NU6.3 changes (moving
+                // `anchorSapling` from the txid digest to the auth digest, and the `..._v6`
+                // personalizations) only affect digest computation, which Zebra delegates to
+                // librustzcash via `to_librustzcash`. So the v5 Sapling codec is reused here.
                 let sapling_shielded_data =
                     deserialize_v5_sapling_shielded_data(&mut limited_reader, is_coinbase)?;
 
