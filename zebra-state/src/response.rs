@@ -11,9 +11,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
-    orchard,
-    parameters::Network,
-    sapling,
+    orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
@@ -28,7 +26,10 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 #[allow(unused_imports)]
 use crate::{ReadRequest, Request};
 
-use crate::{service::read::AddressUtxos, NonFinalizedState, TransactionLocation, WatchReceiver};
+use crate::{
+    service::read::AddressUtxos, ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation,
+    WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
@@ -206,7 +207,7 @@ impl MinedTx {
 ///
 /// It's okay to occasionally miss updates when the buffer is full, as the new blocks in the missed change will be
 /// sent to the listener on the next change to the non-finalized state.
-const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 1_000;
+const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 2 * MAX_BLOCK_REORG_HEIGHT as usize;
 
 /// A listener for changes in the non-finalized state.
 #[derive(Clone, Debug)]
@@ -215,6 +216,38 @@ pub struct NonFinalizedBlocksListener(
 );
 
 impl NonFinalizedBlocksListener {
+    /// Sends the blocks in `non_finalized_state` that satisfy `take_cond` to `sender`, in
+    /// ascending height order.
+    ///
+    /// Walks each chain from its tip downwards, taking blocks while `take_cond` holds and stopping
+    /// at the first block that fails it, so it sends the blocks a listener hasn't been sent yet by
+    /// stopping at the first block it already has.
+    ///
+    /// Returns an error if the receiver has been dropped.
+    async fn take_and_send_blocks<'a>(
+        sender: &tokio::sync::mpsc::Sender<(block::Hash, Arc<Block>)>,
+        non_finalized_state: &'a NonFinalizedState,
+        take_cond: impl Fn(&&ContextuallyVerifiedBlock) -> bool + Copy + 'a,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<(block::Hash, Arc<Block>)>> {
+        let new_blocks = non_finalized_state
+            .chain_iter()
+            .flat_map(move |chain| {
+                // Take blocks from the chain in reverse height order until we reach a block the
+                // listener already has, then restore ascending height order.
+                let mut blocks: Vec<_> =
+                    chain.blocks.values().rev().take_while(take_cond).collect();
+                blocks.reverse();
+                blocks
+            })
+            .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
+
+        for new_block_with_hash in new_blocks {
+            sender.send(new_block_with_hash).await?;
+        }
+
+        Ok(())
+    }
+
     /// Spawns a task to listen for changes in the non-finalized state and sends any blocks in the non-finalized state
     /// to the caller that have not already been sent.
     ///
@@ -225,58 +258,55 @@ impl NonFinalizedBlocksListener {
     ///
     /// Returns a new instance of [`NonFinalizedBlocksListener`] for the caller to listen for new blocks in the non-finalized state.
     pub fn spawn(
-        network: Network,
         mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
         known_chain_tips: HashSet<block::Hash>,
     ) -> Self {
         let (sender, receiver) = tokio::sync::mpsc::channel(NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE);
 
         tokio::spawn(async move {
-            // Start with an empty non-finalized state. Any blocks the caller already has are
-            // identified by the `known_chain_tips` hashes below, so by default we assume the
-            // caller doesn't yet have any blocks from the non-finalized state.
-            let mut prev_non_finalized_state = NonFinalizedState::new(&network);
+            // `prev_non_finalized_state` starts as the current non-finalized state. The first send
+            // below skips blocks at or below the caller's known chain tips; afterwards those blocks
+            // are already in `prev_non_finalized_state`, so later sends only need to check it.
+            let mut prev_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
 
+            // Send the blocks the caller is missing relative to its known chain tips. This checks
+            // `known_chain_tips` once; from here on those blocks are covered by the state check.
+            if Self::take_and_send_blocks(&sender, &prev_non_finalized_state, |b| {
+                !known_chain_tips.contains(&b.hash)
+            })
+            .await
+            .is_err()
+            {
+                tracing::debug!("non-finalized blocks receiver closed, ending task");
+                return;
+            }
+
+            // # Correctness
+            //
+            // This loop should check that the non-finalized state receiver has changed sooner
+            // than the non-finalized state could possibly have changed to avoid missing updates, so
+            // the logic here should be quicker than the contextual verification logic that precedes
+            // commits to the non-finalized state.
+            //
+            // See the `NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE` documentation for more details.
             loop {
-                // # Correctness
-                //
-                // This loop should check that the non-finalized state receiver has changed sooner
-                // than the non-finalized state could possibly have changed to avoid missing updates, so
-                // the logic here should be quicker than the contextual verification logic that precedes
-                // commits to the non-finalized state.
-                //
-                // See the `NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE` documentation for more details.
-                let latest_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+                let non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
 
-                let new_blocks = latest_non_finalized_state
-                    .chain_iter()
-                    .flat_map(|chain| {
-                        // Take blocks from the chain in reverse height order until we reach a block that was
-                        // present in the last seen copy of the non-finalized state.
-                        let mut new_blocks: Vec<_> = chain
-                            .blocks
-                            .values()
-                            .rev()
-                            .take_while(|cv_block| {
-                                !prev_non_finalized_state.any_chain_contains(&cv_block.hash)
-                                    && !known_chain_tips.contains(&cv_block.hash)
-                            })
-                            .collect();
-                        new_blocks.reverse();
-                        new_blocks
-                    })
-                    .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
-
-                for new_block_with_hash in new_blocks {
-                    if sender.send(new_block_with_hash).await.is_err() {
-                        tracing::debug!("non-finalized blocks receiver closed, ending task");
-                        return;
-                    }
+                // Send blocks that weren't in the last seen copy of the non-finalized state. The
+                // caller's known tips are already covered by `prev_non_finalized_state`.
+                if Self::take_and_send_blocks(&sender, &non_finalized_state, |b| {
+                    !prev_non_finalized_state.any_chain_contains(&b.hash)
+                })
+                .await
+                .is_err()
+                {
+                    tracing::debug!("non-finalized blocks receiver closed, ending task");
+                    return;
                 }
 
-                prev_non_finalized_state = latest_non_finalized_state;
+                prev_non_finalized_state = non_finalized_state;
 
-                // Wait for the next update to the non-finalized state
+                // Wait for the next update to the non-finalized state.
                 if let Err(error) = non_finalized_state_receiver.changed().await {
                     warn!(
                         ?error,
