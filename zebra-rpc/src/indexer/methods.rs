@@ -242,7 +242,10 @@ where
                 zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash)?)
             }
             Some(block_request::HashOrHeight::Height(height)) => {
-                zebra_state::HashOrHeight::Height(block::Height(height))
+                let height = block::Height::try_from(height).map_err(|_| {
+                    Status::invalid_argument(format!("block height out of range: {height}"))
+                })?;
+                zebra_state::HashOrHeight::Height(height)
             }
             None => {
                 return Err(Status::invalid_argument(
