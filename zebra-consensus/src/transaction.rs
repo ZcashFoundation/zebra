@@ -1027,20 +1027,22 @@ where
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+        let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
 
         let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
 
-        // TODO(NU6.3): also verify the Ironwood bundle's Halo2 proof under the NU6.3 key, once the
-        // librustzcash fork exposes the v6 Ironwood bundle accessor (tracked separately).
+        // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
+        // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
         Ok(Self::verify_transparent_inputs_and_outputs(
             request,
             script_verifier,
             cached_ffi_transaction,
         )?
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
-        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash)))
+        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(ironwood_bundle, &sighash)))
     }
 
     /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
