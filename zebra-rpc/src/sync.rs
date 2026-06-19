@@ -26,6 +26,22 @@ use crate::indexer::{
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_secs(5);
 
+/// How long to wait for a message on a gRPC subscription stream before assuming the stream is dead
+/// and re-subscribing.
+///
+/// Generous, because legitimate gaps between blocks/tip changes can be several minutes; this is a
+/// backstop against a wedged connection that the keep-alive ping below doesn't catch. Re-subscribing
+/// is cheap and resumes from the syncer's current chain tips, so an occasional false trigger during
+/// a quiet period is harmless.
+const STREAM_MESSAGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// HTTP/2 keep-alive ping interval for the indexer gRPC connection, so a half-open connection is
+/// detected promptly instead of hanging a stream read indefinitely.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How long to wait for a keep-alive ping response before treating the connection as dead.
+const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// How long to wait before re-subscribing after a block fails to commit to the non-finalized state.
 ///
 /// A block can persistently fail to commit (e.g. [`ValidateContextError::NotReadyToBeCommitted`])
@@ -73,19 +89,25 @@ async fn update_finalized_chain_tip(
             continue;
         };
 
-        let message = match chain_tip_change.message().await {
-            Ok(Some(block_hash_and_height)) => block_hash_and_height,
-            Ok(None) => {
-                tracing::warn!("chain_tip_change stream ended unexpectedly");
-                chain_tip_change_stream = None;
-                continue;
-            }
-            Err(err) => {
-                tracing::warn!(?err, "error receiving chain tip change");
-                chain_tip_change_stream = None;
-                continue;
-            }
-        };
+        let message =
+            match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()).await {
+                Ok(Ok(Some(block_hash_and_height))) => block_hash_and_height,
+                Ok(Ok(None)) => {
+                    tracing::warn!("chain_tip_change stream ended unexpectedly");
+                    chain_tip_change_stream = None;
+                    continue;
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(?err, "error receiving chain tip change");
+                    chain_tip_change_stream = None;
+                    continue;
+                }
+                Err(_) => {
+                    tracing::debug!("chain tip change stream timed out, re-subscribing");
+                    chain_tip_change_stream = None;
+                    continue;
+                }
+            };
 
         let Some((hash, _height)) = message.try_into_hash_and_height() else {
             tracing::warn!("failed to convert message into a block hash and height");
@@ -93,7 +115,11 @@ async fn update_finalized_chain_tip(
         };
 
         // Skip the chain tip change if catching up to the primary db instance fails.
-        if db.spawn_try_catch_up_with_primary().await.is_err() {
+        if let Err(error) = db.spawn_try_catch_up_with_primary().await {
+            tracing::debug!(
+                ?error,
+                "failed to catch up to the primary database while updating the finalized tip"
+            );
             continue;
         }
 
@@ -122,8 +148,14 @@ impl TrustedChainSync {
         let non_finalized_state = NonFinalizedState::new(&db.network());
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &db.network());
-        let indexer_rpc_client =
-            IndexerClient::connect(format!("http://{indexer_rpc_address}")).await?;
+        let channel =
+            tonic::transport::Endpoint::from_shared(format!("http://{indexer_rpc_address}"))?
+                .keep_alive_while_idle(true)
+                .http2_keep_alive_interval(KEEPALIVE_INTERVAL)
+                .keep_alive_timeout(KEEPALIVE_TIMEOUT)
+                .connect()
+                .await?;
+        let indexer_rpc_client = IndexerClient::new(channel);
         let finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
 
         let mut syncer = Self {
@@ -179,15 +211,25 @@ impl TrustedChainSync {
                 continue;
             };
 
-            let message = match non_finalized_state_change.message().await {
-                Ok(Some(block_and_hash)) => block_and_hash,
-                Ok(None) => {
+            let message = match tokio::time::timeout(
+                STREAM_MESSAGE_TIMEOUT,
+                non_finalized_state_change.message(),
+            )
+            .await
+            {
+                Ok(Ok(Some(block_and_hash))) => block_and_hash,
+                Ok(Ok(None)) => {
                     tracing::warn!("non-finalized state change stream ended unexpectedly");
                     non_finalized_blocks_listener = None;
                     continue;
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     tracing::warn!(?err, "error receiving non-finalized state change");
+                    non_finalized_blocks_listener = None;
+                    continue;
+                }
+                Err(_) => {
+                    tracing::debug!("non-finalized state change stream timed out, re-subscribing");
                     non_finalized_blocks_listener = None;
                     continue;
                 }
@@ -386,8 +428,16 @@ impl TrustedChainSync {
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
+    ///
+    /// Logs a warning on failure: a secondary that repeatedly can't catch up will serve an
+    /// increasingly stale finalized state, so the failure should be visible rather than silent.
     async fn try_catch_up_with_primary(&self) {
-        let _ = self.db.spawn_try_catch_up_with_primary().await;
+        if let Err(error) = self.db.spawn_try_catch_up_with_primary().await {
+            tracing::warn!(
+                ?error,
+                "failed to catch up to the primary database; the finalized state may be stale"
+            );
+        }
     }
 
     /// Reads the finalized tip block from the secondary db instance and converts it to a [`ChainTipBlock`].
