@@ -423,7 +423,7 @@ impl ZcashSerialize for orchard::ShieldedData {
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
-            deserialize_orchard_shielded_data(reader, orchard::shielded_data::FlagFormat::Nu6_3)?
+            deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
                 .map(orchard::ShieldedDataV6),
         )
     }
@@ -434,22 +434,23 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         // The bare `Option<orchard::ShieldedData>` codec is the v5 Orchard bundle, which uses the
-        // pre-NU6.3 flag-byte format. v6 Orchard and Ironwood bundles call
-        // `deserialize_orchard_shielded_data` directly with `FlagFormat::Nu6_3`.
-        deserialize_orchard_shielded_data(reader, orchard::shielded_data::FlagFormat::PreNu6_3)
+        // pre-NU6.3 flag-byte format (`orchard::Flags`). v6 Orchard and Ironwood bundles use the
+        // `orchard::FlagsV6` newtype.
+        deserialize_orchard_shielded_data::<R, orchard::Flags>(reader)
     }
 }
 
-/// Deserializes an `Option<orchard::ShieldedData>` whose flags byte uses the given `flag_format`.
+/// Deserializes an `Option<orchard::ShieldedData>`, parsing the flags byte via the flag type `F`.
 ///
-/// v5 Orchard bundles use [`FlagFormat::PreNu6_3`](orchard::shielded_data::FlagFormat::PreNu6_3);
-/// v6 Orchard and Ironwood bundles use
-/// [`FlagFormat::Nu6_3`](orchard::shielded_data::FlagFormat::Nu6_3), which permits the
-/// `enableCrossAddress` flag (bit 2).
-pub(crate) fn deserialize_orchard_shielded_data<R: io::Read>(
+/// v5 Orchard bundles pass `F = orchard::Flags` (pre-NU6.3 format); v6 Orchard and Ironwood bundles
+/// pass `F = orchard::FlagsV6` (the NU6.3 format, which permits the `enableCrossAddress` flag).
+pub(crate) fn deserialize_orchard_shielded_data<R, F>(
     mut reader: R,
-    flag_format: orchard::shielded_data::FlagFormat,
-) -> Result<Option<orchard::ShieldedData>, SerializationError> {
+) -> Result<Option<orchard::ShieldedData>, SerializationError>
+where
+    R: io::Read,
+    F: ZcashDeserialize + Into<orchard::Flags>,
+{
     // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
     let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
@@ -468,9 +469,9 @@ pub(crate) fn deserialize_orchard_shielded_data<R: io::Read>(
     //
     // Some Action elements are validated in this function; they are described below.
 
-    // Denoted as `flagsOrchard` in the spec. The reserved-bit consensus rule depends on the
-    // flag-byte format (pre-NU6.3 reserves bits 2..7; NU6.3 reserves bits 3..7).
-    let flags = orchard::Flags::zcash_deserialize_with_format(&mut reader, flag_format)?;
+    // Denoted as `flagsOrchard` in the spec. The flag type `F` selects the reserved-bit rule
+    // (pre-NU6.3 reserves bits 2..7; NU6.3 reserves bits 3..7).
+    let flags: orchard::Flags = F::zcash_deserialize(&mut reader)?.into();
 
     // Denoted as `valueBalanceOrchard` in the spec.
     let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
