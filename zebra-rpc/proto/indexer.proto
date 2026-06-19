@@ -22,6 +22,17 @@ message BlockAndHash {
   bytes data = 2;
 };
 
+// A request to subscribe to non-finalized state changes.
+message NonFinalizedStateChangeRequest {
+  // The hashes of the chain tips the caller already has, in display order.
+  //
+  // The server streams only the non-finalized blocks that come after these
+  // tips, skipping any block at or below a provided tip on the same chain.
+  // If empty, every block currently in the non-finalized state is sent, so an
+  // empty request is equivalent to the previous no-argument behavior.
+  repeated bytes chain_tip_hashes = 1;
+};
+
 // Represents a change in the mempool.
 message MempoolChangeMessage {
   // The type of change that occurred.
@@ -50,7 +61,11 @@ service Indexer {
   rpc ChainTipChange(Empty) returns (stream BlockHashAndHeight);
 
   // Notifies listeners of new blocks in the non-finalized state.
-  rpc NonFinalizedStateChange(Empty) returns (stream BlockAndHash);
+  //
+  // Callers may provide the hashes of the chain tips they already have so the
+  // server only streams blocks after those tips. An empty request streams every
+  // block currently in the non-finalized state.
+  rpc NonFinalizedStateChange(NonFinalizedStateChangeRequest) returns (stream BlockAndHash);
 
   // Notifies listeners of mempool changes
   rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);

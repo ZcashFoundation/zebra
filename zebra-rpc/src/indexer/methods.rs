@@ -1,6 +1,6 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::pin::Pin;
+use std::{collections::HashSet, pin::Pin};
 
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -8,13 +8,13 @@ use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
 use tracing::Span;
-use zebra_chain::{chain_tip::ChainTip, serialization::BytesInDisplayOrder};
+use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
-    MempoolChangeMessage,
+    MempoolChangeMessage, NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -83,16 +83,20 @@ where
 
     async fn non_finalized_state_change(
         &self,
-        _: tonic::Request<Empty>,
+        request: tonic::Request<NonFinalizedStateChangeRequest>,
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
         let span = Span::current();
         let read_state = self.read_state.clone();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
 
+        // The caller may provide the hashes of the chain tips it already has so the server only
+        // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
+        let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
+
         tokio::spawn(async move {
             let mut non_finalized_state_change = match read_state
-                .oneshot(ReadRequest::NonFinalizedBlocksListener)
+                .oneshot(ReadRequest::NonFinalizedBlocksListener { known_chain_tips })
                 .await
             {
                 Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
@@ -212,4 +216,29 @@ where
 
         Ok(Response::new(Box::pin(response_stream)))
     }
+}
+
+/// Decodes the chain tip hashes from a [`NonFinalizedStateChangeRequest`] into a set of
+/// [`block::Hash`]es.
+///
+/// Each hash is expected to be 32 bytes in display order, matching the encoding used when the
+/// server streams [`BlockAndHash`] messages back to the caller.
+///
+/// # Errors
+///
+/// Returns an [`invalid_argument`](Status::invalid_argument) status if any hash is not exactly
+/// 32 bytes long.
+fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<block::Hash>, Status> {
+    chain_tip_hashes
+        .into_iter()
+        .map(|hash| {
+            let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
+                Status::invalid_argument(format!(
+                    "invalid chain tip hash length: expected 32 bytes, got {}",
+                    hash.len()
+                ))
+            })?;
+            Ok(block::Hash::from_bytes_in_display_order(&bytes))
+        })
+        .collect()
 }
