@@ -11,8 +11,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    arbitrary::Prepare, service::finalized_state::FinalizedState, tests::FakeChainHelper, Config,
-    NonFinalizedState, WatchReceiver,
+    arbitrary::Prepare, service::finalized_state::FinalizedState, Config, NonFinalizedState,
+    WatchReceiver,
 };
 
 use super::NonFinalizedBlocksListener;
