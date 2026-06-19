@@ -1602,6 +1602,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.3.0"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
+dependencies = [
+ "blake2b_simd",
+ "corez",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1641,8 +1650,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "blake2b_simd",
 ]
@@ -3629,8 +3637,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a54f8d29bfb1e76a9d4e868a1a08cce2e57dd2bdc66232982822ad3114b91ab3"
+source = "git+https://github.com/valargroup/qr_orchard?rev=6f1a5eaddcf0e016101c0c62a477d48f31e7a83f#6f1a5eaddcf0e016101c0c62a477d48f31e7a83f"
 dependencies = [
  "aes",
  "bitvec",
@@ -7246,8 +7253,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58342d0aaa8e2fa98849636f52800ac4bf020574c944c974742fc933db58cac2"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "bech32",
  "bs58",
@@ -7260,8 +7266,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1440921903cdb86133fb9e2fe800be488015db2939a30bedb413078a1acb0306"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "corez",
  "hex",
@@ -7271,8 +7276,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -7282,8 +7286,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbcdfbb5c8edb247439d72a397abaae9b7dd14a1c070e7e4fc3536924f9065f"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -7323,15 +7326,14 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c69e07f5eb3f682a6467b4b08ee4956f1acd1e886d70b21c4766953b3a1beba2"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
  "corez",
  "crypto-common 0.2.0-rc.1",
  "document-features",
- "equihash",
+ "equihash 0.3.0 (git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid)",
  "ff",
  "hex",
  "incrementalmerkletree",
@@ -7354,8 +7356,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3de6b0ca82e08a9d38b1121f87c5b180b5feac19fecba074cb582882210d2371"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7377,8 +7378,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bec496a0bd62dae98c4b26f51c5dab112d0c5350bbc2ccfdfd05bb3454f714d"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "corez",
  "document-features",
@@ -7416,8 +7416,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15df1908b428d4edeb7c7caae5692e05e2e92e5c38007a40b20ac098efdffd96"
+source = "git+https://github.com/valargroup/librustzcash?branch=adam%2Fironwood-split-2-v6-txid#d098a6d7f5f62aa1d50c936f16d81428e17a2898"
 dependencies = [
  "bip32",
  "bs58",
@@ -7457,7 +7456,7 @@ dependencies = [
  "derive-getters",
  "dirs",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",

@@ -377,3 +377,20 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+# EXPERIMENTAL (NU6.3 / Ironwood spike): pin the librustzcash family to the
+# valargroup fork that adds v6 Ironwood txid/sighash support, and orchard to the
+# matching qr_orchard fork it depends on. Versions match our crates.io pins
+# (zcash_primitives 0.28, zcash_protocol 0.9, orchard 0.14), so this is a
+# source-only patch. Revert this block to return to the released crates.
+# Fork branch is force-pushed; pin to a rev before relying on this.
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_protocol = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_proofs = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_keys = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_address = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_encoding = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_transparent = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+zcash_history = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
+orchard = { git = "https://github.com/valargroup/qr_orchard", rev = "6f1a5eaddcf0e016101c0c62a477d48f31e7a83f" }

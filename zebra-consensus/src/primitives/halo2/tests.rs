@@ -25,8 +25,8 @@ use zebra_chain::{
 };
 
 use super::{
-    verifier_for, Item, VERIFIER_POST_NU6_2, VERIFIER_PRE_NU6_2, VERIFYING_KEY_POST_NU6_2,
-    VERIFYING_KEY_PRE_NU6_2,
+    verifier_for, Item, VERIFIER_POST_NU6_2, VERIFIER_POST_NU6_3, VERIFIER_PRE_NU6_2,
+    VERIFYING_KEY_POST_NU6_2, VERIFYING_KEY_PRE_NU6_2,
 };
 
 /// Returns one real pre-NU6.2 Orchard bundle and its sighash, extracted from the mainnet test
@@ -103,6 +103,7 @@ async fn verifier_for_routes_each_upgrade_to_the_correct_key() {
     // the pointer comparisons below compare the same service type.
     let pre: &'static super::VerifierService = &VERIFIER_PRE_NU6_2;
     let post: &'static super::VerifierService = &VERIFIER_POST_NU6_2;
+    let post_nu6_3: &'static super::VerifierService = &VERIFIER_POST_NU6_3;
 
     // Everything before NU6.2 (including upgrades from before Orchard existed) routes to the
     // insecure key, which is the only key any pre-NU6.2 Orchard history verifies under.
@@ -117,16 +118,18 @@ async fn verifier_for_routes_each_upgrade_to_the_correct_key() {
         );
     }
 
-    // NU6.2 and every later upgrade route to the fixed key. Nu7 guards that "NU6.2 and later"
-    // does not silently fall back to the insecure verifier for future upgrades.
-    for nu in [
-        NetworkUpgrade::Nu6_2,
-        NetworkUpgrade::Nu6_3,
-        NetworkUpgrade::Nu7,
-    ] {
+    // NU6.2 (before the NU6.3 circuit update) routes to the fixed key.
+    assert!(
+        std::ptr::eq(verifier_for(NetworkUpgrade::Nu6_2), post),
+        "Nu6_2 must route to the post-NU6.2 (fixed) verifier"
+    );
+
+    // NU6.3 and every later upgrade route to the NU6.3 (Ironwood / cross-address) key. Nu7 guards
+    // that "NU6.3 and later" does not silently fall back to an earlier verifier.
+    for nu in [NetworkUpgrade::Nu6_3, NetworkUpgrade::Nu7] {
         assert!(
-            std::ptr::eq(verifier_for(nu), post),
-            "{nu:?} must route to the post-NU6.2 (fixed) verifier"
+            std::ptr::eq(verifier_for(nu), post_nu6_3),
+            "{nu:?} must route to the post-NU6.3 (Ironwood) verifier"
         );
     }
 }
