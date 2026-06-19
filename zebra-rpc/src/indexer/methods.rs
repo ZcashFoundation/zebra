@@ -118,26 +118,23 @@ where
                 }
             };
 
-            // Notify the client of chain tip changes until the channel is closed
+            // Notify the client of new blocks until the channel is closed.
+            //
+            // Unlike the other streams, this uses `send().await` to apply backpressure to the
+            // non-finalized state listener rather than dropping blocks for a slow consumer. The
+            // only error is the receiver being closed, which means the client has disconnected.
             while let Some((hash, block)) = non_finalized_state_change.recv().await {
-                match response_sender.try_send(Ok(BlockAndHash::new(hash, block))) {
-                    Ok(()) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                        span.in_scope(|| {
-                            tracing::info!(
-                                "client disconnected, dropping non_finalized_state_change task"
-                            );
-                        });
-                        return;
-                    }
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                        span.in_scope(|| {
-                            tracing::warn!(
-                                "slow consumer, dropping non_finalized_state_change stream"
-                            );
-                        });
-                        return;
-                    }
+                if response_sender
+                    .send(Ok(BlockAndHash::new(hash, block)))
+                    .await
+                    .is_err()
+                {
+                    span.in_scope(|| {
+                        tracing::info!(
+                            "client disconnected, dropping non_finalized_state_change task"
+                        );
+                    });
+                    return;
                 }
             }
 
