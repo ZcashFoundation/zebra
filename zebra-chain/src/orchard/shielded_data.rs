@@ -261,6 +261,70 @@ bitflags! {
         const ENABLE_SPENDS = 0b00000001;
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
+        /// `enableCrossAddress` (NU6.3, bit 2): allow output notes to use a different
+        /// protocol-level address than the spending key.
+        ///
+        /// Reserved (MUST be 0) before NU6.3. Valid only in the NU6.3 flag-byte format (v6
+        /// Orchard and Ironwood bundles); see [`FlagFormat`].
+        const ENABLE_CROSS_ADDRESS = 0b00000100;
+    }
+}
+
+/// The flag-byte format of an Orchard-protocol bundle, which differs by transaction version.
+///
+/// Before NU6.3 (v5 Orchard bundles) bits 2..7 of the flags byte are reserved and MUST be zero.
+/// From NU6.3 (v6 Orchard and Ironwood bundles) bit 2 is the `enableCrossAddress` flag and only
+/// bits 3..7 are reserved.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FlagFormat {
+    /// The pre-NU6.3 format: bits 2..7 reserved (MUST be zero). Used by v5 Orchard bundles.
+    PreNu6_3,
+    /// The NU6.3 format: bit 2 is `enableCrossAddress`, bits 3..7 reserved. Used by v6 Orchard and
+    /// Ironwood bundles.
+    Nu6_3,
+}
+
+impl Flags {
+    /// The flag bits that are reserved (MUST be zero) in the pre-NU6.3 format.
+    const PRE_NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits() | Self::ENABLE_OUTPUTS.bits());
+
+    /// The flag bits that are reserved (MUST be zero) in the NU6.3 format.
+    const NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits()
+        | Self::ENABLE_OUTPUTS.bits()
+        | Self::ENABLE_CROSS_ADDRESS.bits());
+
+    /// Parses a flags byte in the given `format`, rejecting any reserved bit that is set.
+    ///
+    /// # Consensus
+    ///
+    /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
+    /// > field MUST be zero.
+    ///
+    /// From NU6.3, the v6 Orchard and Ironwood flag bytes use bit 2 as `enableCrossAddress`, and
+    /// only bits 3..7 are reserved.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    pub fn from_byte(byte: u8, format: FlagFormat) -> Result<Self, SerializationError> {
+        let reserved = match format {
+            FlagFormat::PreNu6_3 => Self::PRE_NU6_3_RESERVED,
+            FlagFormat::Nu6_3 => Self::NU6_3_RESERVED,
+        };
+
+        if byte & reserved != 0 {
+            return Err(SerializationError::Parse("invalid reserved orchard flags"));
+        }
+
+        // `from_bits_truncate` keeps only known bits; the reserved-bit check above already
+        // rejected any bit that this format does not permit.
+        Ok(Self::from_bits_truncate(byte))
+    }
+
+    /// Deserializes a flags byte in the given `format`.
+    pub fn zcash_deserialize_with_format<R: io::Read>(
+        mut reader: R,
+        format: FlagFormat,
+    ) -> Result<Self, SerializationError> {
+        Self::from_byte(reader.read_u8()?, format)
     }
 }
 
@@ -295,11 +359,13 @@ impl ZcashSerialize for Flags {
 }
 
 impl ZcashDeserialize for Flags {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Consensus rule: "In a version 5 transaction,
-        // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-        Flags::from_bits(reader.read_u8()?)
-            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // The default codec is the pre-NU6.3 format, used by v5 Orchard bundles, where bits 2..7
+        // (including `enableCrossAddress`) are reserved and MUST be zero. v6 Orchard and Ironwood
+        // bundles deserialize with `FlagFormat::Nu6_3` via `zcash_deserialize_with_format`.
+        //
+        // Consensus rule: "In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
+        // field MUST be zero." https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        Flags::zcash_deserialize_with_format(reader, FlagFormat::PreNu6_3)
     }
 }

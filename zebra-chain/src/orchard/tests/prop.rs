@@ -6,8 +6,15 @@ use crate::{
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
+use crate::orchard::shielded_data::FlagFormat;
+
 proptest! {
-    /// Make sure only valid flags deserialize
+    /// Make sure only valid flags deserialize.
+    ///
+    /// The default `Flags` codec is the pre-NU6.3 format (v5 Orchard bundles), where bits 2..7 are
+    /// reserved and MUST be zero. We use [`Flags::from_byte`] in the pre-NU6.3 format as the oracle
+    /// for what the default codec accepts. (The NU6.3 format, which permits bit 2, is covered by
+    /// the `flags` unit tests.)
     #[test]
     fn flag_roundtrip_bytes(flags in any::<u8>()) {
 
@@ -17,18 +24,15 @@ proptest! {
         serialized.set_position(0);
         let maybe_deserialized = (&mut serialized).zcash_deserialize_into();
 
-        let invalid_bits_mask = !orchard::Flags::all().bits();
-        match orchard::Flags::from_bits(flags) {
-            Some(valid_flags) => {
+        match orchard::Flags::from_byte(flags, FlagFormat::PreNu6_3) {
+            Ok(valid_flags) => {
                 prop_assert_eq!(maybe_deserialized.ok(), Some(valid_flags));
-                prop_assert_eq!(flags & invalid_bits_mask, 0);
             }
-            None => {
+            Err(_) => {
                 prop_assert_eq!(
                     maybe_deserialized.err().unwrap().to_string(),
                     "parse error: invalid reserved orchard flags"
                 );
-                prop_assert_ne!(flags & invalid_bits_mask, 0);
             }
         }
     }
