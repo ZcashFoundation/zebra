@@ -1,6 +1,6 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::{collections::HashSet, pin::Pin};
+use std::{collections::HashSet, pin::Pin, time::Duration};
 
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -19,6 +19,14 @@ use super::{
 
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
+
+/// How long to wait for a backpressured send to the non-finalized stream before treating the
+/// consumer as hung and dropping the subscription.
+///
+/// The non-finalized stream applies backpressure (rather than dropping blocks) so a slow consumer
+/// doesn't miss blocks, but without a bound a consumer whose connection is half-open (dead TCP not
+/// yet detected) would block the listener task indefinitely.
+const NON_FINALIZED_SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -121,20 +129,31 @@ where
             // Notify the client of new blocks until the channel is closed.
             //
             // Unlike the other streams, this uses `send().await` to apply backpressure to the
-            // non-finalized state listener rather than dropping blocks for a slow consumer. The
-            // only error is the receiver being closed, which means the client has disconnected.
+            // non-finalized state listener rather than dropping blocks for a slow consumer. A send
+            // error means the client disconnected; a send that doesn't complete within
+            // `NON_FINALIZED_SEND_TIMEOUT` means the consumer is hung. In both cases the task ends
+            // rather than blocking forever.
             while let Some((hash, block)) = non_finalized_state_change.recv().await {
-                if response_sender
-                    .send(Ok(BlockAndHash::new(hash, block)))
-                    .await
-                    .is_err()
-                {
-                    span.in_scope(|| {
-                        tracing::info!(
-                            "client disconnected, dropping non_finalized_state_change task"
-                        );
-                    });
-                    return;
+                let send = response_sender.send(Ok(BlockAndHash::new(hash, block)));
+                match tokio::time::timeout(NON_FINALIZED_SEND_TIMEOUT, send).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        span.in_scope(|| {
+                            tracing::info!(
+                                "client disconnected, dropping non_finalized_state_change task"
+                            );
+                        });
+                        return;
+                    }
+                    Err(_) => {
+                        span.in_scope(|| {
+                            tracing::warn!(
+                                "slow consumer, dropping non_finalized_state_change stream after \
+                                 send timed out"
+                            );
+                        });
+                        return;
+                    }
                 }
             }
 
