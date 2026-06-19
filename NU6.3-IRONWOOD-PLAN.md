@@ -1,6 +1,6 @@
 # NU6.3 / Ironwood — Implementation Plan for Zebra
 
-Status: **Phase 1 landed** · Branch: `nu63-ironwood` (worktree, off `main` @ v5.1.0)
+Status: **Phases 1 & 3 landed** · Branch: `nu63-ironwood` (worktree, off `main` @ v5.1.0)
 Sources: zcash/zips#1300 (spec refactor), zcash/zips#1301 (v6 tx format),
 zcash/ironwood (the Ironwood Book).
 
@@ -20,6 +20,19 @@ zcash/ironwood (the Ironwood Book).
   (now `iter - 2`). No mainnet/testnet activation height yet (mirrors `Nu7`).
   `cargo check --workspace --all-targets`, parameter/network/halo2 tests, fmt,
   and clippy `-D warnings` all green.
+- **Phase 3 ✅** — sixth chain value pool `ironwood` added to `ValueBalance<C>`:
+  field, `from_ironwood_amount`/`ironwood_amount`/`set_ironwood_value_balance`,
+  `zero`/`constrain`/`Add`/`Sub`/`Neg`/arbitrary, and inclusion in
+  `remaining_transaction_value`. Serialization appends ironwood at bytes
+  `40..48`; `to_bytes` is now `[u8; 48]` and `from_bytes` accepts `32|40|48`
+  (old DBs read with ironwood = 0). On-disk consumers updated:
+  `IntoDisk for ValueBalance` (`[u8; 48]`) and `BlockInfo` (44-byte old / 52-byte
+  new layouts). **DB format bumped to 27.1.0** (minor; compatible read code).
+  Value-pool raw-data snapshots regenerated (verified: pure ironwood-zero
+  widening, all real values preserved). Workspace all-targets, fmt, clippy
+  `-D warnings`, and value_balance/disk_format tests green.
+  Note: getblockchaininfo's `valuePools` is still a 5-pool array (zcashd-compat)
+  — adding the ironwood pool there is deferred to Phase 9.
 
 ---
 

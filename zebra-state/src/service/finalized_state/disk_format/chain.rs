@@ -22,7 +22,7 @@ use zebra_chain::{
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 40];
+    type Bytes = [u8; 48];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
@@ -112,8 +112,19 @@ impl FromDisk for BlockInfo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         // We want to be forward-compatible, so this must work even if the
         // size of the buffer is larger than expected.
+        //
+        // The value pool prefix is 48 bytes from NU6.3 onward (it includes the ironwood pool), and
+        // 40 bytes for records written by earlier Zebra versions. The two layouts never collide
+        // because the 4-byte trailing block size makes them 52 and 44 bytes respectively.
         match bytes.as_ref().len() {
-            44.. => {
+            52.. => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..48])
+                    .expect("must work for 48 bytes");
+                let size =
+                    u32::from_le_bytes(bytes.as_ref()[48..52].try_into().expect("must be 4 bytes"));
+                BlockInfo::new(value_pools, size)
+            }
+            44..52 => {
                 let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..40])
                     .expect("must work for 40 bytes");
                 let size =
