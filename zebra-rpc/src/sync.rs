@@ -59,7 +59,7 @@ async fn update_finalized_chain_tip(
             {
                 Ok(listener) => Some(listener),
                 Err(err) => {
-                    tracing::warn!(?err, "failed to subscribe to non-finalized state changes");
+                    tracing::warn!(?err, "failed to subscribe to chain tip changes");
                     tokio::time::sleep(POLL_DELAY).await;
                     None
                 }
@@ -233,12 +233,13 @@ impl TrustedChainSync {
         block: SemanticallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         self.try_catch_up_with_primary().await;
-        self.prune_finalized();
 
         if self.db.finalized_tip_hash() == block.block.header.previous_block_hash {
+            self.prune_finalized();
             self.non_finalized_state.commit_new_chain(block, &self.db)
         } else {
             self.non_finalized_state.commit_block(block, &self.db)?;
+            self.prune_finalized();
             Ok(())
         }
     }
