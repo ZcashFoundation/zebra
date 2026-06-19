@@ -65,7 +65,25 @@ pub struct ShieldedData {
 /// v5 and v6 (de)serialization paths from being confused.
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ShieldedDataV6(pub ShieldedData);
+pub struct ShieldedDataV6(ShieldedData);
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ShieldedDataV6 {
+    /// Wraps a v5-shaped Orchard [`ShieldedData`] as a v6 (NU6.3) Orchard bundle.
+    pub fn new(shielded_data: ShieldedData) -> Self {
+        Self(shielded_data)
+    }
+
+    /// Returns the inner Orchard [`ShieldedData`].
+    pub fn data(&self) -> &ShieldedData {
+        &self.0
+    }
+
+    /// Returns the inner Orchard [`ShieldedData`], mutably.
+    pub fn data_mut(&mut self) -> &mut ShieldedData {
+        &mut self.0
+    }
+}
 
 impl fmt::Display for ShieldedData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -290,7 +308,7 @@ bitflags! {
 /// [`ShieldedDataV6`](super::ShieldedDataV6)).
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct FlagsV6(pub Flags);
+pub struct FlagsV6(Flags);
 
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 impl From<FlagsV6> for Flags {

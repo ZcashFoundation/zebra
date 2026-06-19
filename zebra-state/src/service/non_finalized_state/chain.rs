@@ -1616,7 +1616,7 @@ impl Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data.as_ref().map(|data| &data.0),
+                    orchard_shielded_data.as_ref().map(|data| data.data()),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
@@ -1811,7 +1811,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data.as_ref().map(|data| &data.0),
+                    orchard_shielded_data.as_ref().map(|data| data.data()),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(

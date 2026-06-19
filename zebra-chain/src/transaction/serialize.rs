@@ -430,7 +430,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
             deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
-                .map(orchard::ShieldedDataV6),
+                .map(orchard::ShieldedDataV6::new),
         )
     }
 }
@@ -438,7 +438,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| &data.0), writer)
+        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
     }
 }
 
@@ -447,7 +447,7 @@ impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
             Option::<orchard::ShieldedDataV6>::zcash_deserialize(reader)?
-                .map(ironwood::ShieldedData),
+                .map(ironwood::ShieldedData::new),
         )
     }
 }
@@ -455,7 +455,7 @@ impl ZcashDeserialize for Option<ironwood::ShieldedData> {
 #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 impl ZcashSerialize for Option<ironwood::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| &data.0 .0), writer)
+        zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
     }
 }
 

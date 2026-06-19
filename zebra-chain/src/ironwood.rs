@@ -6,10 +6,28 @@
 //! *type-distinct* from Orchard — it has its own note commitment tree, nullifier set, and chain
 //! value pool — while reusing all of Orchard's wire-format and proof-verification machinery.
 //!
-//! This module is only compiled for the experimental NU6.3 / v6-transaction build
-//! (`--cfg zcash_unstable="nu6.3"` with the `tx_v6` feature).
+//! The Ironwood *state* (nullifier set, note commitment tree, anchors, and chain value pool) is
+//! always compiled, so the on-disk database format is stable across build flags; it simply stays
+//! empty until NU6.3 transactions appear (which only happens in the experimental
+//! `zcash_unstable="nu6.3"` + `tx_v6` build). The Ironwood *transaction bundle*
+//! ([`ShieldedData`]) is only compiled for that experimental build.
 
 use crate::orchard;
+
+/// An Ironwood nullifier.
+///
+/// Wraps [`orchard::Nullifier`] (Ironwood reuses the Orchard nullifier construction). The Ironwood
+/// and Orchard nullifier sets are *disjoint* even when their bit patterns coincide: they live in
+/// separate column families and are checked separately. Keeping Ironwood nullifiers in their own
+/// type lets the duplicate-nullifier detection distinguish the two pools at the type level.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
+pub struct Nullifier(pub orchard::Nullifier);
+
+impl From<orchard::Nullifier> for Nullifier {
+    fn from(nullifier: orchard::Nullifier) -> Self {
+        Self(nullifier)
+    }
+}
 
 /// Ironwood shielded data: a v6 Orchard-protocol bundle committed to the Ironwood pool.
 ///
@@ -18,5 +36,20 @@ use crate::orchard;
 /// Orchard bundle; this newtype keeps the two type-distinct so they cannot be accidentally
 /// interchanged, and so the Ironwood bundle can commit into a separate note commitment tree and
 /// nullifier set.
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ShieldedData(pub orchard::ShieldedDataV6);
+pub struct ShieldedData(orchard::ShieldedDataV6);
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl ShieldedData {
+    /// Wraps a v6 Orchard-protocol bundle as Ironwood shielded data.
+    pub fn new(shielded_data: orchard::ShieldedDataV6) -> Self {
+        Self(shielded_data)
+    }
+
+    /// Returns the inner Orchard [`ShieldedData`](orchard::ShieldedData) backing this Ironwood
+    /// bundle (the v6 Orchard bundle shape that Ironwood reuses).
+    pub fn data(&self) -> &orchard::ShieldedData {
+        self.0.data()
+    }
+}

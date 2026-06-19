@@ -35,14 +35,15 @@ fn pre_nu6_3_format_rejects_reserved_bits() {
 fn nu6_3_format_accepts_cross_address_but_rejects_higher_bits() {
     // Bits 0..2 are all valid in the NU6.3 format.
     for byte in 0u8..=0b111 {
-        let flags = FlagsV6::zcash_deserialize(&[byte][..])
-            .expect("NU6.3 flags byte with only bits 0..2 must parse")
-            .0;
+        let flags = Flags::from(
+            FlagsV6::zcash_deserialize(&[byte][..])
+                .expect("NU6.3 flags byte with only bits 0..2 must parse"),
+        );
         assert_eq!(flags.bits(), byte);
     }
 
     // The enableCrossAddress flag round-trips.
-    let flags = FlagsV6::zcash_deserialize(&[0b100][..]).expect("valid").0;
+    let flags = Flags::from(FlagsV6::zcash_deserialize(&[0b100][..]).expect("valid"));
     assert!(flags.contains(Flags::ENABLE_CROSS_ADDRESS));
 
     // Bits 3..7 remain reserved even in the NU6.3 format.

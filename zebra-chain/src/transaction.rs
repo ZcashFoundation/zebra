@@ -58,7 +58,6 @@ use crate::{
     Error,
 };
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
 use crate::ironwood;
 
 /// A Zcash transaction.
@@ -1105,7 +1104,7 @@ impl Transaction {
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data.as_ref().map(|data| &data.0),
+            } => orchard_shielded_data.as_ref().map(|data| data.data()),
 
             // No Orchard shielded data
             Transaction::V1 { .. }
@@ -1165,7 +1164,7 @@ impl Transaction {
             Transaction::V6 {
                 ironwood_shielded_data,
                 ..
-            } => ironwood_shielded_data.as_ref().map(|data| &data.0 .0),
+            } => ironwood_shielded_data.as_ref().map(|data| data.data()),
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -1183,12 +1182,16 @@ impl Transaction {
             .flat_map(orchard::ShieldedData::actions)
     }
 
-    /// Access the Ironwood [`orchard::Nullifier`]s in this transaction, if there are any,
+    /// Access the [`ironwood::Nullifier`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+    ///
+    /// Ironwood nullifiers are yielded as the Ironwood-pool [`ironwood::Nullifier`] newtype (not the
+    /// bare [`orchard::Nullifier`]), so the state layer keeps them in a set disjoint from Orchard's.
+    pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = ironwood::Nullifier> + '_ {
         self.ironwood_shielded_data()
             .into_iter()
             .flat_map(orchard::ShieldedData::nullifiers)
+            .map(|nullifier| ironwood::Nullifier(*nullifier))
     }
 
     /// Access the Ironwood note commitments in this transaction, if there are any,
@@ -1893,7 +1896,7 @@ impl Transaction {
             Transaction::V6 {
                 orchard_shielded_data: Some(orchard_shielded_data),
                 ..
-            } => Some(&mut orchard_shielded_data.0),
+            } => Some(orchard_shielded_data.data_mut()),
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }

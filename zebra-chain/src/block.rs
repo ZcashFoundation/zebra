@@ -8,7 +8,7 @@ use crate::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
-    orchard,
+    ironwood, orchard,
     parameters::{Network, NetworkUpgrade},
     sapling,
     serialization::TrustedPreallocate,
@@ -159,6 +159,13 @@ impl Block {
         self.transactions
             .iter()
             .flat_map(|transaction| transaction.orchard_nullifiers())
+    }
+
+    /// Access the [`ironwood::Nullifier`]s from all transactions in this block.
+    pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = ironwood::Nullifier> + '_ {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.ironwood_nullifiers())
     }
 
     /// Access the [`sprout::NoteCommitment`]s from all transactions in this block.
