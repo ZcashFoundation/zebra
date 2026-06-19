@@ -53,6 +53,15 @@ async fn test_get_block(
         .expect_err("a block request without a hash or height should be rejected");
     assert_eq!(status.code(), tonic::Code::InvalidArgument);
 
+    // A height above the maximum valid block height is rejected without touching the state.
+    let status = client
+        .get_block(tonic::Request::new(BlockRequest {
+            hash_or_height: Some(block_request::HashOrHeight::Height(u32::MAX)),
+        }))
+        .await
+        .expect_err("an out-of-range block height should be rejected");
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+
     // A block requested by height is returned along with its hash.
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
     let expected_hash = block.hash();
