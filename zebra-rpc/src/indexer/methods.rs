@@ -10,7 +10,7 @@ use tower::util::ServiceExt;
 use tracing::Span;
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse, ReadState};
+use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
@@ -223,9 +223,20 @@ where
 ///
 /// # Errors
 ///
-/// Returns an [`invalid_argument`](Status::invalid_argument) status if any hash is not exactly
-/// 32 bytes long.
+/// Returns an [`invalid_argument`](Status::invalid_argument) status if there are more hashes than
+/// the non-finalized state can hold chains ([`MAX_NON_FINALIZED_CHAIN_FORKS`]), or if any hash is
+/// not exactly 32 bytes long.
 fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<block::Hash>, Status> {
+    // The non-finalized state holds at most `MAX_NON_FINALIZED_CHAIN_FORKS` chains, so a caller can
+    // never legitimately have more chain tips than that. Bound the untrusted input up front rather
+    // than allocating a set sized by the request.
+    if chain_tip_hashes.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
+        return Err(Status::invalid_argument(format!(
+            "too many chain tip hashes: got {}, expected at most {MAX_NON_FINALIZED_CHAIN_FORKS}",
+            chain_tip_hashes.len(),
+        )));
+    }
+
     chain_tip_hashes
         .into_iter()
         .map(|hash| {
@@ -238,4 +249,66 @@ fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<blo
             Ok(block::Hash::from_bytes_in_display_order(&bytes))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonic::Code;
+
+    fn hash(byte: u8) -> block::Hash {
+        block::Hash::from_bytes_in_display_order(&[byte; 32])
+    }
+
+    #[test]
+    fn decode_known_chain_tips_round_trips_display_order() {
+        let hashes = [hash(1), hash(2), hash(3)];
+        let encoded = hashes
+            .iter()
+            .map(|h| h.bytes_in_display_order().to_vec())
+            .collect();
+
+        let decoded = decode_known_chain_tips(encoded).expect("valid hashes should decode");
+
+        assert_eq!(decoded, hashes.into_iter().collect());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_accepts_empty() {
+        assert!(decode_known_chain_tips(Vec::new())
+            .expect("empty input should decode")
+            .is_empty());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_dedups() {
+        let encoded = vec![
+            hash(7).bytes_in_display_order().to_vec(),
+            hash(7).bytes_in_display_order().to_vec(),
+        ];
+
+        let decoded = decode_known_chain_tips(encoded).expect("duplicate hashes should decode");
+
+        assert_eq!(decoded, std::iter::once(hash(7)).collect());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_rejects_wrong_length() {
+        let status = decode_known_chain_tips(vec![vec![0; 31]])
+            .expect_err("a 31-byte hash should be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    #[test]
+    fn decode_known_chain_tips_rejects_too_many() {
+        let encoded = (0..=MAX_NON_FINALIZED_CHAIN_FORKS as u8)
+            .map(|b| hash(b).bytes_in_display_order().to_vec())
+            .collect();
+
+        let status = decode_known_chain_tips(encoded)
+            .expect_err("more than MAX_NON_FINALIZED_CHAIN_FORKS hashes should be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
 }

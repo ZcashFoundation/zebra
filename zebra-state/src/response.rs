@@ -207,6 +207,8 @@ impl MinedTx {
 ///
 /// It's okay to occasionally miss updates when the buffer is full, as the new blocks in the missed change will be
 /// sent to the listener on the next change to the non-finalized state.
+// `MAX_BLOCK_REORG_HEIGHT` is a small `u32` constant (the reorg limit), so widening it to `usize`
+// and doubling it cannot overflow on any supported platform.
 const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 2 * MAX_BLOCK_REORG_HEIGHT as usize;
 
 /// A listener for changes in the non-finalized state.
@@ -251,10 +253,12 @@ impl NonFinalizedBlocksListener {
     /// Spawns a task to listen for changes in the non-finalized state and sends any blocks in the non-finalized state
     /// to the caller that have not already been sent.
     ///
-    /// `known_chain_tips` holds the hashes of chain tips the caller already has. Walking each
-    /// non-finalized chain from its tip downwards, blocks are sent until a hash in this set is
-    /// reached, so any block at or below a known tip on the same chain is skipped. If it is empty,
-    /// every block currently in the non-finalized state is sent.
+    /// `known_chain_tips` holds the hashes of chain tips the caller already has. On the first send
+    /// only, each non-finalized chain is walked from its tip downwards and blocks are sent until a
+    /// hash in this set is reached, so any block at or below a known tip on the same chain is
+    /// skipped. If it is empty, every block currently in the non-finalized state is sent. After the
+    /// first send, those blocks are already tracked as sent, so later sends only forward blocks that
+    /// weren't in the previously seen non-finalized state.
     ///
     /// Returns a new instance of [`NonFinalizedBlocksListener`] for the caller to listen for new blocks in the non-finalized state.
     pub fn spawn(
