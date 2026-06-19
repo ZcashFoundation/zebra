@@ -367,6 +367,19 @@ impl Transaction {
             .intersects(orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS)
     }
 
+    /// Does this transaction have at least one Ironwood flag set when it has at least one Ironwood
+    /// action? (NU6.3 onward.)
+    ///
+    /// Mirrors [`Self::has_enough_orchard_flags`] for the Ironwood pool.
+    pub fn has_enough_ironwood_flags(&self) -> bool {
+        if self.ironwood_actions().count() == 0 {
+            return true;
+        }
+        self.ironwood_flags()
+            .unwrap_or_else(orchard::Flags::empty)
+            .intersects(orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS)
+    }
+
     /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
     /// assuming it is mined at `spend_height`.
     pub fn coinbase_spend_restriction(

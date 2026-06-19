@@ -50,6 +50,15 @@ pub enum TransactionError {
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
 
+    #[error("coinbase transaction MUST NOT have the enableSpendsIronwood flag set")]
+    CoinbaseHasEnableSpendsIronwood,
+
+    #[error("transaction with Ironwood actions MUST set at least one Ironwood flag")]
+    NotEnoughIronwoodFlags,
+
+    #[error("[NU6.3 onward] the Orchard pool MUST NOT enable cross-address transfers (no new value may enter Orchard)")]
+    OrchardHasEnableCrossAddress,
+
     #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
     CoinbaseOutputsNotDecryptable,
 
@@ -339,6 +348,9 @@ impl TransactionError {
             | CoinbaseHasSpend
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
+            | CoinbaseHasEnableSpendsIronwood
+            | NotEnoughIronwoodFlags
+            | OrchardHasEnableCrossAddress
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput

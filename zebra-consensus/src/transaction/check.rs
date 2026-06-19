@@ -147,6 +147,42 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
     Ok(())
 }
 
+/// Checks that a transaction with Ironwood actions has at least one Ironwood flag set.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] If there are any Ironwood actions, then at least one of enableSpendsIronwood
+/// > and enableOutputsIronwood MUST be 1.
+///
+/// (No-op for transactions without Ironwood actions, i.e. all pre-v6 transactions.)
+pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionError> {
+    if !tx.has_enough_ironwood_flags() {
+        return Err(TransactionError::NotEnoughIronwoodFlags);
+    }
+    Ok(())
+}
+
+/// Checks that the Orchard pool does not enable cross-address transfers (NU6.3 onward).
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] The `enableCrossAddress` flag of `flagsOrchard` MUST be 0.
+///
+/// At NU6.3 no new value may enter the Orchard pool; new shielded value is routed to Ironwood, so
+/// only the Ironwood pool may enable cross-address transfers. A v5 Orchard bundle can never set
+/// this flag (it is rejected at deserialization), so this only constrains v6 Orchard bundles.
+pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), TransactionError> {
+    if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+        if orchard_shielded_data
+            .flags
+            .contains(Flags::ENABLE_CROSS_ADDRESS)
+        {
+            return Err(TransactionError::OrchardHasEnableCrossAddress);
+        }
+    }
+    Ok(())
+}
+
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
 /// # Consensus
@@ -175,6 +211,17 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
         if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
             if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
+            }
+        }
+
+        // > [NU6.3 onward] In a version 6 coinbase transaction, the enableSpendsIronwood flag MUST
+        // > be 0.
+        //
+        // (`ironwood_shielded_data` is only ever present in v6 transactions, so this is a no-op for
+        // earlier versions.)
+        if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
+            if ironwood_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+                return Err(TransactionError::CoinbaseHasEnableSpendsIronwood);
             }
         }
     }

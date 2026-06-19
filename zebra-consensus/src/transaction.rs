@@ -404,6 +404,9 @@ where
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
+            // NU6.3 / Ironwood flag rules (no-ops for pre-v6 transactions).
+            check::has_enough_ironwood_flags(&tx)?;
+            check::orchard_cross_address_disabled(&tx)?;
             check::consensus_branch_id(&tx, req.height(), &network)?;
 
             // Soft fork: temporarily require transactions to not contain Orchard actions.
