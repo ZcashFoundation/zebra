@@ -12,7 +12,7 @@ use crate::BoxError;
 ///
 /// This is a safety net to prevent RPC calls from hanging indefinitely
 /// when a server is alive but unresponsive.
-const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(65);
+const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// An HTTP client for making JSON-RPC requests.
 #[derive(Clone, Debug)]
