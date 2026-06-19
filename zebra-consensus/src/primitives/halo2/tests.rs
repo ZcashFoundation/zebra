@@ -26,8 +26,8 @@ use zebra_chain::{
 };
 
 use super::{
-    orchard_v5_verifier_for, orchard_v6_verifier, Item, VERIFIER_POST_NU6_2, VERIFIER_POST_NU6_3,
-    VERIFIER_PRE_NU6_2, VERIFYING_KEY_V5_POST_NU6_2, VERIFYING_KEY_V5_PRE_NU6_2,
+    orchard_v5_verifier_for, orchard_v6_verifier, Item, VERIFIER_V5_POST_NU6_2,
+    VERIFIER_V5_PRE_NU6_2, VERIFIER_V6, VERIFYING_KEY_V5_POST_NU6_2, VERIFYING_KEY_V5_PRE_NU6_2,
 };
 
 /// Returns one real pre-NU6.2 Orchard bundle and its sighash, extracted from the mainnet test
@@ -101,9 +101,9 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
 /// which spawns a worker task and therefore needs a Tokio runtime.
 #[tokio::test(flavor = "multi_thread")]
 async fn orchard_verifier_routing_selects_the_correct_key() {
-    let pre: &'static super::VerifierService = &VERIFIER_PRE_NU6_2;
-    let post: &'static super::VerifierService = &VERIFIER_POST_NU6_2;
-    let post_nu6_3: &'static super::VerifierService = &VERIFIER_POST_NU6_3;
+    let pre: &'static super::VerifierService = &VERIFIER_V5_PRE_NU6_2;
+    let post: &'static super::VerifierService = &VERIFIER_V5_POST_NU6_2;
+    let post_nu6_3: &'static super::VerifierService = &VERIFIER_V6;
 
     // v5 Orchard bundles before NU6.2 (incl. upgrades from before Orchard existed) route to the
     // insecure key, the only key pre-NU6.2 Orchard history verifies under.

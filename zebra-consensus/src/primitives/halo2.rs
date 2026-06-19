@@ -207,8 +207,8 @@ impl Service<Item> for OrchardFallback {
 
 /// The concrete type of a global Halo2 verification service.
 ///
-/// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
-/// [`VERIFIER_POST_NU6_2`], and [`VERIFIER_POST_NU6_3`] — so that batches, fallbacks, and verifying
+/// Each Orchard circuit version gets its own instance — see [`VERIFIER_V5_PRE_NU6_2`],
+/// [`VERIFIER_V5_POST_NU6_2`], and [`VERIFIER_V6`] — so that batches, fallbacks, and verifying
 /// keys are fully separated per circuit version. The Orchard verifier routing functions
 /// ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the matching one.
 pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
@@ -240,7 +240,7 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
+pub static VERIFIER_V5_PRE_NU6_2: Lazy<VerifierService> =
     Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_PRE_NU6_2));
 
 /// Global batch verification context for **NU6.2+** Halo2 Action proofs.
@@ -251,7 +251,7 @@ pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
+pub static VERIFIER_V5_POST_NU6_2: Lazy<VerifierService> =
     Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_POST_NU6_2));
 
 /// Global batch verification context for **NU6.3+** (Ironwood) Halo2 Action proofs.
@@ -262,8 +262,7 @@ pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_POST_NU6_3: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V6));
+pub static VERIFIER_V6: Lazy<VerifierService> = Lazy::new(|| batch_verifier(&VERIFYING_KEY_V6));
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
 /// block at `network_upgrade`.
@@ -275,9 +274,9 @@ pub static VERIFIER_POST_NU6_3: Lazy<VerifierService> =
 /// **never** the NU6.3 cross-address circuit. v6 Orchard bundles are handled separately by
 /// [`orchard_v6_verifier`].
 ///
-///   * upgrades before NU6.2 → [`VERIFIER_PRE_NU6_2`] (the historical insecure key), so
+///   * upgrades before NU6.2 → [`VERIFIER_V5_PRE_NU6_2`] (the historical insecure key), so
 ///     pre-soft-fork Orchard history still verifies on re-sync;
-///   * NU6.2 onward → [`VERIFIER_POST_NU6_2`] (the fixed key); a v5 Orchard bundle never uses the
+///   * NU6.2 onward → [`VERIFIER_V5_POST_NU6_2`] (the fixed key); a v5 Orchard bundle never uses the
 ///     NU6.3 circuit.
 ///
 /// The mapping is an explicit, exhaustive `match` on every [`NetworkUpgrade`] variant: there is no
@@ -291,17 +290,17 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         // are bound to the pre-NU6.2 (insecure) verifier because that is the only key under which
         // any Orchard history before NU6.2 verifies; routing them anywhere else cannot be correct.
         Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5
-        | Nu6 | Nu6_1 => &VERIFIER_PRE_NU6_2,
+        | Nu6 | Nu6_1 => &VERIFIER_V5_PRE_NU6_2,
 
         // NU6.2 onward: a v5 Orchard bundle uses the fixed circuit. It does NOT use the NU6.3
         // cross-address circuit even when mined at NU6.3+, because the v5 format predates it.
-        Nu6_2 | Nu6_3 | Nu7 => &VERIFIER_POST_NU6_2,
+        Nu6_2 | Nu6_3 | Nu7 => &VERIFIER_V5_POST_NU6_2,
 
         // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. A v5 Orchard bundle
         // there still uses the fixed circuit; bound explicitly (not via a wildcard) to keep this
         // match exhaustive and fail-closed under every build configuration.
         #[cfg(zcash_unstable = "zfuture")]
-        ZFuture => &VERIFIER_POST_NU6_2,
+        ZFuture => &VERIFIER_V5_POST_NU6_2,
     }
 }
 
@@ -311,7 +310,7 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
 /// `enableCrossAddress = 0`) and their Ironwood bundle commit to the NU6.3 Action circuit, which
 /// adds the cross-address restriction. Both therefore verify under [`VERIFYING_KEY_V6`].
 pub fn orchard_v6_verifier() -> &'static VerifierService {
-    &VERIFIER_POST_NU6_3
+    &VERIFIER_V6
 }
 
 /// Halo2 proof verifier implementation

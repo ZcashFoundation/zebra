@@ -330,13 +330,6 @@ pub fn miner_fees_are_valid(
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
-    // TODO(NU6.3/NSM): the ZIP-233 burn amount was removed from the v6 transaction format when v6
-    // was redefined for Ironwood (NU6.3). The ZIP-233/ZIP-235 Network Sustainability Mechanism must
-    // re-source the burn amount (e.g. from a coinbase/header field) before this enforcement can be
-    // reinstated. Until then the burn is treated as zero so the coinbase balance equation is
-    // unaffected.
-    let zip233_amount: Amount<NegativeAllowed> = Amount::zero();
-
     // # Consensus
     //
     // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
@@ -350,9 +343,8 @@ pub fn miner_fees_are_valid(
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
     let total_output_value =
         (transparent_value_balance - sapling_value_balance - orchard_value_balance
-            + expected_deferred_pool_balance_change.value()
-            + zip233_amount)
-            .map_err(|_| SubsidyError::Overflow)?;
+            + expected_deferred_pool_balance_change.value())
+        .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
