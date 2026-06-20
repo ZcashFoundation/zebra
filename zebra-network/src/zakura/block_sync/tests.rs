@@ -1246,8 +1246,9 @@ async fn reactor_fill_loop_saturates_every_peer_window_not_just_one() {
     let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
 
     // Three peers, each willing to serve heights 1..=12 and accept four
-    // concurrent single-block requests. Distinct id bytes keep the scheduler's
-    // sorted-peer iteration deterministic.
+    // concurrent single-block requests. The budget is ample, so the fill order
+    // (rotated per pass) does not matter here: every peer's window is saturated
+    // in the single pass regardless of which peer the rotation starts at.
     let mut peer_ids = Vec::new();
     // Keep every peer's stream handles alive for the whole test: dropping them
     // closes the channels and tears the peer down before it can serve.
@@ -1324,6 +1325,248 @@ async fn reactor_fill_loop_saturates_every_peer_window_not_just_one() {
         all_heights,
         (1..=12).collect::<Vec<_>>(),
         "every needed height must be requested exactly once across peers"
+    );
+
+    reactor_task.abort();
+}
+
+/// Under a budget that only covers one in-flight request at a time, issuance
+/// must rotate across the status-ready peers rather than always pouring the
+/// single budgeted request into the lowest-node-id peer.
+///
+/// Before peer-scoped issuance the full pass iterated peers in static sorted
+/// (node-id) order, so a budget-constrained pass always handed its one request
+/// to the lowest-id peer; the higher-id peers were perpetually starved. The
+/// rotating full-pass cursor makes the starting peer advance once per pass, so
+/// across several budget-limited passes the served peer is distributed instead
+/// of monopolized. This is an invariant assertion (issuance is not pinned to one
+/// peer), not an exact-order assertion, since the per-peer order is intentionally
+/// nondeterministic relative to node id.
+#[tokio::test]
+async fn reactor_budget_constrained_issuance_rotates_across_peers() {
+    let config = immediate_body_download_config();
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Three peers, each able to serve height 1 with a single in-flight slot.
+    // Distinct ascending id bytes give the old sorted order a fixed lowest peer
+    // (0x41) that a regression would always pick first.
+    let mut peer_inbounds = HashMap::new();
+    // Keep every peer's outbound handle alive too: dropping it closes the channel
+    // and tears the peer down before it can be offered work.
+    let mut peer_outbounds = Vec::new();
+    for byte in [0x41u8, 0x42, 0x43] {
+        let (peer_id, inbound, outbound) = connect_peer_with_status_message(
+            &service,
+            &mut actions,
+            byte,
+            BlockSyncStatus {
+                servable_low: block::Height(1),
+                servable_high: block::Height(1),
+                tip_hash: block::Hash([1; 32]),
+                max_blocks_per_response: 1,
+                max_inflight_requests: 1,
+                max_response_bytes: MAX_BS_RESPONSE_BYTES,
+            },
+        )
+        .await;
+        peer_inbounds.insert(peer_id, inbound);
+        peer_outbounds.push(outbound);
+    }
+
+    tip_tx
+        .send((block::Height(1), block::Hash([1; 32])))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
+            height: block::Height(1),
+            hash: block::Hash([1; 32]),
+            size: BlockSizeEstimate::Advertised(1_000),
+        }]))
+        .await
+        .expect("needed metadata queues");
+
+    // A single contested height with fanout=1 can be assigned to exactly one
+    // peer at a time. Each pass offers it to the rotation-start peer; that peer
+    // answers `RangeUnavailable`, which re-queues the range and runs another full
+    // pass. The rotating cursor advances once per pass, so over several passes
+    // the offered peer rotates instead of pinning to the lowest-id peer (which is
+    // what the old static sorted order did).
+    let range_unavailable = BlockSyncMessage::RangeUnavailable {
+        start_height: block::Height(1),
+        count: 1,
+    }
+    .encode_frame()
+    .expect("RangeUnavailable frame encodes");
+
+    let mut served_peers = Vec::new();
+    for _ in 0..6 {
+        let (peer, start_height, count) = wait_for_getblocks(&mut actions).await;
+        assert_eq!(start_height, block::Height(1));
+        assert_eq!(count, 1, "fanout=1 yields single-block requests");
+        served_peers.push(peer.clone());
+        peer_inbounds
+            .get(&peer)
+            .expect("served peer is one of the connected peers")
+            .send(range_unavailable.clone())
+            .await
+            .expect("RangeUnavailable frame queues");
+    }
+
+    let distinct: HashSet<_> = served_peers.iter().cloned().collect();
+    assert!(
+        distinct.len() >= 2,
+        "budget-constrained issuance must rotate across peers, not pin to the \
+         lowest-id peer; offered sequence was {served_peers:?}"
+    );
+
+    reactor_task.abort();
+}
+
+/// One peer whose request times out backs off (its outbound window halves) and
+/// must not block the other peers from being filled out of the same shared work.
+///
+/// This is the timeout-locality invariant: a slow peer's recovery is local to
+/// that peer. The retry path re-queues the timed-out range to a *different*
+/// servable peer, so the healthy peer keeps making progress while the slow peer
+/// is in recovery rather than the whole download stalling behind one straggler.
+#[tokio::test]
+async fn reactor_timeout_backoff_is_local_and_healthy_peer_keeps_filling() {
+    let mut config = immediate_body_download_config();
+    config.fanout = 1;
+    // A request timeout long enough that the opening pass fans both heights out
+    // before anything expires, but short enough that the slow peer's unanswered
+    // request still times out within the test window.
+    config.request_timeout = Duration::from_millis(400);
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 64;
+
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Two peers, both able to serve heights 1..=2 with a single in-flight slot.
+    // One will be left holding an unanswered request (the slow peer); the other
+    // answers and must keep being filled from the same shared work — including
+    // the slow peer's range once it times out and re-queues.
+    let status = || BlockSyncStatus {
+        servable_low: block::Height(1),
+        servable_high: block::Height(2),
+        tip_hash: block::Hash([2; 32]),
+        max_blocks_per_response: 1,
+        max_inflight_requests: 1,
+        max_response_bytes: MAX_BS_RESPONSE_BYTES,
+    };
+    let (peer_a, _a_in, _a_out) =
+        connect_peer_with_status_message(&service, &mut actions, 0x41, status()).await;
+    let (peer_b, _b_in, _b_out) =
+        connect_peer_with_status_message(&service, &mut actions, 0x42, status()).await;
+    let mut inbounds = HashMap::from([(peer_a.clone(), _a_in), (peer_b.clone(), _b_in)]);
+
+    tip_tx
+        .send((block::Height(2), block::Hash([2; 32])))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![
+            BlockSyncBlockMeta {
+                height: block::Height(1),
+                hash: block::Hash([1; 32]),
+                size: BlockSizeEstimate::Advertised(1_000),
+            },
+            BlockSyncBlockMeta {
+                height: block::Height(2),
+                hash: block::Hash([2; 32]),
+                size: BlockSizeEstimate::Advertised(1_000),
+            },
+        ]))
+        .await
+        .expect("needed metadata queues");
+
+    // Opening pass: with fanout=1 each peer is offered one of the two heights.
+    let first = wait_for_getblocks(&mut actions).await;
+    let second = wait_for_getblocks(&mut actions).await;
+    let mut offered: HashMap<ZakuraPeerId, block::Height> = HashMap::new();
+    offered.insert(first.0.clone(), first.1);
+    offered.insert(second.0.clone(), second.1);
+    assert_eq!(
+        offered.len(),
+        2,
+        "both peers must be offered a height in the opening pass: {offered:?}"
+    );
+
+    // Pick one peer to be the straggler (it never answers) and the other to be
+    // healthy. The healthy peer answers `RangeUnavailable` for its own range so
+    // it frees its slot without committing anything; the straggler's range then
+    // times out and re-queues. Because the timeout backoff is local to the
+    // straggler, the healthy peer must keep being offered the re-queued shared
+    // work rather than the whole download stalling behind the straggler.
+    let healthy = peer_b.clone();
+    let healthy_in = inbounds.remove(&healthy).expect("healthy peer inbound");
+
+    let healthy_offers = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut count = 0usize;
+        loop {
+            // Whenever the healthy peer is offered a range, free its slot with a
+            // `RangeUnavailable` so it can be offered the next range; the slow
+            // peer never answers and stays in timeout recovery.
+            let (peer, start_height, count_blocks) = wait_for_getblocks(&mut actions).await;
+            if peer == healthy {
+                count += 1;
+                if count >= 2 {
+                    break count;
+                }
+                healthy_in
+                    .send(
+                        BlockSyncMessage::RangeUnavailable {
+                            start_height,
+                            count: count_blocks,
+                        }
+                        .encode_frame()
+                        .expect("RangeUnavailable frame encodes"),
+                    )
+                    .await
+                    .expect("RangeUnavailable frame queues");
+            }
+        }
+    })
+    .await
+    .expect(
+        "the healthy peer must keep being offered shared work while the slow peer \
+         is in timeout recovery; a stall here means a straggler wedged the pass",
+    );
+    assert!(
+        healthy_offers >= 2,
+        "the healthy peer was filled repeatedly despite the slow peer's timeout backoff"
     );
 
     reactor_task.abort();

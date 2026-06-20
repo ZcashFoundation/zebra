@@ -209,6 +209,10 @@ pub(super) struct BlockSyncState {
     pub(super) status_refresh: RateMeter,
     pub(super) pending_status_refresh: bool,
     pub(super) last_advertised_status: BlockSyncStatus,
+    /// Round-robin cursor that rotates which peer the full scheduling pass fills
+    /// first. Advanced once per full pass so a budget-constrained pass is not
+    /// always consumed by the lowest-node-id peer. Deterministic for tests.
+    pub(super) fill_rotation_cursor: usize,
 }
 
 impl BlockSyncState {
@@ -244,6 +248,7 @@ impl BlockSyncState {
             status_refresh: RateMeter::new(startup.config.status_refresh_interval),
             pending_status_refresh: false,
             last_advertised_status,
+            fill_rotation_cursor: 0,
         }
     }
 

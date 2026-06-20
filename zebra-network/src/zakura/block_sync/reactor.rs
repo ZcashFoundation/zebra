@@ -322,7 +322,8 @@ impl BlockSyncReactor {
         self.publish_peer_snapshot();
         self.publish_candidate_state();
         self.send_status(&peer, "peer_connected").await;
-        self.schedule().await;
+        // A peer just connected: only its slots became fillable.
+        self.schedule_peer(&peer).await;
     }
 
     fn handle_peer_disconnected(&mut self, peer: ZakuraPeerId) {
@@ -708,7 +709,8 @@ impl BlockSyncReactor {
         if send_status_reply {
             self.send_status(&peer, "status_reply").await;
         }
-        self.schedule().await;
+        // Only this peer's servable range / windows changed.
+        self.schedule_peer(&peer).await;
     }
 
     async fn handle_block(&mut self, peer: ZakuraPeerId, block: Arc<block::Block>) {
@@ -845,7 +847,9 @@ impl BlockSyncReactor {
             // elsewhere), so release the actual bytes it still reserved.
             self.state.budget.release(serialized_bytes);
             self.release_contiguous_blocks().await;
-            self.schedule().await;
+            // This body completed/advanced only this peer's outstanding request,
+            // so only this peer's slots opened.
+            self.schedule_peer(&peer).await;
             self.release_caught_up_block_sync_peers();
             return;
         }
@@ -883,7 +887,9 @@ impl BlockSyncReactor {
             }
         }
         self.release_contiguous_blocks().await;
-        self.schedule().await;
+        // This body completed/advanced only this peer's outstanding request, so
+        // only this peer's slots opened.
+        self.schedule_peer(&peer).await;
         self.release_caught_up_block_sync_peers();
     }
 
@@ -1011,6 +1017,8 @@ impl BlockSyncReactor {
             OutstandingRangeDisposition::RetryOriginal,
         );
         self.finish_peer_outstanding_at(&peer, index, disposition);
+        // A RetryOriginal disposition re-queues the range globally, so any peer
+        // (not just this one) may now claim it; use the full pass.
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
     }
@@ -1107,7 +1115,9 @@ impl BlockSyncReactor {
                 serialized_bytes,
                 "not buffering unmatched queued block-sync body; height stays queued for retry"
             );
-            self.schedule().await;
+            // Nothing global changed (body not buffered, floor not advanced);
+            // only re-check this peer's slots.
+            self.schedule_peer(peer).await;
             return true;
         }
 
@@ -1265,6 +1275,8 @@ impl BlockSyncReactor {
             OutstandingRangeDisposition::RetryMissing,
         );
         self.finish_peer_outstanding_at(&peer, index, disposition);
+        // A RetryMissing disposition re-queues any missing heights globally, so
+        // any peer (not just this one) may now claim them; use the full pass.
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
     }
@@ -1630,7 +1642,13 @@ impl BlockSyncReactor {
         }
     }
 
-    async fn schedule(&mut self) {
+    /// Shared scheduling preamble: drain ready applies, reclaim overdue
+    /// requests, and decide whether new body downloads may be issued. Returns
+    /// `true` when issuance should proceed, or `false` (with a traced reason)
+    /// when downloads are paused. Both `schedule` (full pass) and
+    /// `schedule_peer` (peer-scoped) call this first, so no issuance entry point
+    /// ever skips this housekeeping.
+    async fn prepare_schedule(&mut self) -> bool {
         self.submit_pending_blocks().await;
         self.expire_due_timeouts(Instant::now());
 
@@ -1643,6 +1661,112 @@ impl BlockSyncReactor {
                 "budget_full"
             };
             self.trace_downloads_paused(reason);
+            return false;
+        }
+
+        true
+    }
+
+    /// Fill one peer's available slots in a single pass, letting the byte budget
+    /// (re-checked each iteration) be the congestion window. A raised slot cap is
+    /// only useful if we can open the window promptly rather than one slot per
+    /// scheduling event. Returns `false` when the global pause condition tripped
+    /// mid-fill so the full-pass caller stops scanning the remaining peers.
+    async fn fill_peer(
+        &mut self,
+        peer_id: &ZakuraPeerId,
+        per_peer_byte_cap: u64,
+        scheduled_since_timeout_check: &mut usize,
+    ) -> bool {
+        loop {
+            if self.should_pause_new_body_downloads() {
+                return false;
+            }
+            let Some(peer) = self.state.peers.get(peer_id) else {
+                break;
+            };
+            if !peer.received_status || peer.available_slots() == 0 {
+                break;
+            }
+            let request = match self.state.schedule.next_for_peer(
+                peer_id,
+                peer,
+                &mut self.state.budget,
+                per_peer_byte_cap,
+                self.startup.config.advertised_max_blocks_per_response(),
+            ) {
+                Ok(request) => request,
+                Err(reason) => {
+                    self.trace_schedule_skipped(peer_id, reason);
+                    break;
+                }
+            };
+
+            let Some(peer) = self.state.peers.get(peer_id) else {
+                break;
+            };
+            let queued_at = Instant::now();
+            if let Err(error) = peer
+                .session
+                .try_send_get_blocks(request.start_height, request.count)
+            {
+                tracing::debug!(
+                    peer = ?peer_id,
+                    start_height = ?request.start_height,
+                    count = request.count,
+                    ?error,
+                    "failed to queue Zakura block-sync GetBlocks"
+                );
+                peer.session.cancel_token().cancel();
+                self.state.budget.release(request.estimated_bytes);
+                self.state.schedule.retry(request);
+                break;
+            }
+
+            let deadline = queued_at + self.startup.config.request_timeout;
+            metrics::counter!("sync.block.request.sent").increment(1);
+            self.trace_get_blocks_sent(
+                peer_id,
+                request.start_height,
+                request.count,
+                request.estimated_bytes,
+            );
+            if let Some(peer) = self.state.peers.get_mut(peer_id) {
+                peer.record_outbound_request_scheduled();
+                peer.outstanding.push(OutstandingBlockRange {
+                    request: request.clone(),
+                    deadline,
+                    received: HashSet::new(),
+                });
+            }
+            let _ = self
+                .dispatch_action(BlockSyncAction::SendMessage {
+                    peer: peer_id.clone(),
+                    msg: BlockSyncMessage::GetBlocks {
+                        start_height: request.start_height,
+                        count: request.count,
+                    },
+                })
+                .await;
+            *scheduled_since_timeout_check = scheduled_since_timeout_check.saturating_add(1);
+            if *scheduled_since_timeout_check >= SCHEDULE_TIMEOUT_CHECK_INTERVAL {
+                self.expire_due_timeouts(Instant::now());
+                *scheduled_since_timeout_check = 0;
+                tokio::task::yield_now().await;
+            }
+        }
+
+        true
+    }
+
+    /// Full scheduling pass: fill every connected peer's window. Issuance starts
+    /// from a rotating cursor (advanced once per pass) instead of the static
+    /// lowest-node-id order, so a budget-constrained pass distributes requests
+    /// across peers rather than always letting the lowest-id peer drain the
+    /// budget first. The cursor is a stored counter, so the order stays
+    /// deterministic and reproducible in tests.
+    async fn schedule(&mut self) {
+        if !self.prepare_schedule().await {
             return;
         }
 
@@ -1652,86 +1776,23 @@ impl BlockSyncReactor {
         let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
         let mut scheduled_since_timeout_check = 0usize;
 
-        for peer_id in peer_ids {
-            // Fill this peer's available slots in one pass, letting the byte
-            // budget (re-checked each iteration) be the congestion window. A
-            // raised slot cap is only useful if we can open the window promptly
-            // rather than one slot per scheduling event.
-            loop {
-                if self.should_pause_new_body_downloads() {
-                    return;
-                }
-                let Some(peer) = self.state.peers.get(&peer_id) else {
-                    break;
-                };
-                if !peer.received_status || peer.available_slots() == 0 {
-                    break;
-                }
-                let request = match self.state.schedule.next_for_peer(
-                    &peer_id,
-                    peer,
-                    &mut self.state.budget,
-                    per_peer_byte_cap,
-                    self.startup.config.advertised_max_blocks_per_response(),
-                ) {
-                    Ok(request) => request,
-                    Err(reason) => {
-                        self.trace_schedule_skipped(&peer_id, reason);
-                        break;
-                    }
-                };
-
-                let Some(peer) = self.state.peers.get(&peer_id) else {
-                    break;
-                };
-                let queued_at = Instant::now();
-                if let Err(error) = peer
-                    .session
-                    .try_send_get_blocks(request.start_height, request.count)
+        if !peer_ids.is_empty() {
+            let start = self.state.fill_rotation_cursor % peer_ids.len();
+            // Advance the cursor once per full pass so the next pass starts at a
+            // different peer. Wrapping is intentional and harmless: only the
+            // value modulo the (variable) peer count is ever used.
+            self.state.fill_rotation_cursor = self.state.fill_rotation_cursor.wrapping_add(1);
+            for offset in 0..peer_ids.len() {
+                let peer_id = peer_ids[(start + offset) % peer_ids.len()].clone();
+                if !self
+                    .fill_peer(
+                        &peer_id,
+                        per_peer_byte_cap,
+                        &mut scheduled_since_timeout_check,
+                    )
+                    .await
                 {
-                    tracing::debug!(
-                        peer = ?peer_id,
-                        start_height = ?request.start_height,
-                        count = request.count,
-                        ?error,
-                        "failed to queue Zakura block-sync GetBlocks"
-                    );
-                    peer.session.cancel_token().cancel();
-                    self.state.budget.release(request.estimated_bytes);
-                    self.state.schedule.retry(request);
                     break;
-                }
-
-                let deadline = queued_at + self.startup.config.request_timeout;
-                metrics::counter!("sync.block.request.sent").increment(1);
-                self.trace_get_blocks_sent(
-                    &peer_id,
-                    request.start_height,
-                    request.count,
-                    request.estimated_bytes,
-                );
-                if let Some(peer) = self.state.peers.get_mut(&peer_id) {
-                    peer.record_outbound_request_scheduled();
-                    peer.outstanding.push(OutstandingBlockRange {
-                        request: request.clone(),
-                        deadline,
-                        received: HashSet::new(),
-                    });
-                }
-                let _ = self
-                    .dispatch_action(BlockSyncAction::SendMessage {
-                        peer: peer_id.clone(),
-                        msg: BlockSyncMessage::GetBlocks {
-                            start_height: request.start_height,
-                            count: request.count,
-                        },
-                    })
-                    .await;
-                scheduled_since_timeout_check = scheduled_since_timeout_check.saturating_add(1);
-                if scheduled_since_timeout_check >= SCHEDULE_TIMEOUT_CHECK_INTERVAL {
-                    self.expire_due_timeouts(Instant::now());
-                    scheduled_since_timeout_check = 0;
-                    tokio::task::yield_now().await;
                 }
             }
         }
@@ -1739,6 +1800,34 @@ impl BlockSyncReactor {
         // The timeout-retry bias only steers the pass that follows the timeout
         // that set it; drop the marks now that this pass has placed (or
         // deferred) every range.
+        self.state.schedule.clear_timeout_avoid();
+    }
+
+    /// Peer-scoped scheduling: run the shared preamble, then fill only the slots
+    /// of the one peer whose capacity an event just changed (a status, a
+    /// completed request, a freed slot). This keeps the high-frequency per-peer
+    /// message path O(1) instead of O(peers).
+    ///
+    /// Clearing `clear_timeout_avoid` after a single peer is correct: the
+    /// timeout-retry-avoid marks are (re)set by `expire_due_timeouts` inside
+    /// `prepare_schedule` immediately above, and the only consumer between
+    /// setting and clearing them is this one `fill_peer`. The full pass has the
+    /// same single-pass lifecycle; per-peer scheduling does not extend the marks'
+    /// lifetime, so no stale bias leaks into a later event.
+    async fn schedule_peer(&mut self, peer_id: &ZakuraPeerId) {
+        if !self.prepare_schedule().await {
+            return;
+        }
+
+        let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
+        let mut scheduled_since_timeout_check = 0usize;
+        self.fill_peer(
+            peer_id,
+            per_peer_byte_cap,
+            &mut scheduled_since_timeout_check,
+        )
+        .await;
+
         self.state.schedule.clear_timeout_avoid();
     }
 
