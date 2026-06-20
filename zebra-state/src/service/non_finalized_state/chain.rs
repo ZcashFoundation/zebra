@@ -1848,15 +1848,20 @@ impl Chain {
                 ))?;
                 self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
 
-                // The Ironwood pool reuses `orchard::ShieldedData`, so its nullifiers can't go
-                // through a distinct `UpdateWith` impl (it would collide with the Orchard one).
-                // Add them inline into the Ironwood-only nullifier set instead.
-                let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
-                check::nullifier::add_to_non_finalized_chain_unique(
-                    &mut self.ironwood_nullifiers,
-                    ironwood_nullifiers.iter(),
-                    transaction_hash,
-                )?;
+                // The Ironwood pool reuses orchard::ShieldedData, so its nullifiers are applied
+                // through a distinct UpdateWith impl keyed on the ironwood::ShieldedData newtype
+                // (which doesn't collide with the Orchard impl).
+                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                if let V6 {
+                    ironwood_shielded_data,
+                    ..
+                } = transaction.deref()
+                {
+                    self.update_chain_tip_with(&(
+                        ironwood_shielded_data.as_ref(),
+                        &transaction_hash,
+                    ))?;
+                }
             }
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -2059,13 +2064,19 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             );
             self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
 
-            // Remove the Ironwood nullifiers added inline above (see the matching comment in
+            // Revert the Ironwood nullifiers through the matching UpdateWith impl (see
             // `update_chain_tip_with_block_except_trees`).
-            let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.ironwood_nullifiers,
-                ironwood_nullifiers.iter(),
-            );
+            #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+            if let V6 {
+                ironwood_shielded_data,
+                ..
+            } = transaction.deref()
+            {
+                self.revert_chain_with(
+                    &(ironwood_shielded_data.as_ref(), transaction_hash),
+                    position,
+                );
+            }
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -2323,7 +2334,7 @@ impl
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers(),
+                joinsplit_data.nullifiers().copied(),
                 *revealing_tx_id,
             )?;
         }
@@ -2351,7 +2362,7 @@ impl
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers(),
+                joinsplit_data.nullifiers().copied(),
             );
         }
     }
@@ -2378,7 +2389,7 @@ where
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
-                sapling_shielded_data.nullifiers(),
+                sapling_shielded_data.nullifiers().copied(),
                 *revealing_tx_id,
             )?;
         }
@@ -2406,7 +2417,7 @@ where
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
-                sapling_shielded_data.nullifiers(),
+                sapling_shielded_data.nullifiers().copied(),
             );
         }
     }
@@ -2426,7 +2437,7 @@ impl UpdateWith<(Option<&orchard::ShieldedData>, &SpendingTransactionId)> for Ch
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
-                orchard_shielded_data.nullifiers(),
+                orchard_shielded_data.nullifiers().copied(),
                 *revealing_tx_id,
             )?;
         }
@@ -2454,7 +2465,58 @@ impl UpdateWith<(Option<&orchard::ShieldedData>, &SpendingTransactionId)> for Ch
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.orchard_nullifiers,
-                orchard_shielded_data.nullifiers(),
+                orchard_shielded_data.nullifiers().copied(),
+            );
+        }
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+impl UpdateWith<(Option<&ironwood::ShieldedData>, &SpendingTransactionId)> for Chain {
+    #[instrument(skip(self, ironwood_shielded_data))]
+    fn update_chain_tip_with(
+        &mut self,
+        &(ironwood_shielded_data, revealing_tx_id): &(
+            Option<&ironwood::ShieldedData>,
+            &SpendingTransactionId,
+        ),
+    ) -> Result<(), ValidateContextError> {
+        if let Some(ironwood_shielded_data) = ironwood_shielded_data {
+            // The Ironwood pool reuses orchard::ShieldedData but commits to a disjoint nullifier
+            // set, so its nullifiers are wrapped in the ironwood::Nullifier newtype.
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.ironwood_nullifiers,
+                ironwood_shielded_data
+                    .data()
+                    .nullifiers()
+                    .map(|nullifier| ironwood::Nullifier(*nullifier)),
+                *revealing_tx_id,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
+    #[instrument(skip(self, ironwood_shielded_data))]
+    fn revert_chain_with(
+        &mut self,
+        (ironwood_shielded_data, _revealing_tx_id): &(
+            Option<&ironwood::ShieldedData>,
+            &SpendingTransactionId,
+        ),
+        _position: RevertPosition,
+    ) {
+        if let Some(ironwood_shielded_data) = ironwood_shielded_data {
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.ironwood_nullifiers,
+                ironwood_shielded_data
+                    .data()
+                    .nullifiers()
+                    .map(|nullifier| ironwood::Nullifier(*nullifier)),
             );
         }
     }
