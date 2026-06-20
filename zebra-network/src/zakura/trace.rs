@@ -248,8 +248,6 @@ pub mod block_sync_trace {
     pub const BLOCK_WORK_EXTENDED: &str = "block_work_extended";
     /// A peer claimed a contiguous chunk of pending work for issuance.
     pub const BLOCK_WORK_TAKEN: &str = "block_work_taken";
-    /// Scheduler could not issue another request for a peer with free slots.
-    pub const BLOCK_SCHEDULE_SKIPPED: &str = "block_schedule_skipped";
     /// Verified body frontier advanced from state.
     pub const BLOCK_FRONTIERS_CHANGED: &str = "block_frontiers_changed";
     /// Chain tip reset rolled the body frontier back.

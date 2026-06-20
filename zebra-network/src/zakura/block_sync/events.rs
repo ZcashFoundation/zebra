@@ -12,32 +12,18 @@ pub struct BlockSyncBlockMeta {
 }
 
 /// Facts accepted by the block-sync scaffold and later reactor.
+///
+/// S4 inverted the inbound data flow: a peer's stream-6 frames are decoded and
+/// the download logic runs in the per-peer pipe-routine
+/// ([`PeerRoutine`](super::peer_routine)). Inbound messages no longer flow
+/// through the reactor as a `WireMessage`; the routine forwards only shared
+/// concerns to the reactor over [`RoutineToReactor`].
 #[derive(Clone, Debug)]
 pub enum BlockSyncEvent {
     /// A peer became available for stream-6 block sync.
     PeerConnected(BlockSyncPeerSession),
     /// A peer disconnected; all of its outstanding work is dropped.
     PeerDisconnected(ZakuraPeerId),
-    /// Inbound stream-6 message from `peer`.
-    WireMessage {
-        /// Serving peer.
-        peer: ZakuraPeerId,
-        /// Decoded stream-6 message.
-        msg: BlockSyncMessage,
-        /// Exact serialized body length for a `Block` message, measured by the
-        /// per-peer decode task from the frame payload (`None` for other
-        /// messages). Lets the reactor account body bytes without re-serializing
-        /// the block on its single thread. When `None`, the reactor falls back to
-        /// re-serializing.
-        body_wire_bytes: Option<u64>,
-    },
-    /// Stream-6 frame decoding failed after handler admission.
-    WireDecodeFailed {
-        /// Peer that sent the malformed frame.
-        peer: ZakuraPeerId,
-        /// Decode/validation error.
-        error: Arc<BlockSyncWireError>,
-    },
     /// Header sync advanced the committed header target.
     HeaderTipChanged {
         /// Current best header height.
@@ -176,4 +162,49 @@ pub enum BlockSyncMisbehavior {
     RangeUnavailable,
     /// A peer sent too many status frames.
     StatusSpam,
+}
+
+/// The shared routine→reactor channel (S4 inverted data flow).
+///
+/// Each per-peer pipe-routine ([`PeerRoutine`](super::peer_routine)) decodes its
+/// own frames and runs the download logic locally; it forwards only the concerns
+/// that need reactor-global state (serving, status advertisement, the producer,
+/// misbehavior aggregation) over this channel. The sender is `try_send`/bounded
+/// so a busy reactor never backpressures a routine's decode loop into stalling
+/// its transport (the only blocking routine send is the Sequencer `AcceptBody`).
+#[derive(Clone, Debug)]
+pub(super) enum RoutineToReactor {
+    /// A routine received a `Status` and updated its own servable/caps + the
+    /// registry. The reactor advertises our `Status` reply and republishes the
+    /// candidate set. `send_reply` is the routine's rate-meter decision (the
+    /// pre-S4 `unsolicited.try_take`) for whether a reply is due this time.
+    StatusReceived {
+        /// Peer whose status was applied.
+        peer: ZakuraPeerId,
+        /// Whether the rate meter allows sending a `Status` reply now.
+        send_reply: bool,
+    },
+    /// A peer requested OUR committed blocks (serving). The reactor runs the
+    /// state query + driver path and sends via the peer's session clone.
+    ServeGetBlocks {
+        /// Peer that requested the range.
+        peer: ZakuraPeerId,
+        /// First requested height.
+        start_height: block::Height,
+        /// Requested block count.
+        count: u32,
+    },
+    /// A routine drained its pending work; the producer should re-query (it
+    /// self-gates on low-water, so the ping is idempotent/cheap).
+    RequeryNeeded,
+    /// A routine scored a peer offense that needs the reactor-side
+    /// disconnect/scoring action (serving-side malformed frames report via this
+    /// path; download-side offenses score directly through the `actions`
+    /// channel + the shared registry count).
+    Misbehavior {
+        /// Misbehaving peer.
+        peer: ZakuraPeerId,
+        /// Reason for reporting.
+        reason: BlockSyncMisbehavior,
+    },
 }

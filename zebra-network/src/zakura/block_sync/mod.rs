@@ -29,6 +29,8 @@ use super::{
 mod config;
 mod error;
 mod events;
+mod peer_registry;
+mod peer_routine;
 mod pipe;
 mod reactor;
 mod reorder;

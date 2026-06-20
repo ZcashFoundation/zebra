@@ -11,37 +11,6 @@ pub enum BlockSizeEstimate {
     Unknown,
 }
 
-/// Reason an issuance attempt could not place a request for a peer with free
-/// slots, recorded on the `block_schedule_skipped` trace row.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) enum ScheduleSkipReason {
-    /// No pending work in the peer's servable range.
-    NoAssignableRange,
-    /// The peer's per-peer byte fairness cap is exhausted.
-    PeerByteCapExhausted,
-    /// The global byte budget cannot fund another worst-case block.
-    BudgetExhausted,
-    /// The first taken block did not fit the peer/budget byte limit.
-    FirstBlockExceedsByteLimit,
-    /// `budget.try_reserve` failed (raced another reserver).
-    ReserveFailed,
-    /// The taken chunk length overflowed the wire request count.
-    RequestCountOverflow,
-}
-
-impl ScheduleSkipReason {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            ScheduleSkipReason::NoAssignableRange => "no_assignable_range",
-            ScheduleSkipReason::PeerByteCapExhausted => "peer_byte_cap_exhausted",
-            ScheduleSkipReason::BudgetExhausted => "budget_exhausted",
-            ScheduleSkipReason::FirstBlockExceedsByteLimit => "first_block_exceeds_byte_limit",
-            ScheduleSkipReason::ReserveFailed => "reserve_failed",
-            ScheduleSkipReason::RequestCountOverflow => "request_count_overflow",
-        }
-    }
-}
-
 /// A contiguous block-range request issued to one peer and tracked in its
 /// `outstanding` set. Built by the reactor's per-peer issuance path from a chunk
 /// taken out of the [`WorkQueue`](super::work_queue::WorkQueue).
@@ -79,11 +48,5 @@ impl BlockRangeRequest {
         self.expected_bytes
             .iter()
             .find_map(|(known_height, bytes)| (*known_height == height).then_some(*bytes))
-    }
-
-    pub(super) fn matches_needed(&self, needed: &HashMap<block::Height, block::Hash>) -> bool {
-        self.expected_hashes
-            .iter()
-            .all(|(height, hash)| needed.get(height) == Some(hash))
     }
 }

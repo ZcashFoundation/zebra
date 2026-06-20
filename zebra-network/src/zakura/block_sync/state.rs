@@ -116,6 +116,11 @@ impl BlockSyncStartup {
 }
 
 /// Cheap cloneable handle used by services and drivers to inform block sync.
+///
+/// S4 carries the shared per-peer download primitives here too, so
+/// `service::add_peer` (the pipe-routine spawn point) can wire each per-peer
+/// pipe-routine with the same `WorkQueue`/`ByteBudget`/`PeerRegistry`/Sequencer/
+/// action/routine-to-reactor channels the reactor created.
 #[derive(Clone, Debug)]
 pub struct BlockSyncHandle {
     pub(super) events: mpsc::Sender<BlockSyncEvent>,
@@ -123,6 +128,27 @@ pub struct BlockSyncHandle {
     pub(super) peers: watch::Receiver<ServicePeerSnapshot>,
     pub(super) status: watch::Receiver<BlockSyncStatus>,
     pub(super) candidates: watch::Receiver<ZakuraBlockSyncCandidateState>,
+    /// Shared primitives every per-peer pipe-routine is wired with at spawn
+    /// (`service::add_peer`). `None` for the inert/handle-less test constructors
+    /// that never spawn routines.
+    pub(super) routine_wiring: Option<RoutineWiring>,
+}
+
+/// The shared download primitives a per-peer pipe-routine is constructed with.
+/// Created once in `spawn_block_sync_reactor` and threaded through the handle to
+/// `service::add_peer`.
+#[derive(Clone, Debug)]
+pub(super) struct RoutineWiring {
+    pub(super) config: ZakuraBlockSyncConfig,
+    pub(super) budget: ByteBudget,
+    pub(super) work: Arc<WorkQueue>,
+    pub(super) registry: Arc<super::peer_registry::PeerRegistry>,
+    pub(super) received_throughput: Arc<std::sync::Mutex<ThroughputMeter>>,
+    pub(super) sequencer_input: mpsc::Sender<super::sequencer_task::SequencerInput>,
+    pub(super) actions: mpsc::Sender<BlockSyncAction>,
+    pub(super) routine_to_reactor: mpsc::Sender<super::events::RoutineToReactor>,
+    pub(super) view: watch::Receiver<super::sequencer_task::SequencerView>,
+    pub(super) trace: ZakuraTrace,
 }
 
 impl BlockSyncHandle {
@@ -186,7 +212,7 @@ impl BlockSyncHandle {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct BlockSyncState {
     pub(super) finalized_height: block::Height,
     pub(super) verified_block_hash: block::Hash,
@@ -194,28 +220,29 @@ pub(super) struct BlockSyncState {
     pub(super) servable_hash: block::Hash,
     pub(super) best_header_tip: block::Height,
     pub(super) best_header_hash: block::Hash,
+    /// Thin per-peer handles the reactor keeps for demux/serving/admission. The
+    /// per-peer *download* state moved into the spawned [`PeerRoutine`](super::peer_routine)
+    /// (S4); the cross-peer facts the reactor/producer need live in the
+    /// [`PeerRegistry`](super::peer_registry).
     pub(super) peers: HashMap<ZakuraPeerId, PeerBlockState>,
     pub(super) parked_peers: HashSet<ZakuraPeerId>,
     pub(super) disconnected_peers: HashSet<ZakuraPeerId>,
     /// Sorted set of needed download heights. Replaces the central
     /// `BlockRangeScheduler`: the per-peer issuance path pulls work in its own
     /// servable range, dedup/covered are `in_flight`, and the floor is GC only.
-    /// `Arc` so the state stays cheaply `Clone` and the queue can be shared with
-    /// the Sequencer task / per-peer routines in later stages.
+    /// `Arc` so the state stays cheaply `Clone` and the queue is shared with the
+    /// Sequencer task and the per-peer routines.
     pub(super) work: Arc<WorkQueue>,
     pub(super) budget: ByteBudget,
     pub(super) needed_heights: Vec<block::Height>,
     pub(super) status_refresh: RateMeter,
     pub(super) pending_status_refresh: bool,
     pub(super) last_advertised_status: BlockSyncStatus,
-    /// Round-robin cursor that rotates which peer the full scheduling pass fills
-    /// first. Advanced once per full pass so a budget-constrained pass is not
-    /// always consumed by the lowest-node-id peer. Deterministic for tests.
-    pub(super) fill_rotation_cursor: usize,
-    /// Throughput of bodies received off the wire (the download rate). Sampled
-    /// each trace tick; compared against the Sequencer task's committed
+    /// Throughput of bodies received off the wire (the download rate). Shared
+    /// with the per-peer routines (they `record` on receipt); the reactor samples
+    /// it each trace tick. Compared against the Sequencer task's committed
     /// throughput it separates a download-limited sync from a commit-limited one.
-    pub(super) received_throughput: ThroughputMeter,
+    pub(super) received_throughput: Arc<std::sync::Mutex<ThroughputMeter>>,
 }
 
 impl BlockSyncState {
@@ -245,8 +272,9 @@ impl BlockSyncState {
             status_refresh: RateMeter::new(startup.config.status_refresh_interval),
             pending_status_refresh: false,
             last_advertised_status,
-            fill_rotation_cursor: 0,
-            received_throughput: ThroughputMeter::new(Instant::now()),
+            received_throughput: Arc::new(std::sync::Mutex::new(ThroughputMeter::new(
+                Instant::now(),
+            ))),
         }
     }
 
@@ -263,87 +291,29 @@ impl BlockSyncState {
             .count();
         ServicePeerSnapshot::new(inbound, outbound, limits)
     }
-
-    /// Drain every outstanding request whose deadline has passed, releasing its
-    /// byte reservation and re-queuing the range for retry. Returns whether any
-    /// request expired so callers can reschedule. Invoked from scheduling hot
-    /// paths (not just the periodic tick) so a stuck floor block is reclaimed
-    /// within the request timeout rather than after the next tick.
-    pub(super) fn expire_due_timeouts(&mut self, now: Instant) -> bool {
-        let mut timed_out = Vec::new();
-        for (peer_id, peer) in self.peers.iter_mut() {
-            let mut index = 0;
-            while index < peer.outstanding.len() {
-                if peer.outstanding[index].deadline <= now {
-                    peer.reduce_outbound_window_after_timeout();
-                    timed_out.push((peer_id.clone(), peer.outstanding.remove(index)));
-                } else {
-                    index += 1;
-                }
-            }
-        }
-
-        let expired_any = !timed_out.is_empty();
-        for (_peer_id, outstanding) in timed_out {
-            self.budget.release(outstanding.reserved_bytes());
-            // Return only the unreceived heights to the queue. Received heights
-            // are already buffered (in `in_flight` until committed); re-queuing
-            // them would re-fetch a body we already hold, which the WorkQueue's
-            // single-owner `in_flight` invariant forbids.
-            self.work.return_items(
-                outstanding
-                    .request
-                    .expected_hashes
-                    .iter()
-                    .filter(|(height, _)| !outstanding.has_received(*height))
-                    .map(|(height, _)| *height),
-            );
-        }
-        expired_any
-    }
 }
 
+/// Adaptive per-peer outbound request window + outstanding requests.
+///
+/// Carved out of the old `PeerBlockState` so the window math stays unit-testable
+/// while the per-peer download state moves into the spawned
+/// [`PeerRoutine`](super::peer_routine) (S4). The routine embeds one of these.
 #[derive(Clone, Debug)]
-pub(super) struct PeerBlockState {
-    pub(super) session: BlockSyncPeerSession,
-    pub(super) direction: ServicePeerDirection,
-    pub(super) servable_low: block::Height,
-    pub(super) servable_high: block::Height,
-    pub(super) max_blocks_per_response: u32,
+pub(super) struct DownloadWindow {
     pub(super) max_inflight_requests: u16,
-    pub(super) max_response_bytes: u32,
     pub(super) outbound_request_window: usize,
     pub(super) timeout_recovery_slots: usize,
-    pub(super) received_status: bool,
     pub(super) outstanding: Vec<OutstandingBlockRange>,
-    pub(super) inbound_status: RateMeter,
-    pub(super) unsolicited: RateMeter,
-    pub(super) served_blocks_inflight: u16,
-    pub(super) served_block_requests: VecDeque<(block::Height, Instant)>,
-    pub(super) misbehavior: u32,
 }
 
-impl PeerBlockState {
-    pub(super) fn new(session: BlockSyncPeerSession, config: &ZakuraBlockSyncConfig) -> Self {
+impl DownloadWindow {
+    pub(super) fn new(config: &ZakuraBlockSyncConfig) -> Self {
+        let max_inflight_requests = config.advertised_max_inflight_requests();
         Self {
-            direction: session.direction(),
-            session,
-            servable_low: block::Height::MIN,
-            servable_high: block::Height::MIN,
-            max_blocks_per_response: config.advertised_max_blocks_per_response(),
-            max_inflight_requests: config.advertised_max_inflight_requests(),
-            max_response_bytes: config.advertised_max_response_bytes(),
-            outbound_request_window: usize::from(config.advertised_max_inflight_requests()),
+            max_inflight_requests,
+            outbound_request_window: usize::from(max_inflight_requests),
             timeout_recovery_slots: 0,
-            received_status: false,
             outstanding: Vec::new(),
-            inbound_status: RateMeter::new(
-                config.status_refresh_interval.min(Duration::from_secs(1)),
-            ),
-            unsolicited: RateMeter::new(config.status_refresh_interval),
-            served_blocks_inflight: 0,
-            served_block_requests: VecDeque::new(),
-            misbehavior: 0,
         }
     }
 
@@ -387,13 +357,6 @@ impl PeerBlockState {
         usize::from(self.max_inflight_requests).min(EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER)
     }
 
-    pub(super) fn can_serve_any(&self, heights: &[block::Height]) -> bool {
-        self.received_status
-            && heights
-                .iter()
-                .any(|height| self.servable_low <= *height && *height <= self.servable_high)
-    }
-
     pub(super) fn outstanding_index_for_height(&self, height: block::Height) -> Option<usize> {
         self.outstanding
             .iter()
@@ -404,6 +367,38 @@ impl PeerBlockState {
         self.outstanding
             .iter()
             .position(|outstanding| outstanding.request.start_height == start_height)
+    }
+}
+
+/// Thin per-peer handle the reactor keeps after S4: enough to serve inbound
+/// `GetBlocks` (the session clone + serving meters), advertise our `Status`, count
+/// admission, and tear down. The per-peer *download* state + inbound decode live
+/// in the per-peer pipe-routine ([`PeerRoutine`](super::peer_routine)); servable/
+/// caps live in the [`PeerRegistry`](super::peer_registry). There is no reactor→
+/// routine channel (inverted data flow): the routine owns its own `FramedRecv`.
+#[derive(Debug)]
+pub(super) struct PeerBlockState {
+    pub(super) session: BlockSyncPeerSession,
+    pub(super) direction: ServicePeerDirection,
+    /// Per-peer rate meter for the reactor's `Status` *advertisement* refresh
+    /// (serving-tip change broadcast + retry to peers that have not acknowledged
+    /// our Status). The pre-S4 `unsolicited` meter was dual-use; its inbound-status
+    /// *reply* half moved to the routine's `status_reply_meter`. This half stays
+    /// reactor-side because the reactor owns serving-tip advertisement.
+    pub(super) refresh_meter: RateMeter,
+    pub(super) served_blocks_inflight: u16,
+    pub(super) served_block_requests: VecDeque<(block::Height, Instant)>,
+}
+
+impl PeerBlockState {
+    pub(super) fn new(session: BlockSyncPeerSession, config: &ZakuraBlockSyncConfig) -> Self {
+        Self {
+            direction: session.direction(),
+            session,
+            refresh_meter: RateMeter::new(config.status_refresh_interval),
+            served_blocks_inflight: 0,
+            served_block_requests: VecDeque::new(),
+        }
     }
 
     pub(super) fn try_start_serving_blocks(

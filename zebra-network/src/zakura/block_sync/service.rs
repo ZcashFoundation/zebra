@@ -1,8 +1,7 @@
-use super::{config::*, events::*, pipe::*, wire::*, *};
+use super::{config::*, events::*, wire::*, *};
 use crate::zakura::{
-    handle_pipe_exit, spawn_supervised_pipe, Flow, FramedSend, OrderedSendError, Peer,
-    PeerStreamSession, Pipe, Service, SinkReject, Stream, StreamMode, ZakuraPeerId,
-    FRAME_HEADER_BYTES,
+    handle_pipe_exit, spawn_supervised_pipe, FramedRecv, FramedSend, OrderedSendError, Peer,
+    PeerStreamSession, Service, SinkReject, Stream, StreamMode, ZakuraPeerId, FRAME_HEADER_BYTES,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 // The per-peer block-sync `Source` frame-pump is test-only scaffolding (see
@@ -179,8 +178,11 @@ pub(crate) struct BlockSyncService {
 #[derive(Debug)]
 struct BlockSyncServiceInner {
     config: ZakuraBlockSyncConfig,
-    events: mpsc::Sender<BlockSyncEvent>,
     lifecycle: mpsc::UnboundedSender<BlockSyncEvent>,
+    /// Shared download primitives every per-peer pipe-routine is wired with at
+    /// `add_peer` (S4). `None` for the inert/handle-less constructors that never
+    /// spawn routines (they only observe `events`/`lifecycle`).
+    routine_wiring: Option<super::state::RoutineWiring>,
     peers: StdMutex<HashMap<ZakuraPeerId, BlockSyncPeerRecord>>,
     next_session_id: AtomicU64,
 }
@@ -214,8 +216,8 @@ impl BlockSyncService {
         Self {
             inner: Arc::new(BlockSyncServiceInner {
                 config,
-                events: handle.events.clone(),
                 lifecycle: handle.lifecycle.clone(),
+                routine_wiring: handle.routine_wiring.clone(),
                 peers: StdMutex::new(HashMap::new()),
                 next_session_id: AtomicU64::new(1),
             }),
@@ -248,8 +250,8 @@ impl BlockSyncService {
         Self {
             inner: Arc::new(BlockSyncServiceInner {
                 config,
-                events: handle.events.clone(),
                 lifecycle: handle.lifecycle.clone(),
+                routine_wiring: handle.routine_wiring.clone(),
                 peers: StdMutex::new(HashMap::new()),
                 next_session_id: AtomicU64::new(1),
             }),
@@ -274,8 +276,8 @@ impl BlockSyncService {
             Self {
                 inner: Arc::new(BlockSyncServiceInner {
                     config,
-                    events,
                     lifecycle,
+                    routine_wiring: None,
                     peers: StdMutex::new(HashMap::new()),
                     next_session_id: AtomicU64::new(1),
                 }),
@@ -427,8 +429,6 @@ impl Service for BlockSyncService {
         #[cfg(not(test))]
         drop(send);
 
-        let events = self.inner.events.clone();
-        let run_peer_id = peer_id.clone();
         let run_cancel = service_cancel_token.clone();
         let on_teardown = {
             let lifecycle = self.inner.lifecycle.clone();
@@ -458,15 +458,47 @@ impl Service for BlockSyncService {
             let connection_cancel_token = connection_cancel_token.clone();
             move || connection_cancel_token.cancel()
         };
-        // A protocol reject is fatal to the whole connection; a normal/parked exit
-        // leaves it for the other services riding on it. Panic teardown is in
-        // `on_panic`.
-        let pipe = async move {
-            handle_pipe_exit(
-                "block-sync",
-                &connection_cancel_token,
-                run_peer(run_peer_id, recv, events, run_cancel).await,
-            );
+        // S4: the per-peer pipe-routine is spawned HERE (the pipe spawn point), so
+        // a protocol reject still cancels the whole connection via
+        // `handle_pipe_exit`. The routine owns `recv` (the transport read), decodes
+        // each frame, and runs the download/serving dispatch in its own task —
+        // there is no reactor inbound demux. When the service has no reactor wiring
+        // (inert/handle-less test constructors) there is no routine to run; drain
+        // the stream so frames are not silently mishandled and the lifecycle still
+        // flows.
+        let pipe = {
+            let connection_cancel_token = connection_cancel_token.clone();
+            let routine_wiring = self.inner.routine_wiring.clone();
+            let block_sync_session = block_sync_session.clone();
+            let peer_id = peer_id.clone();
+            let direction = peer.direction;
+            async move {
+                let result = match routine_wiring {
+                    Some(wiring) => {
+                        let generation = wiring.registry.admit(&peer_id, direction, &wiring.config);
+                        let routine = super::peer_routine::PeerRoutine::new(
+                            peer_id,
+                            block_sync_session,
+                            recv,
+                            wiring.config,
+                            generation,
+                            wiring.budget,
+                            wiring.work,
+                            wiring.registry,
+                            wiring.received_throughput,
+                            wiring.sequencer_input,
+                            wiring.actions,
+                            wiring.routine_to_reactor,
+                            wiring.view,
+                            run_cancel,
+                            wiring.trace,
+                        );
+                        routine.run().await
+                    }
+                    None => drain_inbound(recv, run_cancel).await,
+                };
+                handle_pipe_exit("block-sync", &connection_cancel_token, result);
+            }
         };
         // Let the returned handle drop to detach the supervised task (like
         // `tokio::spawn`); the `PipeTeardown` still runs on every exit path.
@@ -524,18 +556,39 @@ impl Service for BlockSyncService {
 
     fn deliver_frame(
         &self,
-        peer_id: ZakuraPeerId,
-        stream_kind: u16,
-        frame: Frame,
+        _peer_id: ZakuraPeerId,
+        _stream_kind: u16,
+        _frame: Frame,
     ) -> Result<(), SinkReject> {
-        if stream_kind != ZAKURA_STREAM_BLOCK_SYNC {
-            return Ok(());
-        }
+        // S4 inverted the inbound data flow: block sync is an `Ordered` stream
+        // whose `FramedRecv` is taken by `add_peer` and owned by the per-peer
+        // pipe-routine ([`PeerRoutine`](super::peer_routine)), which decodes and
+        // dispatches every frame in its own task. The `Service::deliver_frame`
+        // entry point (driven only by the testkit recorder / `registry.deliver`,
+        // never the production ordered-stream reader) therefore has no routine to
+        // route into and no reactor inbound path to emit to. It is not the
+        // block-sync inbound path; accept-and-ignore rather than constructing a
+        // detached one-shot decode that could never reach the owning routine. No
+        // production frame reaches here (the routine consumes the stream), so this
+        // drops nothing that the routine would otherwise handle.
+        Ok(())
+    }
+}
 
-        let mut pipe = block_sync_pipe(peer_id, self.inner.events.clone());
-        match pipe.run_one(frame) {
-            Flow::Continue(()) | Flow::Done => Ok(()),
-            Flow::Reject(reject) => Err(reject),
+/// Drain a peer's inbound block-sync stream when the service has no reactor
+/// wiring to spawn a pipe-routine (the inert / handle-less test constructors).
+/// Frames are read and discarded until cancellation or stream close, so the
+/// transport reader makes progress and the lifecycle still fires; no routine
+/// exists to act on them.
+async fn drain_inbound(mut recv: FramedRecv, cancel: CancellationToken) -> Result<(), SinkReject> {
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return Ok(()),
+            frame = recv.recv() => {
+                if frame.is_none() {
+                    return Ok(());
+                }
+            }
         }
     }
 }
@@ -608,18 +661,4 @@ impl Source for BlockSyncSource {
             }
         })
     }
-}
-
-pub(super) fn block_sync_pipe(
-    peer_id: ZakuraPeerId,
-    events: mpsc::Sender<BlockSyncEvent>,
-) -> Pipe<BsLocal, BsEnv> {
-    Pipe::new(
-        peer_id,
-        BsLocal,
-        BsEnv::new(events),
-        block_sync_guard(),
-        run_inbound,
-        &PIPE_SHAPE,
-    )
 }

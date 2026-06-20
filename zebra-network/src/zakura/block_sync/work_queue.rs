@@ -209,6 +209,23 @@ impl WorkQueue {
         }
     }
 
+    /// Like [`return_items`](Self::return_items) but **does not** notify waiters.
+    ///
+    /// Used by a peer routine to put back a chunk it took but chose not to issue
+    /// (e.g. the heights are in its own short retry-avoid window after it just
+    /// failed them). Notifying here would re-wake the returning routine's own
+    /// freshly-registered `available` future and busy-loop the want-work arm
+    /// (a self-wake spin); other peers were already woken by the original failure
+    /// `return_items`, so suppressing the notify only affects the caller.
+    pub(super) fn return_items_quiet(&self, heights: impl IntoIterator<Item = block::Height>) {
+        let mut inner = self.lock();
+        for height in heights {
+            if let Some(item) = inner.in_flight.remove(&height) {
+                inner.pending.insert(height, item);
+            }
+        }
+    }
+
     /// Garbage-collect committed heights: raise the floor to `max(self.floor,
     /// floor)` and drop every `pending`/`in_flight` entry `<= floor`. Does **not** throttle
     /// how far above the floor peers may fetch.
