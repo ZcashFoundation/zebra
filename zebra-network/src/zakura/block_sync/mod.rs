@@ -1,4 +1,8 @@
 //! Native Zakura block-sync stream messages and service scaffold.
+//!
+//! New to this subsystem? Start in [`pipe`] — it is the "start here" map of how a
+//! peer's stream-6 frames flow through the per-peer routine, the work queue, the
+//! commit pipeline, the registry, and the reactor.
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},

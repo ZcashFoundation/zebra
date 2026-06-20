@@ -1,25 +1,55 @@
-//! block_sync/pipe.rs — the per-peer block-sync pipe shape (stream 6).
+//! block_sync/pipe.rs — **start here** to read the Zakura block-sync subsystem.
 //!
-//! S4 inverted the inbound data flow: the per-peer pipe-routine
-//! ([`PeerRoutine`](super::peer_routine)) owns its `FramedRecv`, decodes each
-//! frame, and runs the download/serving dispatch in the **same task** — there is
-//! no reactor inbound demux and no `WireMessage` event. This module keeps the
-//! drift-checked [`PIPE_SHAPE`] (now describing the routine's decode → dispatch
-//! shape) and the shared ingress [`block_sync_guard`] the routine applies before
-//! decode.
+//! Block sync downloads block *bodies* over QUIC stream 6 for the heights header
+//! sync has already committed, and serves those same bodies back to other peers.
+//! After S4 the shape is "the pipe IS the routine": each connected peer is driven
+//! by one task that owns its transport read and runs the download logic inline —
+//! there is no central scheduler and no reactor inbound demux.
 //!
+//! # Where the code lives (reading order)
+//!
+//! 1. [`peer_routine`](super::peer_routine) — **the core.** One per-peer routine
+//!    owns its `FramedRecv`, decodes each stream-6 frame, and runs the want-work
+//!    fill loop plus the inbound body/terminator handling in the same task. The
+//!    download decision gates on exactly two things — the global in-flight byte
+//!    budget and the peer's adaptive outbound request window (its slots) — never
+//!    on how far ahead of the committed tip the fetch already is.
+//! 2. [`work_queue`](super::work_queue) — the shared, sorted set of needed heights
+//!    routines pull contiguous chunks from. Dedup / in-flight tracking lives here;
+//!    the committed floor is garbage-collection only, never a fetch throttle.
+//! 3. [`sequencer_task`](super::sequencer_task) — the single commit pipeline.
+//!    Routines forward matched bodies to it; it orders them above the verified
+//!    tip, submits applies, and publishes the committed `SequencerView` watch the
+//!    routines read for the floor and for reset.
+//! 4. [`peer_registry`](super::peer_registry) — the cross-peer facts the routines
+//!    *write* (servable range, caps, outstanding heights, misbehavior) and the
+//!    reactor *reads* (candidate / producer / serving). Generation-gated so a
+//!    superseded routine cannot clobber a live entry.
+//! 5. [`reactor`](super::reactor) — the shared-concerns hub: serving inbound
+//!    `GetBlocks`, status advertisement, the needed-heights producer, and peer
+//!    lifecycle. Routines reach it over `RoutineToReactor` for those concerns
+//!    only; everything per-peer stays in the routine.
+//!
+//! # Inbound data flow (this file's pipe)
+//!
+//! A peer's routine applies the shared ingress [`block_sync_guard`], decodes the
+//! frame, then branches on the decoded message — all inline, no demux:
+//!
+//! ```text
 //!  recv ─▶ guard ─▶ decode ─▶ branch(msg)
-//!                             ├─ Status           ─▶ local servable/caps + advertise
+//!                             ├─ Status           ─▶ local servable/caps + advertise (reactor)
 //!                             ├─ GetBlocks        ─▶ serve (reactor)
 //!                             ├─ Block            ─▶ local match + Sequencer accept
 //!                             ├─ BlocksDone       ─▶ local finish/retry
 //!                             └─ RangeUnavailable ─▶ local retry
+//! ```
 //!
 //! A disallowed/unknown stream-6 type or a malformed payload surfaces as a
-//! `MalformedMessage` misbehavior + a protocol reject (the routine's decode-error
-//! path), rather than a pre-decode guard reject dropping the signal — see BS1.
+//! `MalformedMessage` misbehavior + a protocol reject from the routine's
+//! decode-error path, rather than a pre-decode guard reject silently dropping the
+//! signal (see BS1).
 
-use crate::zakura::{Edge, Node, NodeKind, PipeShape, SessionGuard};
+use crate::zakura::SessionGuard;
 
 use super::wire::MAX_BS_MESSAGE_BYTES;
 
@@ -33,126 +63,4 @@ pub(super) fn block_sync_guard() -> SessionGuard {
     // likewise stays in the routine's reserve/reorder accounting so existing
     // request/retry accounting is not double-counted.
     SessionGuard::oversize_only(MAX_BS_MESSAGE_BYTES as u32)
-}
-
-/// The block-sync pipe-routine DAG slice, as checked documentation. After S4 the
-/// branch terminals are the routine's local download/serving dispatch, not a
-/// single `WireMessage` emit. Drift-checked by `pipe_shape_matches_runtime`;
-/// it is documentation, so it is only referenced from that test.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(super) const PIPE_SHAPE: PipeShape = PipeShape {
-    service: "block-sync",
-    nodes: &[
-        Node {
-            id: "guard",
-            kind: NodeKind::Guard,
-        },
-        Node {
-            id: "decode",
-            kind: NodeKind::Decode,
-        },
-        Node {
-            id: "branch",
-            kind: NodeKind::Branch,
-        },
-        Node {
-            id: "dispatch",
-            kind: NodeKind::Emit,
-        },
-    ],
-    edges: &[
-        Edge {
-            from: "guard",
-            to: "decode",
-            on: "Pass",
-        },
-        Edge {
-            from: "decode",
-            to: "branch",
-            on: "Ok",
-        },
-        Edge {
-            from: "branch",
-            to: "dispatch",
-            on: "Status",
-        },
-        Edge {
-            from: "branch",
-            to: "dispatch",
-            on: "GetBlocks",
-        },
-        Edge {
-            from: "branch",
-            to: "dispatch",
-            on: "Block",
-        },
-        Edge {
-            from: "branch",
-            to: "dispatch",
-            on: "BlocksDone",
-        },
-        Edge {
-            from: "branch",
-            to: "dispatch",
-            on: "RangeUnavailable",
-        },
-    ],
-};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const MESSAGE_BRANCHES: [&str; 5] = [
-        "Status",
-        "GetBlocks",
-        "Block",
-        "BlocksDone",
-        "RangeUnavailable",
-    ];
-
-    #[test]
-    fn pipe_shape_matches_runtime() {
-        // (a) The declared shape is internally consistent.
-        PIPE_SHAPE
-            .validate()
-            .expect("block-sync PIPE_SHAPE edges name only real nodes");
-
-        // (b) The runtime branch is the decoded stream-6 message variant. After
-        // S4 every branch terminates at the routine's local download/serving
-        // dispatch (the single `dispatch` node) rather than a `WireMessage` emit.
-        let branches: Vec<&str> = PIPE_SHAPE
-            .edges
-            .iter()
-            .filter(|edge| edge.from == "branch")
-            .map(|edge| edge.on)
-            .collect();
-
-        assert_eq!(
-            branches.len(),
-            MESSAGE_BRANCHES.len(),
-            "branch has exactly one edge per decoded stream-6 message variant"
-        );
-        for branch in MESSAGE_BRANCHES {
-            assert!(
-                branches.contains(&branch),
-                "branch edge missing for runtime message variant {branch}"
-            );
-        }
-
-        assert!(
-            PIPE_SHAPE
-                .edges
-                .iter()
-                .any(|edge| edge.from == "guard" && edge.to == "decode"),
-            "admitted frames decode before branch"
-        );
-        assert!(
-            PIPE_SHAPE
-                .nodes
-                .iter()
-                .any(|node| node.id == "dispatch" && matches!(node.kind, NodeKind::Emit)),
-            "the pipe terminates at the routine's local dispatch node"
-        );
-    }
 }
