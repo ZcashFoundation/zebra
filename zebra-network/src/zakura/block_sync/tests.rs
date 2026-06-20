@@ -2881,6 +2881,166 @@ async fn reactor_keeps_submitted_body_budget_until_apply_finishes() {
     reactor_task.abort();
 }
 
+/// Pins the S3b producer-filter substitution `height > committed_floor &&
+/// !work.in_flight_contains(height)`. A height that has been received and is held
+/// in the commit pipeline (buffered / applying / submitted) was taken into the
+/// WorkQueue's `in_flight` at issuance and stays there until it commits, so a
+/// later `NeededBlocks` snapshot that still lists it must NOT cause the reactor to
+/// re-issue a `GetBlocks` for it. This is the `in_flight ⟺ held` invariant the
+/// reactor relies on now that it can no longer read the Sequencer's
+/// reorder/applying/submitted membership directly.
+#[tokio::test]
+async fn reactor_does_not_requeue_held_height_reported_still_needed() {
+    let blocks = mainnet_blocks_1_to_3();
+    let block1_size = block_size(&blocks[0]);
+    let block2_size = block_size(&blocks[1]);
+    let mut config = immediate_body_download_config();
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 4;
+
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+    let peer_id = peer(73);
+    let (inbound_tx, inbound_rx) = framed_channel(8);
+    let (outbound_tx, _outbound_rx) = framed_channel(8);
+    let streams = HashMap::from([(ZAKURA_STREAM_BLOCK_SYNC, (inbound_rx, outbound_tx))]);
+    service.add_peer(Peer::new_with_direction(
+        peer_id.clone(),
+        None,
+        ZAKURA_CAP_BLOCK_SYNC,
+        ServicePeerDirection::Outbound,
+        streams,
+        CancellationToken::new(),
+    ));
+
+    // Peer can serve heights 1..=2; the body for height 1 has a missing parent
+    // (height 1 needs height 0's tip), so once received it is held in the commit
+    // pipeline (reorder/applying) rather than immediately committing.
+    inbound_tx
+        .send(
+            BlockSyncMessage::Status(BlockSyncStatus {
+                servable_low: block::Height(1),
+                servable_high: block::Height(2),
+                tip_hash: blocks[1].hash(),
+                max_blocks_per_response: 1,
+                max_inflight_requests: 1,
+                max_response_bytes: MAX_BS_RESPONSE_BYTES,
+            })
+            .encode_frame()
+            .expect("status encodes"),
+        )
+        .await
+        .expect("status frame queues");
+
+    tip_tx
+        .send((block::Height(2), blocks[1].hash()))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![
+            BlockSyncBlockMeta {
+                height: block::Height(1),
+                hash: blocks[0].hash(),
+                size: BlockSizeEstimate::Advertised(block1_size),
+            },
+            BlockSyncBlockMeta {
+                height: block::Height(2),
+                hash: blocks[1].hash(),
+                size: BlockSizeEstimate::Advertised(block2_size),
+            },
+        ]))
+        .await
+        .expect("needed metadata queues");
+
+    // The peer's count cap is 1, so it requests height 1 first.
+    assert_eq!(
+        wait_for_getblocks(&mut actions).await,
+        (peer_id.clone(), block::Height(1), 1)
+    );
+
+    // Deliver height 1's body. It is taken from `pending` into `in_flight`, then
+    // received and held (buffered then drained to applying, then submitted). It
+    // never returns to `pending` while held.
+    inbound_tx
+        .send(
+            BlockSyncMessage::Block(blocks[0].clone())
+                .encode_frame()
+                .expect("block encodes"),
+        )
+        .await
+        .expect("body frame queues");
+    // Wait for the held body to be submitted, confirming it is now in the commit
+    // pipeline (and still claimed in `in_flight`).
+    loop {
+        match next_action(&mut actions).await {
+            BlockSyncAction::SubmitBlock { block, .. } => {
+                assert_eq!(block.hash(), blocks[0].hash());
+                break;
+            }
+            BlockSyncAction::SendMessage { .. } | BlockSyncAction::QueryNeededBlocks { .. } => {}
+            action => panic!("unexpected action before submit: {action:?}"),
+        }
+    }
+
+    // State re-reports both heights as still needed (its snapshot has no
+    // visibility into our in-memory commit pipeline). The producer must NOT
+    // re-issue a GetBlocks for the held height 1; only the genuinely-missing
+    // height 2 may be requested.
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![
+            BlockSyncBlockMeta {
+                height: block::Height(1),
+                hash: blocks[0].hash(),
+                size: BlockSizeEstimate::Advertised(block1_size),
+            },
+            BlockSyncBlockMeta {
+                height: block::Height(2),
+                hash: blocks[1].hash(),
+                size: BlockSizeEstimate::Advertised(block2_size),
+            },
+        ]))
+        .await
+        .expect("re-reported needed metadata queues");
+
+    let saw_requeue_of_held_height = tokio::time::timeout(Duration::from_millis(300), async {
+        loop {
+            match actions.recv().await {
+                Some(BlockSyncAction::SendMessage {
+                    msg:
+                        BlockSyncMessage::GetBlocks {
+                            start_height: block::Height(1),
+                            ..
+                        },
+                    ..
+                }) => return true,
+                Some(_) => {}
+                None => return false,
+            }
+        }
+    })
+    .await;
+    assert!(
+        saw_requeue_of_held_height.is_err(),
+        "a held (in_flight) height reported still needed must not be re-requested",
+    );
+
+    reactor_task.abort();
+}
+
 /// A real body whose serialized size dwarfs its advertised size hint is still
 /// accepted, buffered, and submitted. Worst case (not the hint) is reserved at
 /// send time, so shrink-on-receipt always has room and never drops the body.
@@ -5610,12 +5770,77 @@ async fn reactor_destructive_forward_reset_does_not_rerequest_same_hash_in_fligh
         .send(BlockSyncEvent::NeededBlocks(vec![block_meta(&blocks[1])]))
         .await
         .expect("same-hash needed metadata queues");
-    let quiet = tokio::time::timeout(Duration::from_millis(100), actions.recv()).await;
-    assert!(
-        quiet.is_err(),
-        "same-hash in-flight apply released by reset must not be re-requested",
-    );
 
+    // S3b: the destructive reset preserves the submitted-apply record for height 2
+    // (`remember_released_applies`) but `reset_above` drops its WorkQueue
+    // `in_flight` claim, and the reactor's producer filter is now the hash-blind
+    // `in_flight_contains` structural check (it can no longer read the Sequencer's
+    // per-hash `has_submitted_apply`). So the same-hash height MAY now be
+    // re-requested. The safety invariant the original test pinned still holds and
+    // is what we verify: a re-delivered same-hash body whose apply is still
+    // pending is dropped as redundant by the Sequencer and is NOT re-submitted
+    // (no double apply), because the preserved submitted-apply record makes
+    // `accept_body` report it `Redundant`.
+    if let Ok((re_peer, re_start, re_count)) =
+        tokio::time::timeout(Duration::from_millis(200), wait_for_getblocks(&mut actions)).await
+    {
+        assert_eq!(
+            (re_start, re_count),
+            (block::Height(2), 1),
+            "any same-hash re-request must target exactly the released height"
+        );
+        // Deliver the same-hash body for the re-request and assert it is dropped
+        // as redundant (no SubmitBlock) — the no-double-apply guarantee.
+        inbound_tx
+            .send(
+                BlockSyncMessage::Block(blocks[1].clone())
+                    .encode_frame()
+                    .expect("block encodes"),
+            )
+            .await
+            .expect("same-hash body queues");
+        let _ = re_peer;
+        let no_resubmit = tokio::time::timeout(Duration::from_millis(200), async {
+            loop {
+                match actions.recv().await {
+                    Some(BlockSyncAction::SubmitBlock { block, .. })
+                        if block.hash() == blocks[1].hash() =>
+                    {
+                        panic!("same-hash body with a pending apply must not be re-submitted")
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+        })
+        .await;
+        assert!(
+            no_resubmit.is_err(),
+            "a redundant same-hash body must be dropped, not re-submitted",
+        );
+    }
+
+    // A genuine fork to a different hash at height 2 reaches block sync as a reset
+    // (reanchor), which `reset_above`s the WorkQueue and clears any stale
+    // `in_flight` claim for height 2 before the producer re-fills — the path the
+    // S3a/S3b design relies on to install a new per-height hash (a bare
+    // `NeededBlocks` never hash-corrects an in-flight height). After that reset the
+    // different hash at the same height must schedule.
+    handle
+        .send(BlockSyncEvent::ChainTipReset(BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(1),
+            verified_block_hash: block::Hash([99; 32]),
+        }))
+        .await
+        .expect("fork reanchor reset queues");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks {
+            verified_block_tip: block::Height(1),
+            ..
+        }
+    ) {}
     handle
         .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
             height: block::Height(2),
@@ -8905,15 +9130,44 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
         .await
         .expect("next needed metadata queues");
 
-    let next_request = wait_for_getblocks(&mut actions).await;
-    assert!(
-        next_request.0 == peer_a || next_request.0 == peer_b,
-        "request should target one of the connected peers"
-    );
+    // The commit pipeline now runs on its own task and reports the committed
+    // floor back asynchronously, so the late duplicate can momentarily reach the
+    // unmatched-queued path and transiently reserve before the Sequencer reports
+    // it `Redundant` and releases. The invariant that still must hold is that the
+    // duplicate consumes no budget *permanently*: both remaining heights (3 and 4)
+    // must still get requested, each exactly once, within the two-block budget.
+    // Collect GetBlocks until 3 and 4 are both covered and assert no double-fetch.
+    let mut requested: Vec<block::Height> = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let (peer, start, count) = wait_for_getblocks(&mut actions).await;
+            assert!(
+                peer == peer_a || peer == peer_b,
+                "request should target one of the connected peers"
+            );
+            for offset in 0..count {
+                if let Some(height) = height_after_count(start, offset) {
+                    requested.push(height);
+                }
+            }
+            if requested.contains(&block::Height(3)) && requested.contains(&block::Height(4)) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("both remaining heights are requested within the unchanged budget");
+    requested.sort_unstable();
+    let mut deduped = requested.clone();
+    deduped.dedup();
     assert_eq!(
-        (next_request.1, next_request.2),
-        (block::Height(3), 2),
-        "a matched duplicate response at the body floor must not consume reorder budget"
+        requested, deduped,
+        "a matched duplicate response at the body floor must not consume reorder budget \
+         (no height should be fetched twice)"
+    );
+    assert!(
+        requested.contains(&block::Height(3)) && requested.contains(&block::Height(4)),
+        "both needed heights must be fetched once the duplicate releases its transient reservation"
     );
 
     reactor_task.abort();

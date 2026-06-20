@@ -1,4 +1,4 @@
-use super::{config::*, scheduler::*, sequencer::Sequencer, work_queue::WorkQueue, *};
+use super::{config::*, scheduler::*, work_queue::WorkQueue, *};
 use crate::zakura::{
     chain_frontier_from_parts, Frontier, FrontierUpdate, ServicePeerDirection, ServicePeerSnapshot,
     ZakuraBlockSyncCandidateState,
@@ -203,10 +203,6 @@ pub(super) struct BlockSyncState {
     /// `Arc` so the state stays cheaply `Clone` and the queue can be shared with
     /// the Sequencer task / per-peer routines in later stages.
     pub(super) work: Arc<WorkQueue>,
-    /// The serial commit pipeline (reorder → applying → submit → apply-finished)
-    /// and the body-download floor / verified tip it owns. The reactor reaches
-    /// commit-pipeline state only through this API; see [`Sequencer`].
-    pub(super) sequencer: Sequencer,
     pub(super) budget: ByteBudget,
     pub(super) needed_heights: Vec<block::Height>,
     pub(super) status_refresh: RateMeter,
@@ -217,11 +213,9 @@ pub(super) struct BlockSyncState {
     /// always consumed by the lowest-node-id peer. Deterministic for tests.
     pub(super) fill_rotation_cursor: usize,
     /// Throughput of bodies received off the wire (the download rate). Sampled
-    /// each trace tick; compared against `committed_throughput` it separates a
-    /// download-limited sync from a commit-limited one.
+    /// each trace tick; compared against the Sequencer task's committed
+    /// throughput it separates a download-limited sync from a commit-limited one.
     pub(super) received_throughput: ThroughputMeter,
-    /// Throughput of bodies committed to the chain (the apply/commit rate).
-    pub(super) committed_throughput: ThroughputMeter,
 }
 
 impl BlockSyncState {
@@ -246,10 +240,6 @@ impl BlockSyncState {
             parked_peers: HashSet::new(),
             disconnected_peers: HashSet::new(),
             work: Arc::new(WorkQueue::new(startup.frontiers.verified_block_tip)),
-            sequencer: Sequencer::new(
-                startup.frontiers.verified_block_tip,
-                startup.config.submitted_apply_limit(),
-            ),
             budget: ByteBudget::new(startup.config.max_inflight_block_bytes),
             needed_heights: Vec::new(),
             status_refresh: RateMeter::new(startup.config.status_refresh_interval),
@@ -257,7 +247,6 @@ impl BlockSyncState {
             last_advertised_status,
             fill_rotation_cursor: 0,
             received_throughput: ThroughputMeter::new(Instant::now()),
-            committed_throughput: ThroughputMeter::new(Instant::now()),
         }
     }
 

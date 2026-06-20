@@ -99,14 +99,17 @@ impl Sequencer {
         self.verified_block_tip
     }
 
+    #[cfg(test)]
     pub(super) fn reorder_contains(&self, height: block::Height) -> bool {
         self.reorder.contains(height)
     }
 
+    #[cfg(test)]
     pub(super) fn applying_contains(&self, height: block::Height) -> bool {
         self.applying.contains_key(&height)
     }
 
+    #[cfg(test)]
     pub(super) fn submitted_contains(&self, height: block::Height) -> bool {
         self.submitted_applies.contains_key(&height)
     }
@@ -135,20 +138,6 @@ impl Sequencer {
         self.submitted_applies
             .get(&height)
             .is_some_and(|entries| entries.iter().any(|(entry_hash, _)| *entry_hash == hash))
-    }
-
-    /// A response for `height` is stale when the height is already at/below the
-    /// download floor or held in a commit-pipeline buffer.
-    ///
-    /// Deliberately does NOT include `has_submitted_apply` (unlike
-    /// [`accept_body`](Self::accept_body)'s redundancy precheck): a submitted-but-
-    /// not-yet-buffered height is not treated as a stale *response* here. This
-    /// asymmetry is preserved verbatim from the pre-extraction reactor predicates;
-    /// do not "unify" the two without confirming the behavior change.
-    pub(super) fn is_stale_response_height(&self, height: block::Height) -> bool {
-        height <= self.body_download_floor
-            || self.reorder.contains(height)
-            || self.applying.contains_key(&height)
     }
 
     /// Whether any reorder/applying/submitted body sits at or above `height`,

@@ -34,6 +34,7 @@ mod reactor;
 mod reorder;
 mod scheduler;
 mod sequencer;
+mod sequencer_task;
 mod service;
 mod state;
 #[cfg(test)]
