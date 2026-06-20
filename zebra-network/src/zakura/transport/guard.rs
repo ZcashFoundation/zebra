@@ -13,49 +13,121 @@
 //! its connection-global count bucket exactly as-is. Document this split at the
 //! [`SessionGuard::new`] call site.
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
+use tokio::sync::Notify;
+
 use super::Frame;
 
 /// Byte-rate reservation budget for inflight stream payloads.
 ///
 /// Promoted here from `block_sync/state.rs` so byte-rate protection is reusable
 /// across services; only block_sync currently passes `Some(..)` to a guard.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+///
+/// A cheap `Clone` handle over a shared atomic reservation counter. Every clone
+/// reserves and releases against the *same* counter, so one budget can be shared
+/// across tasks (the block-sync Sequencer and, later, the per-peer routines)
+/// without a lock. The reserve/release methods keep their `&mut self` receiver:
+/// each owner holds its own clone, so `&mut` to that clone never aliases another
+/// owner's, and the shared counter is mutated through the atomic regardless.
+#[derive(Clone, Debug)]
 pub(crate) struct ByteBudget {
+    inner: Arc<ByteBudgetInner>,
+}
+
+#[derive(Debug)]
+struct ByteBudgetInner {
     max_bytes: u64,
-    reserved_bytes: u64,
+    reserved_bytes: AtomicU64,
+    /// Notified whenever bytes are released/shrunk, so a consumer blocked on a
+    /// full budget can re-check capacity. Uses `notify_waiters` (no stored
+    /// permit), so a waiter must register `subscribe_capacity().notified()`
+    /// before re-reading the budget.
+    capacity: Notify,
 }
 
 impl ByteBudget {
     pub(crate) fn new(max_bytes: u64) -> Self {
         Self {
-            max_bytes,
-            reserved_bytes: 0,
+            inner: Arc::new(ByteBudgetInner {
+                max_bytes,
+                reserved_bytes: AtomicU64::new(0),
+                capacity: Notify::new(),
+            }),
         }
     }
 
-    pub(crate) fn available(self) -> u64 {
-        self.max_bytes.saturating_sub(self.reserved_bytes)
+    pub(crate) fn available(&self) -> u64 {
+        self.inner
+            .max_bytes
+            .saturating_sub(self.inner.reserved_bytes.load(Ordering::Acquire))
     }
 
     #[cfg(test)]
-    pub(crate) fn max_bytes_for_test(self) -> u64 {
-        self.max_bytes
+    pub(crate) fn max_bytes_for_test(&self) -> u64 {
+        self.inner.max_bytes
     }
 
-    pub(crate) fn reserved(self) -> u64 {
-        self.reserved_bytes
+    pub(crate) fn reserved(&self) -> u64 {
+        self.inner.reserved_bytes.load(Ordering::Acquire)
     }
 
+    /// Reserve `bytes` against the shared counter, or fail if the budget cannot
+    /// cover it. A CAS loop so concurrent reservers never over-commit the max.
     pub(crate) fn try_reserve(&mut self, bytes: u64) -> bool {
-        if bytes == 0 || bytes > self.available() {
+        if bytes == 0 {
             return false;
         }
-        self.reserved_bytes = self.reserved_bytes.saturating_add(bytes);
-        true
+        let mut reserved = self.inner.reserved_bytes.load(Ordering::Acquire);
+        loop {
+            let available = self.inner.max_bytes.saturating_sub(reserved);
+            if bytes > available {
+                return false;
+            }
+            let next = reserved.saturating_add(bytes);
+            match self.inner.reserved_bytes.compare_exchange_weak(
+                reserved,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(observed) => reserved = observed,
+            }
+        }
     }
 
+    /// Release `bytes` back to the shared counter (saturating at zero) and wake
+    /// any consumer blocked on capacity.
     pub(crate) fn release(&mut self, bytes: u64) {
-        self.reserved_bytes = self.reserved_bytes.saturating_sub(bytes);
+        if bytes == 0 {
+            return;
+        }
+        let _ = self.inner.reserved_bytes.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |reserved| Some(reserved.saturating_sub(bytes)),
+        );
+        self.inner.capacity.notify_waiters();
+    }
+
+    /// Shrink a reservation from `from` to `to` bytes, releasing the difference.
+    /// Used when a received body's worst-case reservation is replaced by its
+    /// actual (smaller) size; a no-op when `to >= from`.
+    pub(crate) fn shrink(&mut self, from: u64, to: u64) {
+        self.release(from.saturating_sub(to));
+    }
+
+    /// Subscribe to capacity-freed notifications. A consumer blocked on a full
+    /// budget registers `subscribe_capacity().notified()` *before* re-reading
+    /// `available()`/`try_reserve`, so a concurrent `release`/`shrink` can never
+    /// be missed between the check and the wait.
+    #[allow(dead_code)] // consumed by the per-peer download routines in S4
+    pub(crate) fn subscribe_capacity(&self) -> &Notify {
+        &self.inner.capacity
     }
 }
 

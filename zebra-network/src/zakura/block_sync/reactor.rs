@@ -867,8 +867,9 @@ impl BlockSyncReactor {
         // downloaded body. `mark_received` then stops `reserved_bytes()` from
         // counting this height, so the only bytes still held for it are the
         // `serialized_bytes` carried into the reorder buffer below.
-        let shrink = BS_PER_BLOCK_WORST_CASE_BYTES.saturating_sub(serialized_bytes);
-        self.state.budget.release(shrink);
+        self.state
+            .budget
+            .shrink(BS_PER_BLOCK_WORST_CASE_BYTES, serialized_bytes);
         self.trace_body_received(
             &peer,
             height,
