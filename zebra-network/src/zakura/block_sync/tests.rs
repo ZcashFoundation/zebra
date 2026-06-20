@@ -147,7 +147,6 @@ fn status() -> BlockSyncStatus {
 fn immediate_body_download_config() -> ZakuraBlockSyncConfig {
     ZakuraBlockSyncConfig {
         max_blocks_per_response: MAX_BS_BLOCKS_PER_REQUEST,
-        near_tip_body_download_pause_blocks: 0,
         ..ZakuraBlockSyncConfig::default()
     }
 }
@@ -499,6 +498,21 @@ fn state_expires_due_timeouts_without_waiting_for_tick() {
         expected_bytes: vec![(block::Height(1), 100)],
     };
 
+    // Height 1 is in flight (the timed-out peer holds it): seed the queue then
+    // take it, mirroring issuance, so the timeout can return it to `pending`.
+    state
+        .work
+        .extend([needed(1, BlockSizeEstimate::Advertised(100))]);
+    assert_eq!(
+        state
+            .work
+            .take_in_range(block::Height(1), block::Height(1), 1)
+            .len(),
+        1
+    );
+    assert_eq!(state.work.in_flight_len(), 1);
+    assert_eq!(state.work.pending_len(), 0);
+
     let (timed_out_peer, mut timed_out_state) = peer_state(47);
     timed_out_state.max_blocks_per_response = 1;
     timed_out_state.max_inflight_requests = 512;
@@ -508,15 +522,8 @@ fn state_expires_due_timeouts_without_waiting_for_tick() {
         received: HashSet::new(),
     });
 
-    let (retry_peer, mut retry_state) = peer_state(48);
-    retry_state.max_blocks_per_response = 1;
-    retry_state.max_inflight_requests = 512;
-    retry_state.servable_low = block::Height(1);
-    retry_state.servable_high = block::Height(1);
-
     assert!(state.budget.try_reserve(request.estimated_bytes));
     state.peers.insert(timed_out_peer.clone(), timed_out_state);
-    state.peers.insert(retry_peer.clone(), retry_state);
 
     assert!(
         state.expire_due_timeouts(now),
@@ -530,91 +537,45 @@ fn state_expires_due_timeouts_without_waiting_for_tick() {
         .outstanding
         .is_empty());
 
-    let retry_peer_state = state
-        .peers
-        .get(&retry_peer)
-        .expect("retry peer exists")
-        .clone();
-    let retry = state
-        .schedule
-        .next_for_peer(
-            &retry_peer,
-            &retry_peer_state,
-            &mut state.budget,
-            u64::MAX,
-            1,
-        )
-        .expect("expired floor request should be immediately requestable");
-    assert_eq!(retry.start_height, block::Height(1));
-    assert_eq!(retry.count, 1);
-}
-
-#[test]
-fn scheduler_retry_after_timeout_prefers_a_different_peer() {
-    // Two separate needed ranges: the contiguous floor (h1) and unrelated work
-    // (h5). Single-block requests keep each range one height.
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(100, 1);
-    scheduler.refresh_needed(vec![
-        needed(1, BlockSizeEstimate::Advertised(100)),
-        needed(5, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let (slow_peer, mut slow_state) = peer_state(47);
-    slow_state.max_blocks_per_response = 1;
-    let (healthy_peer, mut healthy_state) = peer_state(48);
-    healthy_state.max_blocks_per_response = 1;
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 10);
-
-    // The slow peer first downloads the floor (h1)...
-    let floor = scheduler
-        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
-        .expect("floor range is assignable");
-    assert_eq!(floor.start_height, block::Height(1));
-
-    // ...then that request times out on it.
-    budget.release(floor.estimated_bytes);
-    scheduler.retry_after_timeout(floor, slow_peer.clone());
-
-    // Asked again, the slow peer takes its *other* servable work (h5) rather
-    // than immediately re-grabbing the floor it just timed out.
-    let slow_next = scheduler
-        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
-        .expect("slow peer still has other assignable work");
+    // The expired request's unreceived height returned to `pending`, so any
+    // servable peer can immediately re-fetch it.
+    assert_eq!(state.work.in_flight_len(), 0);
+    assert!(state.work.pending_contains(block::Height(1)));
     assert_eq!(
-        slow_next.start_height,
-        block::Height(5),
-        "the slow peer must avoid re-grabbing the floor it just timed out",
+        state.work.min_pending(),
+        Some(block::Height(1)),
+        "expired floor height should be immediately requestable"
     );
-
-    // The floor is left for a different, healthy peer to pick up promptly.
-    let healthy_next = scheduler
-        .next_for_peer(&healthy_peer, &healthy_state, &mut budget, u64::MAX, 1)
-        .expect("healthy peer can take the floor");
-    assert_eq!(healthy_next.start_height, block::Height(1));
 }
 
+// The old `BlockRangeScheduler` single-pass timeout-retry bias
+// (`scheduler_retry_after_timeout_*`) is removed in S3a: the WorkQueue has no
+// per-peer assignment to bias, so a returned height is simply contestable by any
+// servable peer. The peer-local timeout bias is re-introduced in S4. The
+// reactor-level locality property is still covered by
+// `reactor_timeout_backoff_is_local_and_healthy_peer_keeps_filling`.
 #[test]
-fn scheduler_retry_after_timeout_falls_back_to_sole_servable_peer() {
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(100, 1);
-    scheduler.refresh_needed(vec![needed(1, BlockSizeEstimate::Advertised(100))]);
-    let (slow_peer, mut slow_state) = peer_state(47);
-    slow_state.max_blocks_per_response = 1;
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 10);
+fn work_queue_returned_height_is_contestable_by_any_peer() {
+    let queue = work_queue_with(0, [needed(1, BlockSizeEstimate::Advertised(100))]);
 
-    let floor = scheduler
-        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
-        .expect("floor range is assignable");
-    budget.release(floor.estimated_bytes);
-    scheduler.retry_after_timeout(floor, slow_peer.clone());
+    // A peer takes the floor height (it leaves `pending` → `in_flight`).
+    let taken = queue.take_in_range(block::Height(1), block::Height(1), 1);
+    assert_eq!(taken.len(), 1);
+    assert!(queue.in_flight_contains(block::Height(1)));
+    assert!(!queue.pending_contains(block::Height(1)));
 
-    // With no other servable peer and no other work, the slow peer must still
-    // retry the floor — the bias is a preference, not a hard exclusion, so a
-    // single servable peer never stalls.
-    let retry = scheduler
-        .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
-        .expect("sole servable peer falls back to the avoided floor");
-    assert_eq!(retry.start_height, block::Height(1));
+    // Its request times out: the height returns to `pending`, where any servable
+    // peer (not just the original holder) can take it again. No bias toward or
+    // away from any particular peer exists in S3a.
+    queue.return_items([block::Height(1)]);
+    assert!(queue.pending_contains(block::Height(1)));
+    assert_eq!(
+        queue
+            .take_in_range(block::Height(1), block::Height(1), 1)
+            .len(),
+        1,
+        "a returned height must be immediately re-takable"
+    );
 }
 
 async fn connect_peer_with_status(
@@ -673,12 +634,20 @@ async fn connect_peer_with_status_message(
     (peer, inbound_tx, outbound_rx)
 }
 
-fn needed(height: u32, size: BlockSizeEstimate) -> NeededBlock {
-    NeededBlock {
-        height: block::Height(height),
-        hash: block::Hash([height as u8; 32]),
-        size,
-    }
+fn needed(height: u32, size: BlockSizeEstimate) -> (block::Height, block::Hash, BlockSizeEstimate) {
+    (block::Height(height), block::Hash([height as u8; 32]), size)
+}
+
+/// Build a fresh `WorkQueue` seeded above-floor with the given needed items, for
+/// the WorkQueue unit tests that replaced the old `BlockRangeScheduler` tests.
+fn work_queue_with(
+    floor: u32,
+    items: impl IntoIterator<Item = (block::Height, block::Hash, BlockSizeEstimate)>,
+) -> super::work_queue::WorkQueue {
+    let queue = super::work_queue::WorkQueue::new(block::Height(floor));
+    queue.set_estimator_for_tests(750, 1);
+    queue.extend(items);
+    queue
 }
 
 fn block_meta(block: &Arc<block::Block>) -> BlockSyncBlockMeta {
@@ -690,11 +659,10 @@ fn block_meta(block: &Arc<block::Block>) -> BlockSyncBlockMeta {
 }
 
 #[test]
-fn block_sync_near_tip_pause_config_defaults_and_round_trips() {
+fn block_sync_config_defaults_and_round_trips() {
     let default = ZakuraBlockSyncConfig::default();
     assert_eq!(default.max_blocks_per_response, 1);
     assert_eq!(default.max_inflight_requests, 512);
-    assert_eq!(default.near_tip_body_download_pause_blocks, 2);
     assert_eq!(
         default.max_submitted_block_applies,
         DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES
@@ -710,15 +678,10 @@ fn block_sync_near_tip_pause_config_defaults_and_round_trips() {
     let config: crate::Config = toml::from_str(
         r#"
         [zakura.block_sync]
-        near_tip_body_download_pause_blocks = 7
         max_submitted_block_applies = 9
         "#,
     )
     .expect("nested Zakura block-sync config deserializes");
-    assert_eq!(
-        config.zakura.block_sync.near_tip_body_download_pause_blocks,
-        7
-    );
     assert_eq!(config.zakura.block_sync.max_submitted_block_applies, 9);
 }
 
@@ -934,177 +897,210 @@ fn aggregate_response_cap_is_not_the_per_frame_cap() {
     );
 }
 
+// The byte-budget reservation and per-peer fairness logic moved from the old
+// `BlockRangeScheduler::next_for_peer` into the reactor's `fill_peer` issuance
+// path (commit-1 lossless worst-case reservation + commit-3 per-peer byte cap).
+// Those are now exercised end-to-end by the reactor integration tests below
+// (`reactor_fill_loop_*`, `reactor_keeps_issuing_*`); the WorkQueue itself only
+// owns dedup / servable-range eligibility, asserted here.
+
 #[test]
-fn scheduler_assigns_needed_ranges_with_fanout_slots_and_dedup() {
-    let mut scheduler = BlockRangeScheduler::new(2);
-    scheduler.refresh_needed(vec![
-        needed(1, BlockSizeEstimate::Advertised(10_000)),
-        needed(2, BlockSizeEstimate::Advertised(10_000)),
-        needed(3, BlockSizeEstimate::Advertised(10_000)),
-    ]);
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-    let (peer1, state1) = peer_state(31);
-    let (peer2, state2) = peer_state(32);
-    let (peer3, state3) = peer_state(33);
+fn work_queue_take_dedups_a_height_across_peers() {
+    // fanout = 1: a height taken by one peer leaves `pending`, so a second peer
+    // querying the same range cannot also take it.
+    let queue = work_queue_with(
+        0,
+        [
+            needed(1, BlockSizeEstimate::Advertised(10_000)),
+            needed(2, BlockSizeEstimate::Advertised(10_000)),
+            needed(3, BlockSizeEstimate::Advertised(10_000)),
+        ],
+    );
 
-    let first = scheduler
-        .next_for_peer(
-            &peer1,
-            &state1,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("first peer gets the range");
-    assert_eq!(first.start_height, block::Height(1));
-    assert_eq!(first.count, 3);
+    let first = queue.take_in_range(
+        block::Height(1),
+        block::Height(3),
+        MAX_BS_BLOCKS_PER_REQUEST as usize,
+    );
+    assert_eq!(
+        first.iter().map(|(height, _)| height.0).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(queue.in_flight_len(), 3);
 
-    let second = scheduler
-        .next_for_peer(
-            &peer2,
-            &state2,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("fanout allows a second peer");
-    assert_eq!(second.start_height, block::Height(1));
-    assert_eq!(second.count, 3);
-
-    assert!(
-        scheduler
-            .next_for_peer(
-                &peer1,
-                &state1,
-                &mut budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "same peer must not receive overlapping duplicate assignment"
+    let second = queue.take_in_range(
+        block::Height(1),
+        block::Height(3),
+        MAX_BS_BLOCKS_PER_REQUEST as usize,
     );
     assert!(
-        scheduler
-            .next_for_peer(
-                &peer3,
-                &state3,
-                &mut budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "fanout cap must deduplicate the covered range"
+        second.is_empty(),
+        "a height taken by one peer must not be re-takable by another (dedup)"
     );
 }
 
 #[test]
-fn scheduler_byte_budget_sizing_shrinks_or_defers_requests() {
-    // Block sync reserves worst-case bytes per requested block, so request sizing
-    // is in units of `BS_PER_BLOCK_WORST_CASE_BYTES`, not advertised size hints.
-    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(10, BlockSizeEstimate::Advertised(100)),
-        needed(11, BlockSizeEstimate::Advertised(100)),
-        needed(12, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let (peer, mut state) = peer_state(34);
-    // A response cap between one and two worst-case shares admits exactly one.
-    state.max_response_bytes = u32::try_from(worst + worst / 2).expect("fits in u32");
-    state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(worst * 10);
-
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("one block fits the peer response-byte cap");
-    assert_eq!(request.start_height, block::Height(10));
-    assert_eq!(request.count, 1);
-    assert_eq!(budget.reserved(), worst);
-
-    scheduler.complete(&request, &mut budget);
-    assert_eq!(budget.reserved(), 0);
-
-    // A budget below one worst-case share cannot fit even the first block.
-    let mut small_budget = ByteBudget::new(worst - 1);
-    assert!(
-        scheduler
-            .next_for_peer(
-                &peer,
-                &state,
-                &mut small_budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "a first block that does not fit is deferred"
+fn work_queue_extend_dedups_against_pending_in_flight_and_floor() {
+    let queue = work_queue_with(
+        5,
+        [
+            // At/below the floor: rejected.
+            needed(3, BlockSizeEstimate::Advertised(100)),
+            needed(5, BlockSizeEstimate::Advertised(100)),
+            // Above the floor: accepted.
+            needed(6, BlockSizeEstimate::Advertised(100)),
+            needed(7, BlockSizeEstimate::Advertised(100)),
+        ],
     );
-    assert_eq!(small_budget.reserved(), 0);
+    assert_eq!(queue.pending_len(), 2);
+    assert!(!queue.pending_contains(block::Height(5)));
+
+    // Take h6 into `in_flight`, then re-extend with h6 (in flight) and h7
+    // (already pending): both are skipped, only a genuinely new height inserts.
+    queue.take_in_range(block::Height(6), block::Height(6), 1);
+    let inserted = queue.extend([
+        needed(6, BlockSizeEstimate::Advertised(100)), // in flight
+        needed(7, BlockSizeEstimate::Advertised(100)), // already pending
+        needed(8, BlockSizeEstimate::Advertised(100)), // new
+    ]);
+    assert_eq!(inserted, 1, "only the genuinely new height is inserted");
+    assert!(queue.pending_contains(block::Height(8)));
+    assert!(!queue.pending_contains(block::Height(6)));
 }
 
 #[test]
-fn scheduler_per_peer_byte_cap_limits_request_below_global_budget() {
-    // Per-peer byte caps bind in worst-case units: each requested block reserves
-    // `BS_PER_BLOCK_WORST_CASE_BYTES` regardless of its advertised size hint.
-    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(1, BlockSizeEstimate::Advertised(100)),
-        needed(2, BlockSizeEstimate::Advertised(100)),
-        needed(3, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let (peer, mut state) = peer_state(50);
-    state.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX); // not binding
-    state.max_blocks_per_response = 10; // count cap not binding
-    let mut budget = ByteBudget::new(worst * 100); // global budget ample
+fn work_queue_take_respects_servable_range_contiguity_and_max() {
+    // Heights 10,11,12 then a gap then 20,21.
+    let queue = work_queue_with(
+        0,
+        [
+            needed(10, BlockSizeEstimate::Advertised(100)),
+            needed(11, BlockSizeEstimate::Advertised(100)),
+            needed(12, BlockSizeEstimate::Advertised(100)),
+            needed(20, BlockSizeEstimate::Advertised(100)),
+            needed(21, BlockSizeEstimate::Advertised(100)),
+        ],
+    );
 
-    // A per-peer cap between one and two worst-case shares admits only the first
-    // block, even though the count cap, peer response cap, and global budget all
-    // have ample room.
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            worst + worst / 2,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("first block fits the per-peer byte cap");
-    assert_eq!(request.count, 1);
-    assert_eq!(request.estimated_bytes, worst);
-    assert_eq!(budget.reserved(), worst);
+    // `max` bounds the chunk.
+    let chunk = queue.take_in_range(block::Height(10), block::Height(30), 2);
+    assert_eq!(
+        chunk.iter().map(|(height, _)| height.0).collect::<Vec<_>>(),
+        vec![10, 11]
+    );
 
-    // A fresh peer with a cap covering three worst-case shares batches the whole
-    // three-block range.
-    let mut scheduler2 = BlockRangeScheduler::new(1);
-    scheduler2.set_estimator_for_tests(750, 1);
-    scheduler2.refresh_needed(vec![
-        needed(1, BlockSizeEstimate::Advertised(100)),
-        needed(2, BlockSizeEstimate::Advertised(100)),
-        needed(3, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let (peer2, mut state2) = peer_state(51);
-    state2.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX);
-    state2.max_blocks_per_response = 10;
-    let mut budget2 = ByteBudget::new(worst * 100);
-    let request2 = scheduler2
-        .next_for_peer(
-            &peer2,
-            &state2,
-            &mut budget2,
-            worst * 3,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("higher per-peer cap admits the whole range");
-    assert_eq!(request2.count, 3);
-    assert_eq!(request2.estimated_bytes, worst * 3);
+    // The chunk stops at the gap (12 then nothing until 20): a take over the full
+    // range returns only the contiguous run 12, not 12,20,21.
+    let run = queue.take_in_range(
+        block::Height(12),
+        block::Height(30),
+        MAX_BS_BLOCKS_PER_REQUEST as usize,
+    );
+    assert_eq!(
+        run.iter().map(|(height, _)| height.0).collect::<Vec<_>>(),
+        vec![12],
+        "take must stop at the first gap so the chunk is one contiguous request"
+    );
+
+    // `low` excludes lower heights; the next contiguous run is 20,21.
+    let high = queue.take_in_range(
+        block::Height(20),
+        block::Height(30),
+        MAX_BS_BLOCKS_PER_REQUEST as usize,
+    );
+    assert_eq!(
+        high.iter().map(|(height, _)| height.0).collect::<Vec<_>>(),
+        vec![20, 21]
+    );
+}
+
+#[test]
+fn work_queue_take_does_not_clamp_high_to_floor() {
+    // The committed floor is NOT an upper bound on a take: a peer fetches as far
+    // above the floor as its servable range allows (design doc §7.8 footgun).
+    let queue = work_queue_with(
+        0,
+        (100..=104)
+            .map(|height| needed(height, BlockSizeEstimate::Advertised(100)))
+            .collect::<Vec<_>>(),
+    );
+    // Floor stays at 0; heights are far above it.
+    let taken = queue.take_in_range(
+        block::Height(100),
+        block::Height(104),
+        MAX_BS_BLOCKS_PER_REQUEST as usize,
+    );
+    assert_eq!(
+        taken.iter().map(|(height, _)| height.0).collect::<Vec<_>>(),
+        vec![100, 101, 102, 103, 104],
+        "heights far above the floor are takable; the floor never clamps the take"
+    );
+}
+
+#[test]
+fn work_queue_preserves_work_item_estimate_through_take_and_return() {
+    // The size estimate (feeds the SizeMismatch tolerance check) is preserved as
+    // a height moves pending → in_flight → pending. Estimator overridden so the
+    // clamp is wide enough to keep the hinted size.
+    let queue = work_queue_with(0, [needed(10, BlockSizeEstimate::Advertised(12_345))]);
+    let taken = queue.take_in_range(block::Height(10), block::Height(10), 1);
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].1.estimated_bytes, 12_345);
+    assert_eq!(taken[0].1.hash, block::Hash([10; 32]));
+
+    queue.return_items([block::Height(10)]);
+    let retaken = queue.take_in_range(block::Height(10), block::Height(10), 1);
+    assert_eq!(
+        retaken[0].1.estimated_bytes, 12_345,
+        "return_items must restore the stored WorkItem unchanged"
+    );
+}
+
+#[test]
+fn work_queue_advance_floor_and_reset_above_gc_both_maps() {
+    let queue = work_queue_with(
+        0,
+        (1..=6)
+            .map(|height| needed(height, BlockSizeEstimate::Advertised(100)))
+            .collect::<Vec<_>>(),
+    );
+    // h1,h2 in flight; h3..h6 pending.
+    queue.take_in_range(block::Height(1), block::Height(2), 2);
+    assert_eq!(queue.in_flight_len(), 2);
+    assert_eq!(queue.pending_len(), 4);
+
+    // advance_floor GCs <= floor from both maps (committed → never re-fetch).
+    queue.advance_floor(block::Height(3));
+    assert!(!queue.in_flight_contains(block::Height(1)));
+    assert!(!queue.pending_contains(block::Height(3)));
+    assert!(queue.pending_contains(block::Height(4)));
+
+    // reset_above drops > floor from both maps (reset dropped their buffers).
+    queue.take_in_range(block::Height(4), block::Height(4), 1); // h4 → in flight
+    queue.reset_above(block::Height(4));
+    assert!(queue.in_flight_contains(block::Height(4)));
+    assert!(!queue.pending_contains(block::Height(5)));
+    assert!(!queue.pending_contains(block::Height(6)));
+    assert_eq!(queue.pending_len(), 0);
+}
+
+#[test]
+fn work_queue_height_is_in_exactly_one_set() {
+    // §7.7: a height is in exactly one of {below-floor (gone), pending, in_flight}.
+    let queue = work_queue_with(0, [needed(10, BlockSizeEstimate::Advertised(100))]);
+    let in_one_set = |height: block::Height| -> usize {
+        usize::from(queue.pending_contains(height)) + usize::from(queue.in_flight_contains(height))
+    };
+    let h = block::Height(10);
+
+    assert_eq!(in_one_set(h), 1, "pending only after extend");
+    queue.take_in_range(h, h, 1);
+    assert_eq!(in_one_set(h), 1, "in_flight only after take");
+    queue.return_items([h]);
+    assert_eq!(in_one_set(h), 1, "pending only after return");
+    queue.take_in_range(h, h, 1);
+    queue.advance_floor(h);
+    assert_eq!(in_one_set(h), 0, "gone after the floor commits past it");
 }
 
 #[test]
@@ -1573,446 +1569,119 @@ async fn reactor_timeout_backoff_is_local_and_healthy_peer_keeps_filling() {
     reactor_task.abort();
 }
 
+// The old covered-prefix / assigned-key / queued-retry-ordering scheduler tests
+// (`scheduler_partial_*`, `scheduler_drops_*`, `scheduler_splits_*`,
+// `scheduler_retries_only_uncovered_suffix`, `scheduler_keeps_queued_*`,
+// `scheduler_releases_budget_*`) are removed in S3a: the WorkQueue replaces the
+// covered/assigned bookkeeping with `in_flight`, the byte budget moves to the
+// reactor's `fill_peer`, and a `BTreeMap` keeps ascending order by construction.
+// The remaining WorkQueue-owned behaviors (dedup, range eligibility, GC, the
+// size-estimate clamp, and ordering diagnostics) are asserted here; commit-1 /
+// commit-3 byte behavior is covered by the reactor integration tests.
+
 #[test]
-fn scheduler_partial_requests_clear_the_issued_assignment_key() {
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(10, BlockSizeEstimate::Advertised(100)),
-        needed(11, BlockSizeEstimate::Advertised(100)),
-        needed(12, BlockSizeEstimate::Advertised(100)),
+fn work_queue_estimate_clamps_hint_between_floor_and_max_block_bytes() {
+    use super::work_queue::{DEFAULT_BS_EWMA_SEED_BYTES, DEFAULT_BS_SIZE_FLOOR_BYTES};
+
+    // Default estimator: Unknown -> EWMA seed; tiny hints clamp up to the floor;
+    // huge hints clamp down to MAX_BLOCK_BYTES; ordinary hints pass through.
+    let queue = super::work_queue::WorkQueue::new(block::Height(0));
+    queue.extend([
+        needed(1, BlockSizeEstimate::Unknown),
+        needed(2, BlockSizeEstimate::Advertised(1)), // below the floor
+        needed(3, BlockSizeEstimate::Advertised(12_345)),
+        needed(4, BlockSizeEstimate::Confirmed(u32::MAX)), // above MAX_BLOCK_BYTES
     ]);
-    let (peer, mut state) = peer_state(38);
-    // A response cap between two and three worst-case shares admits two blocks.
-    state.max_response_bytes =
-        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2 + BS_PER_BLOCK_WORST_CASE_BYTES / 2)
-            .unwrap_or(u32::MAX);
-    state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
+    let item = |height| {
+        queue
+            .take_in_range(block::Height(height), block::Height(height), 1)
+            .pop()
+            .expect("height present")
+            .1
+            .estimated_bytes
+    };
+    assert_eq!(item(1), DEFAULT_BS_EWMA_SEED_BYTES);
+    assert_eq!(item(2), DEFAULT_BS_SIZE_FLOOR_BYTES);
+    assert_eq!(item(3), 12_345);
+    assert_eq!(item(4), block::MAX_BLOCK_BYTES);
 
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("response-byte cap drains a prefix of the queued range");
-    assert_eq!(request.start_height, block::Height(10));
-    assert_eq!(request.count, 2);
-    assert_eq!(scheduler.assigned_range_count(), 1);
-
-    scheduler.complete(&request, &mut budget);
+    // The test estimator override changes the EWMA seed and floor (floor < ewma
+    // so the two clamp endpoints stay distinguishable).
+    let tuned = super::work_queue::WorkQueue::new(block::Height(0));
+    tuned.set_estimator_for_tests(750, 100);
+    tuned.extend([
+        needed(10, BlockSizeEstimate::Unknown),
+        needed(11, BlockSizeEstimate::Advertised(50)), // below the tuned floor
+    ]);
     assert_eq!(
-        scheduler.assigned_range_count(),
+        tuned
+            .take_in_range(block::Height(10), block::Height(10), 1)
+            .pop()
+            .unwrap()
+            .1
+            .estimated_bytes,
+        750
+    );
+    assert_eq!(
+        tuned
+            .take_in_range(block::Height(11), block::Height(11), 1)
+            .pop()
+            .unwrap()
+            .1
+            .estimated_bytes,
+        100
+    );
+}
+
+#[test]
+fn work_queue_diagnostics_report_runs_min_and_max() {
+    // Two contiguous runs (10..=12 and 20..=21) plus an in-flight height feed the
+    // BLOCK_SYNC_STATE trace remaps (queue_len -> runs, queue_blocks -> pending,
+    // queue_min_start -> min_pending, covered_max_end -> max_in_flight).
+    let queue = work_queue_with(
         0,
-        "completing a partial request must clear the same range key it assigned"
-    );
-}
-
-#[test]
-fn scheduler_drops_verified_prefix_from_queued_ranges() {
-    let (peer1, state1) = peer_state(39);
-    let (peer2, state2) = peer_state(40);
-    let mut scheduler = BlockRangeScheduler::new(2);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(10, BlockSizeEstimate::Advertised(100)),
-        needed(11, BlockSizeEstimate::Advertised(100)),
-        needed(12, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    let first = scheduler
-        .next_for_peer(
-            &peer1,
-            &state1,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("first fanout assignment queues");
-    assert_eq!(first.start_height, block::Height(10));
-
-    scheduler.drop_through(block::Height(10));
-    assert!(
-        scheduler
-            .next_for_peer(
-                &peer1,
-                &state1,
-                &mut budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "verified-prefix trimming must not let the same peer bypass its overlapping assignment",
-    );
-
-    let second = scheduler
-        .next_for_peer(
-            &peer2,
-            &state2,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("queued suffix remains requestable by another fanout peer");
-    assert_eq!(second.start_height, block::Height(11));
-    assert_eq!(second.count, 2);
-}
-
-#[test]
-fn scheduler_refresh_splits_around_assigned_and_queued_ranges() {
-    let (peer, mut state) = peer_state(52);
-    state.max_blocks_per_response = 2;
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(
-        (1..=6)
-            .map(|height| needed(height, BlockSizeEstimate::Advertised(100)))
-            .collect(),
-    );
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    let first = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("first request assigns the range prefix");
-    assert_eq!(first.start_height, block::Height(1));
-    assert_eq!(first.count, 2);
-    assert_eq!(scheduler.queued_block_count(), 4);
-
-    scheduler.refresh_needed(
-        (1..=10)
-            .map(|height| needed(height, BlockSizeEstimate::Advertised(100)))
-            .collect(),
-    );
-
-    assert_eq!(
-        scheduler.queued_block_count(),
-        8,
-        "refresh must queue newly-needed suffix blocks instead of dropping the whole range"
-    );
-}
-
-#[test]
-fn scheduler_drops_covered_prefix_from_partially_queued_range() {
-    let mut scheduler = BlockRangeScheduler::new(2);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(10, BlockSizeEstimate::Advertised(100)),
-        needed(11, BlockSizeEstimate::Advertised(100)),
-        needed(12, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let (peer1, state1) = peer_state(40);
-    let (peer2, state2) = peer_state(41);
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    let first = scheduler
-        .next_for_peer(
-            &peer1,
-            &state1,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("first fanout assignment leaves the queued range for another peer");
-    assert_eq!(first.start_height, block::Height(10));
-    assert_eq!(first.count, 3);
-
-    scheduler.mark_height_covered(block::Height(10));
-
-    assert!(
-        scheduler
-            .next_for_peer(
-                &peer1,
-                &state1,
-                &mut budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "trimming a covered prefix must not let the same peer bypass its overlapping assignment",
-    );
-
-    let second = scheduler
-        .next_for_peer(
-            &peer2,
-            &state2,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("uncovered suffix remains requestable");
-    assert_eq!(
-        second.start_height,
-        block::Height(11),
-        "covered prefix must not remain as the next request anchor",
-    );
-    assert_eq!(second.count, 2);
-}
-
-#[test]
-fn scheduler_splits_queued_range_around_covered_heights() {
-    let (peer, mut state) = peer_state(42);
-    state.max_blocks_per_response = 10;
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(10, BlockSizeEstimate::Advertised(100)),
-        needed(11, BlockSizeEstimate::Advertised(100)),
-        needed(12, BlockSizeEstimate::Advertised(100)),
-        needed(13, BlockSizeEstimate::Advertised(100)),
-        needed(14, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    scheduler.mark_height_covered(block::Height(12));
-
-    let first = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("uncovered prefix remains requestable");
-    assert_eq!(first.start_height, block::Height(10));
-    assert_eq!(first.count, 2);
-
-    let second = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("uncovered suffix remains requestable");
-    assert_eq!(second.start_height, block::Height(13));
-    assert_eq!(second.count, 2);
-}
-
-#[test]
-fn scheduler_retries_only_uncovered_suffix() {
-    let (peer, state) = peer_state(43);
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(20, BlockSizeEstimate::Advertised(100)),
-        needed(21, BlockSizeEstimate::Advertised(100)),
-        needed(22, BlockSizeEstimate::Advertised(100)),
-    ]);
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("range fits");
-    assert_eq!(request.start_height, block::Height(20));
-    assert_eq!(request.count, 3);
-
-    scheduler.mark_height_covered(block::Height(20));
-    scheduler.timeout(request, &mut budget);
-
-    let retry = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("uncovered retry suffix remains requestable");
-    assert_eq!(
-        retry.start_height,
-        block::Height(21),
-        "covered retry prefix must not be requested again",
-    );
-    assert_eq!(retry.count, 2);
-}
-
-#[test]
-fn scheduler_keeps_queued_retries_and_missing_ranges_ordered_by_height() {
-    let (peer, mut state) = peer_state(46);
-    state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
-
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(100))]);
-    scheduler.refresh_needed(vec![needed(10, BlockSizeEstimate::Advertised(100))]);
-
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("lowest missing range is requestable");
-    assert_eq!(
-        request.start_height,
-        block::Height(10),
-        "new lower missing work must not sit behind later queued work",
-    );
-
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(100))]);
-    scheduler.retry(BlockRangeRequest {
-        start_height: block::Height(10),
-        count: 2,
-        anchor_hash: block::Hash([10; 32]),
-        estimated_bytes: 200,
-        expected_hashes: vec![
-            (block::Height(10), block::Hash([10; 32])),
-            (block::Height(11), block::Hash([11; 32])),
+        [
+            needed(10, BlockSizeEstimate::Advertised(100)),
+            needed(11, BlockSizeEstimate::Advertised(100)),
+            needed(12, BlockSizeEstimate::Advertised(100)),
+            needed(20, BlockSizeEstimate::Advertised(100)),
+            needed(21, BlockSizeEstimate::Advertised(100)),
         ],
-        expected_bytes: vec![(block::Height(10), 100), (block::Height(11), 100)],
-    });
+    );
+    assert_eq!(queue.pending_run_count(), 2);
+    assert_eq!(queue.pending_len(), 5);
+    assert_eq!(queue.min_pending(), Some(block::Height(10)));
+    assert_eq!(queue.max_in_flight(), None);
 
-    let retry = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("lowest retried range is requestable");
+    queue.take_in_range(block::Height(20), block::Height(21), 2);
+    assert_eq!(queue.pending_run_count(), 1, "the 20..=21 run was taken");
+    assert_eq!(queue.min_pending(), Some(block::Height(10)));
+    assert_eq!(queue.max_in_flight(), Some(block::Height(21)));
     assert_eq!(
-        retry.start_height,
+        queue.hash_for_height(block::Height(21)),
+        Some(block::Hash([21; 32]))
+    );
+    assert_eq!(
+        queue.hash_for_height(block::Height(12)),
+        Some(block::Hash([12; 32]))
+    );
+    assert_eq!(queue.hash_for_height(block::Height(99)), None);
+}
+
+#[test]
+fn work_queue_keeps_pending_ordered_by_height() {
+    // A BTreeMap keeps the lowest needed height first regardless of extend order,
+    // so a newly-needed lower height never sits behind later queued work.
+    let queue = super::work_queue::WorkQueue::new(block::Height(0));
+    queue.extend([needed(20, BlockSizeEstimate::Advertised(100))]);
+    queue.extend([needed(10, BlockSizeEstimate::Advertised(100))]);
+    assert_eq!(queue.min_pending(), Some(block::Height(10)));
+    let taken = queue.take_in_range(block::Height(1), block::Height(30), 1);
+    assert_eq!(
+        taken[0].0,
         block::Height(10),
-        "timed-out lower work must not sit behind later queued work",
+        "lower work must be taken before higher work"
     );
-}
-
-#[test]
-fn scheduler_releases_budget_on_completion_timeout_and_cancel() {
-    // Each single-block request reserves one worst-case share regardless of the
-    // advertised size hint; completion/timeout/cancel must release it exactly.
-    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
-    let (peer, state) = peer_state(35);
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(1_000))]);
-    let mut budget = ByteBudget::new(worst * 10);
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("range fits");
-    assert_eq!(budget.reserved(), worst);
-    scheduler.complete(&request, &mut budget);
-    assert_eq!(budget.reserved(), 0);
-
-    scheduler.refresh_needed(vec![needed(21, BlockSizeEstimate::Advertised(2_000))]);
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("range fits");
-    scheduler.timeout(request, &mut budget);
-    assert_eq!(budget.reserved(), 0);
-
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("retried range fits");
-    assert_eq!(budget.reserved(), worst);
-    assert_eq!(request.count, 1);
-    scheduler.release_cancelled(&mut budget);
-    assert_eq!(budget.reserved(), 0);
-}
-
-#[test]
-fn scheduler_drops_queued_ranges_whose_anchor_left_current_header_spine() {
-    let (peer, state) = peer_state(37);
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1);
-    scheduler.refresh_needed(vec![
-        needed(40, BlockSizeEstimate::Advertised(1_000)),
-        needed(41, BlockSizeEstimate::Advertised(1_000)),
-    ]);
-
-    let current = HashMap::from([
-        (block::Height(40), block::Hash([90; 32])),
-        (block::Height(41), block::Hash([91; 32])),
-    ]);
-    scheduler.retain_matching_needed(&current);
-
-    let mut budget = ByteBudget::new(10_000);
-    assert!(
-        scheduler
-            .next_for_peer(
-                &peer,
-                &state,
-                &mut budget,
-                u64::MAX,
-                MAX_BS_BLOCKS_PER_REQUEST
-            )
-            .is_err(),
-        "stale queued anchors must not survive a re-derived needed set"
-    );
-    assert_eq!(budget.reserved(), 0);
-}
-
-#[test]
-fn scheduler_reserves_worst_case_regardless_of_size_hints() {
-    // The byte reservation is worst-case per block; EWMA/Advertised/Confirmed size
-    // hints no longer size the reservation (they still feed `expected_bytes` for
-    // size-deviation scoring). A three-block range reserves three worst-case
-    // shares regardless of how each block's size was hinted.
-    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
-    let (peer, mut state) = peer_state(36);
-    state.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX);
-    let mut scheduler = BlockRangeScheduler::new(1);
-    scheduler.set_estimator_for_tests(750, 1_000);
-    scheduler.refresh_needed(vec![
-        needed(30, BlockSizeEstimate::Unknown),
-        needed(31, BlockSizeEstimate::Advertised(500)),
-        needed(32, BlockSizeEstimate::Confirmed(50_000)),
-    ]);
-    let mut budget = ByteBudget::new(worst * 100);
-
-    let request = scheduler
-        .next_for_peer(
-            &peer,
-            &state,
-            &mut budget,
-            u64::MAX,
-            MAX_BS_BLOCKS_PER_REQUEST,
-        )
-        .expect("range fits");
-    assert_eq!(request.count, 3);
-    assert_eq!(request.estimated_bytes, worst * 3);
 }
 
 #[test]
@@ -2980,8 +2649,11 @@ async fn reactor_drives_tip_to_getblocks_to_submit_over_framed_path() {
                 best_header_tip,
             } => {
                 assert_eq!(verified_block_tip, block::Height(0));
-                assert_eq!(best_header_tip, block::Height(1));
-                break;
+                // The startup query carries best_header_tip 0; wait for the
+                // tip-1 query (there is no near-tip pause to suppress either).
+                if best_header_tip == block::Height(1) {
+                    break;
+                }
             }
             BlockSyncAction::SendMessage { .. } => {}
             action => panic!("unexpected action before query: {action:?}"),
@@ -4238,9 +3910,128 @@ async fn reactor_retries_submitted_body_after_apply_rejection() {
     reactor_task.abort();
 }
 
+/// §7.8 footgun regression: downloads gate ONLY on byte budget + per-peer slots,
+/// never on floor-distance / near-tip lag. With the verified floor at 0 and
+/// needed heights far above it (1..=4 with the header tip near 1000), a peer with
+/// free slots and ample budget MUST keep issuing GetBlocks — there is no
+/// near-tip pause. The deleted `reactor_pauses_new_body_downloads_near_tip_by_default`
+/// asserted the opposite; reintroducing any lag/near-tip gate fails this test
+/// (the GetBlocks would never arrive).
 #[tokio::test]
-async fn reactor_pauses_new_body_downloads_near_tip_by_default() {
+async fn reactor_keeps_issuing_far_above_floor_with_no_near_tip_pause() {
+    // The *default* config previously paused within 2 blocks of the header tip;
+    // here the needed heights sit far below a high header tip, but the point is
+    // that issuance proceeds regardless of how close to (or far from) the tip we
+    // are — only budget + slots gate it.
     let config = ZakuraBlockSyncConfig::default();
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+
+    // Peer serves heights 1..=4 with four concurrent single-block slots.
+    let (peer_id, _inbound, _outbound) = connect_peer_with_status_message(
+        &service,
+        &mut actions,
+        41,
+        BlockSyncStatus {
+            servable_low: block::Height(1),
+            servable_high: block::Height(4),
+            tip_hash: block::Hash([4; 32]),
+            max_blocks_per_response: 1,
+            max_inflight_requests: 4,
+            max_response_bytes: MAX_BS_RESPONSE_BYTES,
+        },
+    )
+    .await;
+
+    // Header tip far above the floor (lag is huge — would have *not* paused) and
+    // also exercises that being far from the tip does not gate either.
+    tip_tx
+        .send((block::Height(1_000), block::Hash([9; 32])))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(
+            (1..=4)
+                .map(|height| BlockSyncBlockMeta {
+                    height: block::Height(height),
+                    hash: block::Hash([height as u8; 32]),
+                    size: BlockSizeEstimate::Advertised(1_000),
+                })
+                .collect(),
+        ))
+        .await
+        .expect("needed metadata queues");
+
+    // All four slots fill: no near-tip pause exists to gate issuance.
+    let mut heights = Vec::new();
+    for _ in 0..4 {
+        let (peer, start_height, count) = wait_for_getblocks(&mut actions).await;
+        assert_eq!(peer, peer_id);
+        assert_eq!(count, 1);
+        heights.push(start_height.0);
+    }
+    heights.sort_unstable();
+    assert_eq!(
+        heights,
+        vec![1, 2, 3, 4],
+        "a peer with free slots and budget must keep issuing regardless of floor distance"
+    );
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
+async fn reactor_reserves_worst_case_per_block_under_per_peer_cap_below_budget() {
+    // Ports the deleted scheduler unit tests
+    // `scheduler_reserves_worst_case_regardless_of_size_hints` and
+    // `scheduler_per_peer_byte_cap_limits_request_below_global_budget` to the
+    // post-WorkQueue issuance path (`fill_peer`). It pins two properties at once:
+    //   (commit 1) a request reserves `BS_PER_BLOCK_WORST_CASE_BYTES` per block —
+    //     never the smaller advertised size hint; and
+    //   (commit 3) the per-peer byte cap bounds a single request *below* a larger
+    //     global budget, so one peer cannot drain the whole window.
+    // Global budget = 30 worst-case blocks; per-peer cap = 3 worst-case blocks
+    // (`30 / expected_peers(10)`, floored at `max_response_bytes = 3 * WORST`). The
+    // peer advertises a generous slot/response/block-count budget and tiny 1 KiB
+    // size hints, so the only thing that can bound the request to 3 blocks is the
+    // worst-case-per-block reservation reaching the per-peer cap. If the
+    // reservation honored the 1 KiB hints, the full 16-block range would fit and
+    // the request would be 16 blocks.
+    let per_peer_cap_blocks = 3u32;
+    let worst_case_u32 =
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES).expect("worst-case block bytes fit u32");
+    let config = ZakuraBlockSyncConfig {
+        max_inflight_block_bytes: 30 * BS_PER_BLOCK_WORST_CASE_BYTES,
+        expected_peers: 10,
+        max_response_bytes: per_peer_cap_blocks * worst_case_u32,
+        // Generous per-request block count (the default is 1) so the count cap is
+        // not the binding constraint — the per-peer byte cap is.
+        max_blocks_per_response: 16,
+        ..ZakuraBlockSyncConfig::default()
+    };
+    // The cap really is 3 worst-case blocks and strictly below the global budget,
+    // so a request capped at 3 proves the cap (not the budget) is binding.
+    assert_eq!(
+        config.per_peer_byte_cap(),
+        u64::from(per_peer_cap_blocks) * BS_PER_BLOCK_WORST_CASE_BYTES,
+    );
+    assert!(config.per_peer_byte_cap() < config.max_inflight_block_bytes);
+
     let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
         BlockSyncFrontiers {
@@ -4254,103 +4045,47 @@ async fn reactor_pauses_new_body_downloads_near_tip_by_default() {
     );
     let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
     let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
-    let peer_id = peer(70);
-    let (inbound_tx, inbound_rx) = framed_channel(8);
-    let (outbound_tx, _outbound_rx) = framed_channel(8);
-    let streams = HashMap::from([(ZAKURA_STREAM_BLOCK_SYNC, (inbound_rx, outbound_tx))]);
-    service.add_peer(Peer::new_with_direction(
-        peer_id.clone(),
-        None,
-        ZAKURA_CAP_BLOCK_SYNC,
-        ServicePeerDirection::Outbound,
-        streams,
-        CancellationToken::new(),
-    ));
-    assert_eq!(wait_for_connect_status(&mut actions).await, peer_id);
-    inbound_tx
-        .send(
-            BlockSyncMessage::Status(BlockSyncStatus {
-                servable_low: block::Height(1),
-                servable_high: block::Height(3),
-                tip_hash: block::Hash([3; 32]),
-                max_blocks_per_response: 4,
-                max_inflight_requests: 1,
-                max_response_bytes: MAX_BS_RESPONSE_BYTES,
-            })
-            .encode_frame()
-            .expect("status encodes"),
-        )
-        .await
-        .expect("status queues");
 
-    for height in [block::Height(1), block::Height(2)] {
-        let hash_byte = u8::try_from(height.0).expect("test height fits in u8");
-        handle
-            .send(BlockSyncEvent::HeaderTipChanged {
-                height,
-                hash: block::Hash([hash_byte; 32]),
-            })
-            .await
-            .expect("header-tip event queues");
-        let quiet = tokio::time::timeout(Duration::from_millis(100), actions.recv()).await;
-        assert!(
-            quiet.is_err(),
-            "lag {height:?} is within the default pause window and must not query needed blocks",
-        );
-
-        handle
-            .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
-                height,
-                hash: block::Hash([hash_byte; 32]),
-                size: BlockSizeEstimate::Unknown,
-            }]))
-            .await
-            .expect("stale needed-block event queues");
-        let quiet = tokio::time::timeout(Duration::from_millis(100), actions.recv()).await;
-        assert!(
-            quiet.is_err(),
-            "stale needed metadata inside the pause window must not schedule GetBlocks",
-        );
-    }
+    // One slot, a generous response-byte and per-request block count, so neither
+    // the slot count, the peer's response-byte cap, nor the block-count cap is the
+    // binding constraint — only the per-peer byte cap is.
+    let (peer_id, _inbound, _outbound) = connect_peer_with_status_message(
+        &service,
+        &mut actions,
+        51,
+        BlockSyncStatus {
+            servable_low: block::Height(1),
+            servable_high: block::Height(16),
+            tip_hash: block::Hash([16; 32]),
+            max_blocks_per_response: 16,
+            max_inflight_requests: 1,
+            max_response_bytes: MAX_BS_RESPONSE_BYTES,
+        },
+    )
+    .await;
 
     handle
-        .send(BlockSyncEvent::HeaderTipChanged {
-            height: block::Height(3),
-            hash: block::Hash([3; 32]),
-        })
-        .await
-        .expect("header-tip event queues");
-    while !matches!(
-        next_action(&mut actions).await,
-        BlockSyncAction::QueryNeededBlocks {
-            verified_block_tip: block::Height(0),
-            best_header_tip: block::Height(3),
-        }
-    ) {}
-
-    handle
-        .send(BlockSyncEvent::NeededBlocks(vec![
-            BlockSyncBlockMeta {
-                height: block::Height(1),
-                hash: block::Hash([1; 32]),
-                size: BlockSizeEstimate::Unknown,
-            },
-            BlockSyncBlockMeta {
-                height: block::Height(2),
-                hash: block::Hash([2; 32]),
-                size: BlockSizeEstimate::Unknown,
-            },
-            BlockSyncBlockMeta {
-                height: block::Height(3),
-                hash: block::Hash([3; 32]),
-                size: BlockSizeEstimate::Unknown,
-            },
-        ]))
+        .send(BlockSyncEvent::NeededBlocks(
+            (1..=16)
+                .map(|height| BlockSyncBlockMeta {
+                    height: block::Height(height),
+                    hash: block::Hash([height as u8; 32]),
+                    // Tiny hint: if the reservation honored this instead of the
+                    // worst case, the whole 16-block range would fit under the cap.
+                    size: BlockSizeEstimate::Advertised(1_000),
+                })
+                .collect(),
+        ))
         .await
         .expect("needed metadata queues");
+
+    let (peer, _start_height, count) = wait_for_getblocks(&mut actions).await;
+    assert_eq!(peer, peer_id);
     assert_eq!(
-        wait_for_getblocks(&mut actions).await,
-        (peer_id, block::Height(1), 1)
+        count, per_peer_cap_blocks,
+        "the request must be bounded to {per_peer_cap_blocks} worst-case blocks by the \
+         per-peer byte cap (strictly below the 30-block global budget), proving the \
+         reservation is worst-case-per-block and not the 1 KiB advertised size hint",
     );
 
     reactor_task.abort();
@@ -4380,13 +4115,16 @@ async fn reactor_zero_pause_threshold_preserves_lag_one_downloads() {
         .await
         .expect("header-tip event queues");
 
-    assert!(matches!(
+    // A lag of 1 above the floor must still query needed blocks: there is no
+    // near-tip pause. (The startup query carries best_header_tip 0; the tip-1
+    // event carries best_header_tip 1.)
+    while !matches!(
         next_action(&mut actions).await,
         BlockSyncAction::QueryNeededBlocks {
             verified_block_tip: block::Height(0),
             best_header_tip: block::Height(1),
         }
-    ));
+    ) {}
 
     reactor_task.abort();
 }
@@ -5076,110 +4814,13 @@ async fn reactor_retries_missing_heights_after_partial_blocks_done() {
     reactor_task.abort();
 }
 
-#[tokio::test]
-async fn reactor_does_not_retry_missing_height_already_in_flight() {
-    let blocks = mainnet_blocks_1_to_3();
-    let mut config = immediate_body_download_config();
-    config.fanout = 2;
-    config.expected_peers = 0;
-
-    let (_tip_tx, tip_rx) = watch::channel((block::Height(3), blocks[2].hash()));
-    let startup = BlockSyncStartup::new(
-        BlockSyncFrontiers {
-            finalized_height: block::Height(0),
-            verified_block_tip: block::Height(0),
-            verified_block_hash: block::Hash([0; 32]),
-        },
-        (block::Height(3), blocks[2].hash()),
-        tip_rx,
-        config.clone(),
-    );
-    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
-    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
-    let (_peer_a, _inbound_a, _outbound_a) = connect_peer_with_status(
-        &service,
-        &mut actions,
-        70,
-        block::Height(3),
-        blocks[2].hash(),
-        1,
-        MAX_BS_RESPONSE_BYTES,
-    )
-    .await;
-    let (_peer_b, _inbound_b, _outbound_b) = connect_peer_with_status(
-        &service,
-        &mut actions,
-        71,
-        block::Height(3),
-        blocks[2].hash(),
-        1,
-        MAX_BS_RESPONSE_BYTES,
-    )
-    .await;
-
-    handle
-        .send(BlockSyncEvent::NeededBlocks(
-            blocks.iter().map(block_meta).collect(),
-        ))
-        .await
-        .expect("needed metadata queues");
-    let first_request = wait_for_getblocks(&mut actions).await;
-    let second_request = wait_for_getblocks(&mut actions).await;
-    assert_eq!((first_request.1, first_request.2), (block::Height(1), 3));
-    assert_eq!((second_request.1, second_request.2), (block::Height(1), 3));
-    assert_ne!(
-        first_request.0, second_request.0,
-        "fanout should assign the same range to two peers",
-    );
-
-    handle
-        .send(BlockSyncEvent::WireMessage {
-            peer: first_request.0.clone(),
-            msg: BlockSyncMessage::Block(blocks[0].clone()),
-            body_wire_bytes: None,
-        })
-        .await
-        .expect("first body queues");
-    loop {
-        match next_action(&mut actions).await {
-            BlockSyncAction::SubmitBlock { block, .. } => {
-                assert_eq!(block.hash(), blocks[0].hash());
-                break;
-            }
-            BlockSyncAction::SendMessage { .. } | BlockSyncAction::QueryNeededBlocks { .. } => {}
-            action => panic!("unexpected action before first submit: {action:?}"),
-        }
-    }
-
-    handle
-        .send(BlockSyncEvent::WireMessage {
-            peer: first_request.0.clone(),
-            msg: BlockSyncMessage::BlocksDone {
-                start_height: block::Height(1),
-                returned: 1,
-            },
-            body_wire_bytes: None,
-        })
-        .await
-        .expect("BlocksDone queues");
-
-    while let Ok(Some(action)) =
-        tokio::time::timeout(Duration::from_millis(100), actions.recv()).await
-    {
-        match action {
-            BlockSyncAction::SendMessage {
-                msg: BlockSyncMessage::GetBlocks { start_height, count },
-                ..
-            } => panic!(
-                "partial response retried {start_height:?}/{count} while another peer had it in flight"
-            ),
-            BlockSyncAction::SendMessage { .. } | BlockSyncAction::QueryNeededBlocks { .. } => {}
-            action => panic!("unexpected action after partial BlocksDone: {action:?}"),
-        }
-    }
-
-    reactor_task.abort();
-}
+// `reactor_does_not_retry_missing_height_already_in_flight` was a fanout=2 test:
+// it required the same range to be assigned to two peers and asserted that a
+// partial response from one did not re-request heights the *other* still held.
+// Fanout > 1 is removed in S3a (a height is taken by exactly one peer), so the
+// "in flight on another peer" scenario no longer exists. The structural property
+// — a taken (in_flight) height is not re-takable — is now covered by the
+// WorkQueue unit test `work_queue_take_dedups_a_height_across_peers`.
 
 #[tokio::test]
 async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer() {
@@ -9157,10 +8798,12 @@ async fn reactor_ignores_duplicate_response_at_body_download_floor() {
 
 #[tokio::test]
 async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
+    // fanout = 1: a height is requested from exactly one peer. The duplicate body
+    // that must be ignored at the floor instead arrives unsolicited from the
+    // *other* connected peer after the height has committed.
     let blocks = mainnet_blocks_1_to_3();
     let block2_size = block_size(&blocks[1]);
     let mut config = immediate_body_download_config();
-    config.fanout = 2;
     config.expected_peers = 0;
     config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 2;
 
@@ -9203,13 +8846,13 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
         .await
         .expect("needed metadata queues");
     let first_request = wait_for_getblocks(&mut actions).await;
-    let second_request = wait_for_getblocks(&mut actions).await;
     assert_eq!((first_request.1, first_request.2), (block::Height(2), 1));
-    assert_eq!((second_request.1, second_request.2), (block::Height(2), 1));
-    assert_ne!(
-        first_request.0, second_request.0,
-        "fanout should assign the same height to two distinct peers"
-    );
+    // The other peer is the one that will deliver the ignored duplicate.
+    let other_peer = if first_request.0 == peer_a {
+        peer_b.clone()
+    } else {
+        peer_a.clone()
+    };
 
     handle
         .send(BlockSyncEvent::WireMessage {
@@ -9238,9 +8881,12 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
         .await
         .expect("apply result queues");
 
+    // A late duplicate body for the now-committed height arrives from the other
+    // peer; it sits at/below the body-download floor and must be ignored without
+    // consuming reorder budget.
     handle
         .send(BlockSyncEvent::WireMessage {
-            peer: second_request.0.clone(),
+            peer: other_peer.clone(),
             msg: BlockSyncMessage::Block(blocks[1].clone()),
             body_wire_bytes: None,
         })

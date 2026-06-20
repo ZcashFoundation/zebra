@@ -1,4 +1,4 @@
-use super::{config::*, scheduler::*, sequencer::Sequencer, *};
+use super::{config::*, scheduler::*, sequencer::Sequencer, work_queue::WorkQueue, *};
 use crate::zakura::{
     chain_frontier_from_parts, Frontier, FrontierUpdate, ServicePeerDirection, ServicePeerSnapshot,
     ZakuraBlockSyncCandidateState,
@@ -197,7 +197,12 @@ pub(super) struct BlockSyncState {
     pub(super) peers: HashMap<ZakuraPeerId, PeerBlockState>,
     pub(super) parked_peers: HashSet<ZakuraPeerId>,
     pub(super) disconnected_peers: HashSet<ZakuraPeerId>,
-    pub(super) schedule: BlockRangeScheduler,
+    /// Sorted set of needed download heights. Replaces the central
+    /// `BlockRangeScheduler`: the per-peer issuance path pulls work in its own
+    /// servable range, dedup/covered are `in_flight`, and the floor is GC only.
+    /// `Arc` so the state stays cheaply `Clone` and the queue can be shared with
+    /// the Sequencer task / per-peer routines in later stages.
+    pub(super) work: Arc<WorkQueue>,
     /// The serial commit pipeline (reorder → applying → submit → apply-finished)
     /// and the body-download floor / verified tip it owns. The reactor reaches
     /// commit-pipeline state only through this API; see [`Sequencer`].
@@ -240,7 +245,7 @@ impl BlockSyncState {
             peers: HashMap::new(),
             parked_peers: HashSet::new(),
             disconnected_peers: HashSet::new(),
-            schedule: BlockRangeScheduler::new(startup.config.fanout),
+            work: Arc::new(WorkQueue::new(startup.frontiers.verified_block_tip)),
             sequencer: Sequencer::new(
                 startup.frontiers.verified_block_tip,
                 startup.config.submitted_apply_limit(),
@@ -290,10 +295,20 @@ impl BlockSyncState {
         }
 
         let expired_any = !timed_out.is_empty();
-        for (peer_id, outstanding) in timed_out {
+        for (_peer_id, outstanding) in timed_out {
             self.budget.release(outstanding.reserved_bytes());
-            self.schedule
-                .retry_after_timeout(outstanding.request, peer_id);
+            // Return only the unreceived heights to the queue. Received heights
+            // are already buffered (in `in_flight` until committed); re-queuing
+            // them would re-fetch a body we already hold, which the WorkQueue's
+            // single-owner `in_flight` invariant forbids.
+            self.work.return_items(
+                outstanding
+                    .request
+                    .expected_hashes
+                    .iter()
+                    .filter(|(height, _)| !outstanding.has_received(*height))
+                    .map(|(height, _)| *height),
+            );
         }
         expired_any
     }
@@ -488,66 +503,6 @@ impl OutstandingBlockRange {
 
     pub(super) fn is_complete(&self) -> bool {
         self.received.len() == self.request.expected_hashes.len()
-    }
-
-    pub(super) fn missing_retry_requests<F>(&self, mut should_retry: F) -> Vec<BlockRangeRequest>
-    where
-        F: FnMut(block::Height, block::Hash) -> bool,
-    {
-        let mut requests = Vec::new();
-        let mut segment_hashes = Vec::new();
-        let mut segment_bytes = Vec::new();
-
-        for (height, hash) in &self.request.expected_hashes {
-            let retry = !self.received.contains(height) && should_retry(*height, *hash);
-            let contiguous = segment_hashes
-                .last()
-                .and_then(|(last_height, _)| next_height(*last_height))
-                == Some(*height);
-
-            if !retry || (!segment_hashes.is_empty() && !contiguous) {
-                if let Some(request) = Self::retry_request_from_segment(
-                    std::mem::take(&mut segment_hashes),
-                    std::mem::take(&mut segment_bytes),
-                ) {
-                    requests.push(request);
-                }
-            }
-
-            if retry {
-                if let Some(bytes) = self.request.estimated_bytes_for_height(*height) {
-                    segment_hashes.push((*height, *hash));
-                    segment_bytes.push((*height, bytes));
-                }
-            }
-        }
-
-        if let Some(request) = Self::retry_request_from_segment(segment_hashes, segment_bytes) {
-            requests.push(request);
-        }
-
-        requests
-    }
-
-    fn retry_request_from_segment(
-        expected_hashes: Vec<(block::Height, block::Hash)>,
-        expected_bytes: Vec<(block::Height, u64)>,
-    ) -> Option<BlockRangeRequest> {
-        let (start_height, anchor_hash) = *expected_hashes.first()?;
-        let count = u32::try_from(expected_hashes.len())
-            .expect("block-sync retry segment length is bounded by original request count");
-        let estimated_bytes = expected_bytes
-            .iter()
-            .fold(0u64, |total, (_, bytes)| total.saturating_add(*bytes));
-
-        Some(BlockRangeRequest {
-            start_height,
-            count,
-            anchor_hash,
-            estimated_bytes,
-            expected_hashes,
-            expected_bytes,
-        })
     }
 }
 

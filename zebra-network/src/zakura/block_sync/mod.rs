@@ -39,6 +39,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 mod wire;
+mod work_queue;
 
 pub use config::{BlockSyncStatus, ZakuraBlockSyncConfig, MAX_BS_RESPONSE_BYTES};
 pub use error::BlockSyncWireError;

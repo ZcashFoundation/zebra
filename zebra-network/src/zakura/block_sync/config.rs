@@ -47,8 +47,6 @@ pub const DEFAULT_BS_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30)
 pub const DEFAULT_BS_SIZE_DEVIATION_TOLERANCE: u32 = 200;
 /// Default block-sync peer fanout for the same requested range.
 pub const DEFAULT_BS_FANOUT: usize = 1;
-/// Default body lag where block sync pauses new downloads and lets block propagation finish.
-pub const DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS: u32 = 2;
 /// Maximum peer-advertised aggregate byte target accepted per requested range.
 ///
 /// A range response is sent as one `Block` frame per body, and each body frame
@@ -151,8 +149,6 @@ pub struct ZakuraBlockSyncConfig {
     pub size_deviation_tolerance: u32,
     /// Number of peers later range scheduling may fan out to for the same body gap.
     pub fanout: usize,
-    /// Body lag at or below which block sync pauses new downloads near the header tip.
-    pub near_tip_body_download_pause_blocks: u32,
     /// Block-sync peer caps and queue limits owned by this service.
     pub peer_limits: ServicePeerLimits,
 }
@@ -179,7 +175,6 @@ impl Default for ZakuraBlockSyncConfig {
             status_refresh_interval: DEFAULT_BS_STATUS_REFRESH_INTERVAL,
             size_deviation_tolerance: DEFAULT_BS_SIZE_DEVIATION_TOLERANCE,
             fanout: DEFAULT_BS_FANOUT,
-            near_tip_body_download_pause_blocks: DEFAULT_BS_NEAR_TIP_BODY_DOWNLOAD_PAUSE_BLOCKS,
             peer_limits: ServicePeerLimits::default(),
         }
     }

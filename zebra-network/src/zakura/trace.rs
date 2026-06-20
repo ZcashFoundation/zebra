@@ -244,8 +244,10 @@ pub mod block_sync_trace {
     pub const BLOCK_RANGE_UNAVAILABLE: &str = "block_range_unavailable";
     /// Local node queued a block range response for transport.
     pub const BLOCK_RANGE_RESPONSE_SENT: &str = "block_range_response_sent";
-    /// New body downloads were paused (lag, near-tip, or budget).
-    pub const BLOCK_DOWNLOADS_PAUSED: &str = "block_downloads_paused";
+    /// Work-queue producer added needed heights to the pending set.
+    pub const BLOCK_WORK_EXTENDED: &str = "block_work_extended";
+    /// A peer claimed a contiguous chunk of pending work for issuance.
+    pub const BLOCK_WORK_TAKEN: &str = "block_work_taken";
     /// Scheduler could not issue another request for a peer with free slots.
     pub const BLOCK_SCHEDULE_SKIPPED: &str = "block_schedule_skipped";
     /// Verified body frontier advanced from state.

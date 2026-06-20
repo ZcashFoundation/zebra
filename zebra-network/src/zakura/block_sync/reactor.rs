@@ -1,4 +1,6 @@
-use super::{config::*, events::*, scheduler::*, sequencer::*, state::*, wire::*, *};
+use super::{
+    config::*, events::*, scheduler::*, sequencer::*, state::*, wire::*, work_queue::*, *,
+};
 use crate::zakura::{
     FrontierChange, FrontierUpdate, ServiceAdmissionDecision, ServicePeerDirection,
     ServicePeerSnapshot, ZakuraBlockSyncCandidateState,
@@ -126,9 +128,7 @@ impl BlockSyncReactor {
                 .max(Duration::from_millis(1)),
         );
 
-        if !self.query_needed_blocks().await {
-            self.pause_new_body_downloads();
-        }
+        self.query_needed_blocks().await;
         self.release_caught_up_block_sync_peers();
         self.publish_metrics();
         self.refresh_throughput();
@@ -361,7 +361,6 @@ impl BlockSyncReactor {
             self.state.disconnected_peers.insert(peer.clone());
         }
         self.state.parked_peers.remove(&peer);
-        self.state.schedule.forget_peer(&peer);
         self.publish_peer_snapshot();
         self.publish_candidate_state();
     }
@@ -369,9 +368,7 @@ impl BlockSyncReactor {
     async fn handle_header_tip_changed(&mut self, height: block::Height, hash: block::Hash) {
         self.state.best_header_tip = height;
         self.state.best_header_hash = hash;
-        if !self.query_needed_blocks().await {
-            self.pause_new_body_downloads();
-        }
+        self.query_needed_blocks().await;
         self.release_caught_up_block_sync_peers();
     }
 
@@ -471,9 +468,10 @@ impl BlockSyncReactor {
             .advance_verified_tip(frontiers.verified_block_tip, release_applied);
         self.state.budget.release(advance.release_bytes);
         if advance.changed {
-            self.state
-                .schedule
-                .drop_through(frontiers.verified_block_tip);
+            // GC the queue: committed heights are pruned from pending/in_flight.
+            // This is not a throttle — peers keep fetching above the floor.
+            self.state.work.advance_floor(frontiers.verified_block_tip);
+            self.prune_needed_below_floor();
             self.drop_outstanding_through(frontiers.verified_block_tip);
             self.trace_frontiers_changed(frontiers.verified_block_tip);
             self.release_contiguous_blocks().await;
@@ -481,12 +479,23 @@ impl BlockSyncReactor {
         Some(old_serving_tip)
     }
 
+    /// Drop now-committed heights from the published `needed_heights` set when the
+    /// floor advances. The producer (`handle_needed_blocks`) only ever *grows*
+    /// `needed_heights`; this prunes the heights the floor passed so the candidate
+    /// gap clears promptly without waiting for the next `NeededBlocks` snapshot.
+    fn prune_needed_below_floor(&mut self) {
+        let floor = self.state.sequencer.floor();
+        let before = self.state.needed_heights.len();
+        self.state.needed_heights.retain(|height| *height > floor);
+        if self.state.needed_heights.len() != before {
+            self.publish_candidate_state();
+        }
+    }
+
     async fn finish_frontier_update(&mut self, old_serving_tip: (block::Height, block::Hash)) {
         self.queue_status_refresh_if_changed(old_serving_tip);
         self.flush_status_refresh().await;
-        if !self.query_needed_blocks().await {
-            self.pause_new_body_downloads();
-        }
+        self.query_needed_blocks().await;
         self.release_caught_up_block_sync_peers();
     }
 
@@ -553,15 +562,16 @@ impl BlockSyncReactor {
             .sequencer
             .reset_to(frontiers.verified_block_tip, remember_released_applies);
         self.state.budget.release(released);
-        self.state.schedule.clear_covered_from(block::Height::MIN);
+        // Drop every download work item above the reset target (their buffers
+        // were cleared by `reset_to`); the `query_needed_blocks` below re-fills.
+        self.state.work.reset_above(self.state.sequencer.floor());
+        // Drop every peer's outstanding request (none match the now-empty needed
+        // set), releasing their reservations without re-queuing.
         self.drop_ranges_not_in_needed(&HashMap::new());
-        self.state.schedule.retain_matching_needed(&HashMap::new());
 
         self.queue_status_refresh_if_changed(old_serving_tip);
         self.flush_status_refresh().await;
-        if !self.query_needed_blocks().await {
-            self.pause_new_body_downloads();
-        }
+        self.query_needed_blocks().await;
         self.release_caught_up_block_sync_peers();
     }
 
@@ -596,64 +606,42 @@ impl BlockSyncReactor {
         self.state.needed_heights.dedup();
         self.publish_candidate_state();
 
-        let needed = blocks
-            .into_iter()
-            .map(|block| NeededBlock {
-                height: block.height,
-                hash: block.hash,
-                size: block.size,
-            })
-            .collect::<Vec<_>>();
-        let needed_hashes = needed
+        let needed_hashes = blocks
             .iter()
             .map(|block| (block.height, block.hash))
             .collect::<HashMap<_, _>>();
         // State queries are snapshots taken while peer responses are still in
         // flight. A newer snapshot can omit heights from an active request
         // because those bodies are already buffered, applying, verified, or the
-        // query simply raced with the response. Keep active ranges correlated
-        // unless state explicitly reports a different hash for one of their
-        // heights; otherwise valid late bodies become `UnsolicitedBlock` and
-        // cause avoidable peer churn.
+        // query simply raced with the response. Prune only a peer's outstanding
+        // request when state reports a *different* hash for one of its heights;
+        // otherwise valid late bodies become `UnsolicitedBlock` and cause
+        // avoidable peer churn. (`needed_hashes_with_active_outstanding` re-adds
+        // every active outstanding height so a raced snapshot does not drop it.)
         let retention_hashes = self.needed_hashes_with_active_outstanding(&needed_hashes);
         self.drop_ranges_not_in_needed(&retention_hashes);
-        self.state
-            .schedule
-            .retain_matching_needed(&retention_hashes);
-        self.state.schedule.refresh_needed(needed);
-        if self.should_pause_new_body_downloads() {
-            self.pause_new_body_downloads();
-            self.release_caught_up_block_sync_peers();
-            return;
-        }
+        // The WorkQueue producer is additive and idempotent: `extend` inserts only
+        // heights above the floor that are not already pending or in flight, so a
+        // buffered/in-flight height is never re-queued and a stale snapshot cannot
+        // duplicate work. Heights that fall below the floor are GC'd by
+        // `advance_floor`; heights above a reset target by `reset_above`.
+        let count = self.state.work.extend(
+            blocks
+                .into_iter()
+                .map(|block| (block.height, block.hash, block.size)),
+        );
+        self.trace_work_extended(count);
         self.schedule().await;
     }
 
-    fn clear_needed_heights(&mut self) {
-        if self.state.needed_heights.is_empty() {
-            return;
-        }
-        self.state.needed_heights.clear();
-        self.publish_candidate_state();
-    }
-
-    fn pause_new_body_downloads(&mut self) {
-        self.clear_needed_heights();
-        self.state.schedule.clear_queued();
-    }
-
+    /// Header tip minus verified body tip, emitted as the `body_lag` trace field
+    /// only. Downloads gate on byte budget + per-peer slots — never on this lag
+    /// (no near-tip pause); see the design doc §7.8.
     fn body_lag(&self) -> u32 {
         self.state
             .best_header_tip
             .0
             .saturating_sub(self.state.sequencer.verified_tip().0)
-    }
-
-    fn should_pause_new_body_downloads(&self) -> bool {
-        let lag = self.body_lag();
-        lag == 0
-            || lag <= self.startup.config.near_tip_body_download_pause_blocks
-            || self.state.budget.available() == 0
     }
 
     fn release_caught_up_block_sync_peers(&mut self) {
@@ -899,24 +887,15 @@ impl BlockSyncReactor {
             .sequencer
             .accept_body(height, hash, block, serialized_bytes, peer.clone())
         {
-            AcceptOutcome::Buffered { covered } => {
-                // A received body is now held in memory. Mark it covered so the
-                // retry path stops re-requesting it. `refresh_needed` already
-                // drops buffered heights from `needed`, but the retry path
-                // (`handle_timeouts` / `handle_blocks_done` -> `retry`) bypasses
-                // that filter and re-queues buffered heights via `push_front`.
-                // A run buffered above an open gap was otherwise re-fetched
-                // indefinitely (in production a single height was re-requested
-                // thousands of times), pinning the queue front and every peer
-                // slot so the gap below the run never got a request and the
-                // download floor never advanced. `retry`, `ensure`, and
-                // `prune_covered` all skip covered heights, so this stops the
-                // churn and lets the gap be scheduled. Covered is cleared if the
-                // block is later rolled back (apply `Rejected`/`TimedOut` ->
-                // `clear_covered_from`) or the chain tip resets, both of which
-                // also drop the buffer, so a dropped body becomes requestable
-                // again.
-                self.state.schedule.mark_height_covered(covered);
+            AcceptOutcome::Buffered { .. } => {
+                // A received body is now held in memory. No covered mark is
+                // needed: the height was taken from the WorkQueue into `in_flight`
+                // and stays there until the floor passes it (committed) or its
+                // request times out (`return_items`). The producer's `extend`
+                // skips any height already in `in_flight`, so a buffered height is
+                // never re-queued. A rollback (apply `Rejected`/`TimedOut`) or
+                // chain-tip reset drops the buffer and `reset_above`s the queue,
+                // making the dropped body requestable again.
             }
             AcceptOutcome::Redundant { release_bytes } => {
                 // The body is not buffered (already at/below the floor, held in
@@ -1008,24 +987,39 @@ impl BlockSyncReactor {
         self.state.budget.release(outstanding.reserved_bytes());
         match disposition {
             OutstandingRangeDisposition::Satisfied => {
-                self.state.schedule.clear_assignment(&outstanding.request);
+                // Every requested height was received and buffered; nothing
+                // returns to the queue. Buffered heights stay in `in_flight`
+                // until the floor commits past them.
             }
-            OutstandingRangeDisposition::RetryOriginal => {
-                self.state.schedule.retry(outstanding.request);
-            }
-            OutstandingRangeDisposition::RetryMissing => {
-                self.state.schedule.clear_assignment(&outstanding.request);
-                for request in outstanding
-                    .missing_retry_requests(|height, hash| {
-                        self.should_retry_missing_height(height, hash)
-                    })
-                    .into_iter()
-                    .rev()
-                {
-                    self.state.schedule.retry(request);
-                }
+            // With fanout = 1 a received height is already buffered and must never
+            // be re-fetched, so both retry dispositions return only the *unreceived*
+            // heights to `pending`. `return_items` is idempotent: a height already
+            // GC'd past the floor (no longer in `in_flight`) is silently skipped.
+            OutstandingRangeDisposition::RetryOriginal
+            | OutstandingRangeDisposition::RetryMissing => {
+                self.return_unreceived_to_queue(&outstanding);
             }
         }
+    }
+
+    /// Return an outstanding request's unreceived heights to the WorkQueue's
+    /// pending set so any servable peer can re-fetch them.
+    fn return_unreceived_to_queue(&self, outstanding: &OutstandingBlockRange) {
+        self.state.work.return_items(
+            outstanding
+                .request
+                .expected_hashes
+                .iter()
+                .filter(|(height, _)| !outstanding.has_received(*height))
+                .map(|(height, _)| *height),
+        );
+    }
+
+    /// Return a freshly-taken (never-sent) chunk of WorkQueue items to `pending`.
+    fn return_taken_items(&self, items: &[(block::Height, WorkItem)]) {
+        self.state
+            .work
+            .return_items(items.iter().map(|(height, _)| *height));
     }
 
     async fn handle_range_unavailable(
@@ -1107,7 +1101,7 @@ impl BlockSyncReactor {
         block: Arc<block::Block>,
         body_wire_bytes: Option<u64>,
     ) -> bool {
-        if self.state.schedule.queued_hash_for_height(height) != Some(hash) {
+        if self.state.work.hash_for_height(height) != Some(hash) {
             return false;
         }
         if let Some(peer_state) = self.state.peers.get(peer) {
@@ -1165,14 +1159,20 @@ impl BlockSyncReactor {
             return true;
         }
 
+        // Claim this height into `in_flight` so it leaves `pending` and no other
+        // peer re-fetches it while it is buffered. If it is already `in_flight`
+        // (still held by another peer's outstanding request) the take is a no-op
+        // and the height stays in flight; the Sequencer drops the later duplicate.
+        // Once buffered, the height stays in `in_flight` until the floor commits
+        // past it (no covered mark needed under the WorkQueue model).
+        let _ = self.state.work.take_in_range(height, height, 1);
+
         match self
             .state
             .sequencer
             .accept_body(height, hash, block, serialized_bytes, peer.clone())
         {
-            AcceptOutcome::Buffered { covered } => {
-                self.state.schedule.mark_height_covered(covered);
-            }
+            AcceptOutcome::Buffered { .. } => {}
             AcceptOutcome::Redundant { release_bytes } => {
                 // The height was already buffered/applying/committed, so the
                 // reservation just taken is not owned by anything and is returned.
@@ -1494,14 +1494,15 @@ impl BlockSyncReactor {
                 if height > self.state.sequencer.verified_tip() =>
             {
                 // Drop the rejected body and every successor (in applying and
-                // reorder), roll the floor back below it, and clear the
-                // download-scheduler covered marks so the heights are
-                // re-requestable. The Sequencer returns the freed bytes for the
-                // reactor to release; budget stays in the reactor.
+                // reorder), roll the floor back below it, and drop the WorkQueue
+                // entries above the rolled-back floor so the heights are
+                // re-requestable (the subsequent `query_needed_blocks` re-fills).
+                // The Sequencer returns the freed bytes for the reactor to
+                // release; budget stays in the reactor.
                 let released = self.state.sequencer.release_applying_blocks_from(height);
                 self.state.budget.release(released);
                 self.state.sequencer.reset_floor_below(height);
-                self.state.schedule.clear_covered_from(height);
+                self.state.work.reset_above(self.state.sequencer.floor());
                 let dropped = self.state.sequencer.drop_reorder_from(height);
                 self.state.budget.release(dropped);
                 // A `Rejected` result means consensus found the body invalid
@@ -1533,9 +1534,7 @@ impl BlockSyncReactor {
             self.queue_status_refresh_if_changed(old_serving_tip);
             self.flush_status_refresh().await;
         }
-        if !self.query_needed_blocks().await {
-            self.pause_new_body_downloads();
-        }
+        self.query_needed_blocks().await;
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
     }
@@ -1575,7 +1574,7 @@ impl BlockSyncReactor {
     }
 
     async fn query_needed_blocks(&mut self) -> bool {
-        if !self.startup.state_queries_enabled || self.should_pause_new_body_downloads() {
+        if !self.startup.state_queries_enabled {
             return false;
         }
         if self.local_body_work_blocks() >= self.refill_low_water_blocks() {
@@ -1609,20 +1608,17 @@ impl BlockSyncReactor {
             })
             .sum();
 
-        // Count only the download pipeline (queued + in-flight requests) against
-        // the refill low-water mark, never the commit pipeline (`reorder` +
-        // `applying`). Downloads are bounded by the in-flight byte budget
-        // (`should_pause_new_body_downloads` pauses at `budget.available() == 0`)
-        // and per-peer slots, not by how fast commit/verify drains. Including
-        // reorder/applying here would pace downloads to commit speed: a slow
-        // commit lets those buffers grow, the low-water gate stops refilling, and
-        // `outstanding` collapses. The byte budget already bounds memory because
-        // reorder/applying hold their reservation until apply-finish, so downloads
-        // may legitimately run far ahead of commit up to that budget.
-        self.state
-            .schedule
-            .queued_block_count()
-            .saturating_add(outstanding)
+        // Count only the download pipeline (pending WorkQueue heights + the
+        // unreceived heights of in-flight requests) against the refill low-water
+        // mark, never the commit pipeline (`reorder` + `applying`). Downloads are
+        // bounded by the in-flight byte budget and per-peer slots, not by how fast
+        // commit/verify drains. Including reorder/applying here would pace
+        // downloads to commit speed: a slow commit lets those buffers grow, the
+        // low-water gate stops refilling, and `outstanding` collapses. The byte
+        // budget already bounds memory because reorder/applying hold their
+        // reservation until apply-finish, so downloads may legitimately run far
+        // ahead of commit up to that budget.
+        self.state.work.pending_len().saturating_add(outstanding)
     }
 
     fn refill_low_water_blocks(&self) -> usize {
@@ -1704,67 +1700,147 @@ impl BlockSyncReactor {
         }
     }
 
-    /// Shared scheduling preamble: drain ready applies, reclaim overdue
-    /// requests, and decide whether new body downloads may be issued. Returns
-    /// `true` when issuance should proceed, or `false` (with a traced reason)
-    /// when downloads are paused. Both `schedule` (full pass) and
-    /// `schedule_peer` (peer-scoped) call this first, so no issuance entry point
-    /// ever skips this housekeeping.
-    async fn prepare_schedule(&mut self) -> bool {
+    /// Shared scheduling preamble: drain ready applies into the verifier and
+    /// reclaim overdue requests. Both `schedule` (full pass) and `schedule_peer`
+    /// (peer-scoped) call this first, so no issuance entry point ever skips this
+    /// housekeeping. There is no pause gate: downloads are governed solely by the
+    /// byte budget (`try_reserve` in `fill_peer`) and per-peer slots — never by
+    /// floor-distance / near-tip lag (design doc §7.8).
+    async fn prepare_schedule(&mut self) {
         self.submit_pending_blocks().await;
         self.expire_due_timeouts(Instant::now());
-
-        if self.should_pause_new_body_downloads() {
-            let reason = if self.body_lag() == 0 {
-                "lag_zero"
-            } else if self.body_lag() <= self.startup.config.near_tip_body_download_pause_blocks {
-                "near_tip"
-            } else {
-                "budget_full"
-            };
-            self.trace_downloads_paused(reason);
-            return false;
-        }
-
-        true
     }
 
     /// Fill one peer's available slots in a single pass, letting the byte budget
-    /// (re-checked each iteration) be the congestion window. A raised slot cap is
-    /// only useful if we can open the window promptly rather than one slot per
-    /// scheduling event. Returns `false` when the global pause condition tripped
-    /// mid-fill so the full-pass caller stops scanning the remaining peers.
+    /// (re-checked each iteration via `try_reserve`) be the congestion window. A
+    /// raised slot cap is only useful if we can open the window promptly rather
+    /// than one slot per scheduling event. Returns `true` always (there is no
+    /// global pause condition; the byte budget + per-peer slots are the only
+    /// governor — design doc §7.8).
     async fn fill_peer(
         &mut self,
         peer_id: &ZakuraPeerId,
         per_peer_byte_cap: u64,
         scheduled_since_timeout_check: &mut usize,
     ) -> bool {
+        let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
         loop {
-            if self.should_pause_new_body_downloads() {
-                return false;
-            }
             let Some(peer) = self.state.peers.get(peer_id) else {
                 break;
             };
             if !peer.received_status || peer.available_slots() == 0 {
                 break;
             }
-            let request = match self.state.schedule.next_for_peer(
-                peer_id,
-                peer,
-                &mut self.state.budget,
-                per_peer_byte_cap,
-                self.startup.config.advertised_max_blocks_per_response(),
-            ) {
-                Ok(request) => request,
-                Err(reason) => {
-                    self.trace_schedule_skipped(peer_id, reason);
+            // One contiguous chunk up to the peer's per-request count cap; the
+            // outer loop fills the rest of the peer's slots.
+            let max_count = usize::try_from(
+                peer.max_blocks_per_response
+                    .min(self.startup.config.advertised_max_blocks_per_response())
+                    .max(1),
+            )
+            .unwrap_or(usize::MAX);
+            let (servable_low, servable_high) = (peer.servable_low, peer.servable_high);
+
+            // Take work in this peer's servable range. `servable_high` is NOT
+            // clamped to the floor: a peer fetches as far ahead of the committed
+            // floor as its servable range and the byte budget allow.
+            let mut items = self
+                .state
+                .work
+                .take_in_range(servable_low, servable_high, max_count);
+            if items.is_empty() {
+                self.trace_schedule_skipped(peer_id, ScheduleSkipReason::NoAssignableRange);
+                break;
+            }
+            self.trace_work_taken(peer_id, servable_low, servable_high, items.len());
+
+            // Bound this peer's share of the global byte budget so one fast peer
+            // cannot reserve the whole window and starve the others. The
+            // reservation is worst-case per block (commit 1: it only ever shrinks
+            // toward the actual size on receipt, so a valid body is never dropped
+            // for a full budget).
+            let peer_reserved: u64 = peer
+                .outstanding
+                .iter()
+                .map(|outstanding| outstanding.reserved_bytes())
+                .sum();
+            let peer_headroom = per_peer_byte_cap.saturating_sub(peer_reserved);
+            let max_bytes = self
+                .state
+                .budget
+                .available()
+                .min(u64::from(peer.max_response_bytes.max(1)))
+                .min(peer_headroom);
+
+            // Keep only as many of the taken items as fit under `max_bytes` at the
+            // worst case each; return the overflow to the queue for another slot
+            // or peer.
+            let kept_count = if worst == 0 {
+                items.len()
+            } else {
+                usize::try_from(max_bytes / worst)
+                    .unwrap_or(usize::MAX)
+                    .min(items.len())
+            };
+            if kept_count < items.len() {
+                let overflow: Vec<_> = items.split_off(kept_count);
+                self.state
+                    .work
+                    .return_items(overflow.into_iter().map(|(height, _)| height));
+            }
+            if kept_count == 0 {
+                // The first block did not fit; return it and stop filling this
+                // peer. The reason mirrors the old scheduler's classification.
+                let reason = if peer_headroom == 0 {
+                    ScheduleSkipReason::PeerByteCapExhausted
+                } else if self.state.budget.available() < worst {
+                    ScheduleSkipReason::BudgetExhausted
+                } else {
+                    ScheduleSkipReason::FirstBlockExceedsByteLimit
+                };
+                self.return_taken_items(&items);
+                self.trace_schedule_skipped(peer_id, reason);
+                break;
+            }
+
+            let reserved_bytes = worst.saturating_mul(kept_count as u64);
+            if !self.state.budget.try_reserve(reserved_bytes) {
+                self.return_taken_items(&items);
+                self.trace_schedule_skipped(peer_id, ScheduleSkipReason::ReserveFailed);
+                break;
+            }
+
+            let count = match u32::try_from(kept_count) {
+                Ok(count) => count,
+                Err(_) => {
+                    self.state.budget.release(reserved_bytes);
+                    self.return_taken_items(&items);
+                    self.trace_schedule_skipped(peer_id, ScheduleSkipReason::RequestCountOverflow);
                     break;
                 }
             };
+            let request = BlockRangeRequest {
+                start_height: items[0].0,
+                count,
+                anchor_hash: items[0].1.hash,
+                // The reserved worst-case total (released on a send failure below);
+                // distinct from the size *estimates* in `expected_bytes`.
+                estimated_bytes: reserved_bytes,
+                expected_hashes: items
+                    .iter()
+                    .map(|(height, item)| (*height, item.hash))
+                    .collect(),
+                expected_bytes: items
+                    .iter()
+                    .map(|(height, item)| (*height, item.estimated_bytes))
+                    .collect(),
+            };
 
             let Some(peer) = self.state.peers.get(peer_id) else {
+                // Peer vanished after the take: release the reservation and return
+                // the heights so another peer can fetch them.
+                self.state.budget.release(reserved_bytes);
+                self.return_taken_items(&items);
                 break;
             };
             let queued_at = Instant::now();
@@ -1781,7 +1857,8 @@ impl BlockSyncReactor {
                 );
                 peer.session.cancel_token().cancel();
                 self.state.budget.release(request.estimated_bytes);
-                self.state.schedule.retry(request);
+                // Nothing was received, so return every taken height to the queue.
+                self.return_taken_items(&items);
                 break;
             }
 
@@ -1828,9 +1905,7 @@ impl BlockSyncReactor {
     /// budget first. The cursor is a stored counter, so the order stays
     /// deterministic and reproducible in tests.
     async fn schedule(&mut self) {
-        if !self.prepare_schedule().await {
-            return;
-        }
+        self.prepare_schedule().await;
 
         let mut peer_ids: Vec<_> = self.state.peers.keys().cloned().collect();
         peer_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
@@ -1858,28 +1933,14 @@ impl BlockSyncReactor {
                 }
             }
         }
-
-        // The timeout-retry bias only steers the pass that follows the timeout
-        // that set it; drop the marks now that this pass has placed (or
-        // deferred) every range.
-        self.state.schedule.clear_timeout_avoid();
     }
 
     /// Peer-scoped scheduling: run the shared preamble, then fill only the slots
     /// of the one peer whose capacity an event just changed (a status, a
     /// completed request, a freed slot). This keeps the high-frequency per-peer
     /// message path O(1) instead of O(peers).
-    ///
-    /// Clearing `clear_timeout_avoid` after a single peer is correct: the
-    /// timeout-retry-avoid marks are (re)set by `expire_due_timeouts` inside
-    /// `prepare_schedule` immediately above, and the only consumer between
-    /// setting and clearing them is this one `fill_peer`. The full pass has the
-    /// same single-pass lifecycle; per-peer scheduling does not extend the marks'
-    /// lifetime, so no stale bias leaks into a later event.
     async fn schedule_peer(&mut self, peer_id: &ZakuraPeerId) {
-        if !self.prepare_schedule().await {
-            return;
-        }
+        self.prepare_schedule().await;
 
         let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
         let mut scheduled_since_timeout_check = 0usize;
@@ -1889,18 +1950,15 @@ impl BlockSyncReactor {
             &mut scheduled_since_timeout_check,
         )
         .await;
-
-        self.state.schedule.clear_timeout_avoid();
     }
 
     async fn release_contiguous_blocks(&mut self) {
         // The Sequencer drains its contiguous reorder prefix into `applying`,
-        // advancing its floor, and returns the newly-covered heights so the
-        // reactor marks them covered in the download scheduler.
-        for height in self.state.sequencer.drain_ready_into_applying() {
-            self.state.schedule.mark_height_covered(height);
-        }
-
+        // advancing its floor. The drained heights are already in `in_flight` in
+        // the WorkQueue (taken when requested, received, never returned), so no
+        // covered mark is needed; they leave `in_flight` only when the floor
+        // commits past them (`advance_floor`).
+        let _ = self.state.sequencer.drain_ready_into_applying();
         self.submit_pending_blocks().await;
     }
 
@@ -1947,14 +2005,6 @@ impl BlockSyncReactor {
                 .iter()
                 .any(|outstanding| outstanding.request.start_height == start_height)
         })
-    }
-
-    fn should_retry_missing_height(&self, height: block::Height, hash: block::Hash) -> bool {
-        height > self.state.sequencer.floor()
-            && !self.state.sequencer.reorder_contains(height)
-            && !self.state.sequencer.applying_contains(height)
-            && !self.state.sequencer.has_submitted_apply(height, hash)
-            && !self.has_outstanding_request(height, hash)
     }
 
     fn has_active_successor_after(&self, height: block::Height) -> bool {
@@ -2514,20 +2564,20 @@ impl BlockSyncReactor {
             bs_insert_u64(
                 row,
                 bs_trace::QUEUE_LEN,
-                self.state.schedule.queued_range_count() as u64,
+                self.state.work.pending_run_count() as u64,
             );
             bs_insert_u64(
                 row,
                 bs_trace::QUEUE_BLOCKS,
-                self.state.schedule.queued_block_count() as u64,
+                self.state.work.pending_len() as u64,
             );
-            if let Some(start) = self.state.schedule.queued_min_start() {
+            if let Some(start) = self.state.work.min_pending() {
                 bs_insert_height(row, bs_trace::QUEUE_MIN_START, start);
             }
             bs_insert_u64(
                 row,
                 bs_trace::ASSIGNED_LEN,
-                self.state.schedule.assigned_key_count() as u64,
+                self.state.work.in_flight_len() as u64,
             );
             bs_insert_u64(
                 row,
@@ -2539,7 +2589,7 @@ impl BlockSyncReactor {
                 bs_trace::REFILL_LOW_WATER,
                 self.refill_low_water_blocks() as u64,
             );
-            if let Some(end) = self.state.schedule.covered_max_end() {
+            if let Some(end) = self.state.work.max_in_flight() {
                 bs_insert_height(row, bs_trace::COVERED_MAX_END, end);
             }
         });
@@ -2725,15 +2775,37 @@ impl BlockSyncReactor {
         });
     }
 
-    fn trace_downloads_paused(&self, reason: &'static str) {
-        self.emit_trace(bs_trace::BLOCK_DOWNLOADS_PAUSED, |row| {
-            bs_insert_str(row, bs_trace::REASON, reason);
-            bs_insert_u64(row, bs_trace::BODY_LAG, u64::from(self.body_lag()));
+    /// Trace a WorkQueue producer extend (heights newly added to `pending`).
+    fn trace_work_extended(&self, inserted: usize) {
+        if !self.startup.trace.is_enabled() {
+            return;
+        }
+        self.emit_trace(bs_trace::BLOCK_WORK_EXTENDED, |row| {
+            bs_insert_u64(row, bs_trace::RANGE_COUNT, inserted as u64);
             bs_insert_u64(
                 row,
-                bs_trace::BUDGET_AVAILABLE,
-                self.state.budget.available(),
+                bs_trace::QUEUE_BLOCKS,
+                self.state.work.pending_len() as u64,
             );
+        });
+    }
+
+    /// Trace a WorkQueue take (a contiguous chunk claimed by a peer for issuance).
+    fn trace_work_taken(
+        &self,
+        peer: &ZakuraPeerId,
+        low: block::Height,
+        high: block::Height,
+        count: usize,
+    ) {
+        if !self.startup.trace.is_enabled() {
+            return;
+        }
+        self.emit_trace(bs_trace::BLOCK_WORK_TAKEN, |row| {
+            bs_insert_peer(row, bs_trace::PEER, peer);
+            bs_insert_height(row, "servable_low", low);
+            bs_insert_height(row, "servable_high", high);
+            bs_insert_u64(row, bs_trace::RANGE_COUNT, count as u64);
         });
     }
 
@@ -2772,20 +2844,20 @@ impl BlockSyncReactor {
             bs_insert_u64(
                 row,
                 bs_trace::QUEUE_LEN,
-                self.state.schedule.queued_range_count() as u64,
+                self.state.work.pending_run_count() as u64,
             );
             bs_insert_u64(
                 row,
                 bs_trace::QUEUE_BLOCKS,
-                self.state.schedule.queued_block_count() as u64,
+                self.state.work.pending_len() as u64,
             );
-            if let Some(start) = self.state.schedule.queued_min_start() {
+            if let Some(start) = self.state.work.min_pending() {
                 bs_insert_height(row, bs_trace::QUEUE_MIN_START, start);
             }
             bs_insert_u64(
                 row,
                 bs_trace::ASSIGNED_LEN,
-                self.state.schedule.assigned_key_count() as u64,
+                self.state.work.in_flight_len() as u64,
             );
             bs_insert_u64(row, bs_trace::BUDGET_RESERVED, self.state.budget.reserved());
             bs_insert_u64(
@@ -2864,14 +2936,14 @@ impl BlockSyncReactor {
             "reorder"
         } else if outstanding_peers > 0 {
             "outstanding"
-        } else if self.state.schedule.queued_contains_height(height) {
+        } else if self.state.work.pending_contains(height) {
             "queued"
-        } else if self.state.schedule.assigned_contains_height(height) {
-            "assigned_without_outstanding"
+        } else if self.state.work.in_flight_contains(height) {
+            // Held in `in_flight` but no peer has an outstanding request for it:
+            // a taken-then-buffered height (or one whose holder just dropped).
+            "in_flight_without_outstanding"
         } else if self.state.needed_heights.binary_search(&height).is_ok() {
             "needed_unscheduled"
-        } else if self.state.schedule.covered_contains_height(height) {
-            "covered"
         } else {
             "absent"
         };

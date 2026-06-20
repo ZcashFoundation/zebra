@@ -94,7 +94,6 @@ max_blocks_per_response = 128
 max_inflight_block_bytes = 4294967296
 max_inflight_requests = 16
 max_response_bytes = 33554432
-near_tip_body_download_pause_blocks = 2
 request_timeout = "30s"
 size_deviation_tolerance = 200
 status_refresh_interval = "30s"

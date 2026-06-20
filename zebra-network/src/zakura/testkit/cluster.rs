@@ -1499,7 +1499,6 @@ mod tests {
         limits.stream_open_rate_per_second = 64;
 
         let block_sync_config = ZakuraBlockSyncConfig {
-            near_tip_body_download_pause_blocks: 0,
             max_blocks_per_response: 3,
             max_inflight_block_bytes: u64::MAX,
             request_timeout: Duration::from_secs(300),
