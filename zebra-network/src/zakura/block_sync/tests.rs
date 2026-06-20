@@ -3,8 +3,8 @@ use std::{collections::HashMap, future};
 use super::*;
 use super::{
     config::{
-        DEFAULT_BS_FANOUT, DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES, DEFAULT_BS_REQUEST_TIMEOUT,
-        MAX_BS_INFLIGHT_REQUESTS, MAX_BS_RESPONSE_BYTES,
+        BS_PER_BLOCK_WORST_CASE_BYTES, DEFAULT_BS_FANOUT, DEFAULT_BS_MAX_SUBMITTED_BLOCK_APPLIES,
+        DEFAULT_BS_REQUEST_TIMEOUT, MAX_BS_INFLIGHT_REQUESTS, MAX_BS_RESPONSE_BYTES,
     },
     reactor::node_id_from_block_peer_id,
     reorder::*,
@@ -562,7 +562,7 @@ fn scheduler_retry_after_timeout_prefers_a_different_peer() {
     slow_state.max_blocks_per_response = 1;
     let (healthy_peer, mut healthy_state) = peer_state(48);
     healthy_state.max_blocks_per_response = 1;
-    let mut budget = ByteBudget::new(10_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 10);
 
     // The slow peer first downloads the floor (h1)...
     let floor = scheduler
@@ -599,7 +599,7 @@ fn scheduler_retry_after_timeout_falls_back_to_sole_servable_peer() {
     scheduler.refresh_needed(vec![needed(1, BlockSizeEstimate::Advertised(100))]);
     let (slow_peer, mut slow_state) = peer_state(47);
     slow_state.max_blocks_per_response = 1;
-    let mut budget = ByteBudget::new(10_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 10);
 
     let floor = scheduler
         .next_for_peer(&slow_peer, &slow_state, &mut budget, u64::MAX, 1)
@@ -941,7 +941,7 @@ fn scheduler_assigns_needed_ranges_with_fanout_slots_and_dedup() {
         needed(2, BlockSizeEstimate::Advertised(10_000)),
         needed(3, BlockSizeEstimate::Advertised(10_000)),
     ]);
-    let mut budget = ByteBudget::new(1_000_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
     let (peer1, state1) = peer_state(31);
     let (peer2, state2) = peer_state(32);
     let (peer3, state3) = peer_state(33);
@@ -998,6 +998,9 @@ fn scheduler_assigns_needed_ranges_with_fanout_slots_and_dedup() {
 
 #[test]
 fn scheduler_byte_budget_sizing_shrinks_or_defers_requests() {
+    // Block sync reserves worst-case bytes per requested block, so request sizing
+    // is in units of `BS_PER_BLOCK_WORST_CASE_BYTES`, not advertised size hints.
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
     let mut scheduler = BlockRangeScheduler::new(1);
     scheduler.set_estimator_for_tests(750, 1);
     scheduler.refresh_needed(vec![
@@ -1006,9 +1009,10 @@ fn scheduler_byte_budget_sizing_shrinks_or_defers_requests() {
         needed(12, BlockSizeEstimate::Advertised(100)),
     ]);
     let (peer, mut state) = peer_state(34);
-    state.max_response_bytes = 180;
+    // A response cap between one and two worst-case shares admits exactly one.
+    state.max_response_bytes = u32::try_from(worst + worst / 2).expect("fits in u32");
     state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(worst * 10);
 
     let request = scheduler
         .next_for_peer(
@@ -1021,12 +1025,13 @@ fn scheduler_byte_budget_sizing_shrinks_or_defers_requests() {
         .expect("one block fits the peer response-byte cap");
     assert_eq!(request.start_height, block::Height(10));
     assert_eq!(request.count, 1);
-    assert_eq!(budget.reserved(), 100);
+    assert_eq!(budget.reserved(), worst);
 
     scheduler.complete(&request, &mut budget);
     assert_eq!(budget.reserved(), 0);
 
-    let mut small_budget = ByteBudget::new(50);
+    // A budget below one worst-case share cannot fit even the first block.
+    let mut small_budget = ByteBudget::new(worst - 1);
     assert!(
         scheduler
             .next_for_peer(
@@ -1044,6 +1049,9 @@ fn scheduler_byte_budget_sizing_shrinks_or_defers_requests() {
 
 #[test]
 fn scheduler_per_peer_byte_cap_limits_request_below_global_budget() {
+    // Per-peer byte caps bind in worst-case units: each requested block reserves
+    // `BS_PER_BLOCK_WORST_CASE_BYTES` regardless of its advertised size hint.
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
     let mut scheduler = BlockRangeScheduler::new(1);
     scheduler.set_estimator_for_tests(750, 1);
     scheduler.refresh_needed(vec![
@@ -1052,20 +1060,28 @@ fn scheduler_per_peer_byte_cap_limits_request_below_global_budget() {
         needed(3, BlockSizeEstimate::Advertised(100)),
     ]);
     let (peer, mut state) = peer_state(50);
-    state.max_response_bytes = 10_000; // peer response cap not binding
+    state.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX); // not binding
     state.max_blocks_per_response = 10; // count cap not binding
-    let mut budget = ByteBudget::new(1_000_000); // global budget ample
+    let mut budget = ByteBudget::new(worst * 100); // global budget ample
 
-    // A 150-byte per-peer cap admits only the first 100-byte block, even though
-    // the count cap, peer response cap, and global budget all have ample room.
+    // A per-peer cap between one and two worst-case shares admits only the first
+    // block, even though the count cap, peer response cap, and global budget all
+    // have ample room.
     let request = scheduler
-        .next_for_peer(&peer, &state, &mut budget, 150, MAX_BS_BLOCKS_PER_REQUEST)
+        .next_for_peer(
+            &peer,
+            &state,
+            &mut budget,
+            worst + worst / 2,
+            MAX_BS_BLOCKS_PER_REQUEST,
+        )
         .expect("first block fits the per-peer byte cap");
     assert_eq!(request.count, 1);
-    assert_eq!(request.estimated_bytes, 100);
-    assert_eq!(budget.reserved(), 100);
+    assert_eq!(request.estimated_bytes, worst);
+    assert_eq!(budget.reserved(), worst);
 
-    // A fresh peer with a 1_000-byte cap batches the whole three-block range.
+    // A fresh peer with a cap covering three worst-case shares batches the whole
+    // three-block range.
     let mut scheduler2 = BlockRangeScheduler::new(1);
     scheduler2.set_estimator_for_tests(750, 1);
     scheduler2.refresh_needed(vec![
@@ -1074,20 +1090,20 @@ fn scheduler_per_peer_byte_cap_limits_request_below_global_budget() {
         needed(3, BlockSizeEstimate::Advertised(100)),
     ]);
     let (peer2, mut state2) = peer_state(51);
-    state2.max_response_bytes = 10_000;
+    state2.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX);
     state2.max_blocks_per_response = 10;
-    let mut budget2 = ByteBudget::new(1_000_000);
+    let mut budget2 = ByteBudget::new(worst * 100);
     let request2 = scheduler2
         .next_for_peer(
             &peer2,
             &state2,
             &mut budget2,
-            1_000,
+            worst * 3,
             MAX_BS_BLOCKS_PER_REQUEST,
         )
         .expect("higher per-peer cap admits the whole range");
     assert_eq!(request2.count, 3);
-    assert_eq!(request2.estimated_bytes, 300);
+    assert_eq!(request2.estimated_bytes, worst * 3);
 }
 
 #[test]
@@ -1323,9 +1339,12 @@ fn scheduler_partial_requests_clear_the_issued_assignment_key() {
         needed(12, BlockSizeEstimate::Advertised(100)),
     ]);
     let (peer, mut state) = peer_state(38);
-    state.max_response_bytes = 200;
+    // A response cap between two and three worst-case shares admits two blocks.
+    state.max_response_bytes =
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2 + BS_PER_BLOCK_WORST_CASE_BYTES / 2)
+            .unwrap_or(u32::MAX);
     state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let request = scheduler
         .next_for_peer(
@@ -1359,7 +1378,7 @@ fn scheduler_drops_verified_prefix_from_queued_ranges() {
         needed(11, BlockSizeEstimate::Advertised(100)),
         needed(12, BlockSizeEstimate::Advertised(100)),
     ]);
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let first = scheduler
         .next_for_peer(
@@ -1410,7 +1429,7 @@ fn scheduler_refresh_splits_around_assigned_and_queued_ranges() {
             .map(|height| needed(height, BlockSizeEstimate::Advertised(100)))
             .collect(),
     );
-    let mut budget = ByteBudget::new(10_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let first = scheduler
         .next_for_peer(
@@ -1449,7 +1468,7 @@ fn scheduler_drops_covered_prefix_from_partially_queued_range() {
     ]);
     let (peer1, state1) = peer_state(40);
     let (peer2, state2) = peer_state(41);
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let first = scheduler
         .next_for_peer(
@@ -1508,7 +1527,7 @@ fn scheduler_splits_queued_range_around_covered_heights() {
         needed(13, BlockSizeEstimate::Advertised(100)),
         needed(14, BlockSizeEstimate::Advertised(100)),
     ]);
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     scheduler.mark_height_covered(block::Height(12));
 
@@ -1547,7 +1566,7 @@ fn scheduler_retries_only_uncovered_suffix() {
         needed(21, BlockSizeEstimate::Advertised(100)),
         needed(22, BlockSizeEstimate::Advertised(100)),
     ]);
-    let mut budget = ByteBudget::new(1_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let request = scheduler
         .next_for_peer(
@@ -1585,7 +1604,7 @@ fn scheduler_retries_only_uncovered_suffix() {
 fn scheduler_keeps_queued_retries_and_missing_ranges_ordered_by_height() {
     let (peer, mut state) = peer_state(46);
     state.max_blocks_per_response = 10;
-    let mut budget = ByteBudget::new(10_000);
+    let mut budget = ByteBudget::new(BS_PER_BLOCK_WORST_CASE_BYTES * 100);
 
     let mut scheduler = BlockRangeScheduler::new(1);
     scheduler.set_estimator_for_tests(750, 1);
@@ -1640,11 +1659,14 @@ fn scheduler_keeps_queued_retries_and_missing_ranges_ordered_by_height() {
 
 #[test]
 fn scheduler_releases_budget_on_completion_timeout_and_cancel() {
+    // Each single-block request reserves one worst-case share regardless of the
+    // advertised size hint; completion/timeout/cancel must release it exactly.
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
     let (peer, state) = peer_state(35);
     let mut scheduler = BlockRangeScheduler::new(1);
     scheduler.set_estimator_for_tests(750, 1);
     scheduler.refresh_needed(vec![needed(20, BlockSizeEstimate::Advertised(1_000))]);
-    let mut budget = ByteBudget::new(10_000);
+    let mut budget = ByteBudget::new(worst * 10);
     let request = scheduler
         .next_for_peer(
             &peer,
@@ -1654,7 +1676,7 @@ fn scheduler_releases_budget_on_completion_timeout_and_cancel() {
             MAX_BS_BLOCKS_PER_REQUEST,
         )
         .expect("range fits");
-    assert_eq!(budget.reserved(), 1_000);
+    assert_eq!(budget.reserved(), worst);
     scheduler.complete(&request, &mut budget);
     assert_eq!(budget.reserved(), 0);
 
@@ -1680,7 +1702,7 @@ fn scheduler_releases_budget_on_completion_timeout_and_cancel() {
             MAX_BS_BLOCKS_PER_REQUEST,
         )
         .expect("retried range fits");
-    assert_eq!(budget.reserved(), 2_000);
+    assert_eq!(budget.reserved(), worst);
     assert_eq!(request.count, 1);
     scheduler.release_cancelled(&mut budget);
     assert_eq!(budget.reserved(), 0);
@@ -1719,9 +1741,14 @@ fn scheduler_drops_queued_ranges_whose_anchor_left_current_header_spine() {
 }
 
 #[test]
-fn scheduler_uses_ewma_for_unknown_and_confirmed_size_values() {
+fn scheduler_reserves_worst_case_regardless_of_size_hints() {
+    // The byte reservation is worst-case per block; EWMA/Advertised/Confirmed size
+    // hints no longer size the reservation (they still feed `expected_bytes` for
+    // size-deviation scoring). A three-block range reserves three worst-case
+    // shares regardless of how each block's size was hinted.
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
     let (peer, mut state) = peer_state(36);
-    state.max_response_bytes = 100_000;
+    state.max_response_bytes = u32::try_from(worst * 10).unwrap_or(u32::MAX);
     let mut scheduler = BlockRangeScheduler::new(1);
     scheduler.set_estimator_for_tests(750, 1_000);
     scheduler.refresh_needed(vec![
@@ -1729,7 +1756,7 @@ fn scheduler_uses_ewma_for_unknown_and_confirmed_size_values() {
         needed(31, BlockSizeEstimate::Advertised(500)),
         needed(32, BlockSizeEstimate::Confirmed(50_000)),
     ]);
-    let mut budget = ByteBudget::new(100_000);
+    let mut budget = ByteBudget::new(worst * 100);
 
     let request = scheduler
         .next_for_peer(
@@ -1741,7 +1768,7 @@ fn scheduler_uses_ewma_for_unknown_and_confirmed_size_values() {
         )
         .expect("range fits");
     assert_eq!(request.count, 3);
-    assert_eq!(request.estimated_bytes, 52_000);
+    assert_eq!(request.estimated_bytes, worst * 3);
 }
 
 #[test]
@@ -1750,16 +1777,21 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     let mut budget = ByteBudget::new(10_000);
     let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
 
+    // The reorder buffer no longer touches the budget on insert: a received body
+    // already owns its (shrunk) reservation, so the caller reserves and the buffer
+    // only takes ownership. Model that by reserving the actual bytes here.
+    assert!(budget.try_reserve(300));
     assert_eq!(
-        reorder.insert(block::Height(3), block.clone(), 300, peer(0), &mut budget),
+        reorder.insert(block::Height(3), block.clone(), 300, peer(0)),
         ReorderInsertResult::Inserted
     );
     assert!(reorder.drain_contiguous_prefix(block::Height(0)).is_empty());
     assert_eq!(reorder.buffered_bytes(), 300);
     assert_eq!(budget.reserved(), 300);
 
+    assert!(budget.try_reserve(100));
     assert_eq!(
-        reorder.insert(block::Height(1), block.clone(), 100, peer(0), &mut budget),
+        reorder.insert(block::Height(1), block.clone(), 100, peer(0)),
         ReorderInsertResult::Inserted
     );
     let released = reorder.drain_contiguous_prefix(block::Height(0));
@@ -1770,12 +1802,15 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
             .collect::<Vec<_>>(),
         vec![(block::Height(1), 100)]
     );
+    // Draining the contiguous prefix hands bytes to the apply stage; it does not
+    // release the budget, which the apply finish releases later.
     assert_eq!(reorder.buffered_bytes(), 300);
     assert_eq!(budget.reserved(), 400);
     budget.release(100);
 
+    assert!(budget.try_reserve(200));
     assert_eq!(
-        reorder.insert(block::Height(2), block.clone(), 200, peer(0), &mut budget),
+        reorder.insert(block::Height(2), block.clone(), 200, peer(0)),
         ReorderInsertResult::Inserted
     );
     let released = reorder.drain_contiguous_prefix(block::Height(1));
@@ -1789,27 +1824,31 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
     assert_eq!(budget.reserved(), 500);
     budget.release(500);
 
+    assert!(budget.try_reserve(200));
     assert_eq!(
-        reorder.insert(block::Height(2), block.clone(), 200, peer(0), &mut budget),
+        reorder.insert(block::Height(2), block.clone(), 200, peer(0)),
         ReorderInsertResult::Inserted
     );
+    assert!(budget.try_reserve(300));
     assert_eq!(
-        reorder.insert(block::Height(3), block, 300, peer(0), &mut budget),
+        reorder.insert(block::Height(3), block, 300, peer(0)),
         ReorderInsertResult::Inserted
     );
+    // `drop_from`/`drop_through`/`clear` still release the budget for bodies that
+    // never reach the apply stage.
     reorder.drop_from(block::Height(3), &mut budget);
     assert_eq!(reorder.buffered_bytes(), 200);
     assert_eq!(budget.reserved(), 200);
     reorder.drop_through(block::Height(2), &mut budget);
     assert_eq!(reorder.buffered_bytes(), 0);
     assert_eq!(budget.reserved(), 0);
+    assert!(budget.try_reserve(300));
     assert_eq!(
         reorder.insert(
             block::Height(3),
             mainnet_block(&BLOCK_MAINNET_1_BYTES),
             300,
-            peer(0),
-            &mut budget
+            peer(0)
         ),
         ReorderInsertResult::Inserted
     );
@@ -1836,14 +1875,9 @@ fn reorder_fuzzes_arrival_order_as_parent_first() {
         let mut released_all = Vec::new();
 
         for height in order {
+            assert!(budget.try_reserve(100));
             assert_eq!(
-                reorder.insert(
-                    block::Height(height),
-                    block.clone(),
-                    100,
-                    peer(0),
-                    &mut budget
-                ),
+                reorder.insert(block::Height(height), block.clone(), 100, peer(0)),
                 ReorderInsertResult::Inserted
             );
             for (released, _, bytes, _) in reorder.drain_contiguous_prefix(tip) {
@@ -1865,6 +1899,183 @@ fn reorder_fuzzes_arrival_order_as_parent_first() {
         );
         assert_eq!(budget.reserved(), 0);
     }
+}
+
+/// Build an outstanding three-block range whose worst-case reservation is already
+/// held against `budget`, mirroring what the scheduler does at send time.
+fn outstanding_three_block_range(budget: &mut ByteBudget) -> OutstandingBlockRange {
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
+    let request = BlockRangeRequest {
+        start_height: block::Height(1),
+        count: 3,
+        anchor_hash: block::Hash([1; 32]),
+        // Worst-case reservation: three blocks each reserve one worst-case share.
+        estimated_bytes: worst * 3,
+        expected_hashes: vec![
+            (block::Height(1), block::Hash([1; 32])),
+            (block::Height(2), block::Hash([2; 32])),
+            (block::Height(3), block::Hash([3; 32])),
+        ],
+        // Size hints below the worst case; the reservation does not depend on them.
+        expected_bytes: vec![
+            (block::Height(1), 1_000),
+            (block::Height(2), 1_000),
+            (block::Height(3), 1_000),
+        ],
+    };
+    assert!(budget.try_reserve(request.estimated_bytes));
+    OutstandingBlockRange {
+        request,
+        deadline: Instant::now(),
+        received: HashSet::new(),
+    }
+}
+
+/// The global reservation must never exceed the budget and must monotonically
+/// shrink over a block's lifetime across the download -> buffer -> apply -> commit
+/// path, and across timeout/duplicate/short-response paths. This is the budget
+/// half of the worst-case lossless scheme: a block reserves worst case at send,
+/// only ever shrinks toward its actual serialized size, and is never re-reserved.
+#[test]
+fn budget_reservation_never_exceeds_max_and_only_shrinks_per_block() {
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
+    let max = worst * 3;
+
+    // Happy path: download -> shrink-on-receipt -> buffer -> apply -> commit.
+    {
+        let mut budget = ByteBudget::new(max);
+        let mut reorder = ReorderBuffer::new();
+        let mut outstanding = outstanding_three_block_range(&mut budget);
+        assert_eq!(budget.reserved(), max);
+        assert!(budget.reserved() <= budget.max_bytes_for_test());
+
+        let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        // Receive each height: release `worst - actual`, keep `actual` reserved,
+        // and hand `actual` to the reorder buffer without re-reserving.
+        for (index, height) in [block::Height(1), block::Height(2), block::Height(3)]
+            .into_iter()
+            .enumerate()
+        {
+            let before = budget.reserved();
+            let actual = 1_000u64 + index as u64; // < worst, varies per block
+            budget.release(worst.saturating_sub(actual));
+            outstanding.mark_received(height);
+            assert_eq!(
+                reorder.insert(height, block.clone(), actual, peer(0)),
+                ReorderInsertResult::Inserted
+            );
+            // Per-block reservation only shrank (worst -> actual), never grew.
+            assert!(budget.reserved() <= before);
+            assert!(budget.reserved() <= budget.max_bytes_for_test());
+        }
+        assert!(outstanding.is_complete());
+        assert_eq!(outstanding.reserved_bytes(), 0);
+        assert_eq!(budget.reserved(), 1_000 + 1_001 + 1_002);
+
+        // Commit: draining to apply carries the actual bytes; the apply finish
+        // releases them.
+        let mut floor = block::Height(0);
+        let mut applied_bytes = 0;
+        for (_height, _block, bytes, _peer) in reorder.drain_contiguous_prefix(floor) {
+            applied_bytes += bytes;
+            floor = block::Height(floor.0 + 1);
+        }
+        assert_eq!(applied_bytes, 1_000 + 1_001 + 1_002);
+        budget.release(applied_bytes);
+        assert_eq!(budget.reserved(), 0);
+    }
+
+    // Timeout / short-response path: heights that never buffer release exactly
+    // their worst-case share, with no leak and no double-release.
+    {
+        let mut budget = ByteBudget::new(max);
+        let mut outstanding = outstanding_three_block_range(&mut budget);
+        assert_eq!(budget.reserved(), worst * 3);
+        // A short response delivers only height 1; release its worst-case share.
+        budget.release(worst.saturating_sub(1_000));
+        outstanding.mark_received(block::Height(1));
+        // The remaining two unreceived heights still reserve worst case each.
+        assert_eq!(outstanding.reserved_bytes(), worst * 2);
+        assert!(budget.reserved() <= budget.max_bytes_for_test());
+        // On timeout the outstanding range releases its still-reserved worst case.
+        budget.release(outstanding.reserved_bytes());
+        // Plus the actual bytes held for the one received-but-not-buffered height.
+        budget.release(1_000);
+        assert_eq!(budget.reserved(), 0);
+    }
+
+    // Duplicate path: a duplicate body reserves nothing extra and releases its
+    // actual bytes, so the buffer's reservation is unchanged.
+    {
+        let mut budget = ByteBudget::new(max);
+        let mut reorder = ReorderBuffer::new();
+        let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        assert!(budget.try_reserve(1_000));
+        assert_eq!(
+            reorder.insert(block::Height(1), block.clone(), 1_000, peer(0)),
+            ReorderInsertResult::Inserted
+        );
+        // A second body for the same height is a duplicate; reserve-then-release
+        // leaves the reservation exactly where it was.
+        assert!(budget.try_reserve(1_000));
+        assert_eq!(
+            reorder.insert(block::Height(1), block, 1_000, peer(0)),
+            ReorderInsertResult::Duplicate
+        );
+        budget.release(1_000);
+        assert_eq!(budget.reserved(), 1_000);
+        assert!(budget.reserved() <= budget.max_bytes_for_test());
+    }
+}
+
+/// A body whose actual serialized size exceeds its advertised size hint is still
+/// accepted and buffered: worst case (not the hint) was reserved up front, so the
+/// shrink-on-receipt cannot fail. Under the old release-then-reserve scheme this
+/// path could re-reserve more than the released estimate and drop a valid body.
+#[test]
+fn underestimated_body_is_buffered_without_budget_drop() {
+    let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
+    // Budget holds exactly one worst-case share, so a hint-sized re-reservation
+    // would have had no headroom for an underestimated body.
+    let mut budget = ByteBudget::new(worst);
+    let mut reorder = ReorderBuffer::new();
+
+    let hint = 1_000u64;
+    let request = BlockRangeRequest {
+        start_height: block::Height(1),
+        count: 1,
+        anchor_hash: block::Hash([1; 32]),
+        estimated_bytes: worst,
+        expected_hashes: vec![(block::Height(1), block::Hash([1; 32]))],
+        expected_bytes: vec![(block::Height(1), hint)],
+    };
+    assert!(budget.try_reserve(request.estimated_bytes));
+    let mut outstanding = OutstandingBlockRange {
+        request,
+        deadline: Instant::now(),
+        received: HashSet::new(),
+    };
+    assert_eq!(budget.reserved(), worst);
+
+    // The body's actual serialized size is far larger than the hint (but still
+    // <= MAX_BLOCK_BYTES, the per-block worst case).
+    let actual = hint * 50;
+    assert!(actual < worst);
+    assert!(actual > hint);
+
+    // Receipt: shrink toward the actual size and hand it to the reorder buffer
+    // without re-reserving. The shrink is non-negative because actual <= worst.
+    budget.release(worst.saturating_sub(actual));
+    outstanding.mark_received(block::Height(1));
+    let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+    assert_eq!(
+        reorder.insert(block::Height(1), block, actual, peer(0)),
+        ReorderInsertResult::Inserted,
+        "an underestimated body must still buffer; worst case was reserved up front"
+    );
+    assert_eq!(reorder.buffered_bytes(), actual);
+    assert_eq!(budget.reserved(), actual);
+    assert!(budget.reserved() <= budget.max_bytes_for_test());
 }
 
 #[test]
@@ -2404,7 +2615,7 @@ async fn reactor_keeps_submitted_body_budget_until_apply_finishes() {
     let blocks = mainnet_blocks_1_to_3();
     let block1_size = block_size(&blocks[0]);
     let mut config = immediate_body_download_config();
-    config.max_inflight_block_bytes = u64::from(block1_size);
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES;
 
     let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -2546,6 +2757,101 @@ async fn reactor_keeps_submitted_body_budget_until_apply_finishes() {
     let (_request_peer, start_height, count) = wait_for_getblocks(&mut actions).await;
     assert_eq!(start_height, block::Height(2));
     assert_eq!(count, 1);
+
+    reactor_task.abort();
+}
+
+/// A real body whose serialized size dwarfs its advertised size hint is still
+/// accepted, buffered, and submitted. Worst case (not the hint) is reserved at
+/// send time, so shrink-on-receipt always has room and never drops the body.
+///
+/// A/B: under the old release-then-reserve scheme the request reserved only the
+/// hint-sized estimate, so a body larger than the hint re-reserved more than was
+/// released and, against a tight budget, hit `BudgetFull` and dropped a valid
+/// body. With worst-case reservation this path is unreachable.
+#[tokio::test]
+async fn reactor_buffers_body_larger_than_its_size_hint() {
+    let blocks = mainnet_blocks_1_to_3();
+    let mut config = immediate_body_download_config();
+    // Budget holds exactly one worst-case share, so a hint-sized re-reservation
+    // would have left no headroom for an underestimated body.
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES;
+
+    let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config.clone(),
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
+    let (peer_id, inbound_tx, _outbound_rx) = connect_peer_with_status(
+        &service,
+        &mut actions,
+        41,
+        block::Height(1),
+        blocks[0].hash(),
+        1,
+        MAX_BS_RESPONSE_BYTES,
+    )
+    .await;
+
+    tip_tx
+        .send((block::Height(1), blocks[0].hash()))
+        .expect("tip watch is live");
+    while !matches!(
+        next_action(&mut actions).await,
+        BlockSyncAction::QueryNeededBlocks { .. }
+    ) {}
+
+    // Advertise a 1-byte size hint, far below the real body size, with a
+    // tolerance that admits the deviation without misbehavior scoring.
+    handle
+        .send(BlockSyncEvent::NeededBlocks(vec![BlockSyncBlockMeta {
+            height: block::Height(1),
+            hash: blocks[0].hash(),
+            size: BlockSizeEstimate::Advertised(1),
+        }]))
+        .await
+        .expect("needed metadata queues");
+    assert_eq!(
+        wait_for_getblocks(&mut actions).await,
+        (peer_id, block::Height(1), 1)
+    );
+
+    inbound_tx
+        .send(
+            BlockSyncMessage::Block(blocks[0].clone())
+                .encode_frame()
+                .expect("block encodes"),
+        )
+        .await
+        .expect("body queues");
+
+    let submitted = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match next_action(&mut actions).await {
+                BlockSyncAction::SubmitBlock { block, .. } => break block.hash(),
+                // The preserved size-deviation check reports the hint mismatch but
+                // must not drop the body.
+                BlockSyncAction::Misbehavior {
+                    reason: BlockSyncMisbehavior::SizeMismatch,
+                    ..
+                }
+                | BlockSyncAction::SendMessage { .. }
+                | BlockSyncAction::QueryNeededBlocks { .. } => {}
+                action => panic!("unexpected action before submit: {action:?}"),
+            }
+        }
+    })
+    .await
+    .expect("underestimated body must still be buffered and submitted, not dropped");
+    assert_eq!(submitted, blocks[0].hash());
 
     reactor_task.abort();
 }
@@ -2732,7 +3038,7 @@ async fn reactor_keeps_applying_body_after_non_advancing_duplicate_result() {
     let blocks = mainnet_blocks_1_to_3();
     let block1_size = block_size(&blocks[0]);
     let mut config = immediate_body_download_config();
-    config.max_inflight_block_bytes = u64::from(block1_size);
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES;
 
     let (_tip_tx, tip_rx) = watch::channel((block::Height(2), blocks[1].hash()));
     let startup = BlockSyncStartup::new(
@@ -3224,7 +3530,7 @@ async fn reactor_queries_needed_blocks_above_submitted_floor() {
     let block1_size = block_size(&blocks[0]);
     let block2_size = block_size(&blocks[1]);
     let mut config = immediate_body_download_config();
-    config.max_inflight_block_bytes = u64::from(block1_size) + u64::from(block2_size);
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 2;
 
     let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -3365,7 +3671,7 @@ async fn reactor_retries_submitted_body_after_apply_rejection() {
     let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
     let block_bytes = block_size(&block);
     let mut config = immediate_body_download_config();
-    config.max_inflight_block_bytes = u64::from(block_bytes);
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES;
 
     let (tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -4425,11 +4731,14 @@ async fn reactor_does_not_retry_missing_height_already_in_flight() {
 
 #[tokio::test]
 async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer() {
+    // Worst-case reservation caps a request at ~16 blocks (down from 128), so the
+    // priming prefix is kept short enough to submit within the priming window
+    // while still placing the hole behind several scheduled requests.
     const FIRST_NEEDED: u32 = 801;
-    const PREFIX_END: u32 = 1072;
-    const HOLE_START: u32 = 1073;
-    const HOLE_END: u32 = 1080;
-    const LAST_METADATA: u32 = 1621;
+    const PREFIX_END: u32 = 864;
+    const HOLE_START: u32 = 865;
+    const HOLE_END: u32 = 872;
+    const LAST_METADATA: u32 = 933;
     const BEST_HEADER_TIP: u32 = 10_400;
 
     let blocks = fake_blocks_in_range(FIRST_NEEDED, LAST_METADATA);
@@ -4441,7 +4750,7 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
     let metas: Vec<_> = blocks.iter().map(block_meta).collect();
     let prefix: std::collections::HashSet<_> =
         (FIRST_NEEDED..=PREFIX_END).map(block::Height).collect();
-    let sparse_above_hole: std::collections::HashSet<_> = [1081, 1096, 1200, 1300]
+    let sparse_above_hole: std::collections::HashSet<_> = [873, 888, 905, 920]
         .into_iter()
         .map(block::Height)
         .collect();
@@ -4451,8 +4760,11 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
     config.max_inflight_block_bytes = u64::MAX;
     config.request_timeout = Duration::from_secs(300);
     config.peer_limits.max_outbound_peers = 1;
-    config.peer_limits.inbound_queue_depth = 32;
-    config.peer_limits.outbound_queue_depth = 32;
+    config.peer_limits.inbound_queue_depth = 128;
+    // Worst-case reservation caps a request at ~16 blocks, so the prefix needs
+    // more concurrent requests; keep the outbound queue wide enough that a fill
+    // pass never overflows it and cancels the peer.
+    config.peer_limits.outbound_queue_depth = 128;
 
     let (_tip_tx, tip_rx) = watch::channel((block::Height(BEST_HEADER_TIP), block::Hash([10; 32])));
     let startup = BlockSyncStartup::new(
@@ -4477,7 +4789,10 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
             servable_high: block::Height(LAST_METADATA),
             tip_hash: block_at(LAST_METADATA).hash(),
             max_blocks_per_response: MAX_BS_BLOCKS_PER_REQUEST,
-            max_inflight_requests: 4,
+            // Worst-case reservation caps a request at `max_response_bytes /
+            // MAX_BLOCK_BYTES` (~16) blocks, so allow more concurrent requests to
+            // cover the checkpoint prefix within the priming window.
+            max_inflight_requests: 8,
             max_response_bytes: MAX_BS_RESPONSE_BYTES,
         },
     )
@@ -4504,7 +4819,7 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
 
     let mut requests = Vec::new();
     let mut submitted = std::collections::HashSet::new();
-    let primed = tokio::time::timeout(Duration::from_secs(20), async {
+    let primed = tokio::time::timeout(Duration::from_secs(40), async {
         while requests.len() < 4 || !prefix.is_subset(&submitted) {
             let action = actions
                 .recv()
@@ -4591,7 +4906,7 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
             servable_high: block::Height(LAST_METADATA),
             tip_hash: block_at(LAST_METADATA).hash(),
             max_blocks_per_response: MAX_BS_BLOCKS_PER_REQUEST,
-            max_inflight_requests: 4,
+            max_inflight_requests: 8,
             max_response_bytes: MAX_BS_RESPONSE_BYTES,
         },
     )
@@ -4651,7 +4966,7 @@ async fn checkpoint_hole_disconnect_retries_first_missing_height_with_fresh_peer
 #[tokio::test]
 async fn reactor_reset_mid_download_drops_stale_anchors_and_releases_budget() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -4676,7 +4991,7 @@ async fn reactor_reset_mid_download_drops_stale_anchors_and_releases_budget() {
         block::Height(3),
         blocks[2].hash(),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -4777,7 +5092,7 @@ async fn reactor_reset_mid_download_drops_stale_anchors_and_releases_budget() {
 #[tokio::test]
 async fn reactor_forward_reset_preserves_submitted_successor_body() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -4802,7 +5117,7 @@ async fn reactor_forward_reset_preserves_submitted_successor_body() {
         block::Height(3),
         blocks[2].hash(),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -4907,7 +5222,7 @@ async fn reactor_forward_reset_preserves_submitted_successor_body() {
 #[tokio::test]
 async fn reactor_forward_reset_preserves_future_outstanding_body() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -4932,7 +5247,7 @@ async fn reactor_forward_reset_preserves_future_outstanding_body() {
         block::Height(3),
         blocks[2].hash(),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -5001,7 +5316,7 @@ async fn reactor_forward_reset_preserves_future_outstanding_body() {
 #[tokio::test]
 async fn reactor_forward_reset_preserves_buffered_successor_body() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -5026,7 +5341,7 @@ async fn reactor_forward_reset_preserves_buffered_successor_body() {
         block::Height(3),
         blocks[2].hash(),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -5111,7 +5426,7 @@ async fn reactor_forward_reset_preserves_buffered_successor_body() {
 #[tokio::test]
 async fn reactor_destructive_forward_reset_does_not_rerequest_same_hash_in_flight_apply() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -5136,7 +5451,7 @@ async fn reactor_destructive_forward_reset_does_not_rerequest_same_hash_in_fligh
         block::Height(2),
         blocks[1].hash(),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -5401,7 +5716,7 @@ async fn reactor_ignores_stale_apply_completion_after_resubmit() {
 #[tokio::test]
 async fn reactor_fast_forward_reset_clears_buffered_bodies_and_releases_budget() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 20_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -5426,7 +5741,7 @@ async fn reactor_fast_forward_reset_clears_buffered_bodies_and_releases_budget()
         block::Height(4),
         block::Hash([4; 32]),
         1,
-        20_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 2).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -5552,7 +5867,7 @@ async fn reactor_fuzzes_arrival_order_across_fork_parent_first() {
 
     for (case, old_before_reset, old_before_new_needed, after_new_needed) in cases {
         let mut config = ZakuraBlockSyncConfig {
-            max_inflight_block_bytes: 60_000,
+            max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 3,
             ..immediate_body_download_config()
         };
         config.peer_limits.outbound_queue_depth = 16;
@@ -5582,7 +5897,7 @@ async fn reactor_fuzzes_arrival_order_across_fork_parent_first() {
             block::Height(4),
             old_blocks[2].hash(),
             1,
-            60_000,
+            u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES * 3).unwrap_or(u32::MAX),
         )
         .await;
 
@@ -5854,7 +6169,7 @@ async fn reactor_competing_fork_download_switches_to_current_header_hashes() {
 #[tokio::test]
 async fn reactor_legacy_commit_dedups_inflight_request_and_reuses_budget() {
     let mut config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 10_000,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES,
         ..immediate_body_download_config()
     };
     config.peer_limits.outbound_queue_depth = 16;
@@ -5879,7 +6194,7 @@ async fn reactor_legacy_commit_dedups_inflight_request_and_reuses_budget() {
         block::Height(2),
         blocks[1].hash(),
         1,
-        10_000,
+        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES).unwrap_or(u32::MAX),
     )
     .await;
 
@@ -6410,7 +6725,7 @@ async fn scheduled_get_blocks_is_sent_once_via_session_not_duplicated_by_source(
 async fn reactor_scores_peer_whose_invalid_body_is_rejected_by_consensus() {
     let request_bytes: u32 = 10_000;
     let config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: u64::from(request_bytes) * 2,
+        max_inflight_block_bytes: BS_PER_BLOCK_WORST_CASE_BYTES * 2,
         ..immediate_body_download_config()
     };
 
@@ -7273,10 +7588,9 @@ async fn reactor_exchange_reanchor_lowers_only_best_header_target() {
 async fn reactor_exchange_reanchor_releases_stale_submitted_bodies() {
     let blocks = mainnet_blocks_1_to_3();
     let mut config = immediate_body_download_config();
-    config.max_inflight_block_bytes = blocks
-        .iter()
-        .map(|block| u64::from(block_size(block)))
-        .sum();
+    // Worst-case reservation: budget for exactly the three in-flight bodies.
+    config.max_inflight_block_bytes =
+        BS_PER_BLOCK_WORST_CASE_BYTES * u64::try_from(blocks.len()).expect("block count fits u64");
     config.request_timeout = Duration::from_secs(300);
 
     let initial = test_frontier_update(0, 0, 3, FrontierChange::Snapshot);
@@ -8394,7 +8708,7 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
     let mut config = immediate_body_download_config();
     config.fanout = 2;
     config.expected_peers = 0;
-    config.max_inflight_block_bytes = u64::from(block2_size) * 2;
+    config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 2;
 
     let (_tip_tx, tip_rx) = watch::channel((block::Height(4), block::Hash([4; 32])));
     let startup = BlockSyncStartup::new(

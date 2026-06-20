@@ -1,4 +1,4 @@
-use super::{state::*, *};
+use super::{config::BS_PER_BLOCK_WORST_CASE_BYTES, state::*, *};
 
 pub(super) const DEFAULT_BS_EWMA_SEED_BYTES: u64 = 256 * 1024;
 pub(super) const DEFAULT_BS_SIZE_FLOOR_BYTES: u64 = 1024;
@@ -193,22 +193,27 @@ impl BlockRangeScheduler {
             .max_blocks_per_response
             .min(local_max_blocks_per_request)
             .max(1);
-        let mut estimated_bytes = 0u64;
+        // Reserve the worst case for the response: each requested block can serve
+        // up to `BS_PER_BLOCK_WORST_CASE_BYTES`, so bound the count by how many
+        // whole worst-case shares fit under `max_bytes`. On receipt the
+        // reservation only ever shrinks toward the actual serialized size, so a
+        // valid downloaded body never has to be dropped for a full budget.
+        let mut reserved_bytes = 0u64;
         let mut selected = Vec::new();
 
         for block in range.blocks.iter().take(max_count as usize) {
-            let next_bytes = estimated_bytes.saturating_add(block.estimated_bytes);
+            let next_bytes = reserved_bytes.saturating_add(BS_PER_BLOCK_WORST_CASE_BYTES);
             if next_bytes > max_bytes {
                 break;
             }
-            estimated_bytes = next_bytes;
+            reserved_bytes = next_bytes;
             selected.push(*block);
         }
 
         if selected.is_empty() {
             return Err(ScheduleSkipReason::FirstBlockExceedsByteLimit);
         }
-        if !budget.try_reserve(estimated_bytes) {
+        if !budget.try_reserve(reserved_bytes) {
             return Err(ScheduleSkipReason::ReserveFailed);
         }
 
@@ -218,7 +223,7 @@ impl BlockRangeScheduler {
             start_height: selected[0].height,
             count,
             anchor_hash: selected[0].hash,
-            estimated_bytes,
+            estimated_bytes: reserved_bytes,
             expected_hashes: selected
                 .iter()
                 .map(|block| (block.height, block.hash))
@@ -646,19 +651,6 @@ impl BlockRangeRequest {
         self.expected_bytes
             .iter()
             .find_map(|(known_height, bytes)| (*known_height == height).then_some(*bytes))
-    }
-
-    pub(super) fn single_height_retry(&self, height: block::Height) -> Option<Self> {
-        let hash = self.expected_hash(height)?;
-        let estimated_bytes = self.estimated_bytes_for_height(height)?;
-        Some(Self {
-            start_height: height,
-            count: 1,
-            anchor_hash: hash,
-            estimated_bytes,
-            expected_hashes: vec![(height, hash)],
-            expected_bytes: vec![(height, estimated_bytes)],
-        })
     }
 
     pub(super) fn matches_needed(&self, needed: &HashMap<block::Height, block::Hash>) -> bool {

@@ -24,6 +24,15 @@ pub const DEFAULT_BS_EXPECTED_PEERS: usize = 4;
 pub const DEFAULT_BS_MAX_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 /// Default global byte budget reserved for later block-download scheduling.
 pub const DEFAULT_BS_MAX_INFLIGHT_BLOCK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Worst-case serialized bytes reserved per requested block body.
+///
+/// Block-sync reserves this much per requested block at send time and only ever
+/// shrinks the reservation toward the actual serialized size on receipt, so a
+/// valid, already-downloaded body is never discarded for a full budget. Each
+/// body arrives in its own `Block` frame bounded by [`block::MAX_BLOCK_BYTES`]
+/// at decode (`MAX_BS_MESSAGE_BYTES > MAX_BLOCK_BYTES`), so the actual size can
+/// never exceed this worst case and the shrink is always non-negative.
+pub const BS_PER_BLOCK_WORST_CASE_BYTES: u64 = block::MAX_BLOCK_BYTES;
 /// Default maximum submitted block applies awaiting verifier completion.
 ///
 /// The checkpoint verifier resolves a checkpoint window only after the whole

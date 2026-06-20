@@ -36,19 +36,21 @@ impl ReorderBuffer {
             .map(|buffered| buffered.block.hash())
     }
 
+    /// Buffer a received body that already owns its `bytes` reservation.
+    ///
+    /// The caller reserved worst-case bytes for this height at send time and
+    /// shrank that reservation to `bytes` on receipt, so the reorder buffer takes
+    /// ownership of the existing reservation without touching the budget and can
+    /// never fail on budget. A `Duplicate` height is left to the caller to release.
     pub(super) fn insert(
         &mut self,
         height: block::Height,
         block: Arc<block::Block>,
         bytes: u64,
         source_peer: ZakuraPeerId,
-        budget: &mut ByteBudget,
     ) -> ReorderInsertResult {
         if self.blocks.contains_key(&height) {
             return ReorderInsertResult::Duplicate;
-        }
-        if !budget.try_reserve(bytes) {
-            return ReorderInsertResult::BudgetFull;
         }
 
         self.blocks.insert(
@@ -122,7 +124,6 @@ impl ReorderBuffer {
 pub(super) enum ReorderInsertResult {
     Inserted,
     Duplicate,
-    BudgetFull,
 }
 
 #[derive(Clone, Debug)]

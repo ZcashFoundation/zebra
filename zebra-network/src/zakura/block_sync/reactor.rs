@@ -777,7 +777,6 @@ impl BlockSyncReactor {
             return;
         }
         let estimated_bytes = outstanding.estimated_bytes_for_height(height).unwrap_or(0);
-        let retry_request = outstanding.request.single_height_retry(height);
 
         // The body's transactions are not validated against the header here:
         // recomputing the merkle root for every received body (including the
@@ -813,7 +812,16 @@ impl BlockSyncReactor {
 
         metrics::counter!("sync.block.body.received").increment(1);
         self.trace_body_received(&peer, height, serialized_bytes);
-        self.state.budget.release(estimated_bytes);
+        // The block reserved `BS_PER_BLOCK_WORST_CASE_BYTES` at send time. One body
+        // per `Block` frame is bounded by `MAX_BLOCK_BYTES` at decode, so the
+        // actual serialized size never exceeds the worst case. Shrink the
+        // reservation to the actual size and keep `serialized_bytes` reserved; the
+        // reservation only ever decreases, so the budget can never reject a valid
+        // downloaded body. `mark_received` then stops `reserved_bytes()` from
+        // counting this height, so the only bytes still held for it are the
+        // `serialized_bytes` carried into the reorder buffer below.
+        let shrink = BS_PER_BLOCK_WORST_CASE_BYTES.saturating_sub(serialized_bytes);
+        self.state.budget.release(shrink);
         let mut completed = None;
         if let Some(peer_state) = self.state.peers.get_mut(&peer) {
             if let Some(outstanding) = peer_state.outstanding.get_mut(index) {
@@ -833,19 +841,22 @@ impl BlockSyncReactor {
             || self.state.applying.contains_key(&height)
             || self.has_submitted_apply(height, hash)
         {
+            // The body is not buffered (already at/below the floor or held
+            // elsewhere), so release the actual bytes it still reserved.
+            self.state.budget.release(serialized_bytes);
             self.release_contiguous_blocks().await;
             self.schedule().await;
             self.release_caught_up_block_sync_peers();
             return;
         }
 
-        match self.state.reorder.insert(
-            height,
-            block,
-            serialized_bytes,
-            peer.clone(),
-            &mut self.state.budget,
-        ) {
+        // The body already owns its `serialized_bytes` reservation, so the reorder
+        // buffer takes ownership without re-reserving and can never fail on budget.
+        match self
+            .state
+            .reorder
+            .insert(height, block, serialized_bytes, peer.clone())
+        {
             ReorderInsertResult::Inserted => {
                 // A received body is now held in memory. Mark it covered so the
                 // retry path stops re-requesting it. `refresh_needed` already
@@ -865,19 +876,10 @@ impl BlockSyncReactor {
                 // again.
                 self.state.schedule.mark_height_covered(height);
             }
-            ReorderInsertResult::Duplicate => {}
-            ReorderInsertResult::BudgetFull => {
-                if let Some(request) = retry_request {
-                    self.state.schedule.retry(request);
-                }
-                tracing::debug!(
-                    ?peer,
-                    ?height,
-                    serialized_bytes,
-                    "dropping block-sync body because local byte budget is full"
-                );
-                self.schedule().await;
-                return;
+            ReorderInsertResult::Duplicate => {
+                // A duplicate body is not buffered, so the reservation it still
+                // held (its actual bytes) is released here.
+                self.state.budget.release(serialized_bytes);
             }
         }
         self.release_contiguous_blocks().await;
@@ -1091,26 +1093,36 @@ impl BlockSyncReactor {
         metrics::counter!("sync.block.response.unmatched_queued_accepted").increment(1);
         self.trace_body_received(peer, height, serialized_bytes);
 
-        match self.state.reorder.insert(
-            height,
-            block,
-            serialized_bytes,
-            peer.clone(),
-            &mut self.state.budget,
-        ) {
+        // Unlike a matched body, this queued height owns no prior reservation: the
+        // original requester's worst-case reservation was released when it
+        // disconnected and the range returned to the scheduler queue. Reserve the
+        // body's actual size before buffering it. If the budget is genuinely full
+        // of other legitimately-reserved bodies, skip buffering rather than
+        // exceeding the budget; the height stays queued and is re-requested with
+        // its own worst-case reservation, so no valid body is lost overall.
+        if !self.state.budget.try_reserve(serialized_bytes) {
+            tracing::debug!(
+                ?peer,
+                ?height,
+                serialized_bytes,
+                "not buffering unmatched queued block-sync body; height stays queued for retry"
+            );
+            self.schedule().await;
+            return true;
+        }
+
+        match self
+            .state
+            .reorder
+            .insert(height, block, serialized_bytes, peer.clone())
+        {
             ReorderInsertResult::Inserted => {
                 self.state.schedule.mark_height_covered(height);
             }
-            ReorderInsertResult::Duplicate => {}
-            ReorderInsertResult::BudgetFull => {
-                tracing::debug!(
-                    ?peer,
-                    ?height,
-                    serialized_bytes,
-                    "dropping unmatched queued block-sync body because local byte budget is full"
-                );
-                self.schedule().await;
-                return true;
+            ReorderInsertResult::Duplicate => {
+                // The height was already buffered, so the reservation just taken
+                // is not owned by anything and must be returned.
+                self.state.budget.release(serialized_bytes);
             }
         }
 

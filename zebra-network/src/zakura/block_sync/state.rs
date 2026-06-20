@@ -448,13 +448,19 @@ pub(super) struct OutstandingBlockRange {
 }
 
 impl OutstandingBlockRange {
+    /// Worst-case bytes still reserved for this request: the per-block worst case
+    /// for every requested height not yet received. The reservation for a request
+    /// only ever shrinks, so releasing this (on timeout/disconnect/short response)
+    /// never over-releases bytes that were already handed to the reorder buffer.
     pub(super) fn reserved_bytes(&self) -> u64 {
-        self.request
-            .expected_bytes
-            .iter()
-            .filter(|(height, _)| !self.received.contains(height))
-            .map(|(_, bytes)| *bytes)
-            .sum()
+        let outstanding = self
+            .request
+            .expected_hashes
+            .len()
+            .saturating_sub(self.received.len());
+        // `outstanding` is a count bounded by `MAX_BS_BLOCKS_PER_REQUEST`, so the
+        // product cannot overflow `u64`; `saturating_mul` is belt-and-suspenders.
+        BS_PER_BLOCK_WORST_CASE_BYTES.saturating_mul(outstanding as u64)
     }
 
     pub(super) fn estimated_bytes_for_height(&self, height: block::Height) -> Option<u64> {
@@ -469,14 +475,18 @@ impl OutstandingBlockRange {
         self.received.insert(height);
     }
 
+    /// Mark every requested height at or below `tip` as received and return the
+    /// worst-case bytes that those newly-received heights had reserved, so the
+    /// caller releases exactly the reservation those heights still held.
     pub(super) fn mark_received_through(&mut self, tip: block::Height) -> u64 {
-        self.request
-            .expected_bytes
+        let newly_received = self
+            .request
+            .expected_hashes
             .iter()
-            .filter_map(|(height, bytes)| {
-                (*height <= tip && self.received.insert(*height)).then_some(*bytes)
-            })
-            .sum()
+            .filter(|(height, _)| *height <= tip && self.received.insert(*height))
+            .count();
+        // Bounded by `MAX_BS_BLOCKS_PER_REQUEST`; cannot overflow `u64`.
+        BS_PER_BLOCK_WORST_CASE_BYTES.saturating_mul(newly_received as u64)
     }
 
     pub(super) fn is_complete(&self) -> bool {

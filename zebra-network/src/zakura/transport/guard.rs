@@ -37,6 +37,11 @@ impl ByteBudget {
         self.max_bytes.saturating_sub(self.reserved_bytes)
     }
 
+    #[cfg(test)]
+    pub(crate) fn max_bytes_for_test(self) -> u64 {
+        self.max_bytes
+    }
+
     pub(crate) fn reserved(self) -> u64 {
         self.reserved_bytes
     }
