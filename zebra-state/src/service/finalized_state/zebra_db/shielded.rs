@@ -518,6 +518,18 @@ impl ZebraDb {
         Some(Arc::new(tree))
     }
 
+    /// Returns the Ironwood note commitment trees in the supplied range, in increasing height order.
+    pub fn ironwood_tree_by_height_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (Height, Arc<orchard::tree::NoteCommitmentTree>)> + '_
+    where
+        R: std::ops::RangeBounds<Height>,
+    {
+        let ironwood_trees = self.db.cf_handle("ironwood_note_commitment_tree").unwrap();
+        self.db.zs_forward_range_iter(&ironwood_trees, range)
+    }
+
     /// Returns a list of Ironwood [`NoteCommitmentSubtree`]s in the provided range.
     #[allow(clippy::unwrap_in_result)]
     pub fn ironwood_subtree_list_by_index_range(
