@@ -1706,6 +1706,7 @@ impl Chain {
 
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
+        let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let mut history_tree = self.history_block_commitment_tree();
@@ -1716,6 +1717,7 @@ impl Chain {
                 contextually_valid.block.clone(),
                 &sapling_root,
                 &orchard_root,
+                &ironwood_root,
             )
             .map_err(Arc::new)?;
 
