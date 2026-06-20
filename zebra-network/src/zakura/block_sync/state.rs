@@ -1,4 +1,4 @@
-use super::{config::*, events::BlockApplyToken, reorder::*, scheduler::*, *};
+use super::{config::*, scheduler::*, sequencer::Sequencer, *};
 use crate::zakura::{
     chain_frontier_from_parts, Frontier, FrontierUpdate, ServicePeerDirection, ServicePeerSnapshot,
     ZakuraBlockSyncCandidateState,
@@ -189,9 +189,7 @@ impl BlockSyncHandle {
 #[derive(Clone, Debug)]
 pub(super) struct BlockSyncState {
     pub(super) finalized_height: block::Height,
-    pub(super) verified_block_tip: block::Height,
     pub(super) verified_block_hash: block::Hash,
-    pub(super) body_download_floor: block::Height,
     pub(super) servable_high: block::Height,
     pub(super) servable_hash: block::Hash,
     pub(super) best_header_tip: block::Height,
@@ -200,10 +198,10 @@ pub(super) struct BlockSyncState {
     pub(super) parked_peers: HashSet<ZakuraPeerId>,
     pub(super) disconnected_peers: HashSet<ZakuraPeerId>,
     pub(super) schedule: BlockRangeScheduler,
-    pub(super) reorder: ReorderBuffer,
-    pub(super) applying: BTreeMap<block::Height, ApplyingBlock>,
-    pub(super) submitted_applies: BTreeMap<block::Height, Vec<(block::Hash, usize)>>,
-    pub(super) next_apply_token: BlockApplyToken,
+    /// The serial commit pipeline (reorder → applying → submit → apply-finished)
+    /// and the body-download floor / verified tip it owns. The reactor reaches
+    /// commit-pipeline state only through this API; see [`Sequencer`].
+    pub(super) sequencer: Sequencer,
     pub(super) budget: ByteBudget,
     pub(super) needed_heights: Vec<block::Height>,
     pub(super) status_refresh: RateMeter,
@@ -234,9 +232,7 @@ impl BlockSyncState {
 
         Self {
             finalized_height: startup.frontiers.finalized_height,
-            verified_block_tip: startup.frontiers.verified_block_tip,
             verified_block_hash: startup.frontiers.verified_block_hash,
-            body_download_floor: startup.frontiers.verified_block_tip,
             servable_high: startup.frontiers.verified_block_tip,
             servable_hash: startup.frontiers.verified_block_hash,
             best_header_tip: startup.best_header_tip.0,
@@ -245,10 +241,10 @@ impl BlockSyncState {
             parked_peers: HashSet::new(),
             disconnected_peers: HashSet::new(),
             schedule: BlockRangeScheduler::new(startup.config.fanout),
-            reorder: ReorderBuffer::new(),
-            applying: BTreeMap::new(),
-            submitted_applies: BTreeMap::new(),
-            next_apply_token: 1,
+            sequencer: Sequencer::new(
+                startup.frontiers.verified_block_tip,
+                startup.config.submitted_apply_limit(),
+            ),
             budget: ByteBudget::new(startup.config.max_inflight_block_bytes),
             needed_heights: Vec::new(),
             status_refresh: RateMeter::new(startup.config.status_refresh_interval),
@@ -301,18 +297,6 @@ impl BlockSyncState {
         }
         expired_any
     }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ApplyingBlock {
-    pub(super) token: BlockApplyToken,
-    pub(super) hash: block::Hash,
-    pub(super) block: Arc<block::Block>,
-    pub(super) bytes: u64,
-    pub(super) submitted: bool,
-    /// The peer that delivered this body, used to attribute an apply rejection
-    /// for misbehavior scoring.
-    pub(super) source_peer: ZakuraPeerId,
 }
 
 #[derive(Clone, Debug)]

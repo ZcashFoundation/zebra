@@ -87,36 +87,46 @@ impl ReorderBuffer {
         released
     }
 
-    pub(crate) fn clear(&mut self, budget: &mut ByteBudget) {
-        self.drop_from(block::Height::MIN, budget);
+    /// Drop every buffered body and return the total bytes they held, so the
+    /// caller releases exactly that reservation. The reorder buffer is owned by
+    /// the `Sequencer`, which does not touch the byte budget; it returns the
+    /// freed bytes to the reactor instead.
+    pub(crate) fn clear(&mut self) -> u64 {
+        self.drop_from(block::Height::MIN)
     }
 
-    pub(crate) fn drop_through(&mut self, through: block::Height, budget: &mut ByteBudget) {
+    /// Drop buffered bodies at or below `through` and return the bytes they held.
+    pub(crate) fn drop_through(&mut self, through: block::Height) -> u64 {
         let heights: Vec<_> = self
             .blocks
             .range(..=through)
             .map(|(height, _)| *height)
             .collect();
+        let mut released = 0u64;
         for height in heights {
             if let Some(buffered) = self.blocks.remove(&height) {
                 self.buffered_bytes = self.buffered_bytes.saturating_sub(buffered.bytes);
-                budget.release(buffered.bytes);
+                released = released.saturating_add(buffered.bytes);
             }
         }
+        released
     }
 
-    pub(crate) fn drop_from(&mut self, from: block::Height, budget: &mut ByteBudget) {
+    /// Drop buffered bodies at or above `from` and return the bytes they held.
+    pub(crate) fn drop_from(&mut self, from: block::Height) -> u64 {
         let heights: Vec<_> = self
             .blocks
             .range(from..)
             .map(|(height, _)| *height)
             .collect();
+        let mut released = 0u64;
         for height in heights {
             if let Some(buffered) = self.blocks.remove(&height) {
                 self.buffered_bytes = self.buffered_bytes.saturating_sub(buffered.bytes);
-                budget.release(buffered.bytes);
+                released = released.saturating_add(buffered.bytes);
             }
         }
+        released
     }
 }
 

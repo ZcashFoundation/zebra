@@ -33,6 +33,7 @@ mod pipe;
 mod reactor;
 mod reorder;
 mod scheduler;
+mod sequencer;
 mod service;
 mod state;
 #[cfg(test)]

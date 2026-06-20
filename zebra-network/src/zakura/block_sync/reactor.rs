@@ -1,4 +1,4 @@
-use super::{config::*, events::*, reorder::*, scheduler::*, state::*, wire::*, *};
+use super::{config::*, events::*, scheduler::*, sequencer::*, state::*, wire::*, *};
 use crate::zakura::{
     FrontierChange, FrontierUpdate, ServiceAdmissionDecision, ServicePeerDirection,
     ServicePeerSnapshot, ZakuraBlockSyncCandidateState,
@@ -397,7 +397,7 @@ impl BlockSyncReactor {
                     frontier.best_header.hash,
                 )
                 .await;
-                if frontier.verified_body.height > self.state.verified_block_tip {
+                if frontier.verified_body.height > self.state.sequencer.verified_tip() {
                     self.handle_state_frontiers_changed(state_frontiers).await;
                 }
             }
@@ -448,9 +448,9 @@ impl BlockSyncReactor {
         release_applied: bool,
     ) -> Option<(block::Height, block::Hash)> {
         self.state.finalized_height = self.state.finalized_height.max(frontiers.finalized_height);
-        if frontiers.verified_block_tip < self.state.verified_block_tip {
+        if frontiers.verified_block_tip < self.state.sequencer.verified_tip() {
             tracing::debug!(
-                current = ?self.state.verified_block_tip,
+                current = ?self.state.sequencer.verified_tip(),
                 stale = ?frontiers.verified_block_tip,
                 "ignoring stale Zakura block-sync frontier update"
             );
@@ -461,22 +461,20 @@ impl BlockSyncReactor {
         self.state.servable_high = frontiers.verified_block_tip;
         self.state.servable_hash = frontiers.verified_block_hash;
         self.state.verified_block_hash = frontiers.verified_block_hash;
-        self.state.body_download_floor = self
+        // The Sequencer bumps its floor, drops superseded reorder bodies (and,
+        // when `release_applied`, committed applying bodies), and moves its
+        // verified tip; it returns the freed bytes for the reactor to release and
+        // whether the tip actually moved.
+        let advance = self
             .state
-            .body_download_floor
-            .max(frontiers.verified_block_tip);
-        if frontiers.verified_block_tip != self.state.verified_block_tip {
-            self.state
-                .reorder
-                .drop_through(frontiers.verified_block_tip, &mut self.state.budget);
+            .sequencer
+            .advance_verified_tip(frontiers.verified_block_tip, release_applied);
+        self.state.budget.release(advance.release_bytes);
+        if advance.changed {
             self.state
                 .schedule
                 .drop_through(frontiers.verified_block_tip);
-            if release_applied {
-                self.release_applied_blocks_through(frontiers.verified_block_tip);
-            }
             self.drop_outstanding_through(frontiers.verified_block_tip);
-            self.state.verified_block_tip = frontiers.verified_block_tip;
             self.trace_frontiers_changed(frontiers.verified_block_tip);
             self.release_contiguous_blocks().await;
         }
@@ -499,7 +497,7 @@ impl BlockSyncReactor {
     ) {
         let reset_tip_matches_local_work = !self.reset_tip_conflicts_with_local_work(
             &frontiers,
-            frontiers.verified_block_tip <= self.state.body_download_floor,
+            frontiers.verified_block_tip <= self.state.sequencer.floor(),
         );
 
         // State can report a forward `Reset` while checkpoint commits advance
@@ -508,8 +506,8 @@ impl BlockSyncReactor {
         // floor, or when we already have successor work in flight. Keep fork
         // resets destructive when they are not anchored by active successor
         // work.
-        if frontiers.verified_block_tip > self.state.verified_block_tip
-            && (frontiers.verified_block_tip <= self.state.body_download_floor
+        if frontiers.verified_block_tip > self.state.sequencer.verified_tip()
+            && (frontiers.verified_block_tip <= self.state.sequencer.floor()
                 || self.has_active_successor_after(frontiers.verified_block_tip))
             && reset_tip_matches_local_work
         {
@@ -526,7 +524,7 @@ impl BlockSyncReactor {
         // snapshot can otherwise erase `applying`/covered state and re-request
         // the same bodies while their first apply is still in flight.
         if preserve_active_successors
-            && frontiers.verified_block_tip < self.state.body_download_floor
+            && frontiers.verified_block_tip < self.state.sequencer.floor()
             && reset_tip_matches_local_work
             && self.has_active_successor_after(frontiers.verified_block_tip)
             && self.active_successor_links_to_anchor(
@@ -539,18 +537,22 @@ impl BlockSyncReactor {
         }
 
         let remember_released_applies = frontiers.verified_block_tip > frontiers.finalized_height
-            && frontiers.verified_block_tip <= self.state.body_download_floor;
+            && frontiers.verified_block_tip <= self.state.sequencer.floor();
 
         self.state.finalized_height = frontiers.finalized_height;
-        self.state.verified_block_tip = frontiers.verified_block_tip;
         self.state.verified_block_hash = frontiers.verified_block_hash;
-        self.state.body_download_floor = frontiers.verified_block_tip;
         let old_serving_tip = (self.state.servable_high, self.state.servable_hash);
         self.state.servable_high = frontiers.verified_block_tip;
         self.state.servable_hash = frontiers.verified_block_hash;
 
-        self.state.reorder.clear(&mut self.state.budget);
-        self.release_all_applying_blocks_for_reset(remember_released_applies);
+        // The Sequencer pins its verified tip and floor to the reset target and
+        // clears the reorder/applying buffers, returning the freed bytes for the
+        // reactor to release.
+        let released = self
+            .state
+            .sequencer
+            .reset_to(frontiers.verified_block_tip, remember_released_applies);
+        self.state.budget.release(released);
         self.state.schedule.clear_covered_from(block::Height::MIN);
         self.drop_ranges_not_in_needed(&HashMap::new());
         self.state.schedule.retain_matching_needed(&HashMap::new());
@@ -578,10 +580,13 @@ impl BlockSyncReactor {
         let blocks: Vec<_> = blocks
             .into_iter()
             .filter(|block| {
-                block.height > self.state.body_download_floor
-                    && !self.state.reorder.contains(block.height)
-                    && !self.state.applying.contains_key(&block.height)
-                    && !self.has_submitted_apply(block.height, block.hash)
+                block.height > self.state.sequencer.floor()
+                    && !self.state.sequencer.reorder_contains(block.height)
+                    && !self.state.sequencer.applying_contains(block.height)
+                    && !self
+                        .state
+                        .sequencer
+                        .has_submitted_apply(block.height, block.hash)
                     && !self.has_outstanding_request(block.height, block.hash)
             })
             .collect();
@@ -641,7 +646,7 @@ impl BlockSyncReactor {
         self.state
             .best_header_tip
             .0
-            .saturating_sub(self.state.verified_block_tip.0)
+            .saturating_sub(self.state.sequencer.verified_tip().0)
     }
 
     fn should_pause_new_body_downloads(&self) -> bool {
@@ -884,30 +889,16 @@ impl BlockSyncReactor {
             self.finish_detached_outstanding(outstanding, OutstandingRangeDisposition::Satisfied);
         }
 
-        if height <= self.state.body_download_floor
-            || self.state.reorder.contains(height)
-            || self.state.applying.contains_key(&height)
-            || self.has_submitted_apply(height, hash)
-        {
-            // The body is not buffered (already at/below the floor or held
-            // elsewhere), so release the actual bytes it still reserved.
-            self.state.budget.release(serialized_bytes);
-            self.release_contiguous_blocks().await;
-            // This body completed/advanced only this peer's outstanding request,
-            // so only this peer's slots opened.
-            self.schedule_peer(&peer).await;
-            self.release_caught_up_block_sync_peers();
-            return;
-        }
-
-        // The body already owns its `serialized_bytes` reservation, so the reorder
-        // buffer takes ownership without re-reserving and can never fail on budget.
+        // Offer the body to the commit pipeline. The Sequencer runs the
+        // redundancy checks and either buffers the body (taking ownership of its
+        // existing `serialized_bytes` reservation, so it can never fail on
+        // budget) or reports it redundant so the reactor releases those bytes.
         match self
             .state
-            .reorder
-            .insert(height, block, serialized_bytes, peer.clone())
+            .sequencer
+            .accept_body(height, hash, block, serialized_bytes, peer.clone())
         {
-            ReorderInsertResult::Inserted => {
+            AcceptOutcome::Buffered { covered } => {
                 // A received body is now held in memory. Mark it covered so the
                 // retry path stops re-requesting it. `refresh_needed` already
                 // drops buffered heights from `needed`, but the retry path
@@ -924,12 +915,13 @@ impl BlockSyncReactor {
                 // `clear_covered_from`) or the chain tip resets, both of which
                 // also drop the buffer, so a dropped body becomes requestable
                 // again.
-                self.state.schedule.mark_height_covered(height);
+                self.state.schedule.mark_height_covered(covered);
             }
-            ReorderInsertResult::Duplicate => {
-                // A duplicate body is not buffered, so the reservation it still
-                // held (its actual bytes) is released here.
-                self.state.budget.release(serialized_bytes);
+            AcceptOutcome::Redundant { release_bytes } => {
+                // The body is not buffered (already at/below the floor, held in
+                // another commit-pipeline buffer, or a duplicate), so release the
+                // actual bytes it still reserved.
+                self.state.budget.release(release_bytes);
             }
         }
         self.release_contiguous_blocks().await;
@@ -1081,9 +1073,7 @@ impl BlockSyncReactor {
     }
 
     fn is_stale_response_height(&self, height: block::Height) -> bool {
-        height <= self.state.body_download_floor
-            || self.state.reorder.contains(height)
-            || self.state.applying.contains_key(&height)
+        self.state.sequencer.is_stale_response_height(height)
     }
 
     async fn ignore_stale_response(
@@ -1176,16 +1166,16 @@ impl BlockSyncReactor {
 
         match self
             .state
-            .reorder
-            .insert(height, block, serialized_bytes, peer.clone())
+            .sequencer
+            .accept_body(height, hash, block, serialized_bytes, peer.clone())
         {
-            ReorderInsertResult::Inserted => {
-                self.state.schedule.mark_height_covered(height);
+            AcceptOutcome::Buffered { covered } => {
+                self.state.schedule.mark_height_covered(covered);
             }
-            ReorderInsertResult::Duplicate => {
-                // The height was already buffered, so the reservation just taken
-                // is not owned by anything and must be returned.
-                self.state.budget.release(serialized_bytes);
+            AcceptOutcome::Redundant { release_bytes } => {
+                // The height was already buffered/applying/committed, so the
+                // reservation just taken is not owned by anything and is returned.
+                self.state.budget.release(release_bytes);
             }
         }
 
@@ -1340,7 +1330,7 @@ impl BlockSyncReactor {
         index: usize,
         current: OutstandingRangeDisposition,
     ) -> OutstandingRangeDisposition {
-        let tip = self.state.body_download_floor;
+        let tip = self.state.sequencer.floor();
         let Some(peer_state) = self.state.peers.get_mut(peer) else {
             return current;
         };
@@ -1457,12 +1447,14 @@ impl BlockSyncReactor {
         result: BlockApplyResult,
         local_frontier: Option<BlockSyncFrontiers>,
     ) {
-        let Some(applying) = self.state.applying.get(&height) else {
-            self.decrement_submitted_apply(height, hash);
+        let Some((applying_token, applying_hash)) =
+            self.state.sequencer.applying_token_hash(height)
+        else {
+            self.state.sequencer.decrement_submitted_apply(height, hash);
             return;
         };
-        if applying.hash != hash || applying.token != token {
-            self.decrement_submitted_apply(height, hash);
+        if applying_hash != hash || applying_token != token {
+            self.state.sequencer.decrement_submitted_apply(height, hash);
             return;
         }
 
@@ -1473,7 +1465,9 @@ impl BlockSyncReactor {
             (None, None)
         };
 
-        if matches!(result, BlockApplyResult::Duplicate) && self.state.verified_block_tip < height {
+        if matches!(result, BlockApplyResult::Duplicate)
+            && self.state.sequencer.verified_tip() < height
+        {
             if let Some(old_serving_tip) = old_serving_tip {
                 self.finish_frontier_update(old_serving_tip).await;
             }
@@ -1481,8 +1475,8 @@ impl BlockSyncReactor {
         }
         let applying = self
             .state
-            .applying
-            .remove(&height)
+            .sequencer
+            .remove_applying(height)
             .expect("applying entry exists because it was just checked");
 
         self.state.budget.release(applying.bytes);
@@ -1491,19 +1485,24 @@ impl BlockSyncReactor {
         if matches!(result, BlockApplyResult::Committed) {
             self.state.committed_throughput.record(applying.bytes);
         }
-        self.decrement_submitted_apply(height, hash);
+        self.state.sequencer.decrement_submitted_apply(height, hash);
         self.trace_apply_finished(height, token, result, self.state.budget.reserved());
         match result {
             BlockApplyResult::Committed | BlockApplyResult::Duplicate => {}
             BlockApplyResult::Rejected | BlockApplyResult::TimedOut
-                if height > self.state.verified_block_tip =>
+                if height > self.state.sequencer.verified_tip() =>
             {
-                self.release_applying_blocks_from(height);
-                self.state.body_download_floor = previous_height(height)
-                    .unwrap_or(block::Height::MIN)
-                    .max(self.state.verified_block_tip);
+                // Drop the rejected body and every successor (in applying and
+                // reorder), roll the floor back below it, and clear the
+                // download-scheduler covered marks so the heights are
+                // re-requestable. The Sequencer returns the freed bytes for the
+                // reactor to release; budget stays in the reactor.
+                let released = self.state.sequencer.release_applying_blocks_from(height);
+                self.state.budget.release(released);
+                self.state.sequencer.reset_floor_below(height);
                 self.state.schedule.clear_covered_from(height);
-                self.state.reorder.drop_from(height, &mut self.state.budget);
+                let dropped = self.state.sequencer.drop_reorder_from(height);
+                self.state.budget.release(dropped);
                 // A `Rejected` result means consensus found the body invalid
                 // (e.g. a merkle root that does not match the header). Attribute
                 // it to the peer that delivered the body so repeat offenders are
@@ -1521,7 +1520,11 @@ impl BlockSyncReactor {
             BlockApplyResult::Rejected | BlockApplyResult::TimedOut => {}
         }
         if let Some(frontiers) = accepted_local_frontier {
-            self.release_applied_blocks_through(frontiers.verified_block_tip);
+            let released = self
+                .state
+                .sequencer
+                .release_applied_through(frontiers.verified_block_tip);
+            self.state.budget.release(released);
         }
 
         self.release_contiguous_blocks().await;
@@ -1579,7 +1582,7 @@ impl BlockSyncReactor {
         }
         let _ = self
             .dispatch_action(BlockSyncAction::QueryNeededBlocks {
-                verified_block_tip: self.state.body_download_floor,
+                verified_block_tip: self.state.sequencer.floor(),
                 best_header_tip: self.state.best_header_tip,
             })
             .await;
@@ -1890,101 +1893,43 @@ impl BlockSyncReactor {
     }
 
     async fn release_contiguous_blocks(&mut self) {
-        let released = self
-            .state
-            .reorder
-            .drain_contiguous_prefix(self.state.body_download_floor);
-        for (height, block, bytes, source_peer) in released {
-            let hash = block.hash();
-            self.state.body_download_floor = height;
+        // The Sequencer drains its contiguous reorder prefix into `applying`,
+        // advancing its floor, and returns the newly-covered heights so the
+        // reactor marks them covered in the download scheduler.
+        for height in self.state.sequencer.drain_ready_into_applying() {
             self.state.schedule.mark_height_covered(height);
-            self.state.applying.insert(
-                height,
-                ApplyingBlock {
-                    token: 0,
-                    hash,
-                    block,
-                    bytes,
-                    submitted: false,
-                    source_peer,
-                },
-            );
         }
 
         self.submit_pending_blocks().await;
     }
 
     async fn submit_pending_blocks(&mut self) {
-        let submitted = self
-            .state
-            .applying
-            .values()
-            .filter(|applying| applying.submitted)
-            .count();
-        let available = self
-            .startup
-            .config
-            .submitted_apply_limit()
-            .saturating_sub(submitted);
-        if available == 0 {
-            return;
-        }
-
-        let pending: Vec<_> = self
-            .state
-            .applying
-            .iter()
-            .filter_map(|(height, applying)| (!applying.submitted).then_some(*height))
-            .take(available)
-            .collect();
-
-        for height in pending {
-            let Some(block) = self
-                .state
-                .applying
-                .get(&height)
-                .map(|applying| applying.block.clone())
-            else {
+        // The Sequencer chooses the unsubmitted heights within the submission
+        // window; the reactor assigns each a token (via `prepare_submit`) and
+        // dispatches its `SubmitBlock` action. On dispatch failure it rolls the
+        // submission back and stops; remaining heights stay unsubmitted and are
+        // retried on the next call, identical to the pre-extraction behavior.
+        for height in self.state.sequencer.submittable_heights() {
+            let Some(item) = self.state.sequencer.prepare_submit(height) else {
                 continue;
             };
 
-            let token = self.next_apply_token();
-            if let Some(applying) = self.state.applying.get_mut(&height) {
-                applying.token = token;
-                applying.submitted = true;
-            }
-
             metrics::counter!("sync.block.submit.sent").increment(1);
             if !self
-                .dispatch_action(BlockSyncAction::SubmitBlock { token, block })
+                .dispatch_action(BlockSyncAction::SubmitBlock {
+                    token: item.token,
+                    block: item.block,
+                })
                 .await
             {
-                if let Some(applying) = self.state.applying.get_mut(&height) {
-                    if applying.token == token {
-                        applying.token = 0;
-                        applying.submitted = false;
-                    }
-                }
+                self.state.sequencer.unsubmit(item.height, item.token);
                 return;
             }
-            if let Some(applying) = self.state.applying.get(&height) {
-                self.increment_submitted_apply(height, applying.hash);
-            }
-            self.trace_body_submitted(height, token);
+            self.state
+                .sequencer
+                .record_submitted_apply(item.height, item.hash);
+            self.trace_body_submitted(item.height, item.token);
         }
-    }
-
-    fn next_apply_token(&mut self) -> BlockApplyToken {
-        let token = self.state.next_apply_token;
-        self.state.next_apply_token = self.state.next_apply_token.checked_add(1).unwrap_or(1);
-        token
-    }
-
-    fn has_submitted_apply(&self, height: block::Height, hash: block::Hash) -> bool {
-        self.state
-            .submitted_applies
-            .get(&height)
-            .is_some_and(|entries| entries.iter().any(|(entry_hash, _)| *entry_hash == hash))
     }
 
     fn has_outstanding_request(&self, height: block::Height, hash: block::Hash) -> bool {
@@ -2004,10 +1949,10 @@ impl BlockSyncReactor {
     }
 
     fn should_retry_missing_height(&self, height: block::Height, hash: block::Hash) -> bool {
-        height > self.state.body_download_floor
-            && !self.state.reorder.contains(height)
-            && !self.state.applying.contains_key(&height)
-            && !self.has_submitted_apply(height, hash)
+        height > self.state.sequencer.floor()
+            && !self.state.sequencer.reorder_contains(height)
+            && !self.state.sequencer.applying_contains(height)
+            && !self.state.sequencer.has_submitted_apply(height, hash)
             && !self.has_outstanding_request(height, hash)
     }
 
@@ -2016,9 +1961,7 @@ impl BlockSyncReactor {
             return false;
         };
 
-        self.state.reorder.contains_at_or_above(next)
-            || self.state.applying.range(next..).next().is_some()
-            || self.state.submitted_applies.range(next..).next().is_some()
+        self.state.sequencer.has_buffered_at_or_above(next)
             || self.state.peers.values().any(|peer| {
                 peer.outstanding
                     .iter()
@@ -2048,9 +1991,9 @@ impl BlockSyncReactor {
         };
 
         self.state
-            .applying
-            .get(&next)
-            .map(|applying| applying.block.header.previous_block_hash == anchor_hash)
+            .sequencer
+            .applying_previous_block_hash(next)
+            .map(|previous_block_hash| previous_block_hash == anchor_hash)
             .unwrap_or(true)
     }
 
@@ -2064,26 +2007,25 @@ impl BlockSyncReactor {
 
         if self
             .state
-            .reorder
-            .hash(height)
+            .sequencer
+            .reorder_hash(height)
             .is_some_and(|buffered_hash| buffered_hash != hash)
         {
             return true;
         }
         if self
             .state
-            .applying
-            .get(&height)
-            .is_some_and(|applying| applying.hash != hash)
+            .sequencer
+            .applying_hash(height)
+            .is_some_and(|applying_hash| applying_hash != hash)
         {
             return true;
         }
         if !ignore_non_material_conflicts
             && self
                 .state
-                .submitted_applies
-                .get(&height)
-                .is_some_and(|entries| entries.iter().all(|(entry_hash, _)| *entry_hash != hash))
+                .sequencer
+                .submitted_has_only_other_hashes(height, hash)
         {
             return true;
         }
@@ -2100,92 +2042,6 @@ impl BlockSyncReactor {
             return true;
         }
         false
-    }
-
-    fn increment_submitted_apply(&mut self, height: block::Height, hash: block::Hash) {
-        let entries = self.state.submitted_applies.entry(height).or_default();
-        if let Some((_, count)) = entries
-            .iter_mut()
-            .find(|(entry_hash, _)| *entry_hash == hash)
-        {
-            *count = count.saturating_add(1);
-        } else {
-            entries.push((hash, 1));
-        }
-    }
-
-    fn decrement_submitted_apply(&mut self, height: block::Height, hash: block::Hash) {
-        let Some(entries) = self.state.submitted_applies.get_mut(&height) else {
-            return;
-        };
-        if let Some(index) = entries
-            .iter()
-            .position(|(entry_hash, _)| *entry_hash == hash)
-        {
-            let (_, count) = &mut entries[index];
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                entries.remove(index);
-            }
-        }
-        if entries.is_empty() {
-            self.state.submitted_applies.remove(&height);
-        }
-    }
-
-    fn clear_submitted_applies_from(&mut self, from: block::Height) {
-        let heights: Vec<_> = self
-            .state
-            .submitted_applies
-            .range(from..)
-            .map(|(height, _)| *height)
-            .collect();
-        for height in heights {
-            self.state.submitted_applies.remove(&height);
-        }
-    }
-
-    fn release_applied_blocks_through(&mut self, tip: block::Height) {
-        let applied: Vec<_> = self
-            .state
-            .applying
-            .range(..=tip)
-            .map(|(height, _)| *height)
-            .collect();
-        for height in applied {
-            if let Some(applying) = self.state.applying.remove(&height) {
-                self.state.budget.release(applying.bytes);
-            }
-        }
-    }
-
-    fn release_all_applying_blocks_for_reset(&mut self, keep_submitted_applies: bool) {
-        let bytes = self
-            .state
-            .applying
-            .values()
-            .map(|applying| applying.bytes)
-            .sum();
-        if !keep_submitted_applies {
-            self.state.submitted_applies.clear();
-        }
-        self.state.budget.release(bytes);
-        self.state.applying.clear();
-    }
-
-    fn release_applying_blocks_from(&mut self, from: block::Height) {
-        let heights: Vec<_> = self
-            .state
-            .applying
-            .range(from..)
-            .map(|(height, _)| *height)
-            .collect();
-        for height in heights {
-            if let Some(applying) = self.state.applying.remove(&height) {
-                self.state.budget.release(applying.bytes);
-            }
-        }
-        self.clear_submitted_applies_from(from);
     }
 
     async fn send_status(&self, peer: &ZakuraPeerId, reason: &'static str) {
@@ -2515,28 +2371,31 @@ impl BlockSyncReactor {
             .values()
             .filter(|peer| peer.received_status)
             .count();
-        let submitted_applies = self
-            .state
-            .applying
-            .values()
-            .filter(|applying| applying.submitted)
-            .count();
+        let submitted_applies = self.state.sequencer.submitted_applying_count();
         self.emit_trace(bs_trace::BLOCK_SYNC_STATE, |row| {
             bs_insert_height(
                 row,
                 bs_trace::BODY_DOWNLOAD_FLOOR,
-                self.state.body_download_floor,
+                self.state.sequencer.floor(),
             );
             bs_insert_height(
                 row,
                 bs_trace::VERIFIED_BLOCK_TIP,
-                self.state.verified_block_tip,
+                self.state.sequencer.verified_tip(),
             );
             bs_insert_height(row, bs_trace::BEST_HEADER_TIP, self.state.best_header_tip);
             bs_insert_u64(row, bs_trace::BODY_LAG, u64::from(self.body_lag()));
-            bs_insert_u64(row, bs_trace::APPLYING, self.state.applying.len() as u64);
+            bs_insert_u64(
+                row,
+                bs_trace::APPLYING,
+                self.state.sequencer.applying_len() as u64,
+            );
             bs_insert_u64(row, bs_trace::SUBMITTED_APPLIES, submitted_applies as u64);
-            bs_insert_u64(row, bs_trace::REORDER, self.state.reorder.len() as u64);
+            bs_insert_u64(
+                row,
+                bs_trace::REORDER,
+                self.state.sequencer.reorder_len() as u64,
+            );
             bs_insert_u64(row, bs_trace::OUTSTANDING, outstanding as u64);
             if let Some(floor_gap) = floor_gap {
                 bs_insert_height(row, bs_trace::FLOOR_GAP_HEIGHT, floor_gap.height);
@@ -2950,7 +2809,7 @@ impl BlockSyncReactor {
     }
 
     fn floor_gap_diagnostics(&self, now: Instant) -> Option<FloorGapDiagnostics> {
-        let height = next_height(self.state.body_download_floor)?;
+        let height = next_height(self.state.sequencer.floor())?;
         if height > self.state.best_header_tip {
             return None;
         }
@@ -2996,11 +2855,11 @@ impl BlockSyncReactor {
             }
         }
 
-        let state = if self.state.applying.contains_key(&height) {
+        let state = if self.state.sequencer.applying_contains(height) {
             "applying"
-        } else if self.state.submitted_applies.contains_key(&height) {
+        } else if self.state.sequencer.submitted_contains(height) {
             "submitted_apply"
-        } else if self.state.reorder.contains(height) {
+        } else if self.state.sequencer.reorder_contains(height) {
             "reorder"
         } else if outstanding_peers > 0 {
             "outstanding"
@@ -3033,13 +2892,13 @@ impl BlockSyncReactor {
         metrics::gauge!("sync.block.best_header_tip.height")
             .set(self.state.best_header_tip.0 as f64);
         metrics::gauge!("sync.block.verified_tip.height")
-            .set(self.state.verified_block_tip.0 as f64);
+            .set(self.state.sequencer.verified_tip().0 as f64);
         metrics::gauge!("sync.block.missing_bodies").set(self.state.needed_heights.len() as f64);
         metrics::gauge!("sync.block.budget.reserved_bytes")
             .set(self.state.budget.reserved() as f64);
         metrics::gauge!("sync.block.reorder.buffered_bytes")
-            .set(self.state.reorder.buffered_bytes() as f64);
-        metrics::gauge!("sync.block.applying").set(self.state.applying.len() as f64);
+            .set(self.state.sequencer.reorder_buffered_bytes() as f64);
+        metrics::gauge!("sync.block.applying").set(self.state.sequencer.applying_len() as f64);
         metrics::gauge!("sync.block.outstanding").set(
             self.state
                 .peers

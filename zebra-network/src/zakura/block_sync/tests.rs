@@ -9,6 +9,7 @@ use super::{
     reactor::node_id_from_block_peer_id,
     reorder::*,
     scheduler::*,
+    sequencer::*,
     state::*,
 };
 use crate::zakura::{
@@ -2077,12 +2078,13 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
         reorder.insert(block::Height(3), block, 300, peer(0)),
         ReorderInsertResult::Inserted
     );
-    // `drop_from`/`drop_through`/`clear` still release the budget for bodies that
-    // never reach the apply stage.
-    reorder.drop_from(block::Height(3), &mut budget);
+    // `drop_from`/`drop_through`/`clear` return the bytes their dropped bodies
+    // held; the reactor releases that reservation (the reorder buffer, owned by
+    // the `Sequencer`, never touches the budget directly).
+    budget.release(reorder.drop_from(block::Height(3)));
     assert_eq!(reorder.buffered_bytes(), 200);
     assert_eq!(budget.reserved(), 200);
-    reorder.drop_through(block::Height(2), &mut budget);
+    budget.release(reorder.drop_through(block::Height(2)));
     assert_eq!(reorder.buffered_bytes(), 0);
     assert_eq!(budget.reserved(), 0);
     assert!(budget.try_reserve(300));
@@ -2095,9 +2097,211 @@ fn reorder_drains_only_contiguous_prefix_without_releasing_budget() {
         ),
         ReorderInsertResult::Inserted
     );
-    reorder.clear(&mut budget);
+    budget.release(reorder.clear());
     assert_eq!(reorder.buffered_bytes(), 0);
     assert_eq!(budget.reserved(), 0);
+}
+
+// ---- Sequencer (S1 commit-pipeline extraction) ----
+
+fn test_sequencer(verified_tip: u32, submitted_apply_limit: usize) -> Sequencer {
+    Sequencer::new(block::Height(verified_tip), submitted_apply_limit)
+}
+
+#[test]
+fn sequencer_accept_body_buffers_then_reports_duplicate() {
+    let mut seq = test_sequencer(0, 4);
+    let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+    let hash = block.hash();
+    // First arrival above the floor buffers the body and reports its covered
+    // height; the reorder buffer takes ownership of the reservation.
+    assert_eq!(
+        seq.accept_body(block::Height(1), hash, block.clone(), 100, peer(0)),
+        AcceptOutcome::Buffered {
+            covered: block::Height(1)
+        }
+    );
+    assert!(seq.reorder_contains(block::Height(1)));
+    // A second arrival of the same buffered height is redundant; its bytes are
+    // handed back for the reactor to release.
+    assert_eq!(
+        seq.accept_body(block::Height(1), hash, block, 100, peer(0)),
+        AcceptOutcome::Redundant { release_bytes: 100 }
+    );
+}
+
+#[test]
+fn sequencer_accept_body_rejects_at_or_below_floor() {
+    let mut seq = test_sequencer(5, 4);
+    let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+    assert_eq!(
+        seq.accept_body(block::Height(5), block.hash(), block.clone(), 100, peer(0)),
+        AcceptOutcome::Redundant { release_bytes: 100 }
+    );
+    assert!(!seq.reorder_contains(block::Height(5)));
+}
+
+#[test]
+fn sequencer_drains_contiguous_prefix_into_applying_and_advances_floor() {
+    let mut seq = test_sequencer(0, 8);
+    let blocks = mainnet_blocks_1_to_3();
+    // Buffer heights 1 and 3, leaving a gap at 2.
+    seq.accept_body(
+        block::Height(1),
+        blocks[0].hash(),
+        blocks[0].clone(),
+        100,
+        peer(0),
+    );
+    seq.accept_body(
+        block::Height(3),
+        blocks[2].hash(),
+        blocks[2].clone(),
+        300,
+        peer(0),
+    );
+    // Only the contiguous prefix above the floor (height 1) drains.
+    assert_eq!(seq.drain_ready_into_applying(), vec![block::Height(1)]);
+    assert_eq!(seq.floor(), block::Height(1));
+    assert!(seq.applying_contains(block::Height(1)));
+    assert_eq!(seq.applying_len(), 1);
+    // Filling the gap lets 2 and 3 drain together and advances the floor to 3.
+    seq.accept_body(
+        block::Height(2),
+        blocks[1].hash(),
+        blocks[1].clone(),
+        200,
+        peer(0),
+    );
+    assert_eq!(
+        seq.drain_ready_into_applying(),
+        vec![block::Height(2), block::Height(3)]
+    );
+    assert_eq!(seq.floor(), block::Height(3));
+    assert_eq!(seq.reorder_len(), 0);
+}
+
+#[test]
+fn sequencer_submits_within_window_and_rolls_back_on_unsubmit() {
+    let mut seq = test_sequencer(0, 2);
+    let blocks = mainnet_blocks_1_to_3();
+    for (index, block) in blocks.iter().enumerate() {
+        let height = block::Height(index as u32 + 1);
+        seq.accept_body(height, block.hash(), block.clone(), 100, peer(0));
+    }
+    assert_eq!(seq.drain_ready_into_applying().len(), 3);
+    // The submission window of 2 caps the eligible heights.
+    assert_eq!(
+        seq.submittable_heights(),
+        vec![block::Height(1), block::Height(2)]
+    );
+    let item1 = seq.prepare_submit(block::Height(1)).expect("applying at 1");
+    let item2 = seq.prepare_submit(block::Height(2)).expect("applying at 2");
+    assert_eq!((item1.token, item2.token), (1, 2));
+    assert_eq!(seq.submitted_applying_count(), 2);
+    // The window is now full, so nothing else is submittable.
+    assert!(seq.submittable_heights().is_empty());
+    // Rolling back a failed dispatch frees the slot and re-offers the height.
+    seq.unsubmit(block::Height(2), item2.token);
+    assert_eq!(seq.submitted_applying_count(), 1);
+    assert_eq!(seq.submittable_heights(), vec![block::Height(2)]);
+}
+
+#[test]
+fn sequencer_records_and_decrements_submitted_applies() {
+    let mut seq = test_sequencer(0, 4);
+    let block = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+    let hash = block.hash();
+    assert!(!seq.has_submitted_apply(block::Height(1), hash));
+    seq.record_submitted_apply(block::Height(1), hash);
+    assert!(seq.has_submitted_apply(block::Height(1), hash));
+    assert!(seq.submitted_contains(block::Height(1)));
+    seq.decrement_submitted_apply(block::Height(1), hash);
+    assert!(!seq.has_submitted_apply(block::Height(1), hash));
+    assert!(!seq.submitted_contains(block::Height(1)));
+}
+
+#[test]
+fn sequencer_advance_verified_tip_releases_bytes_and_reports_change() {
+    let mut seq = test_sequencer(0, 8);
+    let blocks = mainnet_blocks_1_to_3();
+    seq.accept_body(
+        block::Height(1),
+        blocks[0].hash(),
+        blocks[0].clone(),
+        100,
+        peer(0),
+    );
+    seq.accept_body(
+        block::Height(2),
+        blocks[1].hash(),
+        blocks[1].clone(),
+        200,
+        peer(0),
+    );
+    // Advancing the verified tip drops buffered bodies at or below it and reports
+    // their bytes for the reactor to release.
+    let advance = seq.advance_verified_tip(block::Height(2), false);
+    assert!(advance.changed);
+    assert_eq!(advance.release_bytes, 300);
+    assert_eq!(seq.verified_tip(), block::Height(2));
+    assert!(seq.floor() >= block::Height(2));
+    // A no-op advance to the same tip frees nothing and reports unchanged.
+    let advance = seq.advance_verified_tip(block::Height(2), false);
+    assert!(!advance.changed);
+    assert_eq!(advance.release_bytes, 0);
+}
+
+#[test]
+fn sequencer_reset_clears_buffers_and_pins_floor_and_tip() {
+    let mut seq = test_sequencer(0, 8);
+    let blocks = mainnet_blocks_1_to_3();
+    seq.accept_body(
+        block::Height(1),
+        blocks[0].hash(),
+        blocks[0].clone(),
+        100,
+        peer(0),
+    );
+    seq.drain_ready_into_applying();
+    seq.accept_body(
+        block::Height(2),
+        blocks[1].hash(),
+        blocks[1].clone(),
+        200,
+        peer(0),
+    );
+    // Reset drops everything (one applying@100 + one reorder@200) and pins the
+    // floor/tip to the reset target.
+    let released = seq.reset_to(block::Height(0), false);
+    assert_eq!(released, 300);
+    assert_eq!(seq.floor(), block::Height(0));
+    assert_eq!(seq.verified_tip(), block::Height(0));
+    assert_eq!(seq.applying_len(), 0);
+    assert_eq!(seq.reorder_len(), 0);
+}
+
+#[test]
+fn sequencer_reject_drops_successors_and_rolls_floor_back() {
+    let mut seq = test_sequencer(0, 8);
+    let blocks = mainnet_blocks_1_to_3();
+    for (index, block) in blocks.iter().enumerate() {
+        let height = block::Height(index as u32 + 1);
+        seq.accept_body(height, block.hash(), block.clone(), 100, peer(0));
+    }
+    seq.drain_ready_into_applying();
+    assert_eq!(seq.floor(), block::Height(3));
+    // A reject at height 2 drops applying >= 2 (200 bytes) and rolls the floor
+    // back below 2, never below the verified tip.
+    let released = seq.release_applying_blocks_from(block::Height(2));
+    assert_eq!(released, 200);
+    assert!(seq.applying_contains(block::Height(1)));
+    assert!(!seq.applying_contains(block::Height(2)));
+    seq.reset_floor_below(block::Height(2));
+    assert_eq!(seq.floor(), block::Height(1));
+    // The committed prefix at or below height 1 is releasable.
+    assert_eq!(seq.release_applied_through(block::Height(1)), 100);
+    assert_eq!(seq.applying_len(), 0);
 }
 
 #[test]
