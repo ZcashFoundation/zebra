@@ -41,7 +41,7 @@ use zcash_protocol::consensus;
 use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
-    block, orchard,
+    block, ironwood, orchard,
     parameters::{
         Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
         TX_V5_VERSION_GROUP_ID,
@@ -57,8 +57,6 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
     Error,
 };
-
-use crate::ironwood;
 
 /// A Zcash transaction.
 ///

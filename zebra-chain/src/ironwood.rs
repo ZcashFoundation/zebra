@@ -14,6 +14,9 @@
 
 use crate::orchard;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
+
 /// An Ironwood nullifier.
 ///
 /// Wraps [`orchard::Nullifier`] (Ironwood reuses the Orchard nullifier construction). The Ironwood
@@ -27,20 +30,6 @@ impl From<orchard::Nullifier> for Nullifier {
     fn from(nullifier: orchard::Nullifier) -> Self {
         Self(nullifier)
     }
-}
-
-#[cfg(any(test, feature = "proptest-impl"))]
-impl proptest::arbitrary::Arbitrary for Nullifier {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::strategy::Strategy;
-        proptest::arbitrary::any::<orchard::Nullifier>()
-            .prop_map(Nullifier)
-            .boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 /// Ironwood shielded data: a v6 Orchard-protocol bundle committed to the Ironwood pool.

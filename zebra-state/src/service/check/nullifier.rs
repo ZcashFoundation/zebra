@@ -29,7 +29,7 @@ use crate::service;
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
@@ -101,7 +101,7 @@ where
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
@@ -158,7 +158,7 @@ pub(crate) fn tx_no_duplicates_in_chain(
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>

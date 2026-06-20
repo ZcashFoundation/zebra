@@ -154,6 +154,8 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 /// > [NU6.3 onward] If there are any Ironwood actions, then at least one of enableSpendsIronwood
 /// > and enableOutputsIronwood MUST be 1.
 ///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
 /// (No-op for transactions without Ironwood actions, i.e. all pre-v6 transactions.)
 pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_enough_ironwood_flags() {
@@ -168,9 +170,10 @@ pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionErro
 ///
 /// > [NU6.3 onward] The `enableCrossAddress` flag of `flagsOrchard` MUST be 0.
 ///
-/// At NU6.3 no new value may enter the Orchard pool; new shielded value is routed to Ironwood, so
-/// only the Ironwood pool may enable cross-address transfers. A v5 Orchard bundle can never set
-/// this flag (it is rejected at deserialization), so this only constrains v6 Orchard bundles.
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// A v5 Orchard bundle can never set this flag (it is rejected at deserialization), so this only
+/// constrains v6 Orchard bundles.
 pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), TransactionError> {
     if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
         if orchard_shielded_data
@@ -224,7 +227,7 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
         if matches!(tx, Transaction::V6 { .. }) {
             if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
                 if !orchard_shielded_data.flags.is_empty() {
-                    return Err(TransactionError::CoinbaseHasNonZeroOrchardFlags);
+                    return Err(TransactionError::CoinbaseHasOrchardFlags);
                 }
             }
         }

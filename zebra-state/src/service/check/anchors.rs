@@ -123,9 +123,17 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
 
     // Ironwood Actions
     //
-    // The anchorIronwood field, whenever it exists (i.e. when there are any Ironwood actions), MUST
-    // refer to some earlier block's final Ironwood treestate. Ironwood reuses the Orchard bundle
-    // shape and tree root type, in a separate anchor set.
+    // MUST refer to some earlier block’s final Ironwood treestate.
+    //
+    // # Consensus
+    //
+    // > The anchorIronwood field of the transaction, whenever it exists
+    // > (i.e. when there are any Ironwood Action descriptions), MUST refer to some
+    // > earlier block’s final Ironwood treestate.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#actions>
+    //
+    // Ironwood reuses the Orchard tree root type, in a separate anchor set.
     if let Some(ironwood_shielded_data) = transaction.ironwood_shielded_data() {
         tracing::debug!(
             ?ironwood_shielded_data.shared_anchor,

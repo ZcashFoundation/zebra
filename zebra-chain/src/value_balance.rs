@@ -124,6 +124,17 @@ where
         self
     }
 
+    /// Returns the deferred amount.
+    pub fn deferred_amount(&self) -> Amount<C> {
+        self.deferred
+    }
+
+    /// Sets the deferred amount without affecting other amounts.
+    pub fn set_deferred_amount(&mut self, deferred_amount: Amount<C>) -> &Self {
+        self.deferred = deferred_amount;
+        self
+    }
+
     /// Get the ironwood amount from the [`ValueBalance`].
     pub fn ironwood_amount(&self) -> Amount<C> {
         self.ironwood
@@ -133,17 +144,6 @@ where
     /// leaving the other values untouched.
     pub fn set_ironwood_value_balance(&mut self, ironwood_value_balance: ValueBalance<C>) -> &Self {
         self.ironwood = ironwood_value_balance.ironwood;
-        self
-    }
-
-    /// Returns the deferred amount.
-    pub fn deferred_amount(&self) -> Amount<C> {
-        self.deferred
-    }
-
-    /// Sets the deferred amount without affecting other amounts.
-    pub fn set_deferred_amount(&mut self, deferred_amount: Amount<C>) -> &Self {
-        self.deferred = deferred_amount;
         self
     }
 
