@@ -186,15 +186,49 @@ else
 fi
 
 # ── progress (single line on stderr; only when stderr is a TTY) ───────
-# Used for the slow per-crate loops (cargo-public-api, --with-values
-# rustdoc). Silent on non-TTY stderr and in --json mode so logs and
-# machine-readable output stay clean.
-progress() {
+# A spinner-prefixed status line for the slow per-crate loops
+# (cargo-public-api, --with-values rustdoc). A background tick re-renders
+# every 100ms so the spinner keeps moving even while a single cargo
+# invocation blocks the foreground. Silent off-TTY and in --json mode so
+# logs and machine-readable output stay clean.
+SPINNER_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+progress_state_file=
+progress_pid=
+
+# Start the background tick. Idempotent.
+progress_start() {
+    [ -n "$progress_pid" ] && return 0
     ${json_mode:-false} && return 0
     [ -t 2 ] || return 0
-    printf '\r\033[K%s' "$1" >&2
+    progress_state_file=$(mktemp -p "$RUN_TMP" progress.XXXXXX)
+    : >"$progress_state_file"
+    (
+        i=0
+        while :; do
+            msg=$(cat "$progress_state_file" 2>/dev/null || true)
+            [ -n "$msg" ] && printf '\r%s %s\033[K' "${SPINNER_FRAMES[i % 10]}" "$msg" >&2
+            i=$((i + 1))
+            sleep 0.1
+        done
+    ) &
+    progress_pid=$!
 }
+
+# Update the displayed message; the background tick picks it up on its
+# next iteration. No-op if the tick hasn't been started.
+progress() {
+    [ -z "$progress_state_file" ] && return 0
+    printf '%s' "$1" >"$progress_state_file"
+}
+
+# Stop the tick and clear the line.
 progress_clear() {
+    if [ -n "$progress_pid" ]; then
+        kill "$progress_pid" 2>/dev/null || true
+        wait "$progress_pid" 2>/dev/null || true
+        progress_pid=
+        progress_state_file=
+    fi
     ${json_mode:-false} && return 0
     [ -t 2 ] || return 0
     printf '\r\033[K' >&2
@@ -479,6 +513,10 @@ mkdir -p "$CACHE_DIR" 2>/dev/null || true
 # (including the case where the script aborts mid-run).
 RUN_TMP=$(mktemp -d)
 cleanup_run_tmp() {
+    # Stop the background progress tick if still running (Ctrl-C path).
+    if [ -n "${progress_pid:-}" ]; then
+        kill "$progress_pid" 2>/dev/null || true
+    fi
     # Best-effort: remove any worktrees still registered, then nuke the dir.
     if [ -d "$RUN_TMP" ]; then
         for wt in "$RUN_TMP"/*; do
@@ -1179,6 +1217,7 @@ done
 # runs; the section is emitted in one go after the loop completes.
 api_rows=""
 
+progress_start
 for i in "${!all_crates[@]}"; do
     crate_name="${all_crates[$i]}"
     progress "${DIM}public-api: [$((i + 1))/$crate_count] $crate_name${RESET}"
@@ -1384,6 +1423,7 @@ if $with_values; then
 
         values_base_tsv="$RUN_TMP/values.base.tsv"
         values_head_tsv="$RUN_TMP/values.head.tsv"
+        progress_start
         dump_value_doc_index "$baseline_sha" base >"$values_base_tsv" || : >"$values_base_tsv"
         dump_value_doc_index "$head_sha" head >"$values_head_tsv" || : >"$values_head_tsv"
         progress_clear

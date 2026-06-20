@@ -212,7 +212,7 @@ Run it from the repository root:
 zebra-utils/check-api                 # parent branch (or HEAD) -> working tree / HEAD
 zebra-utils/check-api main            # main -> working tree / HEAD
 zebra-utils/check-api v4.1.0 v4.2.0   # compare two refs
-zebra-utils/check-api --with-values   # also flag const/static value + doc changes (slow: ~15 min on first run)
+zebra-utils/check-api --with-values   # also flag const/static value + doc changes
 zebra-utils/check-api --json main     # machine-readable output
 ```
 
