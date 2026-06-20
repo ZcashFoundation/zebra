@@ -229,7 +229,6 @@ impl BlockSyncReactor {
         );
 
         self.query_needed_blocks().await;
-        self.release_caught_up_block_sync_peers();
         self.publish_metrics();
         self.refresh_throughput();
         self.trace_sync_state();
@@ -448,7 +447,6 @@ impl BlockSyncReactor {
     async fn handle_peer_connected(&mut self, session: BlockSyncPeerSession) {
         let peer = session.peer_id().clone();
         let direction = session.direction();
-        self.state.disconnected_peers.remove(&peer);
         let decision = self.admission_decision_for(&peer, direction);
         if decision != ServiceAdmissionDecision::Admit {
             // Reject: cancel the session (which also cancels the already-spawned
@@ -491,7 +489,6 @@ impl BlockSyncReactor {
         // thin serving handle and the registry entry.
         if self.state.peers.remove(&peer).is_some() {
             self.trace_peer_disconnected(&peer, self.registry_received_status(&peer));
-            self.state.disconnected_peers.insert(peer.clone());
         }
         self.registry.remove(&peer);
         self.state.parked_peers.remove(&peer);
@@ -507,7 +504,6 @@ impl BlockSyncReactor {
         self.state.best_header_tip = height;
         self.state.best_header_hash = hash;
         self.query_needed_blocks().await;
-        self.release_caught_up_block_sync_peers();
     }
 
     async fn handle_frontier_update(&mut self, update: FrontierUpdate) {
@@ -706,7 +702,6 @@ impl BlockSyncReactor {
         self.queue_status_refresh_if_changed(old_serving_tip);
         self.flush_status_refresh().await;
         self.query_needed_blocks().await;
-        self.release_caught_up_block_sync_peers();
     }
 
     async fn handle_needed_blocks(&mut self, blocks: Vec<BlockSyncBlockMeta>) {
@@ -788,13 +783,6 @@ impl BlockSyncReactor {
             .best_header_tip
             .0
             .saturating_sub(self.verified_block_tip.0)
-    }
-
-    fn release_caught_up_block_sync_peers(&mut self) {
-        // Keep block-sync streams open even when this node is locally caught
-        // up. A synced node can still be the server a fresh peer needs for
-        // historical bodies, and closing the stream after every local catch-up
-        // starves fresh Zakura-only nodes between checkpoint windows.
     }
 
     /// Handle one shared routine→reactor message (S4 inverted flow). The per-peer

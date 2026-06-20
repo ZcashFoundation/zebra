@@ -4382,6 +4382,10 @@ async fn reactor_zero_pause_threshold_preserves_lag_one_downloads() {
 
 #[tokio::test]
 async fn reactor_keeps_block_sync_peer_after_catch_up_and_reuses_later() {
+    // Block-sync streams stay open even when this node is locally caught up: a
+    // synced node can still be the server a fresh peer needs for historical
+    // bodies, so closing the stream after every local catch-up would starve fresh
+    // Zakura-only nodes between checkpoint windows.
     let mut config = immediate_body_download_config();
     config.peer_limits.max_outbound_peers = 1;
     let (_tip_tx, tip_rx) = watch::channel((block::Height(4), block::Hash([4; 32])));
