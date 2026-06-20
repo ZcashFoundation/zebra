@@ -139,6 +139,12 @@ impl Sequencer {
 
     /// A response for `height` is stale when the height is already at/below the
     /// download floor or held in a commit-pipeline buffer.
+    ///
+    /// Deliberately does NOT include `has_submitted_apply` (unlike
+    /// [`accept_body`](Self::accept_body)'s redundancy precheck): a submitted-but-
+    /// not-yet-buffered height is not treated as a stale *response* here. This
+    /// asymmetry is preserved verbatim from the pre-extraction reactor predicates;
+    /// do not "unify" the two without confirming the behavior change.
     pub(super) fn is_stale_response_height(&self, height: block::Height) -> bool {
         height <= self.body_download_floor
             || self.reorder.contains(height)
