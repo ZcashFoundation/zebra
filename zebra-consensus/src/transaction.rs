@@ -446,6 +446,17 @@ where
                 }
             }
 
+            // The Ironwood bundle's Halo2 proof must also have a canonical size. Ironwood only
+            // exists from NU6.3 onward (there is no legacy lenient period as there was for
+            // Orchard), so this is enforced unconditionally whenever an Ironwood bundle is present.
+            // Like the Orchard bundle, Ironwood bundles are deserialized leniently, so the size is
+            // checked here rather than during parsing.
+            if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
+                if !ironwood_shielded_data.proof_size_is_canonical() {
+                    return Err(TransactionError::IronwoodProofSize);
+                }
+            }
+
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);

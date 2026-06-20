@@ -214,6 +214,21 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             }
         }
 
+        // > [NU6.3 onward] For coinbase transactions, flagsOrchard MUST be 0.
+        //
+        // This is stronger than the pre-NU6.3 rule above (which only forbids enableSpends): no new
+        // value may be shielded into the Orchard pool at NU6.3, since new shielded value is routed
+        // to Ironwood. It only applies to v6 transactions (v5 coinbase Orchard bundles may still set
+        // enableOutputs).
+        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+        if matches!(tx, Transaction::V6 { .. }) {
+            if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+                if !orchard_shielded_data.flags.is_empty() {
+                    return Err(TransactionError::CoinbaseHasNonZeroOrchardFlags);
+                }
+            }
+        }
+
         // > [NU6.3 onward] In a version 6 coinbase transaction, the enableSpendsIronwood flag MUST
         // > be 0.
         //
@@ -312,11 +327,15 @@ pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError
     let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
     let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
     let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
+    // `ironwood_nullifiers()` yields owned `ironwood::Nullifier`s (the Ironwood-pool newtype), so
+    // they are wrapped as `Cow::Owned`. Ironwood and Orchard nullifiers are disjoint.
+    let ironwood_nullifiers = transaction.ironwood_nullifiers().map(Cow::Owned);
 
     check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;
     check_for_duplicates(sprout_nullifiers, DuplicateSproutNullifier)?;
     check_for_duplicates(sapling_nullifiers, DuplicateSaplingNullifier)?;
     check_for_duplicates(orchard_nullifiers, DuplicateOrchardNullifier)?;
+    check_for_duplicates(ironwood_nullifiers, DuplicateIronwoodNullifier)?;
 
     Ok(())
 }

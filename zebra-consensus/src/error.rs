@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use zcash_protocol::value::BalanceError;
 use zebra_chain::{
-    amount, block, orchard,
+    amount, block, ironwood, orchard,
     parameters::subsidy::SubsidyError,
     sapling, sprout,
     transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
@@ -52,6 +52,9 @@ pub enum TransactionError {
 
     #[error("coinbase transaction MUST NOT have the enableSpendsIronwood flag set")]
     CoinbaseHasEnableSpendsIronwood,
+
+    #[error("v6 coinbase transaction MUST have flagsOrchard set to 0")]
+    CoinbaseHasNonZeroOrchardFlags,
 
     #[error("transaction with Ironwood actions MUST set at least one Ironwood flag")]
     NotEnoughIronwoodFlags,
@@ -186,6 +189,9 @@ pub enum TransactionError {
     #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
     DuplicateOrchardNullifier(orchard::Nullifier),
 
+    #[error("ironwood double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateIronwoodNullifier(ironwood::Nullifier),
+
     #[error("must have at least one active orchard flag")]
     NotEnoughFlags,
 
@@ -253,6 +259,9 @@ pub enum TransactionError {
 
     #[error("Orchard proof has a non-canonical size")]
     OrchardProofSize,
+
+    #[error("Ironwood proof has a non-canonical size")]
+    IronwoodProofSize,
 
     #[error("unexpected error")]
     Other(String),
@@ -349,6 +358,7 @@ impl TransactionError {
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
             | CoinbaseHasEnableSpendsIronwood
+            | CoinbaseHasNonZeroOrchardFlags
             | NotEnoughIronwoodFlags
             | OrchardHasEnableCrossAddress
             | CoinbaseOutputsNotDecryptable

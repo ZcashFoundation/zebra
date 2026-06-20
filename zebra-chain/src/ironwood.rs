@@ -29,6 +29,20 @@ impl From<orchard::Nullifier> for Nullifier {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
+impl proptest::arbitrary::Arbitrary for Nullifier {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        proptest::arbitrary::any::<orchard::Nullifier>()
+            .prop_map(Nullifier)
+            .boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+}
+
 /// Ironwood shielded data: a v6 Orchard-protocol bundle committed to the Ironwood pool.
 ///
 /// Wraps [`orchard::ShieldedDataV6`] (which itself carries the NU6.3 flag-byte format that permits
