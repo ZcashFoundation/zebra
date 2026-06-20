@@ -15,6 +15,12 @@ const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 /// request timeouts, and above all misbehavior disconnects.
 const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Spare action-channel slots kept above `submitted_apply_limit` for queries,
+/// misbehavior, and best-effort `SendMessage` mirrors. The channel is sized so a
+/// full checkpoint window of `SubmitBlock`s plus this pool fit without the
+/// reactor ever blocking on a required-action `send().await`.
+const BS_ACTION_MIRROR_POOL: usize = 128;
+
 /// How many requests the fill loop issues between hot-path timeout sweeps, so a
 /// large fill pass still reclaims overdue requests promptly instead of waiting
 /// for the periodic tick.
@@ -56,7 +62,18 @@ pub fn spawn_block_sync_reactor(
     let (events_tx, events_rx) =
         mpsc::channel(startup.config.peer_limits.inbound_queue_depth.max(1));
     let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
-    let (actions_tx, actions_rx) = mpsc::channel(128);
+    // Size the action channel so the reactor can dispatch a full checkpoint
+    // window of `SubmitBlock`s (`submitted_apply_limit`) plus the mirror/query
+    // pool without blocking on a required-action `send().await`. The byte budget
+    // — not this channel — bounds in-flight body memory, and `SubmitBlock` only
+    // carries an `Arc<Block>` already accounted in `applying`, so the larger
+    // channel costs negligible memory while removing a head-of-line stall that
+    // throttled body intake behind commit submission.
+    let actions_capacity = startup
+        .config
+        .submitted_apply_limit()
+        .saturating_add(BS_ACTION_MIRROR_POOL);
+    let (actions_tx, actions_rx) = mpsc::channel(actions_capacity);
     let (peers_tx, peers_rx) = watch::channel(state.peer_snapshot(startup.config.peer_limits));
     let (status_tx, status_rx) = watch::channel(state.last_advertised_status);
     let (candidates_tx, candidates_rx) = watch::channel(ZakuraBlockSyncCandidateState::default());
@@ -3064,13 +3081,23 @@ impl BlockSyncReactor {
     /// Hand a data-plane action to the action driver without letting a slow or
     /// stalled driver wedge the reactor. Direct peer-session sends are already
     /// complete before `SendMessage` actions are mirrored, so those mirrors are
-    /// dropped immediately if the channel is full. Required driver actions wait
-    /// up to [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the
-    /// reactor keeps draining peer-lifecycle events, request timeouts, and
+    /// best-effort: they are dropped if the channel is full, and also whenever
+    /// fewer than `submitted_apply_limit` slots remain, so a burst of mirrors can
+    /// never consume the headroom a must-not-drop `SubmitBlock` needs (that would
+    /// make the next `SubmitBlock` `send().await` block the whole reactor and
+    /// stall every peer's body intake behind commit submission). Required driver
+    /// actions wait up to [`ACTION_SEND_TIMEOUT`]; past that the action is dropped
+    /// so the reactor keeps draining peer-lifecycle events, request timeouts, and
     /// misbehavior disconnects. Returns `true` only if the action was accepted.
     async fn dispatch_action(&self, action: BlockSyncAction) -> bool {
         self.trace_action_dispatched(&action);
         if matches!(action, BlockSyncAction::SendMessage { .. }) {
+            // Reserve a full checkpoint window of slots for required actions; the
+            // mirror only uses the pool above that reserve.
+            if self.actions.capacity() <= self.startup.config.submitted_apply_limit() {
+                metrics::counter!("sync.block.action.send_mirror_skipped").increment(1);
+                return false;
+            }
             return match self.actions.try_send(action) {
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(_)) => {
