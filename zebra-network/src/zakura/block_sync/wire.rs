@@ -186,6 +186,23 @@ impl BlockSyncMessage {
         }
         Ok(message)
     }
+
+    /// Exact serialized length of a `Block` body, derived from the frame payload
+    /// length the per-peer decode task already has in hand.
+    ///
+    /// A block payload is `[message_type][block serialization]` with no trailing
+    /// bytes — `encode` writes exactly those two parts and `decode` calls
+    /// `reject_trailing`, so the block occupies exactly
+    /// `payload_len - BLOCK_SYNC_MESSAGE_TYPE_BYTES`. Returning this lets the
+    /// reactor account body bytes without re-serializing the whole block on its
+    /// single thread (the per-peer task already paid the deserialization cost).
+    /// Returns `None` for non-block messages.
+    pub(super) fn block_body_wire_bytes(&self, payload_len: usize) -> Option<u64> {
+        matches!(self, Self::Block(_)).then(|| {
+            u64::try_from(payload_len.saturating_sub(BLOCK_SYNC_MESSAGE_TYPE_BYTES))
+                .unwrap_or(u64::MAX)
+        })
+    }
 }
 
 pub(super) fn validate_block_count(count: u32) -> Result<(), BlockSyncWireError> {

@@ -179,7 +179,11 @@ impl BlockSyncReactor {
         match event {
             BlockSyncEvent::PeerConnected(session) => self.handle_peer_connected(session).await,
             BlockSyncEvent::PeerDisconnected(peer) => self.handle_peer_disconnected(peer),
-            BlockSyncEvent::WireMessage { peer, msg } => self.handle_wire_message(peer, msg).await,
+            BlockSyncEvent::WireMessage {
+                peer,
+                msg,
+                body_wire_bytes,
+            } => self.handle_wire_message(peer, msg, body_wire_bytes).await,
             BlockSyncEvent::WireDecodeFailed { peer, error } => {
                 self.handle_wire_decode_failed(peer, error).await
             }
@@ -647,7 +651,12 @@ impl BlockSyncReactor {
             .await;
     }
 
-    async fn handle_wire_message(&mut self, peer: ZakuraPeerId, msg: BlockSyncMessage) {
+    async fn handle_wire_message(
+        &mut self,
+        peer: ZakuraPeerId,
+        msg: BlockSyncMessage,
+        body_wire_bytes: Option<u64>,
+    ) {
         if self.state.parked_peers.contains(&peer) {
             return;
         }
@@ -655,7 +664,7 @@ impl BlockSyncReactor {
         self.trace_message_received(&peer, &msg);
         match msg {
             BlockSyncMessage::Status(status) => self.handle_status(peer, status).await,
-            BlockSyncMessage::Block(block) => self.handle_block(peer, block).await,
+            BlockSyncMessage::Block(block) => self.handle_block(peer, block, body_wire_bytes).await,
             BlockSyncMessage::BlocksDone {
                 start_height,
                 returned: _,
@@ -715,7 +724,12 @@ impl BlockSyncReactor {
         self.schedule_peer(&peer).await;
     }
 
-    async fn handle_block(&mut self, peer: ZakuraPeerId, block: Arc<block::Block>) {
+    async fn handle_block(
+        &mut self,
+        peer: ZakuraPeerId,
+        block: Arc<block::Block>,
+        body_wire_bytes: Option<u64>,
+    ) {
         let hash = block.hash();
         let Some(height) = block.coinbase_height() else {
             self.report_misbehavior(peer, BlockSyncMisbehavior::InvalidBlock)
@@ -725,7 +739,7 @@ impl BlockSyncReactor {
 
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
             if self
-                .accept_unmatched_queued_body(&peer, height, hash, block.clone())
+                .accept_unmatched_queued_body(&peer, height, hash, block.clone(), body_wire_bytes)
                 .await
             {
                 return;
@@ -748,7 +762,7 @@ impl BlockSyncReactor {
                 return;
             }
             if self
-                .accept_unmatched_queued_body(&peer, height, hash, block.clone())
+                .accept_unmatched_queued_body(&peer, height, hash, block.clone(), body_wire_bytes)
                 .await
             {
                 return;
@@ -790,19 +804,26 @@ impl BlockSyncReactor {
         // attributes that rejection back to the delivering peer for misbehavior
         // scoring (see the `source_peer` plumbing through the reorder buffer).
 
-        let serialized_bytes = match block.zcash_serialize_to_vec() {
-            Ok(bytes) => bytes.len() as u64,
-            Err(error) => {
-                tracing::debug!(?error, "failed to serialize decoded block-sync body");
-                self.finish_peer_outstanding_at(
-                    &peer,
-                    index,
-                    OutstandingRangeDisposition::RetryOriginal,
-                );
-                self.report_misbehavior(peer, BlockSyncMisbehavior::InvalidBlock)
-                    .await;
-                return;
-            }
+        // The per-peer decode task measured the body's exact serialized size from
+        // the wire frame, so the reactor accounts bytes without re-serializing the
+        // block on its single thread. Only fall back to re-serializing if that
+        // size is absent (e.g. a test-injected event).
+        let serialized_bytes = match body_wire_bytes {
+            Some(bytes) => bytes,
+            None => match block.zcash_serialize_to_vec() {
+                Ok(bytes) => bytes.len() as u64,
+                Err(error) => {
+                    tracing::debug!(?error, "failed to serialize decoded block-sync body");
+                    self.finish_peer_outstanding_at(
+                        &peer,
+                        index,
+                        OutstandingRangeDisposition::RetryOriginal,
+                    );
+                    self.report_misbehavior(peer, BlockSyncMisbehavior::InvalidBlock)
+                        .await;
+                    return;
+                }
+            },
         };
         if serialized_bytes
             > tolerated_bytes(
@@ -1076,6 +1097,7 @@ impl BlockSyncReactor {
         height: block::Height,
         hash: block::Hash,
         block: Arc<block::Block>,
+        body_wire_bytes: Option<u64>,
     ) -> bool {
         if self.state.schedule.queued_hash_for_height(height) != Some(hash) {
             return false;
@@ -1091,19 +1113,24 @@ impl BlockSyncReactor {
             return false;
         }
 
-        let serialized_bytes = match block.zcash_serialize_to_vec() {
-            Ok(bytes) => u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-            Err(error) => {
-                tracing::debug!(
-                    ?peer,
-                    ?height,
-                    ?error,
-                    "failed to serialize unmatched queued block-sync body"
-                );
-                self.report_misbehavior(peer.clone(), BlockSyncMisbehavior::InvalidBlock)
-                    .await;
-                return true;
-            }
+        // Prefer the wire-measured body size from the per-peer decode task; only
+        // re-serialize on this thread when it is absent (e.g. a test event).
+        let serialized_bytes = match body_wire_bytes {
+            Some(bytes) => bytes,
+            None => match block.zcash_serialize_to_vec() {
+                Ok(bytes) => u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                Err(error) => {
+                    tracing::debug!(
+                        ?peer,
+                        ?height,
+                        ?error,
+                        "failed to serialize unmatched queued block-sync body"
+                    );
+                    self.report_misbehavior(peer.clone(), BlockSyncMisbehavior::InvalidBlock)
+                        .await;
+                    return true;
+                }
+            },
         };
 
         metrics::counter!("sync.block.response.unmatched_queued_accepted").increment(1);
@@ -3103,7 +3130,7 @@ impl BlockSyncReactor {
                 bs_insert_str(row, bs_trace::KIND, "peer_disconnected");
                 bs_insert_peer(row, bs_trace::PEER, peer);
             }
-            BlockSyncEvent::WireMessage { peer, msg } => {
+            BlockSyncEvent::WireMessage { peer, msg, .. } => {
                 bs_insert_str(row, bs_trace::KIND, "wire_message");
                 bs_insert_str(row, bs_trace::REASON, block_sync_message_label(msg));
                 bs_insert_peer(row, bs_trace::PEER, peer);

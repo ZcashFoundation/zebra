@@ -24,6 +24,12 @@ pub enum BlockSyncEvent {
         peer: ZakuraPeerId,
         /// Decoded stream-6 message.
         msg: BlockSyncMessage,
+        /// Exact serialized body length for a `Block` message, measured by the
+        /// per-peer decode task from the frame payload (`None` for other
+        /// messages). Lets the reactor account body bytes without re-serializing
+        /// the block on its single thread. When `None`, the reactor falls back to
+        /// re-serializing.
+        body_wire_bytes: Option<u64>,
     },
     /// Stream-6 frame decoding failed after handler admission.
     WireDecodeFailed {

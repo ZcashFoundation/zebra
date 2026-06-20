@@ -125,8 +125,8 @@ pub(super) const PIPE_SHAPE: PipeShape = PipeShape {
 /// message variant, then every compatibility branch emits the same `WireMessage`
 /// event for the retained reactor to handle semantically.
 pub(super) fn run_inbound(cx: &mut PipeCx<'_, BsLocal, BsEnv>, frame: Frame) -> Flow<()> {
-    let msg = match decode(&cx.env.events, cx.peer_id.clone(), frame) {
-        Flow::Continue(msg) => msg,
+    let (msg, body_wire_bytes) = match decode(&cx.env.events, cx.peer_id.clone(), frame) {
+        Flow::Continue(decoded) => decoded,
         Flow::Done => return Flow::Done,
         Flow::Reject(reject) => return Flow::Reject(reject),
     };
@@ -141,6 +141,7 @@ pub(super) fn run_inbound(cx: &mut PipeCx<'_, BsLocal, BsEnv>, frame: Frame) -> 
             BlockSyncEvent::WireMessage {
                 peer: cx.peer_id.clone(),
                 msg,
+                body_wire_bytes,
             },
         ),
     }
@@ -206,6 +207,9 @@ pub(super) async fn run_peer(
         };
         let decode_elapsed = decode_started.elapsed();
         let kind = block_sync_message_label(&msg);
+        // Measured here, on the per-peer task, so the reactor never re-serializes
+        // the block on its single thread to learn the body size.
+        let body_wire_bytes = msg.block_body_wire_bytes(frame_payload_bytes);
 
         let queue_started = Instant::now();
         send_event(
@@ -213,6 +217,7 @@ pub(super) async fn run_peer(
             BlockSyncEvent::WireMessage {
                 peer: peer_id.clone(),
                 msg,
+                body_wire_bytes,
             },
         )
         .await?;
@@ -239,13 +244,21 @@ async fn send_event(
 }
 
 /// The single frame decode stage shared by production and `deliver_frame`.
+///
+/// On success returns the decoded message paired with the exact body wire size
+/// for `Block` messages (`None` otherwise), measured here from the frame payload
+/// so the reactor never re-serializes the block.
 fn decode(
     events: &mpsc::Sender<BlockSyncEvent>,
     peer_id: ZakuraPeerId,
     frame: Frame,
-) -> Flow<BlockSyncMessage> {
+) -> Flow<(BlockSyncMessage, Option<u64>)> {
+    let payload_len = frame.payload.len();
     match BlockSyncMessage::decode_frame(frame) {
-        Ok(msg) => Flow::Continue(msg),
+        Ok(msg) => {
+            let body_wire_bytes = msg.block_body_wire_bytes(payload_len);
+            Flow::Continue((msg, body_wire_bytes))
+        }
         Err(error) => {
             // Block bodies are validated against committed headers in B1+.
             let protocol_error =
@@ -367,7 +380,7 @@ mod tests {
 
         assert!(matches!(flow, Flow::Continue(())));
         match events_rx.try_recv() {
-            Ok(BlockSyncEvent::WireMessage { peer: got, msg }) => {
+            Ok(BlockSyncEvent::WireMessage { peer: got, msg, .. }) => {
                 assert_eq!(got, peer);
                 assert_eq!(msg, message);
             }
@@ -411,7 +424,7 @@ mod tests {
             .await
             .expect("frame should be forwarded after queue space opens")
         {
-            Some(BlockSyncEvent::WireMessage { peer: got, msg }) => {
+            Some(BlockSyncEvent::WireMessage { peer: got, msg, .. }) => {
                 assert_eq!(got, peer);
                 assert_eq!(msg, message);
             }

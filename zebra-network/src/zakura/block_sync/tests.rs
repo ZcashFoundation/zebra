@@ -2538,6 +2538,7 @@ async fn lifecycle_events_bypass_full_bounded_wire_queue() {
         .try_send(BlockSyncEvent::WireMessage {
             peer: peer(90),
             msg: BlockSyncMessage::Status(status()),
+            body_wire_bytes: None,
         })
         .expect("test fills bounded wire queue");
     let (lifecycle, mut lifecycle_rx) = mpsc::unbounded_channel();
@@ -3331,6 +3332,7 @@ async fn reactor_keeps_applying_body_after_non_advancing_duplicate_result() {
         .send(BlockSyncEvent::WireMessage {
             peer: peer_id,
             msg: BlockSyncMessage::Block(blocks[0].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("body queues");
@@ -3749,6 +3751,7 @@ async fn reactor_accepts_queued_body_from_recently_disconnected_peer() {
         .send(BlockSyncEvent::WireMessage {
             peer: peer_id,
             msg: BlockSyncMessage::Block(blocks[0].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("late disconnected body queues");
@@ -4929,6 +4932,7 @@ async fn reactor_does_not_retry_missing_height_already_in_flight() {
         .send(BlockSyncEvent::WireMessage {
             peer: first_request.0.clone(),
             msg: BlockSyncMessage::Block(blocks[0].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("first body queues");
@@ -4950,6 +4954,7 @@ async fn reactor_does_not_retry_missing_height_already_in_flight() {
                 start_height: block::Height(1),
                 returned: 1,
             },
+            body_wire_bytes: None,
         })
         .await
         .expect("BlocksDone queues");
@@ -8815,6 +8820,7 @@ async fn reactor_ignores_unmatched_response_for_height_active_on_another_request
         .send(BlockSyncEvent::WireMessage {
             peer: late_peer.clone(),
             msg: BlockSyncMessage::Block(blocks[1].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("late body queues");
@@ -8825,6 +8831,7 @@ async fn reactor_ignores_unmatched_response_for_height_active_on_another_request
                 start_height: block::Height(2),
                 returned: 1,
             },
+            body_wire_bytes: None,
         })
         .await
         .expect("late terminator queues");
@@ -9004,6 +9011,7 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
         .send(BlockSyncEvent::WireMessage {
             peer: first_request.0.clone(),
             msg: BlockSyncMessage::Block(blocks[1].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("first body queues");
@@ -9030,6 +9038,7 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
         .send(BlockSyncEvent::WireMessage {
             peer: second_request.0.clone(),
             msg: BlockSyncMessage::Block(blocks[1].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("late duplicate body queues");
@@ -9105,6 +9114,7 @@ async fn reactor_ignores_late_response_frames_after_peer_disconnect() {
         .send(BlockSyncEvent::WireMessage {
             peer: peer_id.clone(),
             msg: BlockSyncMessage::Block(blocks[1].clone()),
+            body_wire_bytes: None,
         })
         .await
         .expect("late body frame queues");
@@ -9115,6 +9125,7 @@ async fn reactor_ignores_late_response_frames_after_peer_disconnect() {
                 start_height: block::Height(2),
                 returned: 1,
             },
+            body_wire_bytes: None,
         })
         .await
         .expect("late terminator frame queues");
@@ -9249,6 +9260,7 @@ async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated(
                     start_height: block::Height(1),
                     count: 1,
                 },
+                body_wire_bytes: None,
             }),
         )
         .await;
