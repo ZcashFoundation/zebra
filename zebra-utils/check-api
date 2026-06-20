@@ -160,6 +160,11 @@
 
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo "error: bash 4+ required (associative arrays); macOS ships 3.2 — \`brew install bash\` and re-run" >&2
+    exit 1
+fi
+
 # ── tunables ──────────────────────────────────────────────────────────
 # Regex (jq-syntax) matching crate names whose deps should be excluded
 # from the workspace dep classification. These are test-only crates

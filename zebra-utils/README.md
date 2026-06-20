@@ -212,7 +212,7 @@ Run it from the repository root:
 zebra-utils/check-api                 # parent branch (or HEAD) -> working tree / HEAD
 zebra-utils/check-api main            # main -> working tree / HEAD
 zebra-utils/check-api v4.1.0 v4.2.0   # compare two refs
-zebra-utils/check-api --with-values   # also flag const/static value + doc changes
+zebra-utils/check-api --with-values   # also flag const/static value + doc changes (slow: ~15 min on first run)
 zebra-utils/check-api --json main     # machine-readable output
 ```
 
@@ -223,4 +223,5 @@ It exits non-zero when it detects a breaking change. See
 
 - [`cargo-public-api`](https://crates.io/crates/cargo-public-api) (`cargo install cargo-public-api`)
 - `jq`
+- bash 4+ (macOS ships 3.2; `brew install bash`)
 - a nightly toolchain (only for `--with-values`, which builds rustdoc JSON)
