@@ -1,4 +1,4 @@
-use super::{scheduler::*, state::*, wire::*, *};
+use super::{request::*, state::*, wire::*, *};
 
 /// Committed header metadata used by block sync to schedule and validate a body.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

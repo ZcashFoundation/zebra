@@ -8,7 +8,7 @@ use super::{
     },
     reactor::node_id_from_block_peer_id,
     reorder::*,
-    scheduler::*,
+    request::*,
     sequencer::*,
     state::*,
 };

@@ -1,4 +1,4 @@
-use super::{config::*, scheduler::*, work_queue::WorkQueue, *};
+use super::{config::*, request::*, work_queue::WorkQueue, *};
 use crate::zakura::{
     chain_frontier_from_parts, Frontier, FrontierUpdate, ServicePeerDirection, ServicePeerSnapshot,
     ZakuraBlockSyncCandidateState,

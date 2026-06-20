@@ -38,7 +38,7 @@ mod peer_routine;
 mod pipe;
 mod reactor;
 mod reorder;
-mod scheduler;
+mod request;
 mod sequencer;
 mod sequencer_task;
 mod service;
@@ -55,7 +55,7 @@ pub use events::{
     BlockSyncMisbehavior,
 };
 pub use reactor::spawn_block_sync_reactor;
-pub use scheduler::BlockSizeEstimate;
+pub use request::BlockSizeEstimate;
 #[cfg(test)]
 pub(crate) use service::block_sync_streams;
 pub use service::BlockSyncPeerSession;

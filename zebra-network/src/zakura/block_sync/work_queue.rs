@@ -26,7 +26,7 @@ use std::sync::Mutex as StdMutex;
 use tokio::sync::Notify;
 use zebra_chain::block;
 
-use super::scheduler::BlockSizeEstimate;
+use super::request::BlockSizeEstimate;
 
 /// EWMA seed used as the fallback body-size estimate when a height has no size
 /// hint. Moved here from the old scheduler; the estimate only feeds the

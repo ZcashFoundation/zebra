@@ -37,7 +37,7 @@ use super::{
     peer_registry::{hard_outbound_capacity, PeerRegistry},
     pipe::block_sync_guard,
     reactor::{block_sync_message_label, bs_insert_height, bs_insert_u64, tolerated_bytes},
-    scheduler::BlockRangeRequest,
+    request::BlockRangeRequest,
     sequencer_task::{SequencedBody, SequencerInput, SequencerView},
     state::{DownloadWindow, OutstandingBlockRange, ThroughputMeter},
     work_queue::{WorkItem, WorkQueue},

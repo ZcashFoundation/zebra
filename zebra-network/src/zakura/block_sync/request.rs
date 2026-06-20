@@ -1,6 +1,15 @@
+//! Block-range download request types.
+//!
+//! The block-range *request* a peer routine issues and tracks in its
+//! `outstanding` set ([`BlockRangeRequest`]), plus the body-size estimate hint
+//! ([`BlockSizeEstimate`]) that feeds the receive-path `SizeMismatch` tolerance
+//! check. There is no scheduler here: the per-peer routine pulls work from the
+//! [`WorkQueue`](super::work_queue::WorkQueue) and builds a request directly (see
+//! [`pipe`](super::pipe) for the subsystem map).
+
 use super::{state::*, *};
 
-/// Scheduling source for a block-body byte estimate.
+/// Source of a block-body byte-size estimate hint.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BlockSizeEstimate {
     /// Confirmed serialized size from committed block metadata.
