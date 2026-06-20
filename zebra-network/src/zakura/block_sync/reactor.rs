@@ -286,6 +286,14 @@ impl BlockSyncReactor {
                             let view = *self.sequencer_view.borrow_and_update();
                             self.on_sequencer_view_changed(view).await;
                             self.publish_metrics();
+                            // Snapshot the committed state on every view change, not
+                            // only on the periodic tick. Commit progress (including
+                            // the final `applying -> 0` settle near the tip) arrives
+                            // as a view change; without a snapshot here the trace's
+                            // last `commit_state` row lags the live metric, and the
+                            // e2e oracle reads a stale `applying > 0` "leak" after the
+                            // node has actually settled (the live metric reads 0).
+                            self.trace_sync_state();
                         }
                         Err(_) => break,
                     }

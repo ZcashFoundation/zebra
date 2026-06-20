@@ -30,7 +30,17 @@ pub const DEFAULT_BATCH_LINGER: Duration = Duration::from_millis(5);
 pub const DEFAULT_BUFFER_FLUSH_BYTES: usize = 256 * 1024;
 
 /// Default interval between forced file flushes and syncs.
-pub const DEFAULT_FILE_FLUSH_INTERVAL: Duration = Duration::from_secs(17);
+///
+/// Kept short (1s) so a low-volume table's tail rows — e.g. the final
+/// `commit_finish` rows at the end of a sync, which never reach
+/// [`DEFAULT_BUFFER_FLUSH_BYTES`] — are durable within ~1s of being emitted. A
+/// long interval here is the root cause of the e2e trace-oracle "flush race":
+/// the oracle reads the JSONL only a few seconds after the final commits, so a
+/// 17s flush window left those rows unwritten and the oracle saw a `commit_start`
+/// with no matching `commit_finish` even though the node had committed (the live
+/// metrics show `applying = 0`). Tracing is opt-in (a `trace_dir` must be set),
+/// so the extra fsync cadence is negligible against the debuggability win.
+pub const DEFAULT_FILE_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Env var used to label every JSONL trace record with a stable node identifier.
 pub const NODE_ID_ENV: &str = "ZEBRA_NODE_ID";
