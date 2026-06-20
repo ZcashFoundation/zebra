@@ -175,6 +175,22 @@ pub mod block_sync_trace {
     pub const BUDGET_AVAILABLE: &str = "budget_available";
     /// Reserved in-flight body byte budget.
     pub const BUDGET_RESERVED: &str = "budget_reserved";
+    /// Reserved in-flight body byte budget observed at a single body event
+    /// (e.g. immediately after a receive-path shrink or a commit-path release).
+    pub const BUDGET_RESERVED_AFTER: &str = "budget_reserved_after";
+    /// Body bytes received off the wire per second (download throughput).
+    pub const RECEIVED_BYTES_PER_SEC: &str = "received_bytes_per_sec";
+    /// Bodies received off the wire per second (download throughput).
+    pub const RECEIVED_BLOCKS_PER_SEC: &str = "received_blocks_per_sec";
+    /// Body bytes committed to the chain per second (commit throughput).
+    pub const COMMITTED_BYTES_PER_SEC: &str = "committed_bytes_per_sec";
+    /// Bodies committed to the chain per second (commit throughput).
+    pub const COMMITTED_BLOCKS_PER_SEC: &str = "committed_blocks_per_sec";
+    /// 1 when at least one peer has free request slots but the byte budget is too
+    /// low to issue another worst-case block (download is budget-limited).
+    pub const DOWNLOAD_BLOCKED_ON_BUDGET: &str = "download_blocked_on_budget";
+    /// Peers with received status that currently have free outbound request slots.
+    pub const PEERS_WANTING_SLOTS: &str = "peers_wanting_slots";
     /// Connected block-sync peers.
     pub const PEERS: &str = "peers";
     /// Connected block-sync peers whose status we have received (schedulable).

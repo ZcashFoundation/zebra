@@ -114,6 +114,7 @@ impl BlockSyncReactor {
         }
         self.release_caught_up_block_sync_peers();
         self.publish_metrics();
+        self.refresh_throughput();
         self.trace_sync_state();
         loop {
             tokio::select! {
@@ -165,6 +166,7 @@ impl BlockSyncReactor {
                 _ = ticks.tick() => {
                     self.handle_timeouts().await;
                     self.publish_metrics();
+                    self.refresh_throughput();
                     self.trace_sync_state();
                 }
                 _ = status_ticks.tick() => self.flush_status_refresh().await,
@@ -813,7 +815,7 @@ impl BlockSyncReactor {
         }
 
         metrics::counter!("sync.block.body.received").increment(1);
-        self.trace_body_received(&peer, height, serialized_bytes);
+        self.state.received_throughput.record(serialized_bytes);
         // The block reserved `BS_PER_BLOCK_WORST_CASE_BYTES` at send time. One body
         // per `Block` frame is bounded by `MAX_BLOCK_BYTES` at decode, so the
         // actual serialized size never exceeds the worst case. Shrink the
@@ -824,6 +826,12 @@ impl BlockSyncReactor {
         // `serialized_bytes` carried into the reorder buffer below.
         let shrink = BS_PER_BLOCK_WORST_CASE_BYTES.saturating_sub(serialized_bytes);
         self.state.budget.release(shrink);
+        self.trace_body_received(
+            &peer,
+            height,
+            serialized_bytes,
+            self.state.budget.reserved(),
+        );
         let mut completed = None;
         if let Some(peer_state) = self.state.peers.get_mut(&peer) {
             if let Some(outstanding) = peer_state.outstanding.get_mut(index) {
@@ -1099,7 +1107,8 @@ impl BlockSyncReactor {
         };
 
         metrics::counter!("sync.block.response.unmatched_queued_accepted").increment(1);
-        self.trace_body_received(peer, height, serialized_bytes);
+        self.state.received_throughput.record(serialized_bytes);
+        self.trace_body_received(peer, height, serialized_bytes, self.state.budget.reserved());
 
         // Unlike a matched body, this queued height owns no prior reservation: the
         // original requester's worst-case reservation was released when it
@@ -1433,8 +1442,13 @@ impl BlockSyncReactor {
             .expect("applying entry exists because it was just checked");
 
         self.state.budget.release(applying.bytes);
+        // A `Committed` result is a body that newly extended the chain; count it
+        // toward commit throughput (the apply rate the download path is racing).
+        if matches!(result, BlockApplyResult::Committed) {
+            self.state.committed_throughput.record(applying.bytes);
+        }
         self.decrement_submitted_apply(height, hash);
-        self.trace_apply_finished(height, token, result);
+        self.trace_apply_finished(height, token, result, self.state.budget.reserved());
         match result {
             BlockApplyResult::Committed | BlockApplyResult::Duplicate => {}
             BlockApplyResult::Rejected | BlockApplyResult::TimedOut
@@ -2390,6 +2404,15 @@ impl BlockSyncReactor {
     /// and `verified_block_tip` frozen while `best_header_tip` climbs, plus
     /// whichever resource is pinned (`budget_available == 0`, `applying`/`reorder`
     /// growing, or `peers_with_status == 0`).
+    /// Recompute the cached download/commit throughput rates for the next trace
+    /// snapshot. Called on the trace tick (not the body hot path) so the rate is
+    /// measured over the inter-tick interval.
+    fn refresh_throughput(&mut self) {
+        let now = Instant::now();
+        self.state.received_throughput.sample(now);
+        self.state.committed_throughput.sample(now);
+    }
+
     fn trace_sync_state(&self) {
         if !self.startup.trace.is_enabled() {
             return;
@@ -2504,6 +2527,46 @@ impl BlockSyncReactor {
             bs_insert_u64(row, bs_trace::BUDGET_RESERVED, self.state.budget.reserved());
             bs_insert_u64(row, bs_trace::PEERS, self.state.peers.len() as u64);
             bs_insert_u64(row, bs_trace::PEERS_WITH_STATUS, peers_with_status as u64);
+            // Peers that could be issued work but have no free slots are
+            // saturated; the remainder want slots. If those exist and the budget
+            // can't fund another worst-case block, the download path is
+            // budget-limited (not peer- or work-limited) — the key throughput
+            // signal toward the 1–2 Gbps target.
+            let peers_wanting_slots = peers_with_status.saturating_sub(slot_saturated_peers);
+            let download_blocked_on_budget = u64::from(
+                peers_wanting_slots > 0
+                    && self.state.budget.available() < BS_PER_BLOCK_WORST_CASE_BYTES,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::PEERS_WANTING_SLOTS,
+                peers_wanting_slots as u64,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::DOWNLOAD_BLOCKED_ON_BUDGET,
+                download_blocked_on_budget,
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::RECEIVED_BYTES_PER_SEC,
+                self.state.received_throughput.bytes_per_sec(),
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::RECEIVED_BLOCKS_PER_SEC,
+                self.state.received_throughput.blocks_per_sec(),
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::COMMITTED_BYTES_PER_SEC,
+                self.state.committed_throughput.bytes_per_sec(),
+            );
+            bs_insert_u64(
+                row,
+                bs_trace::COMMITTED_BLOCKS_PER_SEC,
+                self.state.committed_throughput.blocks_per_sec(),
+            );
             bs_insert_u64(row, "inbound_peers", inbound_peers as u64);
             bs_insert_u64(row, "outbound_peers", outbound_peers as u64);
             bs_insert_u64(
@@ -2666,11 +2729,13 @@ impl BlockSyncReactor {
         peer: &ZakuraPeerId,
         height: block::Height,
         serialized_bytes: u64,
+        budget_reserved: u64,
     ) {
         self.emit_trace(bs_trace::BLOCK_BODY_RECEIVED, |row| {
             bs_insert_peer(row, bs_trace::PEER, peer);
             bs_insert_height(row, bs_trace::HEIGHT, height);
             bs_insert_u64(row, bs_trace::SERIALIZED_BYTES, serialized_bytes);
+            bs_insert_u64(row, bs_trace::BUDGET_RESERVED_AFTER, budget_reserved);
         });
     }
 
@@ -2710,11 +2775,13 @@ impl BlockSyncReactor {
         height: block::Height,
         token: BlockApplyToken,
         result: BlockApplyResult,
+        budget_reserved_after: u64,
     ) {
         self.emit_trace(bs_trace::BLOCK_APPLY_FINISHED, |row| {
             bs_insert_height(row, bs_trace::HEIGHT, height);
             bs_insert_u64(row, bs_trace::APPLY_TOKEN, token);
             bs_insert_str(row, bs_trace::RESULT, block_apply_result_label(result));
+            bs_insert_u64(row, bs_trace::BUDGET_RESERVED_AFTER, budget_reserved_after);
         });
     }
 

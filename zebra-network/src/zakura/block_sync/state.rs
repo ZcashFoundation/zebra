@@ -213,6 +213,12 @@ pub(super) struct BlockSyncState {
     /// first. Advanced once per full pass so a budget-constrained pass is not
     /// always consumed by the lowest-node-id peer. Deterministic for tests.
     pub(super) fill_rotation_cursor: usize,
+    /// Throughput of bodies received off the wire (the download rate). Sampled
+    /// each trace tick; compared against `committed_throughput` it separates a
+    /// download-limited sync from a commit-limited one.
+    pub(super) received_throughput: ThroughputMeter,
+    /// Throughput of bodies committed to the chain (the apply/commit rate).
+    pub(super) committed_throughput: ThroughputMeter,
 }
 
 impl BlockSyncState {
@@ -249,6 +255,8 @@ impl BlockSyncState {
             pending_status_refresh: false,
             last_advertised_status,
             fill_rotation_cursor: 0,
+            received_throughput: ThroughputMeter::new(Instant::now()),
+            committed_throughput: ThroughputMeter::new(Instant::now()),
         }
     }
 
@@ -583,6 +591,65 @@ impl RateMeter {
 
     pub(super) fn mark_taken(&mut self, now: Instant) {
         self.next_allowed = now + self.interval;
+    }
+}
+
+/// Tracks block-body throughput (bytes and block counts) over the interval
+/// between samples, so the trace snapshot can report download/commit rates while
+/// driving toward the 1–2 Gbps target. `record` accumulates; `sample` snapshots
+/// the per-second rate since the last sample and resets the window. The last
+/// computed rate is cached so it can be read from the immutable trace path. Cost
+/// is two saturating adds per body and one division per sample tick.
+#[derive(Clone, Debug)]
+pub(super) struct ThroughputMeter {
+    bytes: u64,
+    blocks: u64,
+    window_start: Instant,
+    last_bytes_per_sec: u64,
+    last_blocks_per_sec: u64,
+}
+
+impl ThroughputMeter {
+    pub(super) fn new(now: Instant) -> Self {
+        Self {
+            bytes: 0,
+            blocks: 0,
+            window_start: now,
+            last_bytes_per_sec: 0,
+            last_blocks_per_sec: 0,
+        }
+    }
+
+    pub(super) fn record(&mut self, bytes: u64) {
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.blocks = self.blocks.saturating_add(1);
+    }
+
+    /// Recompute the cached per-second rates from the bytes/blocks accumulated
+    /// since the last sample, then reset the window. A non-positive interval
+    /// (clock not advanced between samples) leaves the cached rates untouched.
+    pub(super) fn sample(&mut self, now: Instant) {
+        let elapsed = now
+            .saturating_duration_since(self.window_start)
+            .as_secs_f64();
+        if elapsed <= 0.0 {
+            return;
+        }
+        // `as u64` truncates a finite, non-negative rate; both numerator and
+        // denominator are non-negative so the cast cannot wrap or go negative.
+        self.last_bytes_per_sec = (self.bytes as f64 / elapsed) as u64;
+        self.last_blocks_per_sec = (self.blocks as f64 / elapsed) as u64;
+        self.bytes = 0;
+        self.blocks = 0;
+        self.window_start = now;
+    }
+
+    pub(super) fn bytes_per_sec(&self) -> u64 {
+        self.last_bytes_per_sec
+    }
+
+    pub(super) fn blocks_per_sec(&self) -> u64 {
+        self.last_blocks_per_sec
     }
 }
 
