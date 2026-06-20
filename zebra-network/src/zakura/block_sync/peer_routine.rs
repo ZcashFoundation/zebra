@@ -477,7 +477,6 @@ impl PeerRoutine {
     /// and per-peer slots — never floor-distance / near-tip lag (§7.8).
     async fn try_fill(&mut self) {
         let worst = BS_PER_BLOCK_WORST_CASE_BYTES;
-        let per_peer_byte_cap = self.config.per_peer_byte_cap();
         // Reconcile the adaptive window's hard cap with the peer's currently
         // advertised `max_inflight_requests` (it may have grown/shrunk via a
         // `Status`; `handle_status` set `window.max_inflight_requests`). Mirrors
@@ -513,31 +512,22 @@ impl PeerRoutine {
             .unwrap_or(usize::MAX);
             let (servable_low, servable_high) = (self.servable_low, self.servable_high);
 
-            // Bound this peer's share of the global byte budget so one fast peer
-            // cannot reserve the whole window and starve the others. The
-            // reservation is worst-case per block (commit 1: only ever shrinks
-            // toward the actual size on receipt, so a valid body is never dropped
-            // for a full budget). Compute the byte ceiling BEFORE taking any work:
-            // if it cannot fund even one worst-case block, break and wait on the
-            // budget-capacity / work-added notifications instead of taking a chunk
-            // only to return it. Taking-then-returning would call
+            // Compute this chunk's byte ceiling BEFORE taking any work, from the
+            // global byte budget and this peer's per-response cap. The reservation
+            // is worst-case per block (it only ever shrinks toward the actual size
+            // on receipt, so a valid body is never dropped for a full budget). If
+            // the ceiling cannot fund even one worst-case block, break and wait on
+            // the budget-capacity / work-added notifications instead of taking a
+            // chunk only to return it. Taking-then-returning would call
             // `work.return_items` → `notify_waiters`, which re-wakes THIS routine's
             // own enabled `work_added` notification (registered before the fill) and
             // busy-loops the want-work arm (§7.3 missed-wake's mirror image — a
             // self-wake spin). Gating before the take keeps the routine parked on
             // `capacity` until budget frees up.
-            let peer_reserved: u64 = self
-                .window
-                .outstanding
-                .iter()
-                .map(|outstanding| outstanding.reserved_bytes())
-                .sum();
-            let peer_headroom = per_peer_byte_cap.saturating_sub(peer_reserved);
             let max_bytes = self
                 .budget
                 .available()
-                .min(u64::from(self.max_response_bytes.max(1)))
-                .min(peer_headroom);
+                .min(u64::from(self.max_response_bytes.max(1)));
             // Cap the chunk taken to what the byte ceiling can fund at worst case;
             // break (without taking) when not even one block fits, so no take/return
             // self-wake cycle can occur.

@@ -1022,34 +1022,6 @@ fn work_queue_height_is_in_exactly_one_set() {
     assert_eq!(in_one_set(h), 0, "gone after the floor commits past it");
 }
 
-#[test]
-fn block_sync_per_peer_byte_cap_shares_budget_and_floors_at_one_response() {
-    // Ample budget: each of `expected_peers` gets an even share of the budget.
-    let config = immediate_body_download_config();
-    assert_eq!(
-        config.per_peer_byte_cap(),
-        config.max_inflight_block_bytes / config.expected_peers as u64,
-    );
-
-    // Tiny budget: the per-peer share would starve peers, so the cap floors at
-    // one advertised response so a peer can always make progress.
-    let tiny = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 4_096,
-        ..ZakuraBlockSyncConfig::default()
-    };
-    assert_eq!(
-        tiny.per_peer_byte_cap(),
-        u64::from(tiny.advertised_max_response_bytes()),
-    );
-
-    // `expected_peers == 0` disables per-peer byte fairness entirely.
-    let disabled = ZakuraBlockSyncConfig {
-        expected_peers: 0,
-        ..ZakuraBlockSyncConfig::default()
-    };
-    assert_eq!(disabled.per_peer_byte_cap(), u64::MAX);
-}
-
 #[tokio::test]
 async fn reactor_fill_loop_saturates_multiple_slots_in_one_pass() {
     let config = immediate_body_download_config();
@@ -4092,7 +4064,6 @@ async fn routine_refills_after_budget_release_no_missed_wake() {
     // next GetBlocks without any external nudge.
     let mut config = immediate_body_download_config();
     config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES;
-    config.expected_peers = 1;
     config.max_blocks_per_response = 1;
     config.request_timeout = Duration::from_secs(300);
     let blocks = mainnet_blocks_1_to_3();
@@ -4292,41 +4263,25 @@ async fn routine_disconnect_returns_outstanding_and_releases_budget() {
 }
 
 #[tokio::test]
-async fn reactor_reserves_worst_case_per_block_under_per_peer_cap_below_budget() {
-    // Ports the deleted scheduler unit tests
-    // `scheduler_reserves_worst_case_regardless_of_size_hints` and
-    // `scheduler_per_peer_byte_cap_limits_request_below_global_budget` to the
-    // post-WorkQueue issuance path (`fill_peer`). It pins two properties at once:
-    //   (commit 1) a request reserves `BS_PER_BLOCK_WORST_CASE_BYTES` per block —
-    //     never the smaller advertised size hint; and
-    //   (commit 3) the per-peer byte cap bounds a single request *below* a larger
-    //     global budget, so one peer cannot drain the whole window.
-    // Global budget = 30 worst-case blocks; per-peer cap = 3 worst-case blocks
-    // (`30 / expected_peers(10)`, floored at `max_response_bytes = 3 * WORST`). The
-    // peer advertises a generous slot/response/block-count budget and tiny 1 KiB
-    // size hints, so the only thing that can bound the request to 3 blocks is the
-    // worst-case-per-block reservation reaching the per-peer cap. If the
-    // reservation honored the 1 KiB hints, the full 16-block range would fit and
+async fn reactor_reserves_worst_case_per_block_not_size_hint() {
+    // Ports the deleted scheduler unit test
+    // `scheduler_reserves_worst_case_regardless_of_size_hints` to the post-WorkQueue
+    // issuance path (`fill_peer`): a request reserves `BS_PER_BLOCK_WORST_CASE_BYTES`
+    // per block — never the smaller advertised size hint.
+    // The global byte budget = 3 worst-case blocks, so the budget is the binding
+    // constraint. The peer advertises a generous slot/response/block-count budget and
+    // tiny 1 KiB size hints, so the only thing that can bound the request to 3 blocks
+    // is the worst-case-per-block reservation reaching the budget. If the reservation
+    // honored the 1 KiB hints, the full 16-block range would fit under the budget and
     // the request would be 16 blocks.
-    let per_peer_cap_blocks = 3u32;
-    let worst_case_u32 =
-        u32::try_from(BS_PER_BLOCK_WORST_CASE_BYTES).expect("worst-case block bytes fit u32");
+    let budget_blocks = 3u32;
     let config = ZakuraBlockSyncConfig {
-        max_inflight_block_bytes: 30 * BS_PER_BLOCK_WORST_CASE_BYTES,
-        expected_peers: 10,
-        max_response_bytes: per_peer_cap_blocks * worst_case_u32,
+        max_inflight_block_bytes: u64::from(budget_blocks) * BS_PER_BLOCK_WORST_CASE_BYTES,
         // Generous per-request block count (the default is 1) so the count cap is
-        // not the binding constraint — the per-peer byte cap is.
+        // not the binding constraint — the byte budget is.
         max_blocks_per_response: 16,
         ..ZakuraBlockSyncConfig::default()
     };
-    // The cap really is 3 worst-case blocks and strictly below the global budget,
-    // so a request capped at 3 proves the cap (not the budget) is binding.
-    assert_eq!(
-        config.per_peer_byte_cap(),
-        u64::from(per_peer_cap_blocks) * BS_PER_BLOCK_WORST_CASE_BYTES,
-    );
-    assert!(config.per_peer_byte_cap() < config.max_inflight_block_bytes);
 
     let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -4378,10 +4333,10 @@ async fn reactor_reserves_worst_case_per_block_under_per_peer_cap_below_budget()
     let (peer, _start_height, count) = wait_for_getblocks(&mut actions).await;
     assert_eq!(peer, peer_id);
     assert_eq!(
-        count, per_peer_cap_blocks,
-        "the request must be bounded to {per_peer_cap_blocks} worst-case blocks by the \
-         per-peer byte cap (strictly below the 30-block global budget), proving the \
-         reservation is worst-case-per-block and not the 1 KiB advertised size hint",
+        count, budget_blocks,
+        "the request must be bounded to {budget_blocks} worst-case blocks by the global \
+         byte budget, proving the reservation is worst-case-per-block and not the 1 KiB \
+         advertised size hint",
     );
 
     reactor_task.abort();
@@ -9262,7 +9217,6 @@ async fn reactor_ignores_matched_duplicate_response_at_body_download_floor() {
     let blocks = mainnet_blocks_1_to_3();
     let block2_size = block_size(&blocks[1]);
     let mut config = immediate_body_download_config();
-    config.expected_peers = 0;
     config.max_inflight_block_bytes = BS_PER_BLOCK_WORST_CASE_BYTES * 2;
 
     let (_tip_tx, tip_rx) = watch::channel((block::Height(4), block::Hash([4; 32])));
