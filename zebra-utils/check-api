@@ -185,6 +185,21 @@ else
     RED="" GREEN="" YELLOW="" BOLD="" DIM="" RESET=""
 fi
 
+# ── progress (single line on stderr; only when stderr is a TTY) ───────
+# Used for the slow per-crate loops (cargo-public-api, --with-values
+# rustdoc). Silent on non-TTY stderr and in --json mode so logs and
+# machine-readable output stay clean.
+progress() {
+    ${json_mode:-false} && return 0
+    [ -t 2 ] || return 0
+    printf '\r\033[K%s' "$1" >&2
+}
+progress_clear() {
+    ${json_mode:-false} && return 0
+    [ -t 2 ] || return 0
+    printf '\r\033[K' >&2
+}
+
 # ── help ──────────────────────────────────────────────────────────────
 show_help() {
     sed -n '/^#/!q; s/^# \{0,1\}//; 1d; p' "$0"
@@ -1128,9 +1143,6 @@ fi
 # (e.g. rustdoc crashed, baseline missing) are captured per-crate as
 # `status=error` and surfaced in the summary and verdict.
 
-echo "${BOLD}Public API changes${RESET}"
-echo ""
-
 readarray -t all_crates < <(workspace_crate_names)
 crate_count=${#all_crates[@]}
 if [ "$crate_count" -eq 0 ]; then
@@ -1161,7 +1173,15 @@ for crate_name in "${all_crates[@]}"; do
     [ ${#crate_name} -gt "$crate_col_width" ] && crate_col_width=${#crate_name}
 done
 
-for crate_name in "${all_crates[@]}"; do
+# Buffer per-crate header rows. We only print the "Public API changes"
+# section header if at least one crate has a non-"no changes" row (a real
+# diff, or a cargo-public-api error). Rows are appended here as the loop
+# runs; the section is emitted in one go after the loop completes.
+api_rows=""
+
+for i in "${!all_crates[@]}"; do
+    crate_name="${all_crates[$i]}"
+    progress "${DIM}public-api: [$((i + 1))/$crate_count] $crate_name${RESET}"
     err_file="$RUN_TMP/${crate_name}.err"
     # Run from `api_cwd` so cargo-public-api's internal `git checkout`
     # doesn't trip on a dirty working tree in worktree-snapshot mode.
@@ -1184,8 +1204,8 @@ for crate_name in "${all_crates[@]}"; do
         crate_changed_lines+=("")
         crate_added_lines+=("")
         crate_status+=("error")
-        printf "  %-${crate_col_width}s ${RED}error${RESET}${DIM}: %s${RESET}\n" \
-            "$crate_name" "${err_msg:-cargo public-api failed}"
+        api_rows+=$(printf "  %-${crate_col_width}s ${RED}error${RESET}${DIM}: %s${RESET}" \
+            "$crate_name" "${err_msg:-cargo public-api failed}")$'\n'
         continue
     fi
 
@@ -1251,12 +1271,20 @@ for crate_name in "${all_crates[@]}"; do
         if [ "$r" -eq 0 ] && [ "$c" -eq 0 ]; then
             tag=" ${DIM}(additive)${RESET}"
         fi
-        printf "  %-${crate_col_width}s ${RED}-%d${RESET}  ${YELLOW}~%d${RESET}  ${GREEN}+%d${RESET}%s\n" \
-            "$crate_name" "$r" "$c" "$a" "$tag"
-    else
-        printf "  %-${crate_col_width}s ${DIM}no changes${RESET}\n" "$crate_name"
+        api_rows+=$(printf "  %-${crate_col_width}s ${RED}-%d${RESET}  ${YELLOW}~%d${RESET}  ${GREEN}+%d${RESET}%s" \
+            "$crate_name" "$r" "$c" "$a" "$tag")$'\n'
     fi
+    # Unchanged crates produce no row — the Summary's "(N/M crates with
+    # changes)" count is the sole signal for them.
 done
+
+progress_clear
+
+if [ -n "$api_rows" ]; then
+    echo "${BOLD}Public API changes${RESET}"
+    echo ""
+    printf '%s' "$api_rows"
+fi
 
 # ── const/static value + doc-comment diff (opt-in: --with-values) ──────
 # cargo-public-api compares *signatures*, so a `pub const` whose value changes
@@ -1318,8 +1346,8 @@ if $with_values; then
 
         # Build rustdoc JSON for every workspace crate at $ref and emit the
         # combined V/D rows. Cached on ref-SHA + script hash, like the dep dump.
-        dump_value_doc_index() { # $1=ref  -> stdout TSV
-            local ref=$1 sha cache_file wt tmp_out crate json failed=0
+        dump_value_doc_index() { # $1=ref  $2=ref-label  -> stdout TSV
+            local ref=$1 ref_label=$2 sha cache_file wt tmp_out crate json failed=0 idx=0
             sha=$(git rev-parse --verify "$ref" 2>/dev/null) || return 1
             cache_file="$CACHE_DIR/${sha}.${SCRIPT_HASH}.values.tsv"
             if [ -s "$cache_file" ]; then cat "$cache_file"; return 0; fi
@@ -1331,6 +1359,8 @@ if $with_values; then
             tmp_out=$(mktemp -p "$RUN_TMP")
             while IFS= read -r crate; do
                 [ -z "$crate" ] && continue
+                idx=$((idx + 1))
+                progress "${DIM}--with-values: rustdoc JSON [$ref_label $idx/$crate_count] $crate${RESET}"
                 if CARGO_TARGET_DIR="$values_target" cargo +"$nightly_toolchain" rustdoc -q \
                     --manifest-path "$wt/Cargo.toml" -p "$crate" --lib \
                     -- -Z unstable-options --output-format json >/dev/null 2>&1; then
@@ -1352,11 +1382,11 @@ if $with_values; then
             fi
         }
 
-        echo "${DIM}--with-values: building rustdoc JSON for both refs (this can take a while)...${RESET}" >&2
         values_base_tsv="$RUN_TMP/values.base.tsv"
         values_head_tsv="$RUN_TMP/values.head.tsv"
-        dump_value_doc_index "$baseline_sha" >"$values_base_tsv" || : >"$values_base_tsv"
-        dump_value_doc_index "$head_sha" >"$values_head_tsv" || : >"$values_head_tsv"
+        dump_value_doc_index "$baseline_sha" base >"$values_base_tsv" || : >"$values_base_tsv"
+        dump_value_doc_index "$head_sha" head >"$values_head_tsv" || : >"$values_head_tsv"
+        progress_clear
 
         # Value changes: items present in both refs whose evaluated value differs.
         # (Added/removed items are already covered by the signature diff above.)
@@ -1401,56 +1431,6 @@ if [ $((removed_total + changed_total + added_total + value_changed_total + doc_
         fi
         exit 0
     fi
-fi
-
-# Print a table row. Arguments: name r c a [tag]
-# Colors are applied around the pre-padded field so escape codes don't affect alignment.
-print_row() {
-    local name=$1 r=$2 c=$3 a=$4 tag=${5:-}
-    local rc="" cc="" ac="" nb="" ne=""
-    if [ "$r" = "-" ]; then rc="$DIM"; else rc="$RED"; fi
-    if [ "$c" = "-" ]; then cc="$DIM"; else cc="$YELLOW"; fi
-    if [ "$a" = "-" ]; then ac="$DIM"; else ac="$GREEN"; fi
-    if [ "$name" = "Total" ]; then
-        nb="$BOLD"
-        ne="$RESET"
-    fi
-    printf "  ${nb}%-${crate_col_width}s${ne} ${rc}%8s${RESET} ${cc}%8s${RESET} ${ac}%8s${RESET}%s\n" \
-        "$name" "$r" "$c" "$a" "$tag"
-}
-
-# Horizontal separator: width matches the crate column so dashes
-# line up with the longest crate name.
-printf -v crate_col_dashes '%*s' "$crate_col_width" ''
-crate_col_dashes=${crate_col_dashes// /-}
-
-if [ $((removed_total + changed_total + added_total)) -gt 0 ]; then
-    echo ""
-    print_row "" "Removed" "Changed" "Added"
-    printf "  ${DIM}%s %8s %8s %8s${RESET}\n" "$crate_col_dashes" "--------" "--------" "--------"
-
-    for i in "${!crate_names[@]}"; do
-        r="${crate_removed[$i]}"
-        c="${crate_changed[$i]}"
-        a="${crate_added[$i]}"
-        [ $((r + c + a)) -eq 0 ] && continue
-
-        tag=""
-        [ "$r" -eq 0 ] && [ "$c" -eq 0 ] && tag=" ${DIM}(additive)${RESET}"
-        [ "$r" -eq 0 ] && r="-"
-        [ "$c" -eq 0 ] && c="-"
-        [ "$a" -eq 0 ] && a="-"
-        print_row "${crate_names[$i]}" "$r" "$c" "$a" "$tag"
-    done
-
-    printf "  ${DIM}%s %8s %8s %8s${RESET}\n" "$crate_col_dashes" "--------" "--------" "--------"
-    local_r="$removed_total"
-    [ "$local_r" -eq 0 ] && local_r="-"
-    local_c="$changed_total"
-    [ "$local_c" -eq 0 ] && local_c="-"
-    local_a="$added_total"
-    [ "$local_a" -eq 0 ] && local_a="-"
-    print_row "Total" "$local_r" "$local_c" "$local_a"
 fi
 
 # ── detailed diffs ────────────────────────────────────────────────────
