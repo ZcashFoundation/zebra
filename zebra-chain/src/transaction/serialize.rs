@@ -1125,11 +1125,12 @@ impl ZcashDeserialize for Transaction {
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
                     NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
-                // V6 transactions are only valid from NU5 onward, so reject
-                // transactions with pre-NU5 consensus branch IDs.
-                if network_upgrade < NetworkUpgrade::Nu5 {
+                // v6 transactions are only valid from NU6.3 onward, so reject transactions with
+                // pre-NU6.3 consensus branch IDs at the wire layer. (The exact tx-vs-block network
+                // upgrade match is also re-checked during verification by `consensus_branch_id`.)
+                if network_upgrade < NetworkUpgrade::Nu6_3 {
                     return Err(SerializationError::Parse(
-                        "v6 transaction must have NU5 or later consensus branch ID",
+                        "v6 transaction must have a NU6.3 or later consensus branch ID",
                     ));
                 }
                 // Denoted as `lock_time` in the spec.
