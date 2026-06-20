@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- The state database format is bumped to 28.0.0 for the NU6.3 "Ironwood" shielded
+  pool. This is a major-version bump that is restorable in place from the previous
+  major format version (no resync): an in-place migration backfills the genesis
+  Ironwood note commitment tree and anchor, four new (initially empty) `ironwood_*`
+  column families are created, and the chain value pool record is widened to include
+  the Ironwood pool. The `getblockchaininfo` and `getblock` `valuePools` now include
+  the (zero, until NU6.3 activates) `ironwood` pool.
+
+### Added
+
+- Experimental, off-by-default support for the NU6.3 "Ironwood" shielded pool and
+  v6 transaction format, behind the `zcash_unstable="nu6.3"` cfg and the `tx_v6`
+  feature. This is incomplete pending the deploy ZIP (no real activation height,
+  version group ID, or consensus branch ID yet) and is not built by default.
+
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 
 This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
