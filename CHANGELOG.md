@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   consumer's known chain tips instead of re-streaming the whole non-finalized state,
   and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
   while its finalized state catches up.
+- New `zebra-state` read request `ReadRequest::FindForkPoint` (with response
+  `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
+  locator that is on the best chain — the fork point — for clients tracking chain
+  reorganizations through a read-only state service.
 
 ### Changed
 

@@ -592,7 +592,6 @@ where
 /// `None` if no locator entry is on the best chain.
 ///
 /// Returns `None` if the state is empty.
-#[allow(dead_code)]
 pub fn find_fork_point<C>(
     chain: Option<C>,
     db: &ZebraDb,
