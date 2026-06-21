@@ -10,16 +10,18 @@ use zebra_network::zakura::{
 pub(crate) mod block_sync_driver;
 pub(crate) mod frontier;
 pub(crate) mod header_sync_driver;
+pub(crate) mod throughput_probe;
 
-pub(crate) use block_sync_driver::drive_block_sync_actions;
 #[cfg(test)]
 pub(crate) use block_sync_driver::{
     apply_block_sync_body, block_apply_class, block_sync_misbehavior_is_hard,
     block_sync_missing_body_window, block_sync_needed_blocks_from_state,
     coalesce_ready_needed_block_queries, coalesce_stale_needed_block_queries,
-    commit_block_sync_body, query_block_sync_needed_blocks, BlockApplyClass,
-    ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL, ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW,
+    commit_block_sync_body, query_block_sync_needed_blocks, BlockApplyClass, BlockApplyContext,
+    BlockApplyInput, ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
+    ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW,
 };
+pub(crate) use block_sync_driver::{drive_block_sync_actions, BlockSyncDriverContext};
 pub(crate) use frontier::{query_block_sync_frontiers, verified_block_tip_from_state};
 #[cfg(test)]
 pub(crate) use header_sync_driver::{
@@ -31,6 +33,7 @@ pub(crate) use header_sync_driver::{
     drive_zakura_header_sync_actions, mirror_zakura_full_block_commits,
     zakura_header_sync_driver_startup, ZakuraHeaderSyncDriverHandles,
 };
+pub(crate) use throughput_probe::{BlocksyncThroughputProbe, BlocksyncThroughputSummary};
 
 pub(crate) const ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT: Duration = Duration::from_secs(30);
 

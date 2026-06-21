@@ -502,6 +502,20 @@ pub struct Config {
     /// test/bootstrap configs.
     #[serde(skip_serializing)]
     pub debug_skip_regtest_genesis_self_seed: bool,
+
+    /// Debug-only Zakura block-sync throughput probe target height.
+    ///
+    /// When set, `zebrad start` keeps normal Zakura networking, peer discovery,
+    /// header sync, and block-body downloads, but block-body apply only checks
+    /// contiguous height/hash metadata and advances an in-memory synthetic body
+    /// frontier. Bodies are discarded without consensus verification or state
+    /// commit, and Zebra exits successfully when the synthetic verified body tip
+    /// reaches this height.
+    ///
+    /// This mode requires `network.v2_p2p = true`, is intentionally hidden from
+    /// generated configs, and is only for throughput debugging.
+    #[serde(skip_serializing)]
+    pub debug_blocksync_throughput_target_height: Option<u32>,
 }
 
 impl Default for Config {
@@ -536,6 +550,8 @@ impl Default for Config {
             // Standalone Regtest nodes self-seed genesis; only opt-in test/bootstrap
             // setups download it from peers.
             debug_skip_regtest_genesis_self_seed: false,
+
+            debug_blocksync_throughput_target_height: None,
         }
     }
 }
