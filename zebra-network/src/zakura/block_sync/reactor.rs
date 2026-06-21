@@ -138,6 +138,7 @@ pub fn spawn_block_sync_reactor(
     let reactor = BlockSyncReactor {
         verified_block_tip: startup.frontiers.verified_block_tip,
         committed_floor: startup.frontiers.verified_block_tip,
+        pending_needed_query: None,
         last_reset_epoch: 0,
         last_reaction_epoch: 0,
         last_view: initial_view(startup.frontiers),
@@ -202,6 +203,10 @@ pub(super) struct BlockSyncReactor {
     /// the producer query lower bound, candidate prune, and stale-prefix trim —
     /// never as a fetch decision (design doc §7.8).
     committed_floor: block::Height,
+    /// `(verified_tip, best_header_tip, best_header_hash)` for a dispatched
+    /// `QueryNeededBlocks` action whose `NeededBlocks` response has not come
+    /// back yet.
+    pending_needed_query: Option<(block::Height, block::Height, block::Hash)>,
     /// Last `reset_epoch` the reactor reacted to, so it can tell an advance from
     /// a destructive reset.
     last_reset_epoch: u64,
@@ -610,6 +615,7 @@ impl BlockSyncReactor {
         frontiers: BlockSyncFrontiers,
         preserve_active_successors: bool,
     ) {
+        self.pending_needed_query = None;
         // Reactor-owned prep: precompute the two peer-outstanding-derived halves
         // of the reset decision (the reactor owns peer state; the task ORs them
         // with its Sequencer-internal predicates). The `verified_tip()`/`floor()`
@@ -706,6 +712,7 @@ impl BlockSyncReactor {
     }
 
     async fn handle_needed_blocks(&mut self, blocks: Vec<BlockSyncBlockMeta>) {
+        self.pending_needed_query = None;
         // The state reports every header-known, body-missing height above the
         // download floor, but it has no visibility into our in-memory buffers.
         // Heights already at or below the body download floor, held in the
@@ -1021,16 +1028,39 @@ impl BlockSyncReactor {
         if !self.startup.state_queries_enabled {
             return false;
         }
+        if self.committed_floor >= self.state.best_header_tip {
+            self.pending_needed_query = None;
+            return true;
+        }
+        if self
+            .state
+            .work
+            .max_claimed()
+            .is_some_and(|height| height >= self.state.best_header_tip)
+        {
+            return true;
+        }
         if self.local_body_work_blocks() >= self.refill_low_water_blocks() {
             return true;
         }
-        let _ = self
+        let query = (
+            self.committed_floor,
+            self.state.best_header_tip,
+            self.state.best_header_hash,
+        );
+        if self.pending_needed_query == Some(query) {
+            return true;
+        }
+        let dispatched = self
             .dispatch_action(BlockSyncAction::QueryNeededBlocks {
                 verified_block_tip: self.committed_floor,
                 best_header_tip: self.state.best_header_tip,
             })
             .await;
-        true
+        if dispatched {
+            self.pending_needed_query = Some(query);
+        }
+        dispatched
     }
 
     fn local_body_work_blocks(&self) -> usize {
@@ -1914,7 +1944,7 @@ fn block_apply_result_label(result: BlockApplyResult) -> &'static str {
     }
 }
 
-fn bs_insert_peer(
+pub(super) fn bs_insert_peer(
     row: &mut serde_json::Map<String, serde_json::Value>,
     key: &'static str,
     peer: &ZakuraPeerId,

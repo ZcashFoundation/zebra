@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     future::Future,
     sync::Arc,
     time::{Duration, Instant},
@@ -136,6 +136,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     let full_apply_limit = full_apply_limit.max(sync::MIN_CONCURRENCY_LIMIT);
     let combined_apply_limit = combined_apply_limit.max(sync::MIN_CONCURRENCY_LIMIT);
     let mut pending_applies = VecDeque::new();
+    let mut pending_probe_applies = BTreeMap::new();
     let mut in_flight_applies: FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>> =
         FuturesUnordered::new();
     let mut checkpoint_in_flight = 0usize;
@@ -441,6 +442,7 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
             }
             BlockSyncAction::SubmitBlock { token, block } => {
                 let class = block_apply_class(block.as_ref(), max_checkpoint_height);
+                let height = block.coinbase_height();
                 emit_commit_state(
                     &trace,
                     cs_trace::BLOCK_SUBMIT_QUEUED,
@@ -449,10 +451,15 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         insert_cs_u64(row, cs_trace::APPLY_TOKEN, token);
                         insert_cs_str(row, cs_trace::APPLY_CLASS, block_apply_class_label(class));
                         insert_cs_hash(row, cs_trace::HASH, block.hash());
-                        if let Some(height) = block.coinbase_height() {
+                        if let Some(height) = height {
                             insert_cs_height(row, cs_trace::HEIGHT, height);
                         }
-                        insert_cs_u64(row, cs_trace::QUEUE_LEN, pending_applies.len() as u64);
+                        let queue_len = if throughput_probe.is_some() {
+                            pending_probe_applies.len()
+                        } else {
+                            pending_applies.len()
+                        };
+                        insert_cs_u64(row, cs_trace::QUEUE_LEN, queue_len as u64);
                         insert_cs_u64(
                             row,
                             cs_trace::IN_FLIGHT_COUNT,
@@ -460,6 +467,42 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
                         );
                     },
                 );
+                if let Some(probe) = throughput_probe.clone() {
+                    let pending = PendingBlockApply {
+                        token,
+                        class,
+                        block,
+                    };
+                    if let Some(height) = height {
+                        pending_probe_applies.insert(height, pending);
+                        drain_ordered_probe_applies(
+                            &mut pending_probe_applies,
+                            latest_chain_tip.clone(),
+                            endpoint.clone(),
+                            read_state.clone(),
+                            block_verifier.clone(),
+                            block_sync.clone(),
+                            trace.clone(),
+                            probe,
+                            &mut checkpoint_frontier_refresh,
+                        )
+                        .await;
+                    } else {
+                        let completed = apply_probe_block_sync_body(
+                            latest_chain_tip.clone(),
+                            endpoint.clone(),
+                            read_state.clone(),
+                            block_verifier.clone(),
+                            block_sync.clone(),
+                            trace.clone(),
+                            probe,
+                            pending,
+                        )
+                        .await;
+                        observe_block_apply_completion(completed, &mut checkpoint_frontier_refresh);
+                    }
+                    continue;
+                }
                 pending_applies.push_back(PendingBlockApply {
                     token,
                     class,
@@ -595,18 +638,8 @@ fn handle_completed_block_apply<ReadState, BlockVerifier>(
     BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
     BlockVerifier::Future: Send + 'static,
 {
-    match completed.class {
-        BlockApplyClass::Checkpoint => {
-            *checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
-        }
-        BlockApplyClass::Full => {
-            *full_in_flight = full_in_flight.saturating_sub(1);
-        }
-    }
-
-    if let Some(highest_observed_at_apply) = completed.checkpoint_refresh_floor {
-        checkpoint_frontier_refresh.observe_checkpoint_commit(highest_observed_at_apply);
-    }
+    decrement_in_flight_apply_count(completed.class, checkpoint_in_flight, full_in_flight);
+    observe_block_apply_completion(completed, checkpoint_frontier_refresh);
 
     drain_pending_block_applies(
         pending_applies,
@@ -703,6 +736,114 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
             .boxed(),
         );
     }
+}
+
+fn decrement_in_flight_apply_count(
+    class: BlockApplyClass,
+    checkpoint_in_flight: &mut usize,
+    full_in_flight: &mut usize,
+) {
+    match class {
+        BlockApplyClass::Checkpoint => {
+            *checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
+        }
+        BlockApplyClass::Full => {
+            *full_in_flight = full_in_flight.saturating_sub(1);
+        }
+    }
+}
+
+fn observe_block_apply_completion(
+    completed: BlockApplyCompletion,
+    checkpoint_frontier_refresh: &mut CheckpointFrontierRefresh,
+) {
+    if let Some(highest_observed_at_apply) = completed.checkpoint_refresh_floor {
+        checkpoint_frontier_refresh.observe_checkpoint_commit(highest_observed_at_apply);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn drain_ordered_probe_applies<ReadState, BlockVerifier>(
+    pending_probe_applies: &mut BTreeMap<block::Height, PendingBlockApply>,
+    latest_chain_tip: impl ChainTip + Clone + Send + Sync + 'static,
+    endpoint: Option<ZakuraEndpoint>,
+    read_state: ReadState,
+    block_verifier: BlockVerifier,
+    block_sync: BlockSyncHandle,
+    trace: ZakuraTrace,
+    throughput_probe: BlocksyncThroughputProbe,
+    checkpoint_frontier_refresh: &mut CheckpointFrontierRefresh,
+) where
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    ReadState::Future: Send + 'static,
+    BlockVerifier:
+        Service<zebra_consensus::Request, Response = block::Hash> + Clone + Send + 'static,
+    BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
+    BlockVerifier::Future: Send + 'static,
+{
+    while let Ok(expected_height) = throughput_probe.verified_tip().next() {
+        let Some(pending) = pending_probe_applies.remove(&expected_height) else {
+            break;
+        };
+        let completed = apply_probe_block_sync_body(
+            latest_chain_tip.clone(),
+            endpoint.clone(),
+            read_state.clone(),
+            block_verifier.clone(),
+            block_sync.clone(),
+            trace.clone(),
+            throughput_probe.clone(),
+            pending,
+        )
+        .await;
+        observe_block_apply_completion(completed, checkpoint_frontier_refresh);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_probe_block_sync_body<ReadState, BlockVerifier>(
+    latest_chain_tip: impl ChainTip + Clone + Send + Sync + 'static,
+    endpoint: Option<ZakuraEndpoint>,
+    read_state: ReadState,
+    block_verifier: BlockVerifier,
+    block_sync: BlockSyncHandle,
+    trace: ZakuraTrace,
+    throughput_probe: BlocksyncThroughputProbe,
+    pending: PendingBlockApply,
+) -> BlockApplyCompletion
+where
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    ReadState::Future: Send + 'static,
+    BlockVerifier:
+        Service<zebra_consensus::Request, Response = block::Hash> + Clone + Send + 'static,
+    BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
+    BlockVerifier::Future: Send + 'static,
+{
+    apply_block_sync_body(
+        block_verifier,
+        latest_chain_tip,
+        endpoint,
+        read_state,
+        block_sync,
+        pending.token,
+        pending.block,
+        pending.class,
+        trace,
+        Some(throughput_probe),
+    )
+    .await
 }
 
 pub(crate) fn block_apply_class(

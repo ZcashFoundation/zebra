@@ -437,6 +437,7 @@ impl PeerBlockState {
 #[derive(Clone, Debug)]
 pub(super) struct OutstandingBlockRange {
     pub(super) request: BlockRangeRequest,
+    pub(super) queued_at: Instant,
     pub(super) deadline: Instant,
     pub(super) received: HashSet<block::Height>,
 }

@@ -3032,15 +3032,15 @@ mod zakura_header_sync_driver_tests {
 
         action_tx
             .send(BlockSyncAction::SubmitBlock {
-                token: 1,
-                block: block1.clone(),
+                token: 2,
+                block: block2.clone(),
             })
             .await
             .expect("driver action channel stays open");
         action_tx
             .send(BlockSyncAction::SubmitBlock {
-                token: 2,
-                block: block2.clone(),
+                token: 1,
+                block: block1.clone(),
             })
             .await
             .expect("driver action channel stays open");
@@ -4728,19 +4728,11 @@ mod zakura_header_sync_driver_tests {
             &zebra_network::zakura::ZakuraTrace::noop(),
         )
         .await;
-        let stale_nudge = tokio::time::timeout(Duration::from_secs(1), stale_actions.recv())
-            .await
-            .expect("stale reactor emits query after a header-tip nudge")
-            .expect("stale reactor action channel remains open");
         assert!(
-            matches!(
-                stale_nudge,
-                BlockSyncAction::QueryNeededBlocks {
-                    verified_block_tip: block::Height(0),
-                    best_header_tip: block::Height(20),
-                }
-            ),
-            "without a live frontier event, the old reactor keeps querying from genesis, got {stale_nudge:?}"
+            tokio::time::timeout(Duration::from_millis(100), stale_actions.recv())
+                .await
+                .is_err(),
+            "the old reactor remains stale, but the duplicate pending query is suppressed"
         );
 
         stale_reactor_task.abort();

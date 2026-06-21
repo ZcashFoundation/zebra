@@ -36,7 +36,9 @@ use super::{
     config::BS_PER_BLOCK_WORST_CASE_BYTES,
     peer_registry::{hard_outbound_capacity, PeerRegistry},
     pipe::block_sync_guard,
-    reactor::{block_sync_message_label, bs_insert_height, bs_insert_u64, tolerated_bytes},
+    reactor::{
+        block_sync_message_label, bs_insert_height, bs_insert_peer, bs_insert_u64, tolerated_bytes,
+    },
     request::BlockRangeRequest,
     sequencer_task::{SequencedBody, SequencerInput, SequencerView},
     state::{DownloadWindow, OutstandingBlockRange, ThroughputMeter},
@@ -638,6 +640,7 @@ impl PeerRoutine {
             self.window.record_outbound_request_scheduled();
             self.window.outstanding.push(OutstandingBlockRange {
                 request: request.clone(),
+                queued_at,
                 deadline,
                 received: HashSet::new(),
             });
@@ -792,6 +795,9 @@ impl PeerRoutine {
             return;
         }
         let estimated_bytes = outstanding.estimated_bytes_for_height(height).unwrap_or(0);
+        let request_start_height = outstanding.request.start_height;
+        let request_range_count = outstanding.request.count;
+        let request_elapsed_ms = elapsed_ms_u64(outstanding.queued_at.elapsed());
 
         // The body's transactions are not validated against the header here;
         // consensus does it on apply (`handle_block_apply_finished` attributes a
@@ -827,7 +833,13 @@ impl PeerRoutine {
         // the `serialized_bytes` carried into the reorder buffer.
         self.budget
             .shrink(BS_PER_BLOCK_WORST_CASE_BYTES, serialized_bytes);
-        self.trace_body_received(height, serialized_bytes);
+        self.trace_body_received(
+            height,
+            serialized_bytes,
+            Some(request_start_height),
+            Some(request_range_count),
+            Some(request_elapsed_ms),
+        );
 
         let mut completed = None;
         if let Some(outstanding) = self.window.outstanding.get_mut(index) {
@@ -918,7 +930,7 @@ impl PeerRoutine {
 
         metrics::counter!("sync.block.response.unmatched_queued_accepted").increment(1);
         self.record_received(serialized_bytes);
-        self.trace_body_received(height, serialized_bytes);
+        self.trace_body_received(height, serialized_bytes, None, None, None);
 
         // This queued height owns no prior reservation: reserve its actual size
         // before buffering. If the budget is genuinely full of other legitimate
@@ -1067,10 +1079,15 @@ impl PeerRoutine {
             {
                 return;
             }
-            self.trace_range_unavailable(start_height);
+            self.trace_range_unavailable(start_height, None, None);
             return;
         };
-        self.trace_range_unavailable(start_height);
+        let outstanding = &self.window.outstanding[index];
+        self.trace_range_unavailable(
+            start_height,
+            Some(outstanding.request.count),
+            Some(elapsed_ms_u64(outstanding.queued_at.elapsed())),
+        );
         let disposition = self.stale_adjusted_disposition(index, Disposition::RetryOriginal);
         self.finish_outstanding_at(index, disposition);
     }
@@ -1253,6 +1270,7 @@ impl PeerRoutine {
 
     fn trace_get_blocks_sent(&self, start_height: block::Height, count: u32, estimated_bytes: u64) {
         self.emit(bs_trace::BLOCK_GET_BLOCKS_SENT, |row| {
+            bs_insert_peer(row, bs_trace::PEER, &self.peer);
             bs_insert_height(row, bs_trace::RANGE_START, start_height);
             bs_insert_u64(row, bs_trace::RANGE_COUNT, u64::from(count));
             bs_insert_u64(row, bs_trace::ESTIMATED_BYTES, estimated_bytes);
@@ -1265,19 +1283,52 @@ impl PeerRoutine {
         });
     }
 
-    fn trace_body_received(&self, height: block::Height, serialized_bytes: u64) {
+    fn trace_body_received(
+        &self,
+        height: block::Height,
+        serialized_bytes: u64,
+        request_start_height: Option<block::Height>,
+        request_range_count: Option<u32>,
+        request_elapsed_ms: Option<u64>,
+    ) {
         self.emit(bs_trace::BLOCK_BODY_RECEIVED, |row| {
+            bs_insert_peer(row, bs_trace::PEER, &self.peer);
             bs_insert_height(row, bs_trace::HEIGHT, height);
             bs_insert_u64(row, bs_trace::SERIALIZED_BYTES, serialized_bytes);
             bs_insert_u64(row, bs_trace::BUDGET_RESERVED_AFTER, self.budget.reserved());
+            if let Some(request_start_height) = request_start_height {
+                bs_insert_height(row, "request_start", request_start_height);
+            }
+            if let Some(request_range_count) = request_range_count {
+                bs_insert_u64(row, "request_range_count", u64::from(request_range_count));
+            }
+            if let Some(request_elapsed_ms) = request_elapsed_ms {
+                bs_insert_u64(row, "request_elapsed_ms", request_elapsed_ms);
+            }
         });
     }
 
-    fn trace_range_unavailable(&self, start_height: block::Height) {
+    fn trace_range_unavailable(
+        &self,
+        start_height: block::Height,
+        range_count: Option<u32>,
+        request_elapsed_ms: Option<u64>,
+    ) {
         self.emit(bs_trace::BLOCK_RANGE_UNAVAILABLE, |row| {
+            bs_insert_peer(row, bs_trace::PEER, &self.peer);
             bs_insert_height(row, bs_trace::RANGE_START, start_height);
+            if let Some(range_count) = range_count {
+                bs_insert_u64(row, bs_trace::RANGE_COUNT, u64::from(range_count));
+            }
+            if let Some(request_elapsed_ms) = request_elapsed_ms {
+                bs_insert_u64(row, "request_elapsed_ms", request_elapsed_ms);
+            }
         });
     }
+}
+
+fn elapsed_ms_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// The still-unreceived heights of an outstanding request (the ones that return

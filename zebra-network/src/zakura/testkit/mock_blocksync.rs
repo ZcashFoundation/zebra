@@ -37,6 +37,25 @@ const SYNTHETIC_CORPUS_SEED: u64 = 0x5eed_5eed_b10c_0006;
 const MIN_SYNTHETIC_TXS: usize = 1;
 const MAX_SYNTHETIC_TXS: usize = 16;
 
+#[derive(Copy, Clone, Debug, Default)]
+struct SyntheticBlockShape {
+    target_block_bytes: Option<usize>,
+}
+
+impl SyntheticBlockShape {
+    fn from_env() -> Self {
+        Self {
+            target_block_bytes: env_optional_usize("ZAKURA_MOCK_BS_TARGET_BLOCK_BYTES")
+                .map(|bytes| bytes.clamp(1, max_synthetic_block_bytes())),
+        }
+    }
+
+    fn fixed_tx_count(&self, template: &Arc<block::Block>) -> Option<usize> {
+        self.target_block_bytes
+            .map(|target_bytes| target_tx_count(template, target_bytes))
+    }
+}
+
 #[derive(Clone)]
 struct SyntheticBlockCorpus {
     blocks: Arc<Vec<Arc<block::Block>>>,
@@ -45,19 +64,23 @@ struct SyntheticBlockCorpus {
 }
 
 impl SyntheticBlockCorpus {
-    fn generate(count: u32, seed: u64) -> Self {
+    fn generate(count: u32, seed: u64, shape: SyntheticBlockShape) -> Self {
         let template = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let fixed_tx_count = shape.fixed_tx_count(&template);
         let mut blocks = Vec::with_capacity(usize::try_from(count).expect("u32 fits usize"));
         let mut sizes = Vec::with_capacity(usize::try_from(count).expect("u32 fits usize"));
         let mut by_hash = HashMap::new();
         let mut previous_hash = mainnet_genesis_hash();
 
         for height in 1..=count {
+            let random = splitmix64(seed ^ u64::from(height));
+            let tx_count = fixed_tx_count.unwrap_or_else(|| synthetic_tx_count(random));
             let block = synthetic_block_at_height(
                 &template,
                 block::Height(height),
                 previous_hash,
-                splitmix64(seed ^ u64::from(height)),
+                random,
+                tx_count,
             );
             previous_hash = block.hash();
             sizes.push(block_size(&block));
@@ -102,11 +125,7 @@ impl SyntheticBlockCorpus {
         self.by_hash.get(&hash).copied()
     }
 
-    fn metas_between(
-        &self,
-        start: block::Height,
-        end: block::Height,
-    ) -> Vec<BlockSyncBlockMeta> {
+    fn metas_between(&self, start: block::Height, end: block::Height) -> Vec<BlockSyncBlockMeta> {
         (start.0..=end.0)
             .filter_map(|height| {
                 let height = block::Height(height);
@@ -254,6 +273,13 @@ struct ThroughputSummary {
 }
 
 impl ThroughputStats {
+    fn restart_timer(&self) {
+        self.inner
+            .lock()
+            .expect("throughput stats mutex is not poisoned")
+            .started = Instant::now();
+    }
+
     fn record_commit(&self, height: block::Height, bytes: usize) {
         let mut state = self
             .inner
@@ -308,6 +334,7 @@ struct HarnessConfig {
     max_blocks_per_response: u32,
     max_inflight: u16,
     fanout: usize,
+    shape: SyntheticBlockShape,
     trace_dir: Option<PathBuf>,
 }
 
@@ -323,6 +350,7 @@ impl HarnessConfig {
             .max(1),
             max_inflight: env_u16("ZAKURA_MOCK_BS_MAX_INFLIGHT", DEFAULT_MAX_INFLIGHT).max(1),
             fanout: env_usize("ZAKURA_MOCK_BS_FANOUT", DEFAULT_FANOUT).max(1),
+            shape: SyntheticBlockShape::from_env(),
             trace_dir: env::var_os("ZAKURA_MOCK_BS_TRACE_DIR")
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from),
@@ -552,11 +580,18 @@ async fn connect_leecher_to_seeds(
     let leecher_id = leecher.node_addr().await.node_id.as_bytes().to_vec();
     let seed_ids = seed_peer_ids(cluster, seed_count).await;
     let leecher_peers = leecher.supervisor().subscribe();
-    await_until("leecher connected to all seeds", Duration::from_secs(10), || {
-        seed_ids
-            .iter()
-            .all(|id| leecher_peers.borrow().iter().any(|peer| peer.as_bytes() == id))
-    })
+    await_until(
+        "leecher connected to all seeds",
+        Duration::from_secs(10),
+        || {
+            seed_ids.iter().all(|id| {
+                leecher_peers
+                    .borrow()
+                    .iter()
+                    .any(|peer| peer.as_bytes() == id)
+            })
+        },
+    )
     .await?;
 
     for seed_index in 0..seed_count {
@@ -594,9 +629,9 @@ fn synthetic_block_at_height(
     height: block::Height,
     previous_hash: block::Hash,
     random: u64,
+    tx_count: usize,
 ) -> Arc<block::Block> {
     let mut block = template.as_ref().clone();
-    let tx_count = synthetic_tx_count(random);
 
     let mut coinbase = block.transactions[0].clone();
     let input = match Arc::make_mut(&mut coinbase) {
@@ -627,6 +662,66 @@ fn synthetic_block_at_height(
     block.header = Arc::new(header);
 
     Arc::new(block)
+}
+
+fn target_tx_count(template: &Arc<block::Block>, target_bytes: usize) -> usize {
+    let one_tx = synthetic_block_at_height(
+        template,
+        block::Height(1),
+        mainnet_genesis_hash(),
+        splitmix64(SYNTHETIC_CORPUS_SEED),
+        1,
+    );
+    let one_tx_size = block_size(&one_tx);
+    if target_bytes <= one_tx_size {
+        return 1;
+    }
+
+    let coinbase_size = template.transactions[0]
+        .as_ref()
+        .zcash_serialize_to_vec()
+        .expect("template transaction serializes")
+        .len()
+        .max(1);
+    let mut tx_count = target_bytes
+        .saturating_sub(one_tx_size)
+        .checked_div(coinbase_size)
+        .and_then(|extra| extra.checked_add(1))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    while tx_count > 1 {
+        let candidate = synthetic_block_at_height(
+            template,
+            block::Height(1),
+            mainnet_genesis_hash(),
+            splitmix64(SYNTHETIC_CORPUS_SEED),
+            tx_count,
+        );
+        if block_size(&candidate) <= target_bytes {
+            break;
+        }
+        tx_count = tx_count.saturating_sub(1);
+    }
+
+    loop {
+        let Some(next_tx_count) = tx_count.checked_add(1) else {
+            break;
+        };
+        let candidate = synthetic_block_at_height(
+            template,
+            block::Height(1),
+            mainnet_genesis_hash(),
+            splitmix64(SYNTHETIC_CORPUS_SEED),
+            next_tx_count,
+        );
+        if block_size(&candidate) > target_bytes {
+            break;
+        }
+        tx_count = next_tx_count;
+    }
+
+    tx_count
 }
 
 fn synthetic_tx_count(random: u64) -> usize {
@@ -671,6 +766,10 @@ fn block_size(block: &block::Block) -> usize {
         .len()
 }
 
+fn max_synthetic_block_bytes() -> usize {
+    usize::try_from(block::MAX_BLOCK_BYTES).expect("max block bytes fits usize")
+}
+
 fn percentile(mut values: Vec<usize>, percentile: usize) -> usize {
     if values.is_empty() {
         return 0;
@@ -686,6 +785,10 @@ fn env_usize(name: &str, default: usize) -> usize {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(default)
+}
+
+fn env_optional_usize(name: &str) -> Option<usize> {
+    env::var(name).ok().and_then(|value| value.parse().ok())
 }
 
 fn env_u32(name: &str, default: u32) -> u32 {
@@ -710,12 +813,17 @@ fn print_summary(config: &HarnessConfig, summary: &ThroughputSummary, trace_root
     let mib_per_second = summary.committed_bytes as f64 / (1024.0 * 1024.0) / elapsed_secs;
 
     println!(
-        "zakura mock blocksync: seeds={} blocks={} max_blocks_per_response={} max_inflight={} fanout={}",
+        "zakura mock blocksync: seeds={} blocks={} max_blocks_per_response={} max_inflight={} fanout={} target_block_bytes={}",
         config.seeds,
         config.blocks,
         config.max_blocks_per_response,
         config.max_inflight,
         config.fanout,
+        config
+            .shape
+            .target_block_bytes
+            .map(|bytes| bytes.to_string())
+            .unwrap_or_else(|| "random-small".to_string()),
     );
     println!(
         "throughput: {:.2} blocks/sec, {:.2} MiB/sec, elapsed={:.3}s",
@@ -737,8 +845,10 @@ fn print_summary(config: &HarnessConfig, summary: &ThroughputSummary, trace_root
 
 #[test]
 fn synthetic_block_generation_is_stable_and_serializable() {
-    let corpus = SyntheticBlockCorpus::generate(64, SYNTHETIC_CORPUS_SEED);
-    let repeat = SyntheticBlockCorpus::generate(64, SYNTHETIC_CORPUS_SEED);
+    let corpus =
+        SyntheticBlockCorpus::generate(64, SYNTHETIC_CORPUS_SEED, SyntheticBlockShape::default());
+    let repeat =
+        SyntheticBlockCorpus::generate(64, SYNTHETIC_CORPUS_SEED, SyntheticBlockShape::default());
     let mut previous_hash = mainnet_genesis_hash();
 
     for height in 1..=64 {
@@ -754,7 +864,13 @@ fn synthetic_block_generation_is_stable_and_serializable() {
         assert_eq!(block.coinbase_height(), Some(height));
         assert_eq!(block.header.previous_block_hash, previous_hash);
         assert_eq!(roundtrip.hash(), block.hash());
-        assert_eq!(repeat.block_at(height).expect("repeat height exists").hash(), block.hash());
+        assert_eq!(
+            repeat
+                .block_at(height)
+                .expect("repeat height exists")
+                .hash(),
+            block.hash()
+        );
         assert_eq!(repeat.size_at(height), corpus.size_at(height));
         assert!(!bytes.is_empty());
         assert!(bytes.len() <= usize::try_from(block::MAX_BLOCK_BYTES).expect("u32 fits usize"));
@@ -764,8 +880,36 @@ fn synthetic_block_generation_is_stable_and_serializable() {
 }
 
 #[test]
+fn synthetic_block_generation_honors_target_size() {
+    let target_bytes = 512 * 1024;
+    let shape = SyntheticBlockShape {
+        target_block_bytes: Some(target_bytes),
+    };
+    let corpus = SyntheticBlockCorpus::generate(8, SYNTHETIC_CORPUS_SEED, shape);
+    let repeat = SyntheticBlockCorpus::generate(8, SYNTHETIC_CORPUS_SEED, shape);
+
+    for height in 1..=8 {
+        let height = block::Height(height);
+        let block = corpus.block_at(height).expect("height exists");
+        let bytes = corpus.size_at(height).expect("size exists");
+
+        assert_eq!(block.coinbase_height(), Some(height));
+        assert!(bytes <= target_bytes);
+        assert!(bytes > target_bytes / 2);
+        assert_eq!(
+            repeat
+                .block_at(height)
+                .expect("repeat height exists")
+                .hash(),
+            block.hash()
+        );
+    }
+}
+
+#[test]
 fn mock_apply_frontier_commits_duplicates_and_rejects_gaps() {
-    let corpus = SyntheticBlockCorpus::generate(3, SYNTHETIC_CORPUS_SEED);
+    let corpus =
+        SyntheticBlockCorpus::generate(3, SYNTHETIC_CORPUS_SEED, SyntheticBlockShape::default());
     let apply = MockApplyFrontier::new(corpus.clone());
     let block_1 = corpus.block_at(block::Height(1)).expect("height 1 exists");
     let block_2 = corpus.block_at(block::Height(2)).expect("height 2 exists");
@@ -797,7 +941,7 @@ fn mock_apply_frontier_commits_duplicates_and_rejects_gaps() {
 async fn zakura_mock_blocksync_throughput() -> Result<(), BoxError> {
     let _guard = zebra_test::init();
     let config = HarnessConfig::from_env();
-    let corpus = SyntheticBlockCorpus::generate(config.blocks, SYNTHETIC_CORPUS_SEED);
+    let corpus = SyntheticBlockCorpus::generate(config.blocks, SYNTHETIC_CORPUS_SEED, config.shape);
     let stats = ThroughputStats::default();
     let apply = MockApplyFrontier::new(corpus.clone());
     let mut trace = HarnessTrace::new(config.trace_dir.clone());
@@ -869,11 +1013,14 @@ async fn zakura_mock_blocksync_throughput() -> Result<(), BoxError> {
 
     connect_leecher_to_seeds(&cluster, config.seeds, leecher_index).await?;
     tokio::time::sleep(Duration::from_millis(500)).await;
+    stats.restart_timer();
     let _ = needed_blocks_gate_tx.send(true);
 
-    await_until("leecher reaches mock block-sync target", Duration::from_secs(300), || {
-        stats.final_frontier() >= corpus.target_height()
-    })
+    await_until(
+        "leecher reaches mock block-sync target",
+        Duration::from_secs(300),
+        || stats.final_frontier() >= corpus.target_height(),
+    )
     .await?;
 
     let summary = stats.summary();

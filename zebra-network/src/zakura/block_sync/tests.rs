@@ -419,6 +419,7 @@ fn window_request(height: u32) -> OutstandingBlockRange {
             expected_hashes: vec![(block::Height(height), block::Hash([byte; 32]))],
             expected_bytes: vec![(block::Height(height), 1)],
         },
+        queued_at: Instant::now(),
         deadline: Instant::now(),
         received: HashSet::new(),
     }
@@ -1136,6 +1137,118 @@ async fn reactor_fill_loop_saturates_multiple_slots_in_one_pass() {
     }
     heights.sort_unstable();
     assert_eq!(heights, vec![1, 2, 3, 4]);
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
+async fn reactor_suppresses_duplicate_needed_block_query_until_response() {
+    let config = immediate_body_download_config();
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config,
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let best_hash = block::Hash([4; 32]);
+
+    handle
+        .send(BlockSyncEvent::HeaderTipChanged {
+            height: block::Height(4),
+            hash: best_hash,
+        })
+        .await
+        .expect("header-tip event queues");
+    wait_for_query_needed_blocks(&mut actions, block::Height(0), block::Height(4)).await;
+
+    handle
+        .send(BlockSyncEvent::HeaderTipChanged {
+            height: block::Height(4),
+            hash: best_hash,
+        })
+        .await
+        .expect("duplicate header-tip event queues");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), actions.recv())
+            .await
+            .is_err(),
+        "same pending needed-block query should not be dispatched twice",
+    );
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(Vec::new()))
+        .await
+        .expect("needed-block response queues");
+    handle
+        .send(BlockSyncEvent::HeaderTipChanged {
+            height: block::Height(4),
+            hash: best_hash,
+        })
+        .await
+        .expect("header-tip event after response queues");
+    wait_for_query_needed_blocks(&mut actions, block::Height(0), block::Height(4)).await;
+
+    reactor_task.abort();
+}
+
+#[tokio::test]
+async fn reactor_suppresses_needed_block_query_when_work_already_covers_tip() {
+    let config = immediate_body_download_config();
+    let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
+    let startup = BlockSyncStartup::new(
+        BlockSyncFrontiers {
+            finalized_height: block::Height(0),
+            verified_block_tip: block::Height(0),
+            verified_block_hash: block::Hash([0; 32]),
+        },
+        (block::Height(0), block::Hash([0; 32])),
+        tip_rx,
+        config,
+    );
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let best_hash = block::Hash([4; 32]);
+
+    handle
+        .send(BlockSyncEvent::HeaderTipChanged {
+            height: block::Height(4),
+            hash: best_hash,
+        })
+        .await
+        .expect("header-tip event queues");
+    wait_for_query_needed_blocks(&mut actions, block::Height(0), block::Height(4)).await;
+
+    handle
+        .send(BlockSyncEvent::NeededBlocks(
+            (1..=4)
+                .map(|height| BlockSyncBlockMeta {
+                    height: block::Height(height),
+                    hash: block::Hash([height as u8; 32]),
+                    size: BlockSizeEstimate::Advertised(1_000),
+                })
+                .collect(),
+        ))
+        .await
+        .expect("needed-block response queues");
+    handle
+        .send(BlockSyncEvent::HeaderTipChanged {
+            height: block::Height(4),
+            hash: best_hash,
+        })
+        .await
+        .expect("covered header-tip event queues");
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), actions.recv())
+            .await
+            .is_err(),
+        "producer should not re-query when pending/in-flight work already covers the header tip",
+    );
 
     reactor_task.abort();
 }
@@ -1986,6 +2099,7 @@ fn outstanding_three_block_range(budget: &mut ByteBudget) -> OutstandingBlockRan
     assert!(budget.try_reserve(request.estimated_bytes));
     OutstandingBlockRange {
         request,
+        queued_at: Instant::now(),
         deadline: Instant::now(),
         received: HashSet::new(),
     }
@@ -2112,6 +2226,7 @@ fn underestimated_body_is_buffered_without_budget_drop() {
     assert!(budget.try_reserve(request.estimated_bytes));
     let mut outstanding = OutstandingBlockRange {
         request,
+        queued_at: Instant::now(),
         deadline: Instant::now(),
         received: HashSet::new(),
     };
@@ -5546,13 +5661,12 @@ async fn reactor_forward_reset_preserves_submitted_successor_body() {
         }))
         .await
         .expect("forward reset event queues");
-    while !matches!(
-        next_action(&mut actions).await,
-        BlockSyncAction::QueryNeededBlocks {
-            verified_block_tip: block::Height(3),
-            best_header_tip: block::Height(3),
-        }
-    ) {}
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), actions.recv())
+            .await
+            .is_err(),
+        "forward reset must not re-query or re-submit the preserved successor body",
+    );
 
     handle
         .send(BlockSyncEvent::BlockApplyFinished {
@@ -5564,13 +5678,12 @@ async fn reactor_forward_reset_preserves_submitted_successor_body() {
         })
         .await
         .expect("successor apply result queues");
-    while !matches!(
-        next_action(&mut actions).await,
-        BlockSyncAction::QueryNeededBlocks {
-            verified_block_tip: block::Height(3),
-            best_header_tip: block::Height(3),
-        }
-    ) {}
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), actions.recv())
+            .await
+            .is_err(),
+        "at-tip successor apply must not trigger a redundant needed-block query",
+    );
 
     reactor_task.abort();
 }
@@ -6150,10 +6263,12 @@ async fn reactor_ignores_stale_apply_completion_after_resubmit() {
         })
         .await
         .expect("current apply-finished event queues");
-    while !matches!(
-        next_action(&mut actions).await,
-        BlockSyncAction::QueryNeededBlocks { .. }
-    ) {}
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), actions.recv())
+            .await
+            .is_err(),
+        "at-tip apply completion must not trigger a redundant needed-block query",
+    );
 
     reactor_task.abort();
 }
@@ -8632,7 +8747,6 @@ async fn reactor_range_unavailable_retries_only_unverified_suffix() {
         }))
         .await
         .expect("frontier grow queues");
-    wait_for_query_needed_blocks(&mut actions, block::Height(1), block::Height(2)).await;
 
     inbound_tx
         .send(

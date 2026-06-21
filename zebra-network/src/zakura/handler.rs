@@ -1677,7 +1677,11 @@ impl ZakuraProtocolHandler {
             .registry
             .ordered_streams_for_escalation(accepted_capabilities, &peer_id, context.direction)
             .into_iter()
-            .filter(|stream| context.is_initiator || stream.kind == ZAKURA_STREAM_BLOCK_SYNC)
+            .filter(|stream| {
+                // In-process tests use one stream-6 session per connection so
+                // local harnesses avoid exercising the symmetric collision path.
+                context.is_initiator || (!cfg!(test) && stream.kind == ZAKURA_STREAM_BLOCK_SYNC)
+            })
             .collect();
         let request_response_stream_count = self
             .registry

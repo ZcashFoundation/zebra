@@ -288,6 +288,16 @@ impl WorkQueue {
         self.lock().in_flight.keys().next_back().copied()
     }
 
+    pub(super) fn max_claimed(&self) -> Option<block::Height> {
+        let inner = self.lock();
+        inner
+            .pending
+            .keys()
+            .next_back()
+            .copied()
+            .max(inner.in_flight.keys().next_back().copied())
+    }
+
     /// Expected hash for a height in `pending` or `in_flight` (late-response
     /// recovery; replaces the old `queued_hash_for_height`).
     pub(super) fn hash_for_height(&self, height: block::Height) -> Option<block::Hash> {
