@@ -20,6 +20,96 @@ static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
     (10000, 9000),
 ];
 
+/// Tests that `find_fork_point` returns the most recent locator entry on the best chain.
+#[test]
+fn find_fork_point_locates_the_fork() {
+    use std::sync::Arc;
+
+    use zebra_chain::{
+        amount::NonNegative, block::Block, parameters::Network::Mainnet,
+        value_balance::ValueBalance,
+    };
+
+    use crate::{
+        arbitrary::Prepare,
+        service::{
+            finalized_state::FinalizedState, non_finalized_state::NonFinalizedState,
+            read::find_fork_point,
+        },
+        tests::FakeChainHelper,
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+
+    // Pre-Heartwood block as a base, to avoid history-tree complications (matches the
+    // `any_chain_block_finds_side_chain_blocks` fixture in read/tests/vectors.rs).
+    let base: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    // Two competing children of `base`: different work -> different hashes -> a fork.
+    let best_block = base.make_fake_child().set_work(100);
+    let side_block = base.make_fake_child().set_work(50);
+
+    let base_hash = base.hash();
+    let base_height = base.coinbase_height().unwrap();
+    let best_hash = best_block.hash();
+    let best_height = best_block.coinbase_height().unwrap();
+    let side_hash = side_block.hash();
+
+    assert_ne!(
+        best_hash, side_hash,
+        "could not create distinct block hashes for fork-point test",
+    );
+
+    let mut non_finalized_state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    non_finalized_state
+        .commit_new_chain(base.prepare(), &finalized_state)
+        .unwrap();
+    non_finalized_state
+        .commit_block(best_block.clone().prepare(), &finalized_state)
+        .unwrap();
+    non_finalized_state
+        .commit_block(side_block.clone().prepare(), &finalized_state)
+        .unwrap();
+    assert_eq!(
+        non_finalized_state.chain_count(),
+        2,
+        "should have two competing chains"
+    );
+
+    let best_chain = non_finalized_state.best_chain();
+    let db = &finalized_state.db;
+
+    // No reorg: the locator's top is on the best chain -> it is its own fork point.
+    assert_eq!(
+        find_fork_point(best_chain, db, vec![best_hash]),
+        Some((best_height, best_hash)),
+    );
+
+    // Reorg: a locator over the orphaned tip plus its shared ancestor -> the shared
+    // ancestor (`base`) is the fork point.
+    assert_eq!(
+        find_fork_point(best_chain, db, vec![side_hash, base_hash]),
+        Some((base_height, base_hash)),
+    );
+
+    // A locator containing only the orphaned tip has no entry on the best chain.
+    assert_eq!(find_fork_point(best_chain, db, vec![side_hash]), None);
+
+    // An empty locator has no fork point.
+    assert_eq!(find_fork_point(best_chain, db, vec![]), None);
+}
+
 /// Check that the block locator heights are sensible.
 #[test]
 fn test_block_locator_heights() {
