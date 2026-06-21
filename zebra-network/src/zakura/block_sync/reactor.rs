@@ -220,7 +220,11 @@ impl BlockSyncReactor {
         let mut header_tip_open = header_tip.is_some();
         let mut frontier_updates = self.startup.frontier_updates.clone();
         let mut frontier_updates_open = frontier_updates.is_some();
-        let mut ticks = time::interval(self.startup.config.request_timeout);
+        // Metrics/trace snapshot cadence only. Per-peer request timeouts are owned
+        // by the routines (each sleeps to its own earliest deadline), so this timer
+        // no longer drives any timeout; it reuses `request_timeout` purely as a
+        // reasonable periodic refresh interval.
+        let mut metrics_ticks = time::interval(self.startup.config.request_timeout);
         let mut status_ticks = time::interval(
             self.startup
                 .config
@@ -308,10 +312,7 @@ impl BlockSyncReactor {
                         None => break,
                     }
                 }
-                _ = ticks.tick() => {
-                    // Per-peer request timeouts are now owned by the routines (each
-                    // sleeps to its earliest deadline); the tick only refreshes the
-                    // periodic trace/metrics snapshot.
+                _ = metrics_ticks.tick() => {
                     self.publish_metrics();
                     self.refresh_throughput();
                     self.trace_sync_state();
