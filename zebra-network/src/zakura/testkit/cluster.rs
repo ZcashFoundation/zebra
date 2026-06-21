@@ -33,6 +33,17 @@ impl ZakuraTestCluster {
         Ok(self.nodes.len() - 1)
     }
 
+    /// Spawn one preconfigured node and append it to the cluster.
+    #[cfg(test)]
+    pub(crate) async fn spawn_node_with_builder(
+        &mut self,
+        builder: super::ZakuraTestNodeBuilder,
+    ) -> Result<usize, BoxError> {
+        let node = builder.spawn().await?;
+        self.nodes.push(node);
+        Ok(self.nodes.len() - 1)
+    }
+
     /// Spawn one node with a per-node JSONL trace directory.
     pub async fn spawn_traced_node(
         &mut self,

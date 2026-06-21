@@ -9458,15 +9458,12 @@ async fn reactor_scores_unsolicited_terminator_from_connected_peer() {
     reactor_task.abort();
 }
 
-/// Regression for `claude-sync-reactor-action-backpressure-stalls-disconnect` in
-/// the block-sync reactor: when the bounded 128-slot action channel is saturated
-/// and the action driver is stalled, awaiting `actions.send` for `Misbehavior`
-/// wedged the reactor, so it could no longer reach its own disconnect path. The
-/// reactor must instead enqueue misbehavior non-blockingly and stay live — here,
-/// live enough to still tear down a soft offender once it crosses the
-/// disconnect threshold.
+/// Misbehavior is record-only: a repeatedly-misbehaving peer is still *observed*
+/// (the reactor emits a `Misbehavior` action as a record) but is **not**
+/// disconnected. Peer scoring no longer drives disconnects, so what used to be a
+/// "soft" offense crossing the threshold-of-3 now leaves the peer connected.
 #[tokio::test]
-async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated() {
+async fn repeated_misbehavior_is_recorded_without_disconnecting_the_peer() {
     let config = ZakuraBlockSyncConfig::default();
     let (_tip_tx, tip_rx) = watch::channel((block::Height(0), block::Hash([0; 32])));
     let startup = BlockSyncStartup::new(
@@ -9479,15 +9476,11 @@ async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated(
         tip_rx,
         config.clone(),
     );
-    // `_actions` is held but never drained: the production action driver is
-    // "stalled", so the bounded action channel stays full once filled.
-    let (handle, _actions, reactor_task) = spawn_block_sync_reactor(startup);
+    let (handle, mut actions, reactor_task) = spawn_block_sync_reactor(startup);
     let service = BlockSyncService::new_with_handle_for_test(config, handle.clone());
 
     // Connect the probe peer with a real pipe-routine (S4) so its inbound frames
-    // are decoded and dispatched. The soft-misbehavior threshold disconnect cancels
-    // the probe's session token, exiting its routine and tearing the peer down
-    // (`service.peer_count()` drops to 0).
+    // are decoded and dispatched.
     let probe = peer(7);
     let (probe_inbound_tx, probe_inbound_rx) = framed_channel(8);
     let (probe_outbound_tx, _probe_outbound_rx) = framed_channel(8);
@@ -9510,15 +9503,9 @@ async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated(
     .await
     .expect("probe peer connects");
 
-    // Drive the connected probe past the soft-misbehavior disconnect threshold (3)
-    // while the action channel is saturated and the driver is stalled. Each
-    // `GetBlocks` from a peer that has not sent a Status is `GetBlocksSpam` (soft):
-    // the routine forwards it to the reactor, which scores it via the shared
-    // registry count and cancels the probe's session at threshold — a path that is
-    // structurally independent of the (saturated) action channel, since the
-    // disconnect is a session-token cancel, not an action send. A reactor that
-    // blocked on `actions.send` would never reach the cancel; the non-blocking
-    // `try_send` + registry-count cancel does.
+    // Each `GetBlocks` from a peer that has not sent a Status is `GetBlocksSpam`
+    // (formerly a "soft" offense that disconnected at a threshold of 3). Send well
+    // past the old threshold.
     for _ in 0..8 {
         send_inbound(
             &probe_inbound_tx,
@@ -9530,15 +9517,27 @@ async fn misbehaving_peer_is_disconnected_even_when_action_channel_is_saturated(
         .await;
     }
 
+    // The violation is still recorded: the reactor emits a best-effort
+    // `Misbehavior` action for the spamming peer.
     tokio::time::timeout(Duration::from_secs(2), async {
-        while service.peer_count() != 0 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+        loop {
+            if let BlockSyncAction::Misbehavior { peer, reason } = next_action(&mut actions).await {
+                if peer == probe && reason == BlockSyncMisbehavior::GetBlocksSpam {
+                    break;
+                }
+            }
         }
     })
     .await
-    .expect(
-        "a repeatedly-misbehaving block-sync peer must still be disconnected when the action \
-         channel is saturated and the action driver is stalled",
+    .expect("a misbehavior action is recorded for the spamming peer");
+
+    // But the peer is never torn down: misbehavior no longer cancels the session.
+    // Give the reactor ample time to (not) act, then confirm the peer remains.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        service.peer_count(),
+        1,
+        "misbehavior is record-only: a repeatedly-misbehaving peer must NOT be disconnected",
     );
 
     reactor_task.abort();

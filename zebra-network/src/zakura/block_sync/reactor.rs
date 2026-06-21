@@ -1775,27 +1775,18 @@ impl BlockSyncReactor {
     }
 
     async fn report_misbehavior(&mut self, peer: ZakuraPeerId, reason: BlockSyncMisbehavior) {
-        // The aggregate soft-disconnect count lives in the registry so it is shared
-        // across the routine (download offenses) and the reactor (serving offenses).
-        let should_cancel = self
-            .registry
-            .record_misbehavior(&peer, block_sync_misbehavior_is_soft(reason));
-        if should_cancel {
-            if let Some(peer_state) = self.state.peers.get(&peer) {
-                peer_state.session.cancel_token().cancel();
-            }
-        }
-        // The Misbehavior action carries the hard-disconnect/scoring request to
-        // the supervisor. Deliver it without ever blocking the reactor: awaiting
-        // a full `actions` channel here was the backpressure stall that delayed
-        // misbehavior disconnects, request timeouts, and lifecycle draining
-        // whenever the action driver was slow. `try_send` keeps the reactor live
-        // so it can promptly tear down soft offenders at threshold and deliver
-        // the next disconnect as soon as the driver drains a slot.
+        // Misbehavior is record-only: trace and forward it, but never cancel the
+        // session. Peer scoring no longer drives disconnects.
+        metrics::counter!("sync.block.peer.violation").increment(1);
+        // The Misbehavior action carries the violation to the driver as a record.
+        // Deliver it without ever blocking the reactor: awaiting a full `actions`
+        // channel here was the backpressure stall that delayed request timeouts and
+        // lifecycle draining whenever the action driver was slow. `try_send` keeps
+        // the reactor live.
         let action = BlockSyncAction::Misbehavior { peer, reason };
         self.trace_action_dispatched(&action);
         if self.actions.try_send(action).is_err() {
-            metrics::counter!("sync.block.peer.disconnect.action_dropped").increment(1);
+            metrics::counter!("sync.block.peer.violation.action_dropped").increment(1);
         }
     }
 
@@ -2078,13 +2069,4 @@ fn bs_insert_str(
 
 pub(super) fn tolerated_bytes(reserved_bytes: u64, tolerance_percent: u32) -> u64 {
     reserved_bytes.saturating_mul(u64::from(tolerance_percent.max(100))) / 100
-}
-
-pub(super) fn block_sync_misbehavior_is_soft(reason: BlockSyncMisbehavior) -> bool {
-    matches!(
-        reason,
-        BlockSyncMisbehavior::SizeMismatch
-            | BlockSyncMisbehavior::RangeUnavailable
-            | BlockSyncMisbehavior::GetBlocksSpam
-    )
 }

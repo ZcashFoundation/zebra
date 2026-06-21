@@ -16,8 +16,8 @@
 //! `outstanding` (on issue/finish/timeout/disconnect — per *request*, never per
 //! *body*), slot diagnostics, and download-side misbehavior. The **reactor** owns
 //! only entry insert/remove (admission/teardown) and reports serving-side
-//! misbehavior. The aggregate soft-misbehavior count lives here so the routine
-//! (download offenses) and reactor (serving offenses) share one threshold.
+//! misbehavior. Misbehavior is record-only: it is observed and traced but never
+//! drives a disconnect, so the registry keeps no per-peer misbehavior state.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -31,13 +31,6 @@ use super::{
     state::EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER,
     BlockSyncStatus, ServicePeerDirection, ZakuraPeerId,
 };
-
-/// Soft-misbehavior disconnect threshold shared by the routine and the reactor.
-///
-/// Kept identical to the reactor's pre-S4 `SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD`
-/// so the aggregate count behaves exactly as before, now summed across the two
-/// reporters (routine download offenses + reactor serving offenses).
-pub(super) const SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD: u32 = 3;
 
 /// Per-peer facts the reactor needs globally and the routine reads back.
 #[derive(Clone, Debug)]
@@ -56,7 +49,6 @@ pub(super) struct Entry {
     /// independent of `work.in_flight`, so it structurally closes the
     /// reject-rollback window.
     pub(super) outstanding: BTreeMap<block::Height, block::Hash>,
-    pub(super) misbehavior: u32,
     /// Routine-published slot diagnostics (trace only): the per-peer download
     /// window state the reactor used to read off `PeerBlockState` for the periodic
     /// `BLOCK_SYNC_STATE` row. Updated whenever the routine issues/finishes/times
@@ -84,7 +76,6 @@ impl Entry {
             max_inflight_requests: config.advertised_max_inflight_requests(),
             max_response_bytes: config.advertised_max_response_bytes(),
             outstanding: BTreeMap::new(),
-            misbehavior: 0,
             slots: SlotDiagnostics::default(),
             generation,
         }
@@ -326,19 +317,6 @@ impl PeerRegistry {
     pub(super) fn has_received_status(&self, peer: &ZakuraPeerId) -> bool {
         let peers = self.lock();
         peers.get(peer).is_some_and(|entry| entry.received_status)
-    }
-
-    /// Record one misbehavior offense and return whether the soft-disconnect
-    /// threshold is now reached (so the reporter cancels the session). The count
-    /// always increments; the returned `should_cancel` is only set for a soft
-    /// reason at threshold, matching the pre-S4 reactor behavior.
-    pub(super) fn record_misbehavior(&self, peer: &ZakuraPeerId, is_soft: bool) -> bool {
-        let mut peers = self.lock();
-        let Some(entry) = peers.get_mut(peer) else {
-            return false;
-        };
-        entry.misbehavior = entry.misbehavior.saturating_add(1);
-        is_soft && entry.misbehavior >= SOFT_MISBEHAVIOR_DISCONNECT_THRESHOLD
     }
 
     /// Count of peers that have sent a status (low-water refill + trace).

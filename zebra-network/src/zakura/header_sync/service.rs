@@ -208,7 +208,9 @@ pub(super) enum HeaderSyncPeerCommand {
 pub(crate) async fn drive_header_sync_actions(
     mut actions: mpsc::Receiver<HeaderSyncAction>,
     handle: HeaderSyncHandle,
-    supervisor: ZakuraSupervisorHandle,
+    // Retained so the disconnect capability stays wired into the driver, even
+    // though peer scoring no longer drives disconnects (misbehavior is record-only).
+    _supervisor: ZakuraSupervisorHandle,
     shutdown: CancellationToken,
 ) {
     loop {
@@ -226,12 +228,8 @@ pub(crate) async fn drive_header_sync_actions(
             #[cfg(test)]
             HeaderSyncAction::SendMessage { .. } | HeaderSyncAction::ForwardNewBlock { .. } => {}
             HeaderSyncAction::Misbehavior { peer, reason } => {
-                tracing::debug!(
-                    ?peer,
-                    ?reason,
-                    "disconnecting peer for Zakura header-sync violation"
-                );
-                let _ = supervisor.disconnect_peer(&peer).await;
+                // Record-only: peer scoring no longer drives disconnects.
+                tracing::debug!(?peer, ?reason, "recorded Zakura header-sync peer violation");
             }
             HeaderSyncAction::NewBlockReceived { peer, hash, .. } => {
                 tracing::debug!(

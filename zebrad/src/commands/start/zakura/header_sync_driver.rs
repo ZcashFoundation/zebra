@@ -122,12 +122,8 @@ pub(crate) async fn drive_zakura_header_sync_actions<State, ReadState, BlockVeri
         trace_header_driver_action(&trace, &action);
         match action {
             HeaderSyncAction::Misbehavior { peer, reason } => {
-                debug!(
-                    ?peer,
-                    ?reason,
-                    "disconnecting peer for Zakura header-sync violation"
-                );
-                let _ = handles.endpoint.supervisor().disconnect_peer(&peer).await;
+                // Record-only: peer scoring no longer drives disconnects.
+                debug!(?peer, ?reason, "recorded Zakura header-sync peer violation");
             }
             HeaderSyncAction::NewBlockReceived {
                 peer,

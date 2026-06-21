@@ -1401,31 +1401,21 @@ impl HeaderSyncReactor {
     }
 
     async fn report_misbehavior(&mut self, peer: ZakuraPeerId, reason: HeaderSyncMisbehavior) {
-        if let Some(peer_state) = self.state.peers.get_mut(&peer) {
-            peer_state.misbehavior = peer_state.misbehavior.saturating_add(1);
-        }
+        // Misbehavior is record-only: trace and forward it, but never cancel the
+        // session. Peer scoring no longer drives disconnects.
         if reason == HeaderSyncMisbehavior::UnsolicitedHeaders {
             self.trace_peer_violation(&peer, reason);
             return;
         }
-        if let Some(peer_state) = self.state.peers.get_mut(&peer) {
-            // Prioritized, non-blocking disconnect: tear down the offending
-            // peer's header-sync session locally so a saturated or stalled
-            // action channel can never delay it. The supervised session
-            // teardown also emits a `PeerDisconnected` lifecycle event that
-            // cleans up this reactor's per-peer state.
-            peer_state.session.cancel_token().cancel();
-        }
-        metrics::counter!("sync.header.peer.disconnect").increment(1);
+        metrics::counter!("sync.header.peer.violation").increment(1);
         self.trace_peer_violation(&peer, reason);
         self.trace_peer_disconnect_requested(&peer, reason);
-        // Best-effort supervisor notification for cross-service scoring/full
-        // disconnect. Never block the reactor waiting for channel capacity: the
-        // local session cancel above already removed the peer from this service.
+        // Best-effort record of the violation for the driver. Never block the
+        // reactor waiting for channel capacity.
         let action = HeaderSyncAction::Misbehavior { peer, reason };
         self.trace_action_dispatched(&action);
         if self.actions.try_send(action).is_err() {
-            metrics::counter!("sync.header.peer.disconnect.action_dropped").increment(1);
+            metrics::counter!("sync.header.peer.violation.action_dropped").increment(1);
         }
     }
 

@@ -3284,7 +3284,7 @@ async fn header_sync_jsonl_trace_captures_status_range_dedup_and_disconnect() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn header_sync_metrics_record_status_range_new_block_dedup_and_disconnect() {
+async fn header_sync_metrics_record_status_range_new_block_dedup_and_violation() {
     let metrics = [
         "sync.header.peer.status.sent",
         "sync.header.peer.status.received",
@@ -3293,7 +3293,7 @@ async fn header_sync_metrics_record_status_range_new_block_dedup_and_disconnect(
         "sync.header.range.committed",
         "sync.header.tip.new_block.received",
         "sync.header.tip.new_block.deduped",
-        "sync.header.peer.disconnect",
+        "sync.header.peer.violation",
     ];
     let before = metric_snapshot(&metrics);
 
@@ -4243,13 +4243,11 @@ fn hostile_vectors_are_rejected_for_allocation_and_unsolicited_headers() {
     ));
 }
 
-/// Regression for `claude-sync-reactor-action-backpressure-stalls-disconnect`:
-/// when the bounded 128-slot action channel is saturated and the action driver
-/// is stalled, the reactor must still disconnect a misbehaving peer promptly via
-/// a prioritized, non-blocking path, instead of awaiting `actions.send` and
-/// delaying the disconnect until the queue drains.
+/// Misbehavior is record-only: an `InvalidStatus` (formerly an immediate
+/// disconnect) is still *recorded* as a `Misbehavior` action, but the peer's
+/// session is **not** cancelled. Peer scoring no longer drives disconnects.
 #[tokio::test]
-async fn misbehavior_disconnect_is_prompt_when_action_channel_is_saturated() {
+async fn misbehavior_is_recorded_without_disconnecting_the_peer() {
     let network = Network::Mainnet;
     let anchor = (block::Height(0), network.genesis_hash());
     let mut startup = HeaderSyncStartup::new(
@@ -4267,17 +4265,15 @@ async fn misbehavior_disconnect_is_prompt_when_action_channel_is_saturated() {
     // Keep the test deterministic: no scheduling/state actions, so the only
     // actions enqueued are the ones we drive below.
     startup.range_state_actions_enabled = false;
-    let fixture = spawn_test_reactor(startup);
+    let mut fixture = spawn_test_reactor(startup);
 
-    // Connect the peer we will later flag as misbehaving and keep its session
-    // cancellation token so we can observe the local disconnect.
+    // Connect the peer we will flag as misbehaving and keep its session
+    // cancellation token so we can confirm it is never cancelled.
     let probe = peer(7);
     let probe_cancel =
         connect_peer_with_direction(&fixture, probe.clone(), ServicePeerDirection::Inbound).await;
 
-    // `anchor_height > tip_height` is an `InvalidStatus` misbehavior, evaluated
-    // before any per-peer state lookup, so it works for both an unknown filler
-    // peer and the connected probe peer.
+    // `anchor_height > tip_height` is an `InvalidStatus` misbehavior.
     let invalid_status = HeaderSyncMessage::Status(HeaderSyncStatus {
         tip_height: block::Height(0),
         tip_hash: block::Hash([0; 32]),
@@ -4285,45 +4281,30 @@ async fn misbehavior_disconnect_is_prompt_when_action_channel_is_saturated() {
         max_headers_per_response: 1,
         max_inflight_requests: 1,
     });
+    fixture
+        .handle
+        .send(HeaderSyncEvent::WireMessage {
+            peer: probe.clone(),
+            msg: invalid_status,
+        })
+        .await
+        .expect("event queues");
 
-    // Saturate the bounded action channel and never drain it (the production
-    // action driver is "stalled"). Misbehavior events from an unrelated, unknown
-    // peer enqueue `Misbehavior` actions until the channel is full. A per-send
-    // timeout keeps the test from hanging if the (unfixed) reactor wedges on a
-    // blocking `actions.send` and stops draining the bounded events queue.
-    let filler = peer(200);
-    for _ in 0..400 {
-        let send = fixture.handle.send(HeaderSyncEvent::WireMessage {
-            peer: filler.clone(),
-            msg: invalid_status.clone(),
-        });
-        if tokio::time::timeout(std::time::Duration::from_millis(200), send)
-            .await
-            .is_err()
+    // The violation is recorded: a `Misbehavior` action for the probe is emitted.
+    loop {
+        if let HeaderSyncAction::Misbehavior { peer, reason } =
+            next_non_query_action(&mut fixture.actions).await
         {
+            assert_eq!(peer, probe);
+            assert_eq!(reason, HeaderSyncMisbehavior::InvalidStatus);
             break;
         }
     }
 
-    // Flag the connected probe peer as misbehaving while the action channel is
-    // saturated. Sending the event is best-effort: an unfixed, wedged reactor
-    // will never accept it, but the disconnect must still never arrive there.
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        fixture.handle.send(HeaderSyncEvent::WireMessage {
-            peer: probe.clone(),
-            msg: invalid_status.clone(),
-        }),
-    )
-    .await;
-
-    // The disconnect must land well under `ACTION_SEND_TIMEOUT` and without
-    // anyone draining the action channel — proving a prioritized, non-blocking
-    // disconnect path rather than backpressured delivery.
-    tokio::time::timeout(std::time::Duration::from_secs(1), probe_cancel.cancelled())
-        .await
-        .expect(
-            "a misbehaving peer must be disconnected promptly even when the action channel is \
-             saturated and the action driver is stalled",
-        );
+    // But the peer's session is never cancelled: misbehavior is record-only.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        !probe_cancel.is_cancelled(),
+        "misbehavior is record-only: an InvalidStatus peer must NOT be disconnected",
+    );
 }

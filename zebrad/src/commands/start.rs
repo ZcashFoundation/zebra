@@ -94,8 +94,8 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use zakura::{
     drive_block_sync_actions, drive_zakura_header_sync_actions, mirror_zakura_full_block_commits,
-    query_block_sync_frontiers, zakura_header_sync_driver_startup, BlockSyncDriverContext,
-    BlocksyncThroughputProbe, BlocksyncThroughputSummary, ZakuraHeaderSyncDriverHandles,
+    query_block_sync_frontiers, zakura_header_sync_driver_startup, BlocksyncThroughputProbe,
+    BlocksyncThroughputSummary, ZakuraHeaderSyncDriverHandles,
 };
 
 use crate::{
@@ -682,24 +682,18 @@ impl StartCmd {
                     let block_driver_task = tokio::spawn(
                         drive_block_sync_actions(
                             block_actions,
-                            BlockSyncDriverContext {
-                                supervisor: endpoint.supervisor(),
-                                endpoint: Some(endpoint.clone()),
-                                block_sync: block_sync.clone(),
-                                latest_chain_tip: latest_chain_tip.clone(),
-                                read_state: read_only_state_service.clone(),
-                                block_verifier: block_verifier_router.clone(),
-                                max_checkpoint_height,
-                                checkpoint_apply_limit: config
-                                    .sync
-                                    .checkpoint_verify_concurrency_limit,
-                                full_apply_limit: config.sync.full_verify_concurrency_limit,
-                                combined_apply_limit: config
-                                    .sync
-                                    .zakura_block_apply_concurrency_limit,
-                                trace: trace.clone(),
-                                throughput_probe: blocksync_throughput_probe.clone(),
-                            },
+                            endpoint.supervisor(),
+                            Some(endpoint.clone()),
+                            block_sync.clone(),
+                            latest_chain_tip.clone(),
+                            read_only_state_service.clone(),
+                            block_verifier_router.clone(),
+                            max_checkpoint_height,
+                            config.sync.checkpoint_verify_concurrency_limit,
+                            config.sync.full_verify_concurrency_limit,
+                            config.sync.zakura_block_apply_concurrency_limit,
+                            trace.clone(),
+                            blocksync_throughput_probe.clone(),
                             shutdown.clone().cancelled_owned(),
                         )
                         .in_current_span(),
@@ -2061,65 +2055,25 @@ mod zakura_header_sync_driver_tests {
         BlockSyncBlockMeta, BlockSyncEvent, BlockSyncFrontiers, BlockSyncMisbehavior,
         HeaderSyncCommitFailureKind, HeaderSyncFrontiers, Peer as ZakuraPeer,
         Service as ZakuraService, Stream as ZakuraStream, ZakuraHeaderSyncDriverStartup,
-        COMMIT_STATE_TABLE, DEFAULT_HS_RANGE,
+        BLOCK_SYNC_TABLE, COMMIT_STATE_TABLE, DEFAULT_HS_RANGE,
     };
     use zebra_test::vectors::{BLOCK_MAINNET_1_BYTES, BLOCK_MAINNET_2_BYTES};
 
     use super::zakura::{
         apply_block_sync_body, block_apply_class, block_sync_chain_tip_event,
-        block_sync_misbehavior_is_hard, block_sync_missing_body_window,
-        block_sync_needed_blocks_from_state, block_verify_error_is_duplicate,
-        body_sizes_for_served_header_range, chain_tip_mirror_frontier_change,
-        coalesce_ready_needed_block_queries, coalesce_stale_needed_block_queries,
-        commit_block_sync_body, drive_block_sync_actions, drive_zakura_header_sync_actions,
-        header_range_commit_failure_kind, notify_block_sync_header_tip, query_block_sync_frontiers,
-        query_block_sync_needed_blocks, verified_block_tip_from_state, BlockApplyClass,
-        BlockApplyContext, BlockApplyInput, BlockSyncDriverContext, BlocksyncThroughputProbe,
+        block_sync_missing_body_window, block_sync_needed_blocks_from_state,
+        block_verify_error_is_duplicate, body_sizes_for_served_header_range,
+        chain_tip_mirror_frontier_change, coalesce_ready_needed_block_queries,
+        coalesce_stale_needed_block_queries, commit_block_sync_body, drive_block_sync_actions,
+        drive_zakura_header_sync_actions, header_range_commit_failure_kind,
+        notify_block_sync_header_tip, query_block_sync_frontiers, query_block_sync_needed_blocks,
+        verified_block_tip_from_state, BlockApplyClass, BlocksyncThroughputProbe,
         ZakuraHeaderSyncDriverHandles, ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
         ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT, ZAKURA_BLOCK_SYNC_MISSING_BODY_WINDOW,
     };
 
     fn mainnet_block(bytes: &[u8]) -> Arc<block::Block> {
         Arc::new(bytes.zcash_deserialize_into().expect("block vector parses"))
-    }
-
-    fn block_sync_driver_context<ReadState, BlockVerifier, Tip>(
-        block_sync: zebra_network::zakura::BlockSyncHandle,
-        latest_chain_tip: Tip,
-        read_state: ReadState,
-        block_verifier: BlockVerifier,
-    ) -> BlockSyncDriverContext<ReadState, BlockVerifier, Tip> {
-        BlockSyncDriverContext {
-            supervisor: zebra_network::zakura::ZakuraSupervisorHandle::new(1),
-            endpoint: None,
-            block_sync,
-            latest_chain_tip,
-            read_state,
-            block_verifier,
-            max_checkpoint_height: block::Height::MAX,
-            checkpoint_apply_limit: sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
-            full_apply_limit: sync::MIN_CONCURRENCY_LIMIT,
-            combined_apply_limit: sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
-            trace: zebra_network::zakura::ZakuraTrace::noop(),
-            throughput_probe: None,
-        }
-    }
-
-    fn block_apply_context<ReadState, BlockVerifier, Tip>(
-        block_sync: zebra_network::zakura::BlockSyncHandle,
-        latest_chain_tip: Tip,
-        read_state: ReadState,
-        block_verifier: BlockVerifier,
-        trace: zebra_network::zakura::ZakuraTrace,
-    ) -> BlockApplyContext<ReadState, BlockVerifier, Tip> {
-        BlockApplyContext::normal(
-            latest_chain_tip,
-            None,
-            read_state,
-            block_verifier,
-            block_sync,
-            trace,
-        )
     }
 
     #[derive(Debug)]
@@ -2389,25 +2343,6 @@ mod zakura_header_sync_driver_tests {
     }
 
     #[test]
-    fn block_sync_misbehavior_classifier_keeps_soft_reasons_soft() {
-        assert!(!block_sync_misbehavior_is_hard(
-            BlockSyncMisbehavior::SizeMismatch
-        ));
-        assert!(!block_sync_misbehavior_is_hard(
-            BlockSyncMisbehavior::RangeUnavailable
-        ));
-        assert!(!block_sync_misbehavior_is_hard(
-            BlockSyncMisbehavior::UnsolicitedBlock
-        ));
-        assert!(!block_sync_misbehavior_is_hard(
-            BlockSyncMisbehavior::GetBlocksSpam
-        ));
-        assert!(block_sync_misbehavior_is_hard(
-            BlockSyncMisbehavior::InvalidBlock
-        ));
-    }
-
-    #[test]
     fn block_sync_chain_tip_action_mapping_preserves_reset_vs_grow() {
         let frontiers = BlockSyncFrontiers {
             finalized_height: block::Height(0),
@@ -2573,6 +2508,9 @@ mod zakura_header_sync_driver_tests {
         )
         .await;
 
+        // The reactor emits a startup needed-block query (header tip 0) before the
+        // notification is processed, so drain until the query that reflects the new
+        // header tip arrives rather than asserting on the first action.
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let action = reactor_actions
@@ -2591,7 +2529,7 @@ mod zakura_header_sync_driver_tests {
             }
         })
         .await
-        .expect("reactor emits a needed-block query after a header tip");
+        .expect("reactor emits a needed-block query reflecting the new header tip");
 
         reactor_task.abort();
     }
@@ -2877,12 +2815,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            block_sync_driver_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-            ),
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -2959,17 +2903,21 @@ mod zakura_header_sync_driver_tests {
         let (action_tx, action_rx) = mpsc::channel(8);
         let (_tip_tx, tip_rx) =
             tokio::sync::watch::channel((block::Height(3), block::Hash([3; 32])));
+        let mut capture =
+            TraceCapture::for_test("block_sync_driver_throughput_probe_advances").unwrap();
+        let trace = zebra_network::zakura::ZakuraTrace::new(capture.tracer(), "01");
         let initial_frontiers = BlockSyncFrontiers {
             finalized_height: block::Height(0),
             verified_block_tip: block::Height(0),
             verified_block_hash: block::Hash([0; 32]),
         };
-        let startup = zebra_network::zakura::BlockSyncStartup::new(
+        let mut startup = zebra_network::zakura::BlockSyncStartup::new(
             initial_frontiers,
             (block::Height(3), block::Hash([3; 32])),
             tip_rx,
             zebra_network::zakura::ZakuraBlockSyncConfig::default(),
         );
+        startup.trace = trace.clone();
         let (block_sync, mut reactor_actions, reactor_task) =
             zebra_network::zakura::spawn_block_sync_reactor(startup);
         let (probe, mut completion_rx) =
@@ -3040,15 +2988,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                throughput_probe: Some(probe),
-                ..block_sync_driver_context(
-                    block_sync,
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            trace.clone(),
+            Some(probe),
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3101,35 +3052,38 @@ mod zakura_header_sync_driver_tests {
         assert_eq!(summary.verified_block_tip, block::Height(2));
         assert_eq!(commit_count.load(Ordering::SeqCst), 0);
 
-        let next_query = tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                let action = reactor_actions
-                    .recv()
-                    .await
-                    .expect("reactor action channel stays open");
-                if matches!(
-                    action,
-                    BlockSyncAction::QueryNeededBlocks {
-                        verified_block_tip: block::Height(2),
-                        best_header_tip: block::Height(3),
-                    }
-                ) {
-                    break action;
-                }
-            }
-        })
-        .await
-        .expect("reactor emits next query from synthetic frontier");
-        assert!(matches!(
-            next_query,
-            BlockSyncAction::QueryNeededBlocks {
-                verified_block_tip: block::Height(2),
-                best_header_tip: block::Height(3),
-            }
-        ));
+        capture.flush().await;
+        let reader = capture.reader().unwrap();
+        let block_sync_trace = reader.table(BLOCK_SYNC_TABLE.table());
+        let chain_tip_grow_events = block_sync_trace
+            .rows()
+            .into_iter()
+            .filter(|row| {
+                row.get("event").and_then(serde_json::Value::as_str) == Some("block_event_received")
+                    && row.get("kind").and_then(serde_json::Value::as_str) == Some("chain_tip_grow")
+            })
+            .count();
+        let apply_finished_events = block_sync_trace
+            .rows()
+            .into_iter()
+            .filter(|row| {
+                row.get("event").and_then(serde_json::Value::as_str) == Some("block_event_received")
+                    && row.get("kind").and_then(serde_json::Value::as_str)
+                        == Some("block_apply_finished")
+            })
+            .count();
+        assert_eq!(
+            chain_tip_grow_events, 0,
+            "throughput probe should advance via apply-finished local frontier only"
+        );
+        assert!(
+            apply_finished_events >= 2,
+            "throughput probe should still send apply-finished events"
+        );
 
         let _ = shutdown_tx.send(());
         driver.await.expect("driver task exits cleanly");
+        let _ = capture.finish().await.unwrap();
         reactor_task.abort();
     }
 
@@ -3174,12 +3128,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            block_sync_driver_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-            ),
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3281,16 +3241,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                max_checkpoint_height: block::Height(2),
-                checkpoint_apply_limit: 2,
-                ..block_sync_driver_context(
-                    block_sync,
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height(2),
+            2,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3380,16 +3342,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                max_checkpoint_height: block::Height(2),
-                combined_apply_limit: 1,
-                ..block_sync_driver_context(
-                    block_sync,
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height(2),
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            1,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3480,18 +3444,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                max_checkpoint_height: block::Height(0),
-                checkpoint_apply_limit: 2,
-                full_apply_limit: 2,
-                combined_apply_limit: 1,
-                ..block_sync_driver_context(
-                    block_sync,
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height(0),
+            2,
+            2,
+            1,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3646,20 +3610,19 @@ mod zakura_header_sync_driver_tests {
         });
 
         apply_block_sync_body(
-            BlockApplyInput {
-                token: 1,
-                class: BlockApplyClass::Checkpoint,
-                block,
-            },
-            block_apply_context(
-                block_sync.clone(),
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-                zebra_network::zakura::ZakuraTrace::noop(),
-            ),
+            verifier,
+            zebra_chain::chain_tip::NoChainTip,
+            None,
+            read_state,
+            block_sync.clone(),
+            1,
+            block,
+            BlockApplyClass::Checkpoint,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
         )
         .await;
+
         assert!(
             tokio::time::timeout(Duration::from_millis(50), reactor_actions.recv())
                 .await
@@ -3704,18 +3667,16 @@ mod zakura_header_sync_driver_tests {
         });
 
         apply_block_sync_body(
-            BlockApplyInput {
-                token: 77,
-                class: BlockApplyClass::Full,
-                block,
-            },
-            block_apply_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-                trace,
-            ),
+            verifier,
+            zebra_chain::chain_tip::NoChainTip,
+            None,
+            read_state,
+            block_sync,
+            77,
+            block,
+            BlockApplyClass::Full,
+            trace,
+            None,
         )
         .await;
 
@@ -3784,18 +3745,16 @@ mod zakura_header_sync_driver_tests {
         });
 
         let apply_task = tokio::spawn(apply_block_sync_body(
-            BlockApplyInput {
-                token: 88,
-                class: BlockApplyClass::Checkpoint,
-                block,
-            },
-            block_apply_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-                trace,
-            ),
+            verifier,
+            zebra_chain::chain_tip::NoChainTip,
+            None,
+            read_state,
+            block_sync,
+            88,
+            block,
+            BlockApplyClass::Checkpoint,
+            trace,
+            None,
         ));
 
         tokio::task::yield_now().await;
@@ -3866,12 +3825,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            block_sync_driver_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-            ),
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -3929,16 +3894,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                checkpoint_apply_limit: two_checkpoint_gaps,
-                combined_apply_limit: zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
-                ..block_sync_driver_context(
-                    block_sync,
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            two_checkpoint_gaps,
+            sync::MIN_CONCURRENCY_LIMIT,
+            zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -4043,7 +4010,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            block_sync_driver_context(block_sync.clone(), latest_chain_tip, read_state, verifier),
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync.clone(),
+            latest_chain_tip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -4154,15 +4132,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                trace,
-                ..block_sync_driver_context(
-                    block_sync.clone(),
-                    zebra_chain::chain_tip::NoChainTip,
-                    read_state,
-                    verifier,
-                )
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync.clone(),
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            trace,
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -4286,12 +4267,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            block_sync_driver_context(
-                block_sync,
-                zebra_chain::chain_tip::NoChainTip,
-                read_state,
-                verifier,
-            ),
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -4407,12 +4394,20 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                // Every block 0..=10 is at or below the checkpoint, so all are Checkpoint-class
-                // (indefinite-wait) commits — the path that wedges in production.
-                max_checkpoint_height: block::Height(CHECKPOINT_HEIGHT),
-                ..block_sync_driver_context(block_sync, _latest_tip, read_state.clone(), verifier)
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            _latest_tip,
+            read_state.clone(),
+            verifier,
+            // Every block 0..=10 is at or below the checkpoint, so all are Checkpoint-class
+            // (indefinite-wait) commits — the path that wedges in production.
+            block::Height(CHECKPOINT_HEIGHT),
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },
@@ -4555,10 +4550,18 @@ mod zakura_header_sync_driver_tests {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let driver = tokio::spawn(drive_block_sync_actions(
             action_rx,
-            BlockSyncDriverContext {
-                max_checkpoint_height: second_checkpoint_height,
-                ..block_sync_driver_context(block_sync, latest_tip, read_state.clone(), verifier)
-            },
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync,
+            latest_tip,
+            read_state.clone(),
+            verifier,
+            second_checkpoint_height,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            sync::DEFAULT_ZAKURA_BLOCK_APPLY_CONCURRENCY_LIMIT,
+            zebra_network::zakura::ZakuraTrace::noop(),
+            None,
             async move {
                 let _ = shutdown_rx.await;
             },

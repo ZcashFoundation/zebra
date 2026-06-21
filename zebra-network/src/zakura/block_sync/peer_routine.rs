@@ -1173,11 +1173,9 @@ impl PeerRoutine {
     // ===================== misbehavior (shared count via registry) ==========
 
     async fn report_misbehavior(&self, reason: BlockSyncMisbehavior) {
-        let is_soft = super::reactor::block_sync_misbehavior_is_soft(reason);
-        let should_cancel = self.registry.record_misbehavior(&self.peer, is_soft);
-        if should_cancel {
-            self.session.cancel_token().cancel();
-        }
+        // Misbehavior is record-only: observe and forward it, but never cancel the
+        // session. Peer scoring no longer drives disconnects.
+        metrics::counter!("sync.block.peer.violation").increment(1);
         // `Misbehavior` is best-effort: never block the routine.
         let _ = self.actions.try_send(BlockSyncAction::Misbehavior {
             peer: self.peer.clone(),

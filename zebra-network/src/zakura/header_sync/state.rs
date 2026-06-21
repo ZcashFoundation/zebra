@@ -210,7 +210,6 @@ pub(super) struct PeerHeaderState {
     pub(super) late_covered_responses: usize,
     pub(super) meters: HeaderSyncPeerMeters,
     pub(super) served_headers_inflight: u16,
-    pub(super) misbehavior: u32,
 }
 
 impl PeerHeaderState {
@@ -241,7 +240,6 @@ impl PeerHeaderState {
                 inbound_new_block_min_interval,
             ),
             served_headers_inflight: 0,
-            misbehavior: 0,
         }
     }
 

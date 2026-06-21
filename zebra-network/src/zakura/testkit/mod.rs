@@ -6,6 +6,8 @@ mod endpoint;
 mod gossip;
 mod hostile;
 mod matrix;
+#[cfg(test)]
+mod mock_blocksync;
 mod node;
 mod pinned;
 mod recorder;
