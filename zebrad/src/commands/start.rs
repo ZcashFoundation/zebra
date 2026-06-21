@@ -2857,12 +2857,14 @@ mod zakura_header_sync_driver_tests {
 
         let peer =
             zebra_network::zakura::ZakuraPeerId::new(vec![8; 32]).expect("test peer id is valid");
+        // A non-`SubmitBlock` action the driver consumes without affecting the
+        // commit pipeline: the driver must process it and keep its action channel
+        // open, then still commit the following `SubmitBlock`s parent-first. A soft
+        // misbehavior is consumed (logged) without disconnecting the peer.
         action_tx
-            .send(BlockSyncAction::SendMessage {
+            .send(BlockSyncAction::Misbehavior {
                 peer,
-                msg: zebra_network::zakura::BlockSyncMessage::Status(
-                    zebra_network::zakura::BlockSyncStatus::default(),
-                ),
+                reason: zebra_network::zakura::BlockSyncMisbehavior::SizeMismatch,
             })
             .await
             .expect("driver action channel stays open");

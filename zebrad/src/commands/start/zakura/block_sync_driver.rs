@@ -18,8 +18,8 @@ use tracing::{debug, warn};
 use zebra_chain::{block, chain_tip::ChainTip};
 use zebra_network::zakura::{
     commit_state_trace as cs_trace, BlockApplyResult, BlockApplyToken, BlockSizeEstimate,
-    BlockSyncAction, BlockSyncBlockMeta, BlockSyncEvent, BlockSyncHandle, BlockSyncMessage,
-    BlockSyncMisbehavior, Frontier, FrontierChange, ZakuraEndpoint, ZakuraTrace,
+    BlockSyncAction, BlockSyncBlockMeta, BlockSyncEvent, BlockSyncHandle, BlockSyncMisbehavior,
+    Frontier, FrontierChange, ZakuraEndpoint, ZakuraTrace,
 };
 
 use crate::components::sync;
@@ -224,7 +224,6 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
 
         trace_block_driver_action(&trace, &action);
         match action {
-            BlockSyncAction::SendMessage { .. } => {}
             BlockSyncAction::Misbehavior { peer, reason } => {
                 if block_sync_misbehavior_is_hard(reason) {
                     debug!(
@@ -1268,11 +1267,6 @@ fn trace_block_driver_action(trace: &ZakuraTrace, action: &BlockSyncAction) {
         cs_trace::ACTION_RECEIVED,
         "block_sync_driver",
         |row| match action {
-            BlockSyncAction::SendMessage { peer, msg } => {
-                insert_cs_str(row, cs_trace::ACTION, "send_message");
-                insert_cs_peer(row, cs_trace::PEER, peer);
-                insert_cs_str(row, cs_trace::REASON, block_sync_message_label(msg));
-            }
             BlockSyncAction::Misbehavior { peer, reason } => {
                 insert_cs_str(row, cs_trace::ACTION, "misbehavior");
                 insert_cs_peer(row, cs_trace::PEER, peer);
@@ -1353,16 +1347,6 @@ fn block_apply_class_label(class: BlockApplyClass) -> &'static str {
     match class {
         BlockApplyClass::Checkpoint => "checkpoint",
         BlockApplyClass::Full => "full",
-    }
-}
-
-fn block_sync_message_label(msg: &BlockSyncMessage) -> &'static str {
-    match msg {
-        BlockSyncMessage::Status(_) => "status",
-        BlockSyncMessage::Block(_) => "block",
-        BlockSyncMessage::BlocksDone { .. } => "blocks_done",
-        BlockSyncMessage::RangeUnavailable { .. } => "range_unavailable",
-        BlockSyncMessage::GetBlocks { .. } => "get_blocks",
     }
 }
 

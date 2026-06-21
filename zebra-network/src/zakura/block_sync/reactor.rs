@@ -15,11 +15,11 @@ use iroh::NodeId;
 /// request timeouts, and above all misbehavior disconnects.
 const ACTION_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Spare action-channel slots kept above `submitted_apply_limit` for queries,
-/// misbehavior, and best-effort `SendMessage` mirrors. The channel is sized so a
-/// full checkpoint window of `SubmitBlock`s plus this pool fit without the
-/// reactor ever blocking on a required-action `send().await`.
-const BS_ACTION_MIRROR_POOL: usize = 128;
+/// Spare action-channel slots kept above `submitted_apply_limit` for queries and
+/// misbehavior actions. The channel is sized so a full checkpoint window of
+/// `SubmitBlock`s plus this pool fit without the reactor ever blocking on a
+/// required-action `send().await`.
+const BS_ACTION_SPARE_POOL: usize = 128;
 
 /// Bound on the shared routine→reactor channel (status-advertise / serve /
 /// re-query / serving-misbehavior). Sized generously so a transient burst of
@@ -59,16 +59,16 @@ pub fn spawn_block_sync_reactor(
     let events_keepalive = events_tx.clone();
     let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
     // Size the action channel so the reactor can dispatch a full checkpoint
-    // window of `SubmitBlock`s (`submitted_apply_limit`) plus the mirror/query
-    // pool without blocking on a required-action `send().await`. The byte budget
-    // — not this channel — bounds in-flight body memory, and `SubmitBlock` only
-    // carries an `Arc<Block>` already accounted in `applying`, so the larger
+    // window of `SubmitBlock`s (`submitted_apply_limit`) plus the query/misbehavior
+    // spare pool without blocking on a required-action `send().await`. The byte
+    // budget — not this channel — bounds in-flight body memory, and `SubmitBlock`
+    // only carries an `Arc<Block>` already accounted in `applying`, so the larger
     // channel costs negligible memory while removing a head-of-line stall that
     // throttled body intake behind commit submission.
     let actions_capacity = startup
         .config
         .submitted_apply_limit()
-        .saturating_add(BS_ACTION_MIRROR_POOL);
+        .saturating_add(BS_ACTION_SPARE_POOL);
     let (actions_tx, actions_rx) = mpsc::channel(actions_capacity);
     let (peers_tx, peers_rx) = watch::channel(state.peer_snapshot(startup.config.peer_limits));
     let (status_tx, status_rx) = watch::channel(state.last_advertised_status);
@@ -1085,12 +1085,6 @@ impl BlockSyncReactor {
         }
         self.trace_message_sent(peer, &msg, "queued", started.elapsed());
         self.trace_status_sent(peer, reason, status);
-        let _ = self
-            .dispatch_action(BlockSyncAction::SendMessage {
-                peer: peer.clone(),
-                msg,
-            })
-            .await;
     }
 
     async fn send_block(&self, peer: &ZakuraPeerId, block: Arc<block::Block>) -> bool {
@@ -1761,35 +1755,12 @@ impl BlockSyncReactor {
     }
 
     /// Hand a data-plane action to the action driver without letting a slow or
-    /// stalled driver wedge the reactor. Direct peer-session sends are already
-    /// complete before `SendMessage` actions are mirrored, so those mirrors are
-    /// best-effort: they are dropped if the channel is full, and also whenever
-    /// fewer than `submitted_apply_limit` slots remain, so a burst of mirrors can
-    /// never consume the headroom a must-not-drop `SubmitBlock` needs (that would
-    /// make the next `SubmitBlock` `send().await` block the whole reactor and
-    /// stall every peer's body intake behind commit submission). Required driver
-    /// actions wait up to [`ACTION_SEND_TIMEOUT`]; past that the action is dropped
-    /// so the reactor keeps draining peer-lifecycle events, request timeouts, and
-    /// misbehavior disconnects. Returns `true` only if the action was accepted.
+    /// stalled driver wedge the reactor. Required driver actions wait up to
+    /// [`ACTION_SEND_TIMEOUT`]; past that the action is dropped so the reactor keeps
+    /// draining peer-lifecycle events, request timeouts, and misbehavior
+    /// disconnects. Returns `true` only if the action was accepted.
     async fn dispatch_action(&self, action: BlockSyncAction) -> bool {
         self.trace_action_dispatched(&action);
-        if matches!(action, BlockSyncAction::SendMessage { .. }) {
-            // Reserve a full checkpoint window of slots for required actions; the
-            // mirror only uses the pool above that reserve.
-            if self.actions.capacity() <= self.startup.config.submitted_apply_limit() {
-                metrics::counter!("sync.block.action.send_mirror_skipped").increment(1);
-                return false;
-            }
-            return match self.actions.try_send(action) {
-                Ok(()) => true,
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    metrics::counter!("sync.block.action.send_full_dropped").increment(1);
-                    false
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
-            };
-        }
-
         match time::timeout(ACTION_SEND_TIMEOUT, self.actions.send(action)).await {
             Ok(Ok(())) => true,
             // Receiver dropped: the driver is gone, treat like a send failure.
@@ -1906,12 +1877,6 @@ impl BlockSyncReactor {
 
     fn trace_action_dispatched(&self, action: &BlockSyncAction) {
         self.emit_trace(bs_trace::BLOCK_ACTION_DISPATCHED, |row| match action {
-            BlockSyncAction::SendMessage { peer, msg } => {
-                bs_insert_str(row, bs_trace::KIND, "send_message");
-                bs_insert_str(row, bs_trace::REASON, block_sync_message_label(msg));
-                bs_insert_peer(row, bs_trace::PEER, peer);
-                trace_block_sync_message_fields(row, msg);
-            }
             BlockSyncAction::QueryNeededBlocks {
                 verified_block_tip,
                 best_header_tip,

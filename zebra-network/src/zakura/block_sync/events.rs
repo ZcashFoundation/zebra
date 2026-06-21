@@ -1,4 +1,4 @@
-use super::{request::*, state::*, wire::*, *};
+use super::{request::*, state::*, *};
 
 /// Committed header metadata used by block sync to schedule and validate a body.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -100,13 +100,6 @@ pub type BlockApplyToken = u64;
 /// Actions emitted by the future block-sync reactor for the service seam.
 #[derive(Clone, Debug)]
 pub enum BlockSyncAction {
-    /// Queue a typed stream-6 message to a peer.
-    SendMessage {
-        /// Destination peer.
-        peer: ZakuraPeerId,
-        /// Message that should be written to the peer's stream.
-        msg: BlockSyncMessage,
-    },
     /// Ask node wiring to read `missing_block_bodies`, header hashes, and size hints.
     QueryNeededBlocks {
         /// Current verified body tip.

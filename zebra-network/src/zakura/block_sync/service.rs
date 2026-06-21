@@ -4,11 +4,6 @@ use crate::zakura::{
     PeerStreamSession, Service, SinkReject, Stream, StreamMode, ZakuraPeerId, FRAME_HEADER_BYTES,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
-// The per-peer block-sync `Source` frame-pump is test-only scaffolding (see
-// `BlockSyncPeerRecord` / `add_peer`); its trait and boxed-future alias are only
-// referenced by that `cfg(test)` task.
-#[cfg(test)]
-use crate::zakura::{BoxRunFuture, Source};
 
 /// Maximum frame bytes for one stream-6 body frame plus protocol framing.
 ///
@@ -192,19 +187,6 @@ struct BlockSyncPeerRecord {
     session_id: u64,
     direction: ServicePeerDirection,
     cancel_token: CancellationToken,
-    // Production outbound block-sync sends are authoritative through
-    // `BlockSyncPeerSession`: the reactor calls `try_send_get_blocks`/etc.
-    // directly (see `reactor::schedule`). The per-peer `BlockSyncSource` action
-    // pump and its `actions` sender are test-only scaffolding — no non-test code
-    // produces into this channel, and `drive_block_sync_actions` deliberately
-    // ignores the reactor's duplicate `SendMessage` to avoid double-sending.
-    // Gating the sender and the task handle to `cfg(test)` keeps that contract
-    // compiler-enforced: production has no producer to wire and therefore cannot
-    // double-send, and it retains no idle frame-pump task/channel per peer.
-    #[cfg(test)]
-    actions: mpsc::Sender<BlockSyncAction>,
-    #[cfg(test)]
-    _tasks: Vec<JoinHandle<()>>,
 }
 
 impl BlockSyncService {
@@ -305,25 +287,6 @@ impl BlockSyncService {
             .len()
     }
 
-    #[cfg(test)]
-    pub(crate) async fn send_action(
-        &self,
-        action: BlockSyncAction,
-    ) -> Result<(), mpsc::error::SendError<BlockSyncAction>> {
-        let BlockSyncAction::SendMessage { peer, .. } = &action else {
-            return Err(mpsc::error::SendError(action));
-        };
-        let peer = peer.clone();
-        let sender = match self.inner.peers.lock() {
-            Ok(peers) => peers.get(&peer).map(|record| record.actions.clone()),
-            Err(_) => return Err(mpsc::error::SendError(action)),
-        };
-        let Some(sender) = sender else {
-            return Err(mpsc::error::SendError(action));
-        };
-        sender.send(action).await
-    }
-
     fn peer_slots_free(&self, direction: ServicePeerDirection) -> bool {
         let peers = self
             .inner
@@ -408,25 +371,12 @@ impl Service for BlockSyncService {
         let session_id = self.inner.next_session_id.fetch_add(1, Ordering::Relaxed);
         let (_session_peer, _stream_kind, recv, send, _session_cancel) = session.into_parts();
 
-        // The per-peer block-sync source frame-pump is test-only scaffolding (see
-        // `BlockSyncPeerRecord`). Production outbound frames go directly through
-        // `BlockSyncPeerSession`, so only the test build spawns the source to
-        // exercise `send_action`; production drops the redundant transport sender.
-        // The outbound stream stays alive through the `BlockSyncPeerSession` clone
-        // the reactor holds, so nothing is lost by not retaining it here.
-        #[cfg(test)]
-        let (actions_tx, source_task) = {
-            let (actions_tx, actions_rx) =
-                mpsc::channel(self.inner.config.peer_limits.outbound_queue_depth.max(1));
-            let source_task = spawn_block_sync_source(
-                peer_id.clone(),
-                actions_rx,
-                service_cancel_token.clone(),
-                send,
-            );
-            (actions_tx, source_task)
-        };
-        #[cfg(not(test))]
+        // Production outbound block-sync frames go directly through
+        // `BlockSyncPeerSession` (the per-peer routine's `try_send_get_blocks` /
+        // the reactor's `try_send_status`/serving sends), so the raw transport
+        // sender taken from the stream here is redundant. The outbound stream stays
+        // alive through the `BlockSyncPeerSession` clone the reactor holds, so
+        // nothing is lost by dropping it.
         drop(send);
 
         let run_cancel = service_cancel_token.clone();
@@ -522,10 +472,6 @@ impl Service for BlockSyncService {
                     session_id,
                     direction: peer.direction,
                     cancel_token: service_cancel_token,
-                    #[cfg(test)]
-                    actions: actions_tx,
-                    #[cfg(test)]
-                    _tasks: vec![source_task],
                 },
             ) {
                 old_record.cancel_token.cancel();
@@ -590,75 +536,5 @@ async fn drain_inbound(mut recv: FramedRecv, cancel: CancellationToken) -> Resul
                 }
             }
         }
-    }
-}
-
-// Test-only per-peer outbound frame-pump. Production block-sync sends go through
-// `BlockSyncPeerSession` directly (see `add_peer` / `BlockSyncPeerRecord`); this
-// source exists solely so tests can drive outbound frames via `send_action`.
-#[cfg(test)]
-fn spawn_block_sync_source(
-    peer_id: ZakuraPeerId,
-    actions: mpsc::Receiver<BlockSyncAction>,
-    cancel_token: CancellationToken,
-    send: FramedSend,
-) -> JoinHandle<()> {
-    tokio::task::spawn(async move {
-        let source = Box::new(BlockSyncSource {
-            peer_id,
-            actions,
-            cancel_token,
-        });
-        source.run(send).await;
-    })
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-struct BlockSyncSource {
-    peer_id: ZakuraPeerId,
-    actions: mpsc::Receiver<BlockSyncAction>,
-    cancel_token: CancellationToken,
-}
-
-#[cfg(test)]
-impl Source for BlockSyncSource {
-    fn run(mut self: Box<Self>, send: FramedSend) -> BoxRunFuture<'static, ()> {
-        Box::pin(async move {
-            loop {
-                let action = tokio::select! {
-                    _ = self.cancel_token.cancelled() => return,
-                    action = self.actions.recv() => {
-                        let Some(action) = action else {
-                            return;
-                        };
-                        action
-                    }
-                };
-
-                let BlockSyncAction::SendMessage { peer, msg } = action else {
-                    continue;
-                };
-                if peer != self.peer_id {
-                    continue;
-                }
-
-                let frame = match msg.encode_frame() {
-                    Ok(frame) => frame,
-                    Err(error) => {
-                        tracing::debug!(
-                            ?error,
-                            peer = ?self.peer_id,
-                            "block-sync source refused to encode outbound message"
-                        );
-                        continue;
-                    }
-                };
-
-                if send.send(frame).await.is_err() {
-                    return;
-                }
-            }
-        })
     }
 }

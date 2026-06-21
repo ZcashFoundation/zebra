@@ -647,14 +647,6 @@ impl PeerRoutine {
                 request.count,
                 request.estimated_bytes,
             );
-            // Best-effort `SendMessage` mirror (driver-ignored); never block.
-            let _ = self.actions.try_send(BlockSyncAction::SendMessage {
-                peer: self.peer.clone(),
-                msg: BlockSyncMessage::GetBlocks {
-                    start_height: request.start_height,
-                    count: request.count,
-                },
-            });
         }
 
         // If pending work is running low, ping the reactor to re-query (the
