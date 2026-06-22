@@ -1,7 +1,7 @@
 # Single source of truth for "what changed files trigger what workflow."
 #
 # Consumed by dorny/paths-filter in each required-check workflow's `changes` job.
-# Each key maps 1:1 to a workflow basename; values are picomatch globs.
+# Each key maps to a workflow basename (or a gated job within one); values are picomatch globs.
 #
 # Editing this file re-triggers every workflow on the next PR (the file is
 # listed in every filter), which is the desired safety property when the
@@ -15,6 +15,11 @@ lint:
   - "**/clippy.toml"
   - "deny.toml"
   - "supply-chain/**"
+  - ".github/workflows/lint.yml"
+  - ".github/path-filters.yml"
+
+hadolint:
+  - "docker/Dockerfile"
   - ".github/workflows/lint.yml"
   - ".github/path-filters.yml"
 
