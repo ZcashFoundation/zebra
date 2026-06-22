@@ -8,9 +8,9 @@ mod args;
 
 use std::io::Read;
 
+use clap::Parser;
 use color_eyre::eyre::Result;
 use serde_json::Value;
-use structopt::StructOpt;
 
 use zebra_chain::serialization::{DateTime32, ZcashSerialize};
 use zebra_rpc::{
@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     // get arguments from command-line or stdin
-    let args = args::Args::from_args();
+    let args = args::Args::parse();
 
     let time_source = args.time_source;
 
