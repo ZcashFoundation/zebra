@@ -20,9 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 - Experimental, off-by-default support for the NU6.3 "Ironwood" shielded pool and
-  v6 transaction format, behind the `zcash_unstable="nu6.3"` cfg and the `tx_v6`
-  feature. This is incomplete pending the deploy ZIP (no real activation height,
-  version group ID, or consensus branch ID yet) and is not built by default.
+  v6 transaction format, behind the `zcash_unstable="nu6.3"` cfg. This is incomplete
+  pending the deploy ZIP (no real activation height, version group ID, or consensus
+  branch ID yet) and is not built by default.
+
+## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
+
+This release increases Zebra's local rollback window as a defence-in-depth measure
+against sustained consensus splits.
+
+### Changed
+
+- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
+  1000 blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
+
+## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
+
+This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
+expected at the end of July 2026, so that nodes running outdated versions stop before
+the upgrade activates.
+
+### Changed
+
+- Reduced the end-of-support period from 105 to 44 days, and updated the estimated
+  release height, ahead of the NU7 network upgrade
+  ([#10710](https://github.com/ZcashFoundation/zebra/pull/10710))
 
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 

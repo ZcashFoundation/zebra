@@ -1,4 +1,4 @@
-//! Shared checks for the `zebrad` acceptance tests.
+//! Shared checks for the `zebrad` tests.
 //!
 //! # Warning
 //!

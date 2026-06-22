@@ -1,5 +1,5 @@
 ---
-source: zebrad/tests/acceptance.rs
+source: zebrad/tests/stateful/rpc.rs
 expression: parsed
 ---
 {
