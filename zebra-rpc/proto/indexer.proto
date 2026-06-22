@@ -25,13 +25,11 @@ message BlockAndHash {
 // A request for a single block by hash or height from the best chain.
 message BlockRequest {
   // The block to fetch, identified by either its hash or its height.
-  oneof hash_or_height {
-    // The hash of the block in display order.
-    bytes hash = 1;
-
-    // The height of the block in the chain.
-    uint32 height = 2;
-  }
+  //
+  // A 32-byte value is interpreted as a block hash in display order; a 4-byte
+  // value is interpreted as a big-endian block height. Any other length is
+  // rejected.
+  bytes hash_or_height = 1;
 };
 
 // A request to subscribe to non-finalized state changes.

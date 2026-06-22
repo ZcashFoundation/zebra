@@ -18,7 +18,7 @@ use zebra_test::{
     prelude::color_eyre::{eyre::eyre, Result},
 };
 
-use crate::indexer::{self, block_request, indexer_client::IndexerClient, BlockRequest, Empty};
+use crate::indexer::{self, indexer_client::IndexerClient, BlockRequest, Empty};
 
 #[tokio::test]
 async fn rpc_server_spawn() -> Result<()> {
@@ -44,19 +44,20 @@ async fn test_get_block(
     mut client: IndexerClient<tonic::transport::Channel>,
     mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
 ) -> Result<()> {
-    // A request that specifies neither a hash nor a height is rejected without touching the state.
+    // A request whose bytes are neither a 32-byte hash nor a 4-byte height is rejected without
+    // touching the state.
     let status = client
         .get_block(tonic::Request::new(BlockRequest {
-            hash_or_height: None,
+            hash_or_height: Vec::new(),
         }))
         .await
-        .expect_err("a block request without a hash or height should be rejected");
+        .expect_err("a block request without a valid hash or height should be rejected");
     assert_eq!(status.code(), tonic::Code::InvalidArgument);
 
     // A height above the maximum valid block height is rejected without touching the state.
     let status = client
         .get_block(tonic::Request::new(BlockRequest {
-            hash_or_height: Some(block_request::HashOrHeight::Height(u32::MAX)),
+            hash_or_height: u32::MAX.to_be_bytes().to_vec(),
         }))
         .await
         .expect_err("an out-of-range block height should be rejected");
@@ -73,7 +74,7 @@ async fn test_get_block(
     let request_task = tokio::spawn(async move {
         request_client
             .get_block(tonic::Request::new(BlockRequest {
-                hash_or_height: Some(block_request::HashOrHeight::Height(height.0)),
+                hash_or_height: height.0.to_be_bytes().to_vec(),
             }))
             .await
     });

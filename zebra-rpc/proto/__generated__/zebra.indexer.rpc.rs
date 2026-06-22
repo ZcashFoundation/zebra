@@ -30,22 +30,12 @@ pub struct BlockAndHash {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BlockRequest {
     /// The block to fetch, identified by either its hash or its height.
-    #[prost(oneof = "block_request::HashOrHeight", tags = "1, 2")]
-    pub hash_or_height: ::core::option::Option<block_request::HashOrHeight>,
-}
-/// Nested message and enum types in `BlockRequest`.
-pub mod block_request {
-    /// The block to fetch, identified by either its hash or its height.
-    #[derive(serde::Deserialize, serde::Serialize)]
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum HashOrHeight {
-        /// The hash of the block in display order.
-        #[prost(bytes, tag = "1")]
-        Hash(::prost::alloc::vec::Vec<u8>),
-        /// The height of the block in the chain.
-        #[prost(uint32, tag = "2")]
-        Height(u32),
-    }
+    ///
+    /// A 32-byte value is interpreted as a block hash in display order; a 4-byte
+    /// value is interpreted as a big-endian block height. Any other length is
+    /// rejected.
+    #[prost(bytes = "vec", tag = "1")]
+    pub hash_or_height: ::prost::alloc::vec::Vec<u8>,
 }
 /// A request to subscribe to non-finalized state changes.
 #[derive(serde::Deserialize, serde::Serialize)]
