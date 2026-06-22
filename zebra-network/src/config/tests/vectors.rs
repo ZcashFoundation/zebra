@@ -177,3 +177,20 @@ fn regtest_should_allow_unshielded_coinbase_spends_serialization_roundtrip() {
     };
     assert!(!params.should_allow_unshielded_coinbase_spends());
 }
+
+/// Checks that the Regtest-only `should_allow_unshielded_coinbase_spends` knob is rejected
+/// on a configured Testnet rather than silently ignored.
+#[test]
+fn should_allow_unshielded_coinbase_spends_rejected_on_testnet() {
+    let _init_guard = zebra_test::init();
+
+    let toml = "network = 'Testnet'\n\n[testnet_parameters]\nshould_allow_unshielded_coinbase_spends = true\n";
+    let err = toml::from_str::<Config>(toml)
+        .expect_err("configured Testnet must reject the Regtest-only field");
+
+    assert!(
+        err.to_string()
+            .contains("should_allow_unshielded_coinbase_spends"),
+        "unexpected error: {err}"
+    );
+}
