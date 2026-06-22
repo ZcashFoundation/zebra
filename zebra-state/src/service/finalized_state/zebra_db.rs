@@ -26,7 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    write_database_format_version_to_disk, BoxError, Config,
+    write_database_format_version_to_disk, BoxError, Config, StateInitError,
 };
 
 use super::disk_format::upgrade::restorable_db_versions;
@@ -91,6 +91,7 @@ impl ZebraDb {
     /// This argument is only used when running tests, it is ignored in production code.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(
         config: &Config,
         db_kind: impl AsRef<str>,
@@ -99,21 +100,47 @@ impl ZebraDb {
         debug_skip_format_upgrades: bool,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
-    ) -> ZebraDb {
-        let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &restorable_db_versions(),
-            format_version_in_code,
-            config,
-            &db_kind,
-            network,
-        )
-        .or_else(|| {
+    ) -> Result<ZebraDb, StateInitError> {
+        // A read-only secondary instance must never modify the primary's cache directory, so it
+        // skips the post-major-upgrade DB reuse (which can create directories and rename the
+        // on-disk database) and reads the on-disk format version directly. The cache directory is
+        // checked for readability first, so a missing or unreadable directory returns a typed
+        // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
+        let disk_version = if read_only {
+            DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
                 .expect("unable to read database format version file")
-        });
+        } else {
+            DiskDb::try_reusing_previous_db_after_major_upgrade(
+                &restorable_db_versions(),
+                format_version_in_code,
+                config,
+                &db_kind,
+                network,
+            )
+            .or_else(|| {
+                database_format_version_on_disk(
+                    config,
+                    &db_kind,
+                    format_version_in_code.major,
+                    network,
+                )
+                .expect("unable to read database format version file")
+            })
+        };
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
+
+        // A read-only secondary instance cannot create a database. If there's no database on
+        // disk, fail with a clear, actionable error instead of silently "creating" one.
+        //
+        // The read-write path is unaffected: creating a new database is the correct behavior there.
+        if read_only && format_change.is_newly_created() {
+            let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
+            return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
+        }
 
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
@@ -121,23 +148,26 @@ impl ZebraDb {
         // We also allow skipping them when we are running tests.
         let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
 
-        // Open the database and do initial checks.
+        // Open the low-level database and do initial checks.
+        //
+        // After the database directory is created, a newly created database temporarily
+        // changes to the default database version. Then we set the correct version in the
+        // upgrade thread. We need to do the version change in this order, because the version
+        // file can only be changed while we hold the RocksDB database lock.
+        let disk_db = DiskDb::new(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+        )?;
+
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
-            // After the database directory is created, a newly created database temporarily
-            // changes to the default database version. Then we set the correct version in the
-            // upgrade thread. We need to do the version change in this order, because the version
-            // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(
-                config,
-                db_kind,
-                format_version_in_code,
-                network,
-                column_families_in_code,
-                read_only,
-            ),
+            db: disk_db,
         };
 
         let zero_location_utxos =
@@ -153,7 +183,7 @@ impl ZebraDb {
 
         db.spawn_format_change(format_change);
 
-        db
+        Ok(db)
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.

@@ -31,7 +31,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, count, network, _history_tree) in PreparedChain::default())| {
-            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false);
+            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false).expect("opening an ephemeral database should succeed");
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
@@ -90,7 +90,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, _count, network, _history_tree) in PreparedChain::default().with_ledger_strategy(ledger_strategy).with_valid_commitments().no_shrink())| {
 
-            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false);
+            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false).expect("opening an ephemeral database should succeed");
             let mut height = Height(0);
             let heartwood_height = NetworkUpgrade::Heartwood.activation_height(&network).unwrap();
             let heartwood_height_plus1 = (heartwood_height + 1).unwrap();
