@@ -101,17 +101,34 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<ZebraDb, StateInitError> {
-        let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &restorable_db_versions(),
-            format_version_in_code,
-            config,
-            &db_kind,
-            network,
-        )
-        .or_else(|| {
+        // A read-only secondary instance must never modify the primary's cache directory, so it
+        // skips the post-major-upgrade DB reuse (which can create directories and rename the
+        // on-disk database) and reads the on-disk format version directly. The cache directory is
+        // checked for readability first, so a missing or unreadable directory returns a typed
+        // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
+        let disk_version = if read_only {
+            DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
                 .expect("unable to read database format version file")
-        });
+        } else {
+            DiskDb::try_reusing_previous_db_after_major_upgrade(
+                &restorable_db_versions(),
+                format_version_in_code,
+                config,
+                &db_kind,
+                network,
+            )
+            .or_else(|| {
+                database_format_version_on_disk(
+                    config,
+                    &db_kind,
+                    format_version_in_code.major,
+                    network,
+                )
+                .expect("unable to read database format version file")
+            })
+        };
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
