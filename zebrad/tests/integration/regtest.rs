@@ -544,7 +544,7 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         .with_slow_start_interval(Height::MIN)
         .with_lockbox_disbursements(vec![])
         .with_activation_heights(ConfiguredActivationHeights {
-            nu7: Some(1),
+            nu6_3: Some(1),
             ..Default::default()
         });
 

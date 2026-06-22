@@ -238,6 +238,104 @@ fn orchard_value_balance_frozen_at_nu6_3() {
     );
 }
 
+/// Tests the `[NU6.3 onward] if there are Ironwood actions, at least one of enableSpendsIronwood
+/// and enableOutputsIronwood MUST be 1` rule.
+#[test]
+#[cfg(zcash_unstable = "nu6.3")]
+fn v6_transaction_with_ironwood_actions_must_have_flags() {
+    use zebra_chain::ironwood;
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // An Ironwood bundle with no flags set is rejected.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::empty(),
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert_eq!(
+        check::has_enough_ironwood_flags(&tx),
+        Err(TransactionError::NotEnoughIronwoodFlags),
+    );
+
+    // With enableSpends set, it passes.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(check::has_enough_ironwood_flags(&tx).is_ok());
+
+    // A transaction with no Ironwood bundle is a no-op.
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, None);
+    assert!(check::has_enough_ironwood_flags(&tx).is_ok());
+}
+
+/// Tests the `[NU6.3 onward] the enableCrossAddress flag of flagsOrchard MUST be 0` rule, which only
+/// a v6 Orchard bundle can violate (a v5 Orchard bundle rejects the flag bit at deserialization).
+#[test]
+#[cfg(zcash_unstable = "nu6.3")]
+fn v6_orchard_bundle_must_not_enable_cross_address() {
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // A v6 Orchard bundle with enableCrossAddress set is rejected.
+    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
+        zero,
+        1,
+    ));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    assert_eq!(
+        check::orchard_cross_address_disabled(&tx),
+        Err(TransactionError::OrchardHasEnableCrossAddress),
+    );
+
+    // Without the flag, it passes.
+    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(Flags::ENABLE_SPENDS, zero, 1));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    assert!(check::orchard_cross_address_disabled(&tx).is_ok());
+}
+
+/// Tests that a transaction revealing the same Ironwood nullifier twice is rejected as a
+/// double-spend, and that the Ironwood and Orchard nullifier sets are checked separately.
+#[test]
+#[cfg(zcash_unstable = "nu6.3")]
+fn v6_transaction_with_duplicate_ironwood_nullifier_is_rejected() {
+    use zebra_chain::ironwood;
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // Two Ironwood actions sharing a nullifier are a double-spend.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        2,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(matches!(
+        check::spend_conflicts(&tx),
+        Err(TransactionError::DuplicateIronwoodNullifier(_)),
+    ));
+
+    // A single Ironwood action has no conflict.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(check::spend_conflicts(&tx).is_ok());
+}
+
 #[test]
 fn v5_transaction_with_no_inputs_fails_verification() {
     let (_, output, _) = mock_transparent_transfer(
