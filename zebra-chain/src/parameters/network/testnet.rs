@@ -746,7 +746,8 @@ impl ParametersBuilder {
         self
     }
 
-    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    /// Sets whether coinbase outputs may be spent into transparent outputs in the
+    /// [`Parameters`] being built (the inverse of zcashd's `-regtestshieldcoinbase`).
     pub fn with_unshielded_coinbase_spends(
         mut self,
         should_allow_unshielded_coinbase_spends: bool,
@@ -1081,7 +1082,8 @@ impl Parameters {
             funding_streams: _,
             target_difficulty_limit,
             disable_pow,
-            should_allow_unshielded_coinbase_spends,
+            // Configurable on Regtest
+            should_allow_unshielded_coinbase_spends: _,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements: _,
@@ -1095,8 +1097,6 @@ impl Parameters {
             && self.slow_start_shift == slow_start_shift
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
-            && self.should_allow_unshielded_coinbase_spends
-                == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
