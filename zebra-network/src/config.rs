@@ -901,9 +901,15 @@ where
         checkpoints,
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
-        // Regtest only; ignored for configured Testnets.
-        should_allow_unshielded_coinbase_spends: _,
+        should_allow_unshielded_coinbase_spends,
     } = params;
+
+    // This is a Regtest-only consensus knob, so reject it rather than silently ignoring it.
+    if should_allow_unshielded_coinbase_spends.is_some() {
+        return Err(de::Error::custom(
+            "should_allow_unshielded_coinbase_spends is only supported on Regtest",
+        ));
+    }
 
     let mut params_builder = testnet::Parameters::build();
 
