@@ -208,8 +208,8 @@ impl MinedTx {
 /// This should be large enough to typically avoid blocking the sender when the non-finalized state is full so
 /// that the [`NonFinalizedBlocksListener`] reliably receives updates whenever the non-finalized state changes.
 ///
-/// It's okay to occasionally miss updates when the buffer is full, as the new blocks in the missed change will be
-/// sent to the listener on the next change to the non-finalized state.
+/// If the buffer does fill, sends apply backpressure (the sender awaits a free slot) rather than
+/// dropping blocks, so the listener still receives every block once the consumer catches up.
 // `MAX_BLOCK_REORG_HEIGHT` is a small `u32` constant (the reorg limit), so widening it to `usize`
 // and doubling it cannot overflow on any supported platform.
 const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 2 * MAX_BLOCK_REORG_HEIGHT as usize;
