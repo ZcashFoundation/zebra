@@ -709,9 +709,9 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             temporary_orchard_disabling_soft_fork_height: params
                 .temporary_orchard_disabling_soft_fork_height()
                 .map(|height| height.0),
-            should_allow_unshielded_coinbase_spends: Some(
-                params.should_allow_unshielded_coinbase_spends(),
-            ),
+            should_allow_unshielded_coinbase_spends: params
+                .is_regtest()
+                .then(|| params.should_allow_unshielded_coinbase_spends()),
         }
     }
 }

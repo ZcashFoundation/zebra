@@ -147,3 +147,33 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
         Some(soft_fork_height),
     );
 }
+
+/// Checks that a Regtest configured to forbid unshielded coinbase spends survives a
+/// serialization round-trip, and that the flag does not change the network's identity.
+#[test]
+fn regtest_should_allow_unshielded_coinbase_spends_serialization_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        network: Network::new_regtest(testnet::RegtestParameters {
+            should_allow_unshielded_coinbase_spends: Some(false),
+            ..Default::default()
+        }),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+
+    // Forbidding unshielded coinbase spends must not stop the network from being Regtest.
+    assert!(config.network.is_regtest());
+
+    let serialized = toml::to_string(&config).unwrap();
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(config, deserialized);
+    assert!(deserialized.network.is_regtest());
+
+    let Network::Testnet(params) = &deserialized.network else {
+        panic!("deserialized network must be Regtest");
+    };
+    assert!(!params.should_allow_unshielded_coinbase_spends());
+}

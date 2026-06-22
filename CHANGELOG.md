@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
+  to forbid spending coinbase outputs into transparent outputs (the inverse of
+  zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
+  existing Regtest behavior ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+
 ### Changed
 
 - Opening a Zebra state read-only (for example, as a secondary instance over a
