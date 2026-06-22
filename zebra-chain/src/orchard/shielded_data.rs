@@ -63,11 +63,11 @@ pub struct ShieldedData {
 /// pre-NU6.3 serialization that the bare [`ShieldedData`] uses for v5 Orchard bundles. The two
 /// formats differ only in which flag bits are reserved; encoding the format in the type keeps the
 /// v5 and v6 (de)serialization paths from being confused.
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedDataV6(ShieldedData);
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 impl ShieldedDataV6 {
     /// Wraps a v5-shaped Orchard [`ShieldedData`] as a v6 (NU6.3) Orchard bundle.
     pub fn new(shielded_data: ShieldedData) -> Self {
@@ -82,6 +82,11 @@ impl ShieldedDataV6 {
     /// Returns the inner Orchard [`ShieldedData`], mutably.
     pub fn data_mut(&mut self) -> &mut ShieldedData {
         &mut self.0
+    }
+
+    /// Consumes the wrapper, returning the inner Orchard [`ShieldedData`].
+    pub fn into_inner(self) -> ShieldedData {
+        self.0
     }
 }
 
@@ -306,11 +311,11 @@ bitflags! {
 /// pre-NU6.3 (v5 Orchard) format, where bits 2..7 are all reserved. Encoding the format in the type
 /// keeps the v5 and v6 flag-parsing paths from being confused (parallels
 /// [`ShieldedDataV6`](super::ShieldedDataV6)).
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FlagsV6(Flags);
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 impl From<FlagsV6> for Flags {
     fn from(flags: FlagsV6) -> Self {
         flags.0
@@ -322,7 +327,7 @@ impl Flags {
     const PRE_NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits() | Self::ENABLE_OUTPUTS.bits());
 
     /// The flag bits that are reserved (MUST be zero) in the NU6.3 format.
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     const NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits()
         | Self::ENABLE_OUTPUTS.bits()
         | Self::ENABLE_CROSS_ADDRESS.bits());
@@ -391,7 +396,7 @@ impl ZcashDeserialize for Flags {
     }
 }
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 impl ZcashDeserialize for FlagsV6 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // The NU6.3 format, used by v6 Orchard and Ironwood bundles: bit 2 (`enableCrossAddress`)

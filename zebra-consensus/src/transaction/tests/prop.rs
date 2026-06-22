@@ -321,7 +321,7 @@ fn mock_transparent_transaction(
             orchard_shielded_data: None,
             network_upgrade,
         },
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+        #[cfg(zcash_unstable = "nu6.3")]
         6 => Transaction::V6 {
             inputs,
             outputs,

@@ -150,7 +150,7 @@ impl SigHasher {
     }
 
     /// Returns the Ironwood bundle in the precomputed transaction data (NU6.3 onward).
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     pub fn ironwood_bundle(
         &self,
     ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {

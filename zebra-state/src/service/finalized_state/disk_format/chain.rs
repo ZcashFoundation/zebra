@@ -113,8 +113,8 @@ impl FromDisk for BlockInfo {
         // Records are exactly 52 bytes from NU6.3 onward (48-byte value pool incl. the ironwood
         // pool, plus the 4-byte block size) and exactly 44 bytes for records written by earlier
         // Zebra versions (40-byte value pool plus 4-byte size). We discriminate the two layouts by
-        // length, and — as the original code did with its open `44..` range — stay forward-compatible
-        // by reading the known prefix and ignoring any unexpected trailing bytes.
+        // length, and stay forward-compatible by reading the known prefix
+        // and ignoring any unexpected trailing bytes.
         match bytes.as_ref().len() {
             // NU6.3 onward (and any forward-compatible larger record): 48-byte pool + 4-byte size.
             52.. => {
@@ -124,8 +124,8 @@ impl FromDisk for BlockInfo {
                     u32::from_le_bytes(bytes.as_ref()[48..52].try_into().expect("must be 4 bytes"));
                 BlockInfo::new(value_pools, size)
             }
-            // Pre-NU6.3 records (exactly 44 bytes; the open range matches the original forward-
-            // compatible behavior, since the 52.. arm above already took every NU6.3 record).
+            // Pre-NU6.3 records (exactly 44 bytes; the open range stays forward-compatible, and the
+            // 52.. arm above already took every NU6.3 record).
             44.. => {
                 let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..40])
                     .expect("must work for 40 bytes");

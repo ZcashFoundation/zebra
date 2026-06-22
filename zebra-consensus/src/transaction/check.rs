@@ -12,7 +12,7 @@ use std::{
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::Height,
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
@@ -186,6 +186,39 @@ pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), Transactio
     Ok(())
 }
 
+/// Checks that no net new value is shielded into the Orchard pool from NU6.3 onward.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] `valueBalanceOrchard` MUST be nonnegative.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// From NU6.3, newly shielded value is routed to the Ironwood pool, so the Orchard pool is frozen
+/// against new inflows. An Orchard bundle may still spend existing notes — Orchard-to-Orchard note
+/// management nets to a zero balance and Orchard-to-transparent unshielding to a positive one — but
+/// a net-negative `valueBalanceOrchard` (which would move new value into the pool) is rejected.
+///
+/// This applies to both v5 and v6 Orchard bundles, since v5 Orchard bundles remain valid after
+/// NU6.3 (so that non-upgraded hardware wallets can keep authorizing Orchard spends).
+///
+/// (No-op for transactions without an Orchard bundle, and before NU6.3.)
+pub fn orchard_value_balance_non_negative(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3 {
+        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+            if orchard_shielded_data.value_balance() < Amount::<NegativeAllowed>::zero() {
+                return Err(TransactionError::NegativeOrchardValueBalance);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
 /// # Consensus
@@ -219,11 +252,11 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 
         // > [NU6.3 onward] For coinbase transactions, flagsOrchard MUST be 0.
         //
-        // This is stronger than the pre-NU6.3 rule above (which only forbids enableSpends): no new
-        // value may be shielded into the Orchard pool at NU6.3, since new shielded value is routed
-        // to Ironwood. It only applies to v6 transactions (v5 coinbase Orchard bundles may still set
-        // enableOutputs).
-        #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+        // This is stronger than the pre-NU6.3 rule above (which only forbids enableSpends), and only
+        // applies to v6 transactions. A v5 coinbase Orchard bundle may still set enableOutputs, but
+        // `orchard_value_balance_non_negative` independently stops any coinbase from shielding new
+        // value into the Orchard pool at NU6.3 (new shielded value is routed to Ironwood instead).
+        #[cfg(zcash_unstable = "nu6.3")]
         if matches!(tx, Transaction::V6 { .. }) {
             if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
                 if !orchard_shielded_data.flags.is_empty() {

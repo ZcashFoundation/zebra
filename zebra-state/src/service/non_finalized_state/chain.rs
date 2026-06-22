@@ -1805,7 +1805,7 @@ impl Chain {
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref(),
                 ),
-                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                #[cfg(zcash_unstable = "nu6.3")]
                 V6 {
                     inputs,
                     outputs,
@@ -1851,7 +1851,7 @@ impl Chain {
                 // The Ironwood pool reuses orchard::ShieldedData, so its nullifiers are applied
                 // through a distinct UpdateWith impl keyed on the ironwood::ShieldedData newtype
                 // (which doesn't collide with the Orchard impl).
-                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                #[cfg(zcash_unstable = "nu6.3")]
                 if let V6 {
                     ironwood_shielded_data,
                     ..
@@ -2015,7 +2015,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref(),
                 ),
-                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                #[cfg(zcash_unstable = "nu6.3")]
                 V6 {
                     inputs,
                     outputs,
@@ -2066,7 +2066,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
             // Revert the Ironwood nullifiers through the matching UpdateWith impl (see
             // `update_chain_tip_with_block_except_trees`).
-            #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+            #[cfg(zcash_unstable = "nu6.3")]
             if let V6 {
                 ironwood_shielded_data,
                 ..
@@ -2471,7 +2471,7 @@ impl UpdateWith<(Option<&orchard::ShieldedData>, &SpendingTransactionId)> for Ch
     }
 }
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 impl UpdateWith<(Option<&ironwood::ShieldedData>, &SpendingTransactionId)> for Chain {
     #[instrument(skip(self, ironwood_shielded_data))]
     fn update_chain_tip_with(

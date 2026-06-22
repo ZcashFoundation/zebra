@@ -407,6 +407,9 @@ where
             // NU6.3 / Ironwood flag rules (no-ops for pre-v6 transactions).
             check::has_enough_ironwood_flags(&tx)?;
             check::orchard_cross_address_disabled(&tx)?;
+            // [NU6.3 onward] valueBalanceOrchard must be non-negative (Orchard pool frozen against
+            // new inflows; see `orchard_value_balance_non_negative`).
+            check::orchard_value_balance_non_negative(&tx, req.height(), &network)?;
             check::consensus_branch_id(&tx, req.height(), &network)?;
 
             // Soft fork: temporarily require transactions to not contain Orchard actions.
@@ -558,7 +561,7 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                 )?,
-                #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                #[cfg(zcash_unstable = "nu6.3")]
                 Transaction::V6 {
                     ..
                 } => Self::verify_v6_transaction(
@@ -1027,7 +1030,7 @@ where
     /// Differs from [`Self::verify_v5_transaction`] in the Orchard verifier: a v6 Orchard bundle
     /// commits to the NU6.3 cross-address circuit, so it (and the Ironwood bundle) verify under the
     /// NU6.3 key, not the v5 fixed key.
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,
@@ -1062,7 +1065,7 @@ where
     /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
     ///
     /// V6 transactions are only valid from NU6.3 onward.
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_v6_transaction_network_upgrade(
         transaction: &Transaction,
         network_upgrade: NetworkUpgrade,
@@ -1296,7 +1299,7 @@ where
     /// A v6 Orchard bundle commits to the NU6.3 cross-address circuit, so it always verifies under
     /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
     /// network upgrade (v6 transactions only exist from NU6.3 onward).
-    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_orchard_v6_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,

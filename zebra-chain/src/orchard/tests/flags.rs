@@ -2,7 +2,7 @@
 
 use crate::{orchard::Flags, serialization::ZcashDeserialize};
 
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 use crate::orchard::FlagsV6;
 
 /// In the pre-NU6.3 format (the default `Flags` codec, v5 Orchard bundles), only bits 0..1 are
@@ -30,7 +30,7 @@ fn pre_nu6_3_format_rejects_reserved_bits() {
 
 /// In the NU6.3 format (the `FlagsV6` codec, v6 Orchard and Ironwood bundles), bit 2 is the valid
 /// `enableCrossAddress` flag; bits 3..7 stay reserved.
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 #[test]
 fn nu6_3_format_accepts_cross_address_but_rejects_higher_bits() {
     // Bits 0..2 are all valid in the NU6.3 format.

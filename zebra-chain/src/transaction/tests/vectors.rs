@@ -1011,7 +1011,7 @@ fn binding_signatures() {
                             at_least_one_v5_checked = true;
                         }
                     }
-                    #[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+                    #[cfg(zcash_unstable = "nu6.3")]
                     Transaction::V6 {
                         sapling_shielded_data,
                         ..
@@ -1059,7 +1059,7 @@ fn binding_signatures() {
 /// v6 (ZIP-244) digest path, which is the runtime path that does not work against released
 /// librustzcash. The branch id resolves to the fork's `BranchId::Nu6_3`.
 #[test]
-#[cfg(all(zcash_unstable = "nu6.3", feature = "tx_v6"))]
+#[cfg(zcash_unstable = "nu6.3")]
 fn v6_ironwood_txid_and_roundtrip() {
     let _init_guard = zebra_test::init();
 

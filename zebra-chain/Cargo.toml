@@ -49,8 +49,6 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
-tx_v6 = []
-
 [dependencies]
 
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }

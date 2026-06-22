@@ -171,6 +171,9 @@ pub enum TransactionError {
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
 
+    #[error("the Orchard value balance must be non-negative from NU6.3 onward")]
+    NegativeOrchardValueBalance,
+
     #[error("could not calculate the transaction fee")]
     IncorrectFee,
 
@@ -379,7 +382,9 @@ impl TransactionError {
             | RedPallas(_)
             | BothVPubsNonZero
             | DisabledAddToSproutPool
+            | NegativeOrchardValueBalance
             | NotEnoughFlags
+            | NotEnoughIronwoodFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId
             | LockedUntilAfterBlockHeight(_)

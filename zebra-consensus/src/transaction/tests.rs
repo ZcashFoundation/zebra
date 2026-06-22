@@ -167,6 +167,77 @@ fn v5_transaction_with_orchard_actions_has_flags() {
     }
 }
 
+/// Tests the `[NU6.3 onward] valueBalanceOrchard MUST be nonnegative` rule: from NU6.3 the Orchard
+/// pool is frozen against new inflows (newly shielded value is routed to Ironwood).
+#[test]
+fn orchard_value_balance_frozen_at_nu6_3() {
+    let _init_guard = zebra_test::init();
+
+    // NU6.3 is unscheduled on Mainnet/Testnet, so the rule is unreachable there; use a network
+    // that schedules it.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(10),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let nu6_3_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 activation height is configured");
+    let pre_nu6_3_height = NetworkUpgrade::Nu6_2
+        .activation_height(&network)
+        .expect("NU6.2 activation height is configured");
+
+    // A real V5 transaction carrying an Orchard bundle; its value balance is overridden below.
+    let mut tx = v5_transactions(Network::Mainnet.block_iter())
+        .find(|tx| tx.orchard_shielded_data().is_some())
+        .expect("a V5 transaction with an Orchard bundle");
+
+    // A net-negative `valueBalanceOrchard` shields new value into the Orchard pool. The check has
+    // no coinbase exemption, so it applies to coinbase transactions too.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(-1).expect("-1 is a valid signed amount");
+
+    // Rejected from NU6.3 onward,
+    assert_eq!(
+        check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network),
+        Err(TransactionError::NegativeOrchardValueBalance),
+    );
+    // but allowed before NU6.3, where the Orchard pool is not yet frozen.
+    assert!(check::orchard_value_balance_non_negative(&tx, pre_nu6_3_height, &network).is_ok());
+
+    // A zero balance (Orchard-to-Orchard note management) is allowed at NU6.3.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(0).expect("0 is a valid amount");
+    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+
+    // A positive balance (Orchard-to-transparent unshielding) is allowed at NU6.3.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(1).expect("1 is a valid amount");
+    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+
+    // A transaction with no Orchard bundle is unaffected at NU6.3.
+    let no_orchard_tx = Transaction::V5 {
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        lock_time: LockTime::Height(Height(0)),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+    assert!(
+        check::orchard_value_balance_non_negative(&no_orchard_tx, nu6_3_height, &network).is_ok()
+    );
+}
+
 #[test]
 fn v5_transaction_with_no_inputs_fails_verification() {
     let (_, output, _) = mock_transparent_transfer(
