@@ -13,8 +13,8 @@ use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
 
 use super::{
-    block_request, indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight,
-    BlockRequest, Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
+    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
+    Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -237,20 +237,26 @@ where
         &self,
         request: tonic::Request<BlockRequest>,
     ) -> Result<Response<BlockAndHash>, Status> {
-        let hash_or_height = match request.into_inner().hash_or_height {
-            Some(block_request::HashOrHeight::Hash(hash)) => {
-                zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash)?)
-            }
-            Some(block_request::HashOrHeight::Height(height)) => {
+        // The request carries a single `hash_or_height` byte string: a 32-byte block hash in
+        // display order, or a 4-byte big-endian block height. The length tells the two apart.
+        let hash_or_height = request.into_inner().hash_or_height;
+        let hash_or_height = match hash_or_height.len() {
+            32 => zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash_or_height)?),
+            4 => {
+                let height = u32::from_be_bytes(
+                    hash_or_height
+                        .try_into()
+                        .expect("a 4-byte vec always converts to a [u8; 4]"),
+                );
                 let height = block::Height::try_from(height).map_err(|_| {
                     Status::invalid_argument(format!("block height out of range: {height}"))
                 })?;
                 zebra_state::HashOrHeight::Height(height)
             }
-            None => {
-                return Err(Status::invalid_argument(
-                    "block request must specify a hash or height",
-                ));
+            len => {
+                return Err(Status::invalid_argument(format!(
+                    "block request must be a 32-byte hash or a 4-byte height, got {len} bytes"
+                )));
             }
         };
 

@@ -19,7 +19,7 @@ use zebra_state::{
 use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::indexer::{
-    block_request, indexer_client::IndexerClient, BlockAndHash, BlockRequest, Empty,
+    indexer_client::IndexerClient, BlockAndHash, BlockRequest, Empty,
     NonFinalizedStateChangeRequest,
 };
 
@@ -434,16 +434,13 @@ impl TrustedChainSync {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<(Block, block::Hash), Status> {
-        let request = match hash_or_height {
-            HashOrHeight::Hash(hash) => BlockRequest {
-                hash_or_height: Some(block_request::HashOrHeight::Hash(
-                    hash.bytes_in_display_order().to_vec(),
-                )),
-            },
-            HashOrHeight::Height(height) => BlockRequest {
-                hash_or_height: Some(block_request::HashOrHeight::Height(height.0)),
-            },
+        // Encode the request as a single `hash_or_height` byte string: a 32-byte hash in display
+        // order, or a 4-byte big-endian height. The server tells them apart by length.
+        let hash_or_height = match hash_or_height {
+            HashOrHeight::Hash(hash) => hash.bytes_in_display_order().to_vec(),
+            HashOrHeight::Height(height) => height.0.to_be_bytes().to_vec(),
         };
+        let request = BlockRequest { hash_or_height };
 
         let response = tokio::time::timeout(
             GET_BLOCK_TIMEOUT,
