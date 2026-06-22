@@ -1683,7 +1683,9 @@ impl DiskDb {
     // Used when opening a read-only secondary instance, which must never create the
     // primary's cache directory. Returns a [`StateInitError`] if the directory is missing
     // or unreadable.
-    fn check_cache_dir_readable(cache_dir: &std::path::Path) -> Result<(), StateInitError> {
+    pub(crate) fn check_cache_dir_readable(
+        cache_dir: &std::path::Path,
+    ) -> Result<(), StateInitError> {
         match fs::read_dir(cache_dir) {
             Ok(_) => Ok(()),
             Err(source) => Err(StateInitError::ReadOnlyCacheDirUnreadable {
