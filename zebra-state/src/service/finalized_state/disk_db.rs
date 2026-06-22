@@ -32,7 +32,7 @@ use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_end
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    write_database_format_version_to_disk, Config,
+    write_database_format_version_to_disk, Config, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -965,9 +965,13 @@ impl DiskDb {
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
     ///
+    /// # Errors
+    ///
+    /// - In read-only mode, if the cache directory is missing or unreadable.
+    ///
     /// # Panics
     ///
-    /// - If the cache directory does not exist and can't be created.
+    /// - In read-write mode, if the cache directory does not exist and can't be created.
     /// - If the database cannot be opened for whatever reason.
     pub fn new(
         config: &Config,
@@ -976,10 +980,17 @@ impl DiskDb {
         network: &Network,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
-    ) -> DiskDb {
+    ) -> Result<DiskDb, StateInitError> {
         // If the database is ephemeral, we don't need to check the cache directory.
         if !config.ephemeral {
-            DiskDb::validate_cache_dir(&config.cache_dir);
+            if read_only {
+                // A read-only secondary instance must never create the primary cache
+                // directory: the primary zebrad owns it. At most, verify it already
+                // exists and is readable, and fail with a clear error otherwise.
+                DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+            } else {
+                DiskDb::validate_cache_dir(&config.cache_dir);
+            }
         }
 
         let db_kind = db_kind.as_ref();
@@ -1027,7 +1038,7 @@ impl DiskDb {
 
                 db.assert_default_cf_is_empty();
 
-                db
+                Ok(db)
             }
 
             Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
@@ -1664,6 +1675,23 @@ impl DiskDb {
                 self.zs_is_empty(&default_cf),
                 "Zebra should not store data in the 'default' column family"
             );
+        }
+    }
+
+    // Checks that a cache directory already exists and is readable, without creating it.
+    //
+    // Used when opening a read-only secondary instance, which must never create the
+    // primary's cache directory. Returns a [`StateInitError`] if the directory is missing
+    // or unreadable.
+    pub(crate) fn check_cache_dir_readable(
+        cache_dir: &std::path::Path,
+    ) -> Result<(), StateInitError> {
+        match fs::read_dir(cache_dir) {
+            Ok(_) => Ok(()),
+            Err(source) => Err(StateInitError::ReadOnlyCacheDirUnreadable {
+                path: cache_dir.to_path_buf(),
+                source,
+            }),
         }
     }
 

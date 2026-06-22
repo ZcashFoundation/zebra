@@ -19,6 +19,13 @@ use crate::indexer::{indexer_client::IndexerClient, BlockAndHash, Empty};
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_secs(5);
 
+/// How long to wait before re-subscribing after a block fails to commit to the non-finalized state.
+///
+/// A block can persistently fail to commit (e.g. [`ValidateContextError::NotReadyToBeCommitted`])
+/// when the secondary finalized state hasn't yet caught up with the primary. Without this delay,
+/// re-subscribing immediately turns that into a full-speed busy loop that saturates the logs.
+const COMMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
+
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 #[derive(Debug)]
 pub struct TrustedChainSync {
@@ -135,6 +142,9 @@ impl TrustedChainSync {
     #[tracing::instrument(skip_all)]
     async fn sync(&mut self) {
         let mut non_finalized_blocks_listener = None;
+        // The hash of the block that most recently failed to commit, used to avoid re-logging the
+        // same warning at full rate while a block persistently fails to commit.
+        let mut last_failed_commit_hash = None;
         self.try_catch_up_with_primary().await;
         if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
             self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
@@ -185,6 +195,8 @@ impl TrustedChainSync {
             let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
             match self.try_commit(block.clone()).await {
                 Ok(()) => {
+                    last_failed_commit_hash = None;
+
                     while self
                         .non_finalized_state
                         .root_height()
@@ -198,15 +210,25 @@ impl TrustedChainSync {
                     self.update_channels();
                 }
                 Err(error) => {
-                    tracing::warn!(
-                        ?error,
-                        ?hash,
-                        "failed to commit block to non-finalized state"
-                    );
+                    // Only log on transitions to avoid saturating the logs when the same block
+                    // persistently fails to commit (e.g. when the secondary finalized state hasn't
+                    // caught up with the primary yet).
+                    if last_failed_commit_hash != Some(hash) {
+                        tracing::warn!(
+                            ?error,
+                            ?hash,
+                            "failed to commit block to non-finalized state"
+                        );
+                        last_failed_commit_hash = Some(hash);
+                    }
 
                     // TODO: Investigate whether it would be correct to ignore some errors here instead of
                     //       trying every block in the non-finalized state again.
                     non_finalized_blocks_listener = None;
+
+                    // Back off before re-subscribing so a persistently failing block doesn't turn
+                    // re-subscription into a full-speed busy loop.
+                    tokio::time::sleep(COMMIT_RETRY_DELAY).await;
                 }
             };
         }
@@ -306,8 +328,11 @@ pub fn init_read_state_with_syncer(
             return Err("standalone read state service cannot be used with ephemeral state".into());
         }
 
+        // The outer `?` propagates a `JoinError` if the blocking task panicked or was
+        // cancelled, and the inner `?` propagates a `StateInitError` (e.g. a missing
+        // read-only database).
         let (read_state, db, non_finalized_state_sender) =
-            spawn_init_read_only(config, &network).await?;
+            spawn_init_read_only(config, &network).await??;
         let (latest_chain_tip, chain_tip_change, sync_task) =
             TrustedChainSync::spawn(indexer_rpc_address, db, non_finalized_state_sender).await?;
         Ok((read_state, latest_chain_tip, chain_tip_change, sync_task))

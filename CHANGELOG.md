@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Opening a Zebra state read-only (for example, as a secondary instance over a
+  running node's database) now fails with a clear error instead of panicking when
+  the cache directory is missing or unreadable, or when no database exists at the
+  configured path. The read-write open path is unchanged.
+
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
