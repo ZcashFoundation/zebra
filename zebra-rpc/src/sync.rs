@@ -77,6 +77,7 @@ async fn update_finalized_chain_tip(
     db: ZebraDb,
     mut indexer_rpc_client: IndexerClient<tonic::transport::Channel>,
     mut finalized_chain_tip_sender: ChainTipSender,
+    non_finalized_state_receiver: tokio::sync::watch::Receiver<NonFinalizedState>,
 ) {
     let mut chain_tip_change_stream = None;
 
@@ -127,16 +128,26 @@ async fn update_finalized_chain_tip(
 
         // Catch the secondary's finalized state up to the primary, then publish its finalized tip.
         //
-        // This keeps the finalized tip current while the secondary is still catching up. Once
-        // `TrustedChainSync::sync()` commits its first non-finalized block, the chain tip sender
-        // switches to the non-finalized tip and these finalized updates become no-ops, so this task
-        // doesn't need to stop itself once the syncer has taken over.
+        // This keeps the finalized tip current while the secondary is still catching up, before
+        // `TrustedChainSync::sync()` has any non-finalized blocks of its own to publish.
         if let Err(error) = db.spawn_try_catch_up_with_primary().await {
             tracing::debug!(
                 ?error,
                 "failed to catch up to the primary database while updating the finalized tip"
             );
             continue;
+        }
+
+        // Stop once the syncer has committed its first non-finalized block. From then on `sync()`
+        // owns the published chain tip via the (higher) non-finalized tip, and publishing our
+        // lagging finalized tip here would drag the reported tip backwards.
+        //
+        // `sync()`'s `ChainTipSender` latches onto the non-finalized tip, but this task holds a
+        // separate `finalized_sender()` handle that doesn't, so `set_finalized_tip` would keep
+        // overwriting the non-finalized tip rather than becoming a no-op. The task therefore stops
+        // itself. The non-finalized state only grows once populated, so this handover is permanent.
+        if non_finalized_state_receiver.borrow().best_chain().is_some() {
+            return;
         }
 
         if let Some(tip_block) = finalized_chain_tip_block(&db).await {
@@ -182,6 +193,10 @@ impl TrustedChainSync {
         let indexer_rpc_client = IndexerClient::new(channel);
         let finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
 
+        // Subscribe to the non-finalized state before moving the sender into the syncer, so the
+        // finalized-tip task can tell when `sync()` has taken over the chain tip.
+        let non_finalized_state_receiver = non_finalized_state_sender.subscribe();
+
         let mut syncer = Self {
             indexer_rpc_client: indexer_rpc_client.clone(),
             db: db.clone(),
@@ -192,7 +207,13 @@ impl TrustedChainSync {
 
         // Spawn a task to send finalized chain tip changes to the chain tip change and latest chain tip channels.
         tokio::spawn(async move {
-            update_finalized_chain_tip(db, indexer_rpc_client, finalized_chain_tip_sender).await
+            update_finalized_chain_tip(
+                db,
+                indexer_rpc_client,
+                finalized_chain_tip_sender,
+                non_finalized_state_receiver,
+            )
+            .await
         });
 
         let sync_task = tokio::spawn(async move {
