@@ -292,7 +292,13 @@ impl TrustedChainSync {
             };
 
             if self.non_finalized_state.any_chain_contains(&hash) {
-                tracing::warn!(?hash, "non-finalized state already contains block");
+                // Expected and harmless: on a resumed or multi-chain stream the server can re-send a
+                // block the syncer already has (e.g. a fork's shared ancestors), so this is logged
+                // at debug rather than warn to avoid noise.
+                tracing::debug!(
+                    ?hash,
+                    "non-finalized state already contains block, skipping"
+                );
                 continue;
             }
 
