@@ -138,19 +138,24 @@ async fn update_finalized_chain_tip(
             continue;
         }
 
-        // Stop once the syncer has committed its first non-finalized block. From then on `sync()`
-        // owns the published chain tip via the (higher) non-finalized tip, and publishing our
-        // lagging finalized tip here would drag the reported tip backwards.
-        //
-        // `sync()`'s `ChainTipSender` latches onto the non-finalized tip, but this task holds a
-        // separate `finalized_sender()` handle that doesn't, so `set_finalized_tip` would keep
-        // overwriting the non-finalized tip rather than becoming a no-op. The task therefore stops
-        // itself. The non-finalized state only grows once populated, so this handover is permanent.
-        if non_finalized_state_receiver.borrow().best_chain().is_some() {
-            return;
-        }
-
         if let Some(tip_block) = finalized_chain_tip_block(&db).await {
+            // Stop once the syncer has committed its first non-finalized block. From then on
+            // `sync()` owns the published chain tip via the (higher) non-finalized tip, and
+            // publishing our lagging finalized tip here would drag the reported tip backwards.
+            //
+            // `sync()`'s `ChainTipSender` latches onto the non-finalized tip, but this task holds a
+            // separate `finalized_sender()` handle that doesn't, so `set_finalized_tip` would keep
+            // overwriting the non-finalized tip rather than becoming a no-op. The task therefore
+            // stops itself. The non-finalized state only grows once populated, so this handover is
+            // permanent.
+            //
+            // Check this immediately before publishing, after the awaits above: the syncer can take
+            // over while we wait on `spawn_try_catch_up_with_primary` or `finalized_chain_tip_block`,
+            // so checking any earlier would leave a window where we still publish the stale tip.
+            if non_finalized_state_receiver.borrow().best_chain().is_some() {
+                return;
+            }
+
             finalized_chain_tip_sender.set_finalized_tip(tip_block);
         }
     }
