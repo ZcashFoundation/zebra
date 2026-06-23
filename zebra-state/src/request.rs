@@ -1283,6 +1283,16 @@ pub enum ReadRequest {
         known_blocks: Vec<block::Hash>,
     },
 
+    /// Returns the live finalized-state database location and identity.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::StateDbInfo`](ReadResponse::StateDbInfo) with the on-disk path,
+    /// the running format version, and the database kind. Used by a co-located follower
+    /// to bootstrap a read-only secondary, including against an ephemeral database whose
+    /// path cannot be recomputed from config.
+    StateDbInfo,
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1455,6 +1465,7 @@ impl ReadRequest {
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
+            ReadRequest::StateDbInfo => "state_db_info",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",

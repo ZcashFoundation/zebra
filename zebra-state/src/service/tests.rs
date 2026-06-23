@@ -659,6 +659,44 @@ fn read_only_open_with_unreadable_cache_dir_returns_error() {
     }
 }
 
+/// `ReadRequest::StateDbInfo` reports the live database location, kind, and format version.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_request_state_db_info_reports_live_db() {
+    use tower::ServiceExt;
+
+    use crate::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        super::init_test_services(&network).await;
+
+    let response = read_state
+        .oneshot(ReadRequest::StateDbInfo)
+        .await
+        .expect("StateDbInfo request should succeed");
+
+    let ReadResponse::StateDbInfo {
+        path,
+        format_version,
+        db_kind,
+    } = response
+    else {
+        panic!("expected ReadResponse::StateDbInfo, got {response:?}");
+    };
+
+    assert_eq!(db_kind, "state");
+    assert!(
+        path.exists(),
+        "reported db path should exist on disk: {path:?}"
+    );
+    assert_eq!(
+        format_version.major,
+        crate::constants::state_database_format_version_in_code().major,
+    );
+}
+
 /// Opening a read-only state with an ephemeral database configured must fail with
 /// [`StateInitError::ReadOnlyEphemeralConflict`]: a read-only secondary follows another
 /// process's primary database and must never delete it, so it cannot also be ephemeral

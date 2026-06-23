@@ -1560,6 +1560,12 @@ impl Service<ReadRequest> for ReadStateService {
                 read::find_fork_point(state.latest_best_chain(), &state.db, known_blocks),
             )),
 
+            ReadRequest::StateDbInfo => Ok(ReadResponse::StateDbInfo {
+                path: state.db.path().to_path_buf(),
+                format_version: state.db.format_version_in_code(),
+                db_kind: state.db.db_kind(),
+            }),
+
             ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
                 read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
