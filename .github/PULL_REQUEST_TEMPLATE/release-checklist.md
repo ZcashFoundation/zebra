@@ -21,7 +21,7 @@ assignees: ""
 - [ ] All CI checks pass on the Release PR
 - [ ] A full-sync test has passed on `main` since the last state change, or a manual full sync is running
 - [ ] Trusted publishing is configured for every crate release-plz will publish
-- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are configured for the release environment, so the generated GitHub Release can trigger Docker and GCP workflows
+- [ ] `RELEASE_APP_ID` (variable) and `RELEASE_APP_PRIVATE_KEY` (secret) are both set at repository or organization scope, not only in the `release` environment. The `release-pr` job declares no environment, so environment-scoped credentials are invisible to it: it would create the Release PR with `GITHUB_TOKEN`, and that PR gets no CI. Keep both at the same scope. A repo-scoped variable paired with an environment-only secret is worse: the token step runs but fails on the empty key, breaking `release-pr` on every push. Repository or organization scope for both lets the Release PR run CI and lets the published GitHub Release trigger the Docker and GCP workflows.
 
 ## Merge and Monitor
 
