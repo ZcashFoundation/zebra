@@ -1,16 +1,18 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::BoxError;
 use zebra_chain::{
-    block::Height,
+    block::{self, Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
+    serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
+use zebra_state::{NonFinalizedBlocksListener, ReadRequest, ReadResponse};
 use zebra_test::{
     mock_service::MockService,
     prelude::color_eyre::{eyre::eyre, Result},
@@ -73,6 +75,83 @@ async fn test_mempool_change(
         .expect("response stream should not be empty")
         .expect("chain tip change response should not be an error message");
 
+    Ok(())
+}
+
+/// Verify that `non_finalized_state_change` can deliver more than 64 blocks without
+/// dropping the stream (regression test for #10728).
+#[tokio::test]
+async fn non_finalized_state_change_delivers_burst() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const BLOCK_COUNT: usize = 100;
+
+    let listen_addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let mut mock_read_service = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (mempool_tx_sender, _) = tokio::sync::broadcast::channel(1);
+    let mempool_tx_subscriber = MempoolTxSubscriber::new(mempool_tx_sender);
+
+    let (server_task, listen_addr) = indexer::server::init(
+        listen_addr,
+        mock_read_service.clone(),
+        mock_chain_tip,
+        mempool_tx_subscriber,
+    )
+    .await
+    .map_err(|err| eyre!(err))?;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let endpoint = tonic::transport::channel::Endpoint::new(format!("http://{listen_addr}"))
+        .unwrap()
+        .timeout(Duration::from_secs(10));
+    let mut client = IndexerClient::connect(endpoint).await.unwrap();
+
+    // Pre-load a channel with BLOCK_COUNT fake blocks.
+    let (sender, receiver) = tokio::sync::mpsc::channel(BLOCK_COUNT);
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for i in 0..BLOCK_COUNT {
+        let hash = block::Hash([i as u8; 32]);
+        sender.send((hash, block.clone())).await.unwrap();
+    }
+    drop(sender);
+
+    let listener = NonFinalizedBlocksListener(Arc::new(receiver));
+
+    // Spawn request so MockService can respond.
+    let stream_handle = tokio::spawn(async move {
+        let request = tonic::Request::new(Empty {});
+        client.non_finalized_state_change(request).await
+    });
+
+    // Respond with our pre-loaded listener.
+    mock_read_service
+        .expect_request(ReadRequest::NonFinalizedBlocksListener)
+        .await
+        .respond(ReadResponse::NonFinalizedBlocksListener(listener));
+
+    let response = stream_handle.await.unwrap().unwrap();
+    let mut stream = response.into_inner();
+    let mut received = 0;
+    while let Some(Ok(_)) = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .unwrap_or(None)
+    {
+        received += 1;
+    }
+
+    assert_eq!(
+        received, BLOCK_COUNT,
+        "stream should deliver all {BLOCK_COUNT} blocks without dropping"
+    );
+
+    drop(server_task);
     Ok(())
 }
 
