@@ -138,6 +138,16 @@ pub struct Config {
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database password.
     pub elasticsearch_password: String,
+
+    /// An explicit on-disk path for a read-only secondary to follow, overriding the
+    /// `cache_dir`-derived path.
+    ///
+    /// Runtime-only (never (de)serialized): set programmatically when following another
+    /// process's database whose path cannot be derived from this config — e.g. an
+    /// ephemeral primary at a random temporary directory. Ignored unless the state is
+    /// opened read-only.
+    #[serde(skip)]
+    pub read_only_db_path: Option<PathBuf>,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -225,6 +235,7 @@ impl Default for Config {
             elasticsearch_username: "elastic".to_string(),
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: "".to_string(),
+            read_only_db_path: None,
         }
     }
 }

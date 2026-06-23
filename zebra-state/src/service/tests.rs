@@ -697,6 +697,45 @@ async fn read_request_state_db_info_reports_live_db() {
     );
 }
 
+/// A read-only secondary can be opened at an explicit DB path that differs from the
+/// path `Config::db_path` would derive (the ephemeral/secondary case).
+#[test]
+fn read_only_open_honors_explicit_db_path() {
+    let network = Network::Mainnet;
+
+    // Create a persistent primary so there is a real on-disk DB to follow.
+    let primary_dir = tempfile::tempdir().expect("temp dir");
+    let primary_config = Config {
+        cache_dir: primary_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let primary = crate::FinalizedState::new(
+        &primary_config,
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening the primary should succeed");
+    let primary_db_path = primary.db.path().to_path_buf();
+
+    // Open a read-only secondary pointed explicitly at the primary's DB path, using a
+    // DIFFERENT cache_dir so success can only come from the explicit override.
+    let follower_dir = tempfile::tempdir().expect("temp dir");
+    let follower_config = Config {
+        cache_dir: follower_dir.path().to_path_buf(),
+        ephemeral: false,
+        read_only_db_path: Some(primary_db_path.clone()),
+        ..Config::default()
+    };
+
+    let (read_state, db, _sender) =
+        super::init_read_only(follower_config, &network).expect("read-only open should succeed");
+
+    assert_eq!(db.path(), primary_db_path.as_path());
+    drop(read_state);
+}
+
 /// Opening a read-only state with an ephemeral database configured must fail with
 /// [`StateInitError::ReadOnlyEphemeralConflict`]: a read-only secondary follows another
 /// process's primary database and must never delete it, so it cannot also be ephemeral
