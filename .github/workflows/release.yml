@@ -2,11 +2,11 @@
 #
 # Changelog generation is handled by release-plz + git-cliff.
 #
-# Pipeline:
-#   push to main → release-pr (creates/updates Release PR on every push)
-#                → release (publishes crates + tags, only on Release PR merge)
-#                → create app-authored zebrad GitHub Release
-#                → downstream workflows fire from the release event
+# Pipeline (release-pr and release both run on every push to main, independently):
+#   release-pr → creates/updates the single Release PR
+#   release    → on a Release PR merge, publishes crates + tags and creates the
+#                app-authored zebrad GitHub Release; downstream workflows fire
+#                from that release event (exits early on non-release commits)
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:released  → release-binaries.yml (Docker Hub)
@@ -72,9 +72,11 @@ jobs:
   # The Release PR merge is the human gate. The GitHub Release must be created
   # with a GitHub App installation token because release events created by the
   # repository GITHUB_TOKEN do not trigger downstream workflows.
+  #
+  # No `needs: release-pr`: this job self-detects the merge and must publish even
+  # when release-pr's concurrency group cancels its superseded pending run.
   release:
     name: Publish crates and GitHub Release
-    needs: release-pr
     runs-on: ubuntu-latest
     permissions:
       contents: write
