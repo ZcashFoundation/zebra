@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   to forbid spending coinbase outputs into transparent outputs (the inverse of
   zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
   existing Regtest behavior ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+- When the indexer RPC is enabled, a co-located read-state consumer can follow the
+  node more efficiently: the non-finalized block subscription resumes from the
+  consumer's known chain tips instead of re-streaming the whole non-finalized state,
+  and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
+  while its finalized state catches up.
 
 ### Changed
 

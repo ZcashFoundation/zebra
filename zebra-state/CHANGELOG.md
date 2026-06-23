@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new public `StateInitError` rather than panicking. The read-write open path is
   unchanged.
   ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `ReadRequest::NonFinalizedBlocksListener` is now a struct variant carrying the
+  caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
+  blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
+  is now re-exported from the crate root.
 
 ## [9.0.1] - 2026-06-18
 
