@@ -467,8 +467,7 @@ where
             // Select version-specific async verification pipeline
             let mut async_checks = Self::dispatch_version_verification(
                 tx.as_ref(),
-                &req,
-                &network,
+                nu,
                 script_verifier,
                 cached_ffi_transaction.clone()
             )?;
@@ -833,12 +832,14 @@ where
 
     /// Dispatches version-specific async verification checks for `tx`.
     ///
+    /// `nu` is the network upgrade active at the transaction's block height,
+    /// pre-computed by the caller from `req.upgrade(&network)`.
+    ///
     /// Returns [`TransactionError::WrongVersion`] for V1-V3 transactions, which
     /// are not supported by any network upgrade Zebra verifies.
     fn dispatch_version_verification(
         tx: &Transaction,
-        req: &Request,
-        network: &Network,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
@@ -848,18 +849,18 @@ where
                 Err(TransactionError::WrongVersion)
             }
             Transaction::V4 { joinsplit_data, .. } => Self::verify_v4_transaction(
-                req,
-                network,
+                tx,
+                nu,
                 script_verifier,
                 cached_ffi_transaction,
                 joinsplit_data,
             ),
             Transaction::V5 { .. } => {
-                Self::verify_v5_transaction(req, network, script_verifier, cached_ffi_transaction)
+                Self::verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 { .. } => {
-                Self::verify_v6_transaction(req, network, script_verifier, cached_ffi_transaction)
+                Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
         }
     }
@@ -875,25 +876,20 @@ where
     ///
     /// The parameters of this method are:
     ///
-    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
-    ///   for more information)
-    /// - the `network` to consider when verifying
+    /// - the `tx` transaction to verify
+    /// - the `nu` network upgrade active at the transaction's block height
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the prepared `cached_ffi_transaction` used by the script verifier
     /// - the Sprout `joinsplit_data` shielded data in the transaction
-    /// - the `sapling_shielded_data` in the transaction
     #[allow(clippy::unwrap_in_result)]
     fn verify_v4_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let tx = request.transaction();
-        let nu = request.upgrade(network);
-
-        Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
+        Self::verify_v4_transaction_network_upgrade(tx, nu)?;
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
 
@@ -902,7 +898,7 @@ where
             .sighash(HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            request,
+            tx,
             script_verifier,
             cached_ffi_transaction,
         )?
@@ -966,24 +962,18 @@ where
     ///
     /// The parameters of this method are:
     ///
-    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
-    ///   for more information)
-    /// - the `network` to consider when verifying
+    /// - the `tx` transaction to verify
+    /// - the `nu` network upgrade active at the transaction's block height
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the prepared `cached_ffi_transaction` used by the script verifier
-    /// - the sapling shielded data of the transaction, if any
-    /// - the orchard shielded data of the transaction, if any
     #[allow(clippy::unwrap_in_result)]
     fn verify_v5_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let transaction = request.transaction();
-        let nu = request.upgrade(network);
-
-        Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
+        Self::verify_v5_transaction_network_upgrade(tx, nu)?;
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
@@ -993,7 +983,7 @@ where
             .sighash(HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            request,
+            tx,
             script_verifier,
             cached_ffi_transaction,
         )?
@@ -1045,12 +1035,12 @@ where
     /// Passthrough to verify_v5_transaction, but for V6 transactions.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+        Self::verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1058,19 +1048,17 @@ where
     ///
     /// Returns script verification responses via the `utxo_sender`.
     fn verify_transparent_inputs_and_outputs(
-        request: &Request,
+        tx: &Transaction,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let transaction = request.transaction();
-
-        if transaction.is_coinbase() {
+        if tx.is_coinbase() {
             // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())
         } else {
             // feed all of the inputs to the script verifier
-            let inputs = transaction.inputs();
+            let inputs = tx.inputs();
 
             let script_checks = (0..inputs.len())
                 .map(move |input_index| {
