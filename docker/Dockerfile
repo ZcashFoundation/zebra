@@ -34,8 +34,8 @@ ARG BUILDPLATFORM
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-    libclang-dev \
-    protobuf-compiler \
+    libclang-dev=1:19.0-63 \
+    protobuf-compiler=3.21.12-11 \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Build arguments and variables
@@ -53,6 +53,7 @@ ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
+SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 ARG SHORT_SHA
 ARG FEATURES
@@ -85,7 +86,7 @@ ARG CARGO_TARGET_DIR
 
 # Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends librocksdb-dev curl && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-1+b1 curl=8.14.1-2+deb13u3 && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -195,8 +196,8 @@ ENV HOME=${HOME}
 # Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
-    adduser \
-    curl \
+    adduser=3.152 \
+    curl=8.14.1-2+deb13u3 \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
