@@ -20,18 +20,18 @@ use super::{
     MempoolChangeMessage,
 };
 
-/// The maximum number of messages that can be queued to be streamed to a client.
+/// Buffer size for `chain_tip_change` and `mempool_change` streams, which emit incrementally.
+const RESPONSE_BUFFER_SIZE: usize = 64;
+
+/// Buffer size for the `non_finalized_state_change` stream.
 ///
-/// Sized to hold the entire non-finalized state, because `non_finalized_state_change`
-/// bursts every non-finalized block to each new subscriber on subscribe: up to
-/// 2 chains of up to `MAX_BLOCK_REORG_HEIGHT` blocks each
-/// (forks re-emit their shared prefix). If this buffer is smaller than that burst, a
-/// subscriber near the tip can never assemble the full non-finalized state within one
-/// subscription, which livelocks consumers like `TrustedChainSync`. Derived from the
-/// state constants so it can't silently go stale if the reorg limit changes.
-const RESPONSE_BUFFER_SIZE: usize =
-    // `MAX_BLOCK_REORG_HEIGHT` is a small compile-time constant that always fits `usize`.
-    2 * MAX_BLOCK_REORG_HEIGHT as usize;
+/// On subscribe, `NonFinalizedBlocksListener` bursts every block from every non-finalized
+/// chain (`chain_iter()` can return up to `MAX_NON_FINALIZED_CHAIN_FORKS` chains of
+/// `MAX_BLOCK_REORG_HEIGHT` blocks, with forks re-emitting their shared prefix).
+/// Backpressure (`send().await`) handles transient overflow, but sizing the buffer to
+/// fit the burst avoids blocking the listener task.
+const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize =
+    MAX_NON_FINALIZED_CHAIN_FORKS * MAX_BLOCK_REORG_HEIGHT as usize;
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -100,7 +100,8 @@ where
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
         let span = Span::current();
         let read_state = self.read_state.clone();
-        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+        let (response_sender, response_receiver) =
+            tokio::sync::mpsc::channel(NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
 
         tokio::spawn(async move {
