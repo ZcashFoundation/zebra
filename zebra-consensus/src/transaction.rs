@@ -877,7 +877,6 @@ where
             Transaction::V5 { .. } => {
                 Self::verify_v5_transaction(req, network, script_verifier, cached_ffi_transaction)
             }
-            #[cfg(zcash_unstable = "nu6.3")]
             Transaction::V6 { .. } => {
                 Self::verify_v6_transaction(req, network, script_verifier, cached_ffi_transaction)
             }
@@ -1069,7 +1068,6 @@ where
     /// Differs from [`Self::verify_v5_transaction`] in the Orchard verifier: a v6 Orchard bundle
     /// commits to the NU6.3 cross-address circuit, so it (and the Ironwood bundle) verify under the
     /// NU6.3 key, not the v5 fixed key.
-    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,
@@ -1104,7 +1102,6 @@ where
     /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
     ///
     /// V6 transactions are only valid from NU6.3 onward.
-    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_v6_transaction_network_upgrade(
         transaction: &Transaction,
         network_upgrade: NetworkUpgrade,
@@ -1341,7 +1338,6 @@ where
     /// A v6 Orchard bundle commits to the NU6.3 cross-address circuit, so it always verifies under
     /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
     /// network upgrade (v6 transactions only exist from NU6.3 onward).
-    #[cfg(zcash_unstable = "nu6.3")]
     fn verify_orchard_v6_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,

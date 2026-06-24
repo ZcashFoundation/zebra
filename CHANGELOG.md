@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Experimental, off-by-default support for the NU6.3 "Ironwood" shielded pool and
-  v6 transaction format, behind the `zcash_unstable="nu6.3"` cfg. This is incomplete
-  pending the deploy ZIP (no real activation height, version group ID, or consensus
-  branch ID yet) and is not built by default.
+- Experimental support for the NU6.3 "Ironwood" shielded pool and v6 transaction
+  format. This is incomplete pending the deploy ZIP (no real activation height,
+  version group ID, or consensus branch ID yet), so it cannot activate on any
+  network.
 - Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
   to forbid spending coinbase outputs into transparent outputs (the inverse of
   zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving

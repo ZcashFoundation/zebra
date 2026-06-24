@@ -958,7 +958,6 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
-        #[cfg(zcash_unstable = "nu6.3")]
         v6 @ V6 { .. } => v6.clone(),
     }
 }
@@ -1044,7 +1043,6 @@ pub fn v5_transactions<'b>(
         | Transaction::V3 { .. }
         | Transaction::V4 { .. } => None,
         ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
-        #[cfg(zcash_unstable = "nu6.3")]
         ref tx @ Transaction::V6 { .. } => Some(tx.clone()),
     })
 }
@@ -1126,7 +1124,6 @@ pub fn insert_fake_orchard_shielded_data(
 /// dummy action — so all actions share one nullifier, which is convenient for duplicate-nullifier
 /// tests. The proof is empty (not canonically sized) and the signatures are not valid, so this MUST
 /// NOT be used where proof verification or a canonical proof size is required.
-#[cfg(zcash_unstable = "nu6.3")]
 pub fn fake_v6_orchard_shielded_data(
     flags: orchard::Flags,
     value_balance: Amount<NegativeAllowed>,
@@ -1160,7 +1157,6 @@ pub fn fake_v6_orchard_shielded_data(
 ///
 /// The transaction is non-coinbase (no inputs) and otherwise empty. The bundles are not
 /// cryptographically valid (see [`fake_v6_orchard_shielded_data`]).
-#[cfg(zcash_unstable = "nu6.3")]
 pub fn fake_v6_transaction(
     network_upgrade: NetworkUpgrade,
     orchard_shielded_data: Option<orchard::ShieldedDataV6>,

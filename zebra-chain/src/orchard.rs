@@ -24,5 +24,4 @@ pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
 
-#[cfg(zcash_unstable = "nu6.3")]
 pub use shielded_data::{FlagsV6, ShieldedDataV6};

@@ -7,10 +7,8 @@
 //! value pool — while reusing all of Orchard's wire-format and proof-verification machinery.
 //!
 //! The Ironwood *state* (nullifier set, note commitment tree, anchors, and chain value pool) is
-//! always compiled, so the on-disk database format is stable across build flags; it simply stays
-//! empty until NU6.3 transactions appear (which only happens in the experimental
-//! `zcash_unstable="nu6.3"` build). The Ironwood *transaction bundle*
-//! ([`ShieldedData`]) is only compiled for that experimental build.
+//! always present, so the on-disk database format is stable; it simply stays empty until NU6.3
+//! transactions appear on-chain.
 
 use crate::orchard;
 
@@ -39,11 +37,9 @@ impl From<orchard::Nullifier> for Nullifier {
 /// Orchard bundle; this newtype keeps the two type-distinct so they cannot be accidentally
 /// interchanged, and so the Ironwood bundle can commit into a separate note commitment tree and
 /// nullifier set.
-#[cfg(zcash_unstable = "nu6.3")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedData(orchard::ShieldedDataV6);
 
-#[cfg(zcash_unstable = "nu6.3")]
 impl ShieldedData {
     /// Wraps a v6 Orchard-protocol bundle as Ironwood shielded data.
     pub fn new(shielded_data: orchard::ShieldedDataV6) -> Self {

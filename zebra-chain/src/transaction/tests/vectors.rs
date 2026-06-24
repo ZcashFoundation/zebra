@@ -1011,7 +1011,6 @@ fn binding_signatures() {
                             at_least_one_v5_checked = true;
                         }
                     }
-                    #[cfg(zcash_unstable = "nu6.3")]
                     Transaction::V6 {
                         sapling_shielded_data,
                         ..
@@ -1059,7 +1058,6 @@ fn binding_signatures() {
 /// v6 (ZIP-244) digest path, which is the runtime path that does not work against released
 /// librustzcash. The branch id resolves to the fork's `BranchId::Nu6_3`.
 #[test]
-#[cfg(zcash_unstable = "nu6.3")]
 fn v6_ironwood_txid_and_roundtrip() {
     let _init_guard = zebra_test::init();
 
@@ -1097,7 +1095,6 @@ fn v6_ironwood_txid_and_roundtrip() {
 /// helpers produce. This exercises Zebra's self-contained v6 wire codec for *non-empty* bundles
 /// (the empty-bundle path is already covered above).
 #[test]
-#[cfg(zcash_unstable = "nu6.3")]
 fn v6_transaction_with_bundles_round_trips() {
     use crate::ironwood;
     use crate::orchard::{Flags, ShieldedDataV6};

@@ -21,7 +21,6 @@ use crate::{
     },
 };
 
-#[cfg(zcash_unstable = "nu6.3")]
 use crate::parameters::TX_V6_VERSION_GROUP_ID;
 
 use super::*;
@@ -425,7 +424,6 @@ impl ZcashSerialize for orchard::ShieldedData {
 // identically on the wire (the flag byte is written as-is), so the v6 Orchard and Ironwood
 // (de)serializers below delegate to the v5 Orchard bundle codec, only wrapping/unwrapping their
 // newtypes (`orchard::ShieldedDataV6` and `ironwood::ShieldedData`).
-#[cfg(zcash_unstable = "nu6.3")]
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
@@ -435,14 +433,12 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     }
 }
 
-#[cfg(zcash_unstable = "nu6.3")]
 impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
     }
 }
 
-#[cfg(zcash_unstable = "nu6.3")]
 impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
@@ -452,7 +448,6 @@ impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     }
 }
 
-#[cfg(zcash_unstable = "nu6.3")]
 impl ZcashSerialize for Option<ironwood::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
@@ -770,7 +765,6 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
 
-            #[cfg(zcash_unstable = "nu6.3")]
             Transaction::V6 {
                 network_upgrade,
                 lock_time,
@@ -1114,7 +1108,6 @@ impl ZcashDeserialize for Transaction {
 
                 Ok(tx)
             }
-            #[cfg(zcash_unstable = "nu6.3")]
             (6, true) => {
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;

@@ -504,9 +504,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 /// Test successful block template submission as a block proposal.
 ///
 /// This test can be run locally with:
-/// `RUSTFLAGS='--cfg zcash_unstable="nu6.3"' cargo test --package zebrad --test zebrad-tests -- nu6_3_block_template_proposal --exact --show-output`
+/// `cargo test --package zebrad --test zebrad-tests -- nu6_3_block_template_proposal --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(zcash_unstable = "nu6.3")]
 async fn nu6_3_block_template_proposal() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
