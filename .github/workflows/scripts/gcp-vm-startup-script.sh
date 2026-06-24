@@ -3,7 +3,7 @@
 #
 # This script appends 'MaxStartups 500' to /etc/ssh/sshd_config allowing up to 500
 # unauthenticated connections to Google Cloud instances.
-ps auxwww | grep sshd
+pgrep -a sshd
 echo
 sudo grep MaxStartups /etc/ssh/sshd_config
 echo 'Original config:'
@@ -19,4 +19,4 @@ sudo cat /etc/ssh/sshd_config
 echo
 sudo systemctl reload sshd.service
 echo
-ps auxwww | grep sshd
+pgrep -a sshd

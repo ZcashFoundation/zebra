@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:
+  optional override for whether Regtest allows coinbase outputs to be spent into
+  transparent outputs. Defaults to allowing them, and does not affect
+  `Network::is_regtest()`.
+
 ## [10.1.0] - 2026-06-18
 
 ### Added

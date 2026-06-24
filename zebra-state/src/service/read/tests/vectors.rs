@@ -381,6 +381,7 @@ fn new_ephemeral_db() -> ZebraDb {
             .map(ToString::to_string),
         false,
     )
+    .expect("opening an ephemeral database should succeed")
 }
 
 /// Test that AnyChainBlock can find blocks by hash and height.
@@ -489,7 +490,8 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);

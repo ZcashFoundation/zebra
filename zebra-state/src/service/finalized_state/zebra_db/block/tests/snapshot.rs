@@ -171,7 +171,8 @@ fn test_block_and_transaction_data_with_network(network: Network) {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     // Assert that empty databases are the same, regardless of the network.
     let mut settings = insta::Settings::clone_current();

@@ -79,8 +79,22 @@ compiler. Below are quick summaries for installing these dependencies.
 sudo pacman -S rust clang protobuf
 ```
 
-Note that the package `clang` includes `libclang` as well. The GCC version on
-Arch Linux has a broken build script in a `rocksdb` dependency. A workaround is:
+Note that the package `clang` includes `libclang` as well. If you hit a
+compiling failure in `rocksdb`, see the [GCC 15 workaround](#gcc-15-workaround)
+below.
+
+</details>
+
+<details><summary>
+
+#### GCC 15 workaround
+
+</summary>
+
+GCC 15, which is the default on many recent distros like Arch Linux and Ubuntu
+25 onwards, introduces a compiling failure in the version of the `rocksdb`
+dependency used by Zebra. A workaround is running the following before
+installing Zebra:
 
 ```sh
 export CXXFLAGS="$CXXFLAGS -include cstdint"

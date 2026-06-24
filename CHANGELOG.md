@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
+  to forbid spending coinbase outputs into transparent outputs (the inverse of
+  zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
+  existing Regtest behavior ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+- When the indexer RPC is enabled, a co-located read-state consumer can follow the
+  node more efficiently: the non-finalized block subscription resumes from the
+  consumer's known chain tips instead of re-streaming the whole non-finalized state,
+  and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
+  while its finalized state catches up.
+
+### Changed
+
+- Opening a Zebra state read-only (for example, as a secondary instance over a
+  running node's database) now fails with a clear error instead of panicking when
+  the cache directory is missing or unreadable, or when no database exists at the
+  configured path. The read-write open path is unchanged.
+
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
