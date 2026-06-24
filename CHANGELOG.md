@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
   locator that is on the best chain — the fork point — for clients tracking chain
   reorganizations through a read-only state service.
+- New `getreadstateinfo` JSON-RPC method that reports a node's live state database
+  path, indexer gRPC address, database format version, and network (including Regtest
+  activation heights), so a co-located read-state follower can bootstrap a read-only
+  secondary — including against an ephemeral or Regtest node — instead of
+  hand-configuring those values.
 
 ### Changed
 

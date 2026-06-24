@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `ReadRequest::StateDbInfo` (response `ReadResponse::StateDbInfo`) reporting the
+  live finalized-state database path, running format version, and kind — usable to
+  bootstrap a read-only secondary against a database whose path cannot be derived from
+  config (for example, an ephemeral primary).
+- A read-only state can now be opened at an explicit on-disk path via the new
+  `Config::read_only_db_path`, overriding the `cache_dir`-derived path so a follower can
+  tail an ephemeral primary's randomly-located database.
+
 ### Breaking Changes
 
 - The finalized-state open functions now return `Result<_, StateInitError>` instead
