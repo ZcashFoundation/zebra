@@ -82,6 +82,18 @@ pub enum StateInitError {
         /// The database path at which no database was found.
         path: PathBuf,
     },
+
+    /// A read-only state was requested together with an ephemeral database.
+    ///
+    /// A read-only secondary follows another process's primary database and must
+    /// never delete it, whereas an ephemeral database deletes its files on drop. The
+    /// two are mutually exclusive, so requesting both is a fatal configuration error.
+    #[error(
+        "cannot open read-only state: an ephemeral database was also requested. \
+         Hint: a read-only state follows an existing Zebra node's database and must not \
+         delete it; set `ephemeral = false`, or do not request a read-only state"
+    )]
+    ReadOnlyEphemeralConflict,
 }
 
 /// An error describing why a block could not be queued to be committed to the state.
