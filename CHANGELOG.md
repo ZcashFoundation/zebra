@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Fixed
 
 - Released `zebrad` binaries report their source commit in `zebrad version`
-  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 
 ### Security
 
@@ -46,12 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   builds of the same commit produce the same binary. Release images are also built
   without the shared build cache, so a published image cannot inherit a layer from
   a lower-trust build
-  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 - Release Docker images are signed and carry build provenance and a signed SBOM.
   Each production release gets a Cosign keyless signature, a signed SLSA provenance
   attestation, and a signed SBOM, so anyone can confirm an image came from Zebra's CI
   with `cosign verify` or `gh attestation verify`
-  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
