@@ -72,7 +72,7 @@ extra_coinbase_data = "/MyPoolName/"
 A few important details about how this value is used:
 
 - The string is inserted into the transparent input script of the coinbase transaction, immediately after the encoded block height.
-- The string is always encoded as raw UTF-8 bytes. It is **not** hex-decoded, even if it looks like a valid hex string — `extra_coinbase_data = "deadbeef"` puts the eight ASCII characters `deadbeef` in the coinbase script, not the two bytes `0xde 0xad`. If you need to embed specific raw bytes, write them out as UTF-8 text (most mining tags are short, human-readable pool names or identifiers, so this is usually what you want anyway).
+- The string is always encoded as raw UTF-8 bytes. It is **not** hex-decoded, even if it looks like a valid hex string — `extra_coinbase_data = "deadbeef"` puts the eight ASCII characters `deadbeef` in the coinbase script, not the four bytes `0xde 0xad 0xbe 0xef`. This option only carries UTF-8 text, so arbitrary non-UTF-8 byte sequences can't be embedded. In practice most mining tags are short, human-readable pool names or identifiers, so this is usually what you want anyway.
 - The encoded value, including Zebra's script push overhead, is limited to 94 bytes. Because that limit includes 1-2 bytes of push-opcode overhead, keep your tag at 92 bytes or less to be safe. If the limit is exceeded, Zebra refuses to build a block template until the value is shortened.
 - This field is optional. Leaving it unset is valid — Zebra just won't tag the block.
 
