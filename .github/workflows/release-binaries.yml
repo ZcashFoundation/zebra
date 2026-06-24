@@ -65,6 +65,8 @@ jobs:
     name: Release binaries success
     runs-on: ubuntu-latest
     # Only run for the official v-prefixed zebrad release tags.
+    # `always()` keeps this aggregator running when `build` fails or is cancelled;
+    # otherwise GitHub skips jobs with failed `needs`.
     if: >-
       ${{
         always() &&

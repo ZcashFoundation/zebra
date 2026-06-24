@@ -141,6 +141,12 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 
 - [ ] Commit and push the above version changes to the release branch.
 
+## Update Initial Minimum Network Protocol Version
+
+- [ ] If this release should stop connecting to older peers, update
+      `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in
+      `zebra-network/src/constants.rs`.
+
 ## Update End of Support
 
 The end of support height is calculated from the current blockchain height:

@@ -2,7 +2,7 @@
 name: "Release Checklist"
 about: "Checklist for reviewing and merging a release-plz Release PR"
 title: "Release Zebra (version)"
-labels: "A-release, P-Critical :ambulance:"
+labels: "A-release"
 assignees: ""
 ---
 
@@ -29,7 +29,7 @@ assignees: ""
 - [ ] Verify crates published to crates.io (check the Release workflow output)
 - [ ] Verify git tags were created
 - [ ] Verify the public `zebrad` GitHub Release was created automatically
-- [ ] Verify `zebrad` installs from crates.io: `cargo install --locked --force --version <version> zebrad && ~/.cargo/bin/zebrad`
+- [ ] Confirm the automated `zebrad` crates.io install smoke passed in the Release workflow
 - [ ] Verify Docker images built (check release-binaries workflow)
 - [ ] Verify Docker Hub tag appears
 - [ ] Verify GCP deployment triggered (check deploy-nodes workflow)

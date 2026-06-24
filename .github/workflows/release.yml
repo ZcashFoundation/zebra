@@ -128,26 +128,20 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-      - name: Create zebrad GitHub Release
+      - name: Extract zebrad release metadata
+        id: zebrad-release
         if: steps.release-plz.outputs.releases_created == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASES: ${{ steps.release-plz.outputs.releases }}
-          REPOSITORY: ${{ github.repository }}
-          TARGET_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES}")"
+          ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES:-[]}")"
 
           if [ -z "${ZEBRAD_RELEASE}" ]; then
+            echo "released=false" >> "${GITHUB_OUTPUT}"
             echo "No zebrad release in release-plz output; skipping GitHub Release."
             exit 0
-          fi
-
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
-            exit 1
           fi
 
           VERSION="$(jq -r '.version' <<< "${ZEBRAD_RELEASE}")"
@@ -158,13 +152,52 @@ jobs:
             exit 1
           fi
 
+          {
+            echo "released=true"
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        if: steps.zebrad-release.outputs.released == 'true'
+        with:
+          toolchain: stable
+          cache-on-failure: true
+      - name: Verify zebrad installs from crates.io
+        if: steps.zebrad-release.outputs.released == 'true'
+        timeout-minutes: 30
+        env:
+          VERSION: ${{ steps.zebrad-release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          cargo install --locked --force --version "${VERSION}" zebrad
+          ~/.cargo/bin/zebrad --version
+      - name: Create zebrad GitHub Release
+        if: steps.zebrad-release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+          VERSION: ${{ steps.zebrad-release.outputs.version }}
+          TAG: ${{ steps.zebrad-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
+            exit 1
+          fi
+
           NOTES_FILE="$(mktemp)"
           awk -v version="${VERSION}" '
+            BEGIN {
+              heading = "## [Zebra " version "]"
+            }
             /^##[[:space:]]+\[/ {
               if (found) {
                 exit
               }
-              if (index($0, version) > 0) {
+              if (index($0, heading) == 1) {
                 found = 1
               }
             }
