@@ -431,7 +431,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cosign verify "${HUB_IMAGE}@${DIGEST}" \
-            --certificate-identity-regexp='^https://github.com/ZcashFoundation/zebra/' \
+            --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
           gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
             --owner ZcashFoundation \

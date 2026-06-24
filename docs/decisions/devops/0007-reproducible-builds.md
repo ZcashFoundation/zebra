@@ -18,7 +18,7 @@ Zebra already builds with `--locked` and `CARGO_INCREMENTAL=0`, pins apt version
 
 - Reuse the existing multi-stage Dockerfile, GitHub Actions, and Docker Build Cloud. Avoid a second build system.
 - The artifact is a native binary and its OCI image, so verification rests on the image digest and its attestations, not a consensus blob.
-- Harden the release path only; leave development and CI builds fast.
+- Reproducibility hardening must be cheap enough to apply to every build; reserve signing for release images.
 
 ## Considered Options
 
@@ -30,7 +30,7 @@ Zebra already builds with `--locked` and `CARGO_INCREMENTAL=0`, pins apt version
 
 Chosen: option 1. Guix gives the strongest guarantee but is a large departure from the current stack and disproportionate for a validator node. Signing alone cannot be independently corroborated. Hardening the existing pipeline reaches both goals with changes a reviewer can read.
 
-Reproducibility comes from making the build a function of its inputs and nothing else:
+Reproducibility applies to every image build, releases included, because the changes are cheap. The build becomes a function of its inputs and nothing else:
 
 - Pin the Rust toolchain to an exact version and digest-pin the rust and debian base images; bump both deliberately.
 - Set `SOURCE_DATE_EPOCH` from the commit and rewrite layer timestamps.
@@ -60,7 +60,7 @@ gh attestation verify oci://docker.io/zfnd/zebra:<version> \
   --owner ZcashFoundation \
   --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
 cosign verify docker.io/zfnd/zebra:<version> \
-  --certificate-identity-regexp='^https://github.com/ZcashFoundation/zebra/' \
+  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
