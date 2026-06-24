@@ -1,0 +1,132 @@
+[workspace]
+# Prevent Cargo.lock churn from triggering cascading Release PRs.
+# The `home` crate pin (0.5.11) would break if cargo update runs.
+dependencies_update = false
+
+# Only publish when the Release PR is merged, not on every push.
+# release-plz checks if the current commit is from a release-plz- branch.
+release_always = false
+
+# release-plz still publishes crates and creates git tags. Zebra creates the
+# single public `zebrad` GitHub Release in .github/workflows/release.yml so
+# release-triggered Docker and GCP workflows only run once, for the node binary.
+git_release_enable = false
+
+# These commits trigger version bumps. Other commits can still appear in
+# changelogs or dependency cascades, but do not trigger a release by themselves.
+release_commits = "^(feat|fix|perf|refactor|build)"
+
+# Release PR metadata. Keep the generated long-lived PR out of the urgent queue
+# until maintainers are ready to publish.
+pr_labels = ["A-release"]
+
+pr_body = """
+## Review the Release PR
+
+- [ ] Version bumps match user-visible changes for each changed crate (`major` for network upgrades or breaking API, `minor` for new API/behavior/RPC/config, `patch` otherwise)
+- [ ] `cargo-semver-checks` output has been reviewed for each published library crate
+- [ ] Public API diff has been reviewed for each published library crate (`cargo public-api diff latest -p <crate> -sss`)
+- [ ] Root `CHANGELOG.md` summary is clear and user-facing
+- [ ] Per-crate `CHANGELOG.md` entries describe crate-consumer impact
+- [ ] No git dependencies remain in crates that will publish to crates.io (`check-no-git-dependencies`)
+- [ ] Any required checkpoint, end-of-support height, README, or operational release-note changes already landed before this generated Release PR
+- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are both configured at repository or organization scope
+- [ ] Merge this Release PR only when crates should be published and the public `zebrad` GitHub Release should be created
+
+## Release Summary
+
+{% for release in releases %}
+- `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} -> {% endif %}{{ release.next_version }}{% if release.semver_check == "incompatible" %} (API breaking changes){% elif release.semver_check == "compatible" %} (API compatible changes){% endif %}
+{%- endfor %}
+{%- for release in releases %}{% if release.breaking_changes %}
+
+### `{{ release.package }}` Breaking Changes
+
+```text
+{{ release.breaking_changes }}
+```
+{% endif %}{% endfor %}
+{% for release in releases %}{% if release.changelog %}
+<details><summary><b>{{ release.package }} changelog</b></summary>
+
+{% if release.title %}### {{ release.title }}
+{% endif %}
+{{ release.changelog }}
+
+</details>
+{% endif %}{% endfor %}
+
+---
+This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).
+"""
+
+# Repository URL for changelog links
+repo_url = "https://github.com/ZcashFoundation/zebra"
+
+# Timeout for waiting for each crate to appear on crates.io after publish
+publish_timeout = "30m"
+
+[changelog]
+header = ""
+body = """
+{% if package == "zebrad" -%}
+## [Zebra {{ version }}](https://github.com/ZcashFoundation/zebra/releases/tag/v{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | split(pat="\n") | first | trim | upper_first }}\
+{% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/ZcashFoundation/zebra/pull/{{ commit.remote.pr_number }})){% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+postprocessors = [
+    { pattern = "(?m)^- (\\[\\*\\*breaking\\*\\*\\] )?[[:alpha:]]+(\\([^)]*\\))?!?:[[:space:]]*", replace = "- ${1}" },
+]
+protect_breaking_commits = true
+sort_commits = "oldest"
+# Changelog display only; release triggering is `release_commits` above. Skipped
+# types still publish (they just print no changelog line), and
+# `protect_breaking_commits = true` keeps breaking commits visible even when
+# their type is skipped, so breaking changes never silently vanish.
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Changed" },
+    { message = "^refactor", skip = true },
+    { message = "^docs", skip = true },
+    { message = "^build", skip = true },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^style", skip = true },
+]
+
+# ── zebrad: the node binary ─────────────────────────────────────
+# Aggregates changelogs from all zebra-* crates for a complete release view.
+# Uses the legacy v-prefixed tag format (v4.3.1) for compatibility with
+# GCP deployment, which parses the tag to extract the semver.
+[[package]]
+name = "zebrad"
+changelog_include = [
+    "zebra-chain",
+    "zebra-consensus",
+    "zebra-network",
+    "zebra-state",
+    "zebra-rpc",
+    "zebra-script",
+    "zebra-node-services",
+    "zebra-utils",
+]
+git_tag_name = "v{{ version }}"
+changelog_path = "./CHANGELOG.md"
+
+# ── Library crates ──────────────────────────────────────────────
+# No special config needed for most crates. release-plz defaults:
+# - Tag format: <crate>-v<version> (e.g., zebra-chain-v6.0.2)
+# - Change detection: file-path-based (only files in crate directory)
+# - Version bump: from conventional commits touching the crate's files
+# - Changelog: per-crate CHANGELOG.md in the crate directory
