@@ -30,9 +30,12 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
-      short_sha: ''
+      # Embed the release commit (the only source of git_commit(), since `.git` is excluded).
+      short_sha: auto
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
+      # Build releases without the shared (poisonable) Docker Build Cloud cache.
+      no_cache: true
       # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
       publish_to_dockerhub: true

@@ -151,6 +151,10 @@ jobs:
         with:
           short-length: 7
 
+      # Pin image timestamps to the commit time for reproducible builds
+      - name: Set SOURCE_DATE_EPOCH from the commit
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
@@ -238,7 +242,7 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
           provenance: mode=max
@@ -264,7 +268,7 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
@@ -297,6 +301,7 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      attestations: write
     outputs:
       image_digest: ${{ steps.create.outputs.digest }}
     steps:
@@ -375,6 +380,29 @@ jobs:
           echo "digest=$(cat /tmp/digest.txt)" >> $GITHUB_OUTPUT
         env:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+
+      # Sign + attest the released image
+      - name: Attest build provenance
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: docker.io/zfnd/${{ inputs.image_name }}
+          subject-digest: ${{ steps.create.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install Cosign
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign images with Cosign
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          DIGEST: ${{ steps.create.outputs.digest }}
+          GAR_IMAGE: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
+          HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+        run: |
+          cosign sign --yes "${GAR_IMAGE}@${DIGEST}"
+          cosign sign --yes "${HUB_IMAGE}@${DIGEST}"
 
       # For the merged multi-arch manifest, display:
       # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)

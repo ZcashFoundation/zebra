@@ -12,6 +12,10 @@
 #
 *
 
+# Keep `.git` out of the context (do NOT add `!.git`). The binary takes its commit
+# from the SHORT_SHA build arg; including .git makes the build depend on clone shape.
+# See docs/decisions/devops/0007-reproducible-builds.md.
+
 # Now un-exclude required files and folders:
 #
 !.cargo
