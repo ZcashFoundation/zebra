@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `error::TransactionError`:
+  - `CoinbaseHasEnableSpendsIronwood`
+  - `CoinbaseHasOrchardFlags`
+  - `DuplicateIronwoodNullifier`
+  - `IronwoodProofSize`
+  - `NegativeOrchardValueBalance`
+  - `NotEnoughIronwoodFlags`
+  - `OrchardHasEnableCrossAddress`
+- `transaction::check`:
+  - `has_enough_ironwood_flags`
+  - `orchard_cross_address_disabled`
+  - `orchard_value_balance_non_negative`
+- Halo2 verifiers split for the NU6.3 Orchard-pool freeze:
+  - `halo2::VERIFYING_KEY_V5_PRE_NU6_2`
+  - `halo2::VERIFYING_KEY_V5_POST_NU6_2`
+  - `halo2::VERIFYING_KEY_V6`
+  - `halo2::{VERIFIER_V5_PRE_NU6_2, VERIFIER_V5_POST_NU6_2, VERIFIER_V6}`
+  - `halo2::{orchard_v5_verifier_for, orchard_v6_verifier, VerifierService}`
+
+### Removed
+
+- The pre-split Halo2 verifiers, replaced by the V5/V6 set above:
+  - `halo2::VERIFYING_KEY_PRE_NU6_2`
+  - `halo2::VERIFYING_KEY_POST_NU6_2`
+  - `halo2::{VERIFIER_PRE_NU6_2, VERIFIER_POST_NU6_2, verifier_for}`
+
 ## [9.0.1] - 2026-06-18
 
 ### Changed

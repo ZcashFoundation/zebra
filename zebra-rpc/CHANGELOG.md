@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `client::GetBlockchainInfoBalance::ironwood`, exposing the Ironwood value pool
+  in `getblockchaininfo`.
+
+### Changed
+
+- `methods::BlockchainValuePoolBalances` is now `[GetBlockchainInfoBalance; 6]`
+  (was `; 5`), and `GetBlockchainInfoBalance::{value_pools, zero_pools}` were
+  updated for the added Ironwood pool.
+
 ## [10.0.1] - 2026-06-18
 
 ### Changed
