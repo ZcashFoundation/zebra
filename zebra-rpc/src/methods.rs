@@ -1223,14 +1223,6 @@ where
     ) -> Result<GetBlockResponse> {
         let verbosity = verbosity.unwrap_or(1);
         let network = self.network.clone();
-        let original_hash_or_height = hash_or_height.clone();
-
-        // If verbosity requires a call to `get_block_header`, resolve it here
-        let get_block_header_future = if matches!(verbosity, 1 | 2) {
-            Some(self.get_block_header(original_hash_or_height.clone(), Some(true)))
-        } else {
-            None
-        };
 
         let hash_or_height =
             HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
@@ -1256,9 +1248,16 @@ where
                 }
                 _ => unreachable!("unmatched response to a block request"),
             }
-        } else if let Some(get_block_header_future) = get_block_header_future {
-            let get_block_header_result: Result<GetBlockHeaderResponse> =
-                get_block_header_future.await;
+        } else if matches!(verbosity, 1 | 2) {
+            // Reuse the already-resolved `hash_or_height` (rather than the
+            // caller-supplied string) so `get_block_header` resolves to the same
+            // block this call resolved above, even for tip-relative inputs like a
+            // negative height. Resolving the caller string a second time here would
+            // re-sample the best chain at a different instant and could pick a
+            // different block after a reorg or tip advance. See issue #10550.
+            let get_block_header_result: Result<GetBlockHeaderResponse> = self
+                .get_block_header(hash_or_height.to_string(), Some(true))
+                .await;
 
             let GetBlockHeaderResponse::Object(block_header) = get_block_header_result? else {
                 panic!("must return Object")
