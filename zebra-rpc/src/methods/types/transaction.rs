@@ -290,7 +290,7 @@ pub struct TransactionObject {
     /// mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    pub(crate) confirmations: Option<u32>,
+    pub(crate) confirmations: Option<i64>,
 
     /// Transparent inputs of the transaction.
     #[serde(rename = "vin")]
@@ -794,7 +794,7 @@ impl TransactionObject {
     pub fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
-        confirmations: Option<u32>,
+        confirmations: Option<i64>,
         network: &Network,
         block_time: Option<DateTime<Utc>>,
         block_hash: Option<block::Hash>,

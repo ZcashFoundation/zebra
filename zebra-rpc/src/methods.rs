@@ -1337,9 +1337,7 @@ where
                                     TransactionObject::from_transaction(
                                         tx.clone(),
                                         Some(height),
-                                        Some(confirmations.try_into().expect(
-                                            "should be less than max block height, i32::MAX",
-                                        )),
+                                        Some(confirmations),
                                         &network,
                                         Some(block_time),
                                         Some(hash),
@@ -1791,7 +1789,7 @@ where
                         AnyTx::Mined(mined) if in_best_chain => (
                             mined.tx.clone(),
                             Some(mined.height),
-                            Some(mined.confirmations),
+                            Some(mined.confirmations.into()),
                             Some(mined.block_time),
                         ),
                         _ => {
@@ -1834,7 +1832,7 @@ where
                                 TransactionObject::from_transaction(
                                     tx.tx.clone(),
                                     Some(tx.height),
-                                    Some(tx.confirmations),
+                                    Some(tx.confirmations.into()),
                                     &self.network,
                                     // TODO: Performance gain:
                                     // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752

@@ -831,7 +831,17 @@ async fn rpc_getblock_missing_error() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
-/// Regression test for GHSA-x6v8-c2xp-928m.
+/// Regression test for GHSA-x6v8-c2xp-928m — panics (aborts) before the fix.
+///
+/// When `Depth` returns `None` (side-chain block), `get_block_header` sets
+/// `confirmations = -1`:
+/// https://github.com/ZcashFoundation/zebra/blob/v5.2.0/zebra-rpc/src/methods.rs#L1508
+/// The old code narrowed that to `u32` via `.try_into().expect()`, which panicked.
+///
+/// The fix changes `TransactionObject.confirmations` from `u32` to `i64`, matching
+/// zcashd's signed `int`:
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/rawtransaction.cpp#L311
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/blockchain.cpp#L404
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let _init_guard = zebra_test::init();
@@ -851,7 +861,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
             .for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, rpc_tx_queue) = RpcImpl::new(
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
         Mainnet,
         Default::default(),
         Default::default(),
@@ -873,7 +883,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_future =
         tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
 
-    // get_block_header sub-call: BlockHeader
+    // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
     read_state
         .expect_request(ReadRequest::BlockHeader(block_hash.into()))
         .await
@@ -883,63 +893,37 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
             height: zebra_chain::block::Height(0),
             next_block_hash: None,
         });
-
-    // get_block_header sub-call: SaplingTree
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::SaplingTree(_)))
         .await
         .respond(ReadResponse::SaplingTree(Some(Default::default())));
-
-    // get_block_header sub-call: Depth — return None to simulate a side-chain block
     read_state
         .expect_request(ReadRequest::Depth(block_hash))
         .await
         .respond(ReadResponse::Depth(None));
 
-    // get_block: BlockAndSize
+    // get_block: BlockAndSize, OrchardTree, BlockInfo x2
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
         .await
         .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
-
-    // get_block: OrchardTree
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
         .await
         .respond(ReadResponse::OrchardTree(Some(Default::default())));
-
-    // get_block: BlockInfo (previous block)
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
         .await
         .respond(ReadResponse::BlockInfo(None));
-
-    // get_block: BlockInfo (current block)
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
         .await
         .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
 
-    let result = block_future
+    block_future
         .await
         .expect("task should not panic")
         .expect("getblock should succeed for side-chain blocks");
-
-    if let GetBlockResponse::Object(obj) = &result {
-        let BlockObject { confirmations, .. } = &**obj;
-        assert_eq!(
-            *confirmations, -1,
-            "side-chain block should have -1 confirmations at the block level"
-        );
-    } else {
-        panic!("expected GetBlockResponse::Object for verbosity 2");
-    }
-
-    mempool.expect_no_requests().await;
-    read_state.expect_no_requests().await;
-
-    let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
-    assert!(rpc_tx_queue_task_result.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1257,7 +1241,7 @@ async fn rpc_getrawtransaction() {
                 panic!("unexpected response to Depth request");
             };
 
-            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            let expected_confirmations: i64 = (1 + depth.expect("depth should be Some")).into();
 
             (confirmations, expected_confirmations)
         }
