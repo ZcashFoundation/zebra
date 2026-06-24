@@ -18,13 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   consumer's known chain tips instead of re-streaming the whole non-finalized state,
   and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
   while its finalized state catches up.
+- New `zebra-state` read request `ReadRequest::FindForkPoint` (with response
+  `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
+  locator that is on the best chain — the fork point — for clients tracking chain
+  reorganizations through a read-only state service.
+- New `getreadstateinfo` JSON-RPC method that reports a node's live state database
+  path, indexer gRPC address, database format version, and network (including Regtest
+  activation heights), so a co-located read-state follower can bootstrap a read-only
+  secondary — including against an ephemeral or Regtest node — instead of
+  hand-configuring those values.
 
 ### Changed
 
 - Opening a Zebra state read-only (for example, as a secondary instance over a
   running node's database) now fails with a clear error instead of panicking when
-  the cache directory is missing or unreadable, or when no database exists at the
-  configured path. The read-write open path is unchanged.
+  the cache directory is missing or unreadable, when no database exists at the
+  configured path, or when an ephemeral database is also configured (a read-only
+  secondary must not delete the primary's files). The read-write open path is
+  unchanged.
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 

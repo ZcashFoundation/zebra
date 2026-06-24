@@ -157,6 +157,7 @@ async fn test_z_get_treestate() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Request the treestate by a hash.
@@ -261,6 +262,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -636,6 +638,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         latest_chain_tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1076,6 +1079,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         mock_address_book,
         rx.clone(),
         None,
+        None,
     );
 
     if network.is_a_test_network() && !network.is_default_testnet() {
@@ -1222,6 +1226,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         MockAddressBookPeers::default(),
         rx.clone(),
         None,
+        None,
     );
 
     // Basic variant (default mode and no extra features)
@@ -1338,6 +1343,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         mock_tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 

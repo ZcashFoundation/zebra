@@ -17,7 +17,7 @@ use semver::Version;
 use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    config::database_format_version_on_disk,
+    config::{database_format_version_at_path, database_format_version_on_disk},
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -107,10 +107,34 @@ impl ZebraDb {
         // checked for readability first, so a missing or unreadable directory returns a typed
         // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
         let disk_version = if read_only {
-            DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+            // When an explicit DB path is provided, check that path for readability rather than
+            // the cache_dir; otherwise fall back to the standard cache_dir check.
+            let dir_to_check = config
+                .read_only_db_path
+                .as_deref()
+                .unwrap_or(&config.cache_dir);
+            DiskDb::check_cache_dir_readable(dir_to_check)?;
 
-            database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
+            // When an explicit DB path is provided, read the format version from that path rather
+            // than the one derived from cache_dir.
+            if let Some(explicit_path) = config.read_only_db_path.as_ref() {
+                let version_path =
+                    explicit_path.join(crate::constants::DATABASE_FORMAT_VERSION_FILE_NAME);
+                database_format_version_at_path(
+                    &version_path,
+                    explicit_path,
+                    format_version_in_code.major,
+                )
                 .expect("unable to read database format version file")
+            } else {
+                database_format_version_on_disk(
+                    config,
+                    &db_kind,
+                    format_version_in_code.major,
+                    network,
+                )
+                .expect("unable to read database format version file")
+            }
         } else {
             DiskDb::try_reusing_previous_db_after_major_upgrade(
                 &restorable_db_versions(),
@@ -138,7 +162,10 @@ impl ZebraDb {
         //
         // The read-write path is unaffected: creating a new database is the correct behavior there.
         if read_only && format_change.is_newly_created() {
-            let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
+            let db_path = config
+                .read_only_db_path
+                .clone()
+                .unwrap_or_else(|| config.db_path(&db_kind, format_version_in_code.major, network));
             return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
         }
 

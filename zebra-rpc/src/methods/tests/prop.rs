@@ -1004,6 +1004,7 @@ where
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     (mempool, read_state, rpc, mempool_tx_queue)

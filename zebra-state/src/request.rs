@@ -1269,6 +1269,30 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Finds the fork point between the locator `known_blocks` and the best chain.
+    ///
+    /// `known_blocks` is a block locator. Returns the most recent locator entry that is
+    /// on the best chain (the fork point), or `None` if no entry is on the best chain.
+    /// Returns `None` if the state is empty.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)`](ReadResponse::ForkPoint).
+    FindForkPoint {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+    },
+
+    /// Returns the live finalized-state database location and identity.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::StateDbInfo`](ReadResponse::StateDbInfo) with the on-disk path,
+    /// the running format version, and the database kind. Used by a co-located follower
+    /// to bootstrap a read-only secondary, including against an ephemeral database whose
+    /// path cannot be recomputed from config.
+    StateDbInfo,
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1440,6 +1464,8 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::FindForkPoint { .. } => "find_fork_point",
+            ReadRequest::StateDbInfo => "state_db_info",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",

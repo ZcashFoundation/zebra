@@ -17,5 +17,6 @@ mod tests;
 
 pub use methods::types::{
     get_block_template::{fetch_chain_info, proposal::proposal_block_from_template, MinerParams},
+    get_read_state_info::{GetReadStateInfo, ReadStateNetworkInfo},
     submit_block::SubmitBlockChannel,
 };

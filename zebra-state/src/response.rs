@@ -426,6 +426,22 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
+    /// The response to a `FindForkPoint` request.
+    /// Returns the height and hash of the fork point, or `None` if no locator entry is
+    /// on the best chain.
+    ForkPoint(Option<(block::Height, block::Hash)>),
+
+    /// The response to a `StateDbInfo` request: the live finalized-state database
+    /// location, running format version, and kind.
+    StateDbInfo {
+        /// The on-disk path of the finalized-state database.
+        path: std::path::PathBuf,
+        /// The database format version of the running code.
+        format_version: semver::Version,
+        /// The database kind (e.g. `"state"`).
+        db_kind: String,
+    },
+
     /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
     /// _best_ non-finalized chain, or the finalized chain.
     UnspentBestChainUtxo(Option<transparent::Utxo>),
@@ -596,7 +612,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
-            | ReadResponse::IsTransparentOutputSpent(_) => {
+            | ReadResponse::IsTransparentOutputSpent(_)
+            | ReadResponse::ForkPoint(_)
+            | ReadResponse::StateDbInfo { .. } => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

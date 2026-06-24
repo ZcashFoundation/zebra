@@ -79,6 +79,18 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
         let block_cases = Transcript::from(block_cases);
         block_cases.check(read_state.clone()).await?;
 
+        let fork_point_cases = vec![(
+            ReadRequest::FindForkPoint {
+                known_blocks: vec![block.hash()],
+            },
+            Ok(ReadResponse::ForkPoint(Some((
+                block.coinbase_height().unwrap(),
+                block.hash(),
+            )))),
+        )];
+        let fork_point_cases = Transcript::from(fork_point_cases);
+        fork_point_cases.check(read_state.clone()).await?;
+
         // Spec: transactions in the genesis block are ignored.
         if block.coinbase_height().unwrap().0 == 0 {
             continue;
@@ -352,6 +364,12 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
         (
             ReadRequest::Block(block.coinbase_height().unwrap().into()),
             Ok(ReadResponse::Block(None)),
+        ),
+        (
+            ReadRequest::FindForkPoint {
+                known_blocks: vec![block.hash()],
+            },
+            Ok(ReadResponse::ForkPoint(None)),
         ),
     ]
 }
