@@ -658,3 +658,25 @@ fn read_only_open_with_unreadable_cache_dir_returns_error() {
         }
     }
 }
+
+/// Opening a read-only state with an ephemeral database configured must fail with
+/// [`StateInitError::ReadOnlyEphemeralConflict`]: a read-only secondary follows another
+/// process's primary database and must never delete it, so it cannot also be ephemeral
+/// (which would delete the primary's files on drop).
+#[test]
+fn read_only_open_with_ephemeral_config_returns_error() {
+    let network = Network::Mainnet;
+
+    let config = Config {
+        ephemeral: true,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyEphemeralConflict) => {}
+        Err(other) => panic!("expected ReadOnlyEphemeralConflict, got: {other:?}"),
+        Ok(_) => {
+            panic!("expected an error when opening a read-only state with an ephemeral config")
+        }
+    }
+}
