@@ -322,6 +322,21 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
 
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
 ///
+/// Build an empty `NonFinalizedState` and an ephemeral `FinalizedState` with a
+/// populated value pool — the shared setup for the invalidate/reconsider
+/// regression tests below.
+fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, FinalizedState) {
+    let state = NonFinalizedState::new(network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    (state, finalized_state)
+}
+
 /// Invalidating the non-finalized root of a tracked chain previously called
 /// `BTreeSet::remove(&chain)`, which compared the stored chain against
 /// itself via `Chain::cmp` and reached an `unreachable!()` for matching tip
@@ -335,14 +350,7 @@ fn invalidating_non_finalized_root_does_not_panic() {
     let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
     let block2 = block1.make_fake_child().set_work(10);
 
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    );
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
 
     state
         .commit_new_chain(block1.clone().prepare(), &finalized_state)
@@ -378,14 +386,7 @@ fn invalidating_same_height_fork_tips_is_idempotent() {
     let block2a = block1.make_fake_child().set_work(10);
     let block2b = block1.make_fake_child().set_work(11);
 
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    );
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
 
     state
         .commit_new_chain(block1.clone().prepare(), &finalized_state)
@@ -429,14 +430,7 @@ fn reconsider_block_removes_live_entry_and_second_call_returns_missing() {
     let block2 = block1.make_fake_child().set_work(10);
     let block3 = block2.make_fake_child().set_work(1);
 
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    );
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
 
     state
         .commit_new_chain(block1.prepare(), &finalized_state)
@@ -491,14 +485,7 @@ fn reconsider_block_preserves_record_when_parent_chain_missing() {
     let block2 = block1.make_fake_child().set_work(10);
     let block3 = block2.make_fake_child().set_work(1);
 
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    );
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
 
     state
         .commit_new_chain(block1.clone().prepare(), &finalized_state)

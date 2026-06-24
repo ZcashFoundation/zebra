@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
-- Handle `invalidateblock` and `reconsiderblock` edge cases without panicking. Three previously process-fatal paths in the non-finalized state are now graceful: `invalidateblock` on the root of a tracked chain, `invalidateblock` on two same-height sibling fork tips, and a repeated `reconsiderblock` for the same hash. `Chain::cmp` no longer panics on matching tip hashes; the root invalidation path retains by tip hash; `reconsider_block` removes the invalidation record from the live map; and replay errors propagate as a typed `ReconsiderError::ReplayFailed` rather than `expect()` ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and same-height sibling-tip invalidation, repeated reconsideration) without panicking ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 

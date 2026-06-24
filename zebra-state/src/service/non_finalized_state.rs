@@ -431,15 +431,9 @@ impl NonFinalizedState {
         block_hash: block::Hash,
         finalized_state: &ZebraDb,
     ) -> Result<Vec<block::Hash>, ReconsiderError> {
-        // Locate the invalidated record without removing it. We must keep the
-        // record live across all fallible steps below: parent lookup and replay
-        // can fail, and the previous version's removal-from-a-clone left the
-        // live entry stale, which lets a second reconsider replay the same
-        // chain suffix into a chain set that already contains the restored tip
-        // and panic in `Chain::cmp`. Removing the live entry up front would
-        // instead permanently lose the invalidation record on a recoverable
-        // error. So: look up, replay against a clone, then `shift_remove`
-        // atomically with the insert below.
+        // Locate the record but keep it live until replay succeeds, so a
+        // recoverable error can't lose it; it is `shift_remove`d atomically with
+        // the insert below.
         let (height, invalidated_blocks_arc) = self
             .invalidated_blocks
             .iter()

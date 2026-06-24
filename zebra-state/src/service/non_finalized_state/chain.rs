@@ -2335,11 +2335,12 @@ impl Ord for Chain {
     /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
     /// interior mutability.
     ///
-    /// Two chains with the same cumulative work and tip hash compare equal. The
-    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
-    /// attempt to insert a chain whose tip hash matches an existing chain is a
-    /// no-op rather than a process-fatal panic. Callers that need to replace a
-    /// chain with the same tip hash must remove the existing entry first.
+    /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
+    /// the tip hash match. The [`NonFinalizedState::chain_set`][2] is a
+    /// `BTreeSet<Arc<Chain>>`, so an attempt to insert a chain that compares
+    /// equal to an existing entry is a no-op rather than a process-fatal panic.
+    /// Callers that need to replace such a chain must remove the existing entry
+    /// first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
