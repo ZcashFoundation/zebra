@@ -763,6 +763,13 @@ pub trait Rpc {
         n: u32,
         include_mempool: Option<bool>,
     ) -> Result<GetTxOutResponse>;
+
+    /// Returns the information a co-located read-state follower needs to open a read-only
+    /// secondary of this node's state and follow its non-finalized chain.
+    ///
+    /// zebra-only; not a zcashd-compatible method.
+    #[method(name = "getreadstateinfo")]
+    async fn get_read_state_info(&self) -> Result<types::get_read_state_info::GetReadStateInfo>;
 }
 
 /// RPC method implementations.
@@ -787,6 +794,10 @@ where
 
     /// The configured network for this RPC service.
     network: Network,
+
+    /// The node's indexer gRPC listen address, reported to read-state followers. `None`
+    /// when the indexer is not configured.
+    indexer_grpc_addr: Option<std::net::SocketAddr>,
 
     /// Test-only option that makes Zebra say it is at the chain tip,
     /// no matter what the estimated height or local clock is.
@@ -878,6 +889,7 @@ where
         address_book: AddressBook,
         last_warn_error_log_rx: LoggedLastEvent,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
+        indexer_grpc_addr: Option<std::net::SocketAddr>,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -905,6 +917,7 @@ where
             build_version,
             user_agent,
             network: network.clone(),
+            indexer_grpc_addr,
             debug_force_finished_sync,
             mempool: mempool.clone(),
             state: state.clone(),
@@ -3170,6 +3183,34 @@ where
             zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
             _ => unreachable!("unmatched response to a `Transaction` request"),
         }
+    }
+
+    async fn get_read_state_info(&self) -> Result<types::get_read_state_info::GetReadStateInfo> {
+        use types::get_read_state_info::{network_info, GetReadStateInfo};
+
+        let response = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::StateDbInfo)
+            .await
+            .map_misc_error()?;
+
+        let zebra_state::ReadResponse::StateDbInfo {
+            path,
+            format_version,
+            db_kind,
+        } = response
+        else {
+            unreachable!("unexpected response to StateDbInfo request: {response:?}")
+        };
+
+        Ok(GetReadStateInfo::new(
+            self.indexer_grpc_addr.map(|addr| addr.to_string()),
+            path.display().to_string(),
+            format_version.to_string(),
+            db_kind,
+            network_info(&self.network),
+        ))
     }
 }
 

@@ -301,6 +301,7 @@ impl StartCmd {
             address_book.clone(),
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
+            config.rpc.indexer_listen_addr,
         );
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
