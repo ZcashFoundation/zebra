@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
+  `x86_64` and `aarch64`, so operators can run a node without Docker or a source
+  build, also installable with `cargo binstall zebrad`. Each `.tar.gz` carries a
+  SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature
+  over the checksum manifest ([#10799](https://github.com/ZcashFoundation/zebra/pull/10799))
 - Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
   to forbid spending coinbase outputs into transparent outputs (the inverse of
   zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
