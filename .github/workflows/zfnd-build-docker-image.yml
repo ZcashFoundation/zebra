@@ -404,6 +404,39 @@ jobs:
           cosign sign --yes "${GAR_IMAGE}@${DIGEST}"
           cosign sign --yes "${HUB_IMAGE}@${DIGEST}"
 
+      - name: Generate SBOM
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: docker.io/zfnd/${{ inputs.image_name }}@${{ steps.create.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest SBOM
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: docker.io/zfnd/${{ inputs.image_name }}
+          subject-digest: ${{ steps.create.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      # Fail the release if the signature or attestations don't verify.
+      - name: Verify release signatures
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          DIGEST: ${{ steps.create.outputs.digest }}
+          HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cosign verify "${HUB_IMAGE}@${DIGEST}" \
+            --certificate-identity-regexp='^https://github.com/ZcashFoundation/zebra/' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+          gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
+            --owner ZcashFoundation \
+            --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
+
       # For the merged multi-arch manifest, display:
       # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)
       # - the available recommendations

@@ -47,10 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   without the shared build cache, so a published image cannot inherit a layer from
   a lower-trust build
   ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
-- Release Docker images are signed and carry build provenance. Each production
-  release gets a Cosign keyless signature and a signed SLSA provenance attestation,
-  so anyone can confirm an image came from Zebra's CI with `cosign verify` or
-  `gh attestation verify`
+- Release Docker images are signed and carry build provenance and a signed SBOM.
+  Each production release gets a Cosign keyless signature, a signed SLSA provenance
+  attestation, and a signed SBOM, so anyone can confirm an image came from Zebra's CI
+  with `cosign verify` or `gh attestation verify`
   ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
