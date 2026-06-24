@@ -16,8 +16,12 @@ pub struct ReadStateNetworkInfo {
     /// The network's genesis block hash, in display order.
     genesis_hash: String,
     /// Configured network-upgrade activation heights. Present only for Regtest, where the
-    /// follower must reconstruct them; absent for Mainnet/Testnet, whose heights are fixed
-    /// by the network kind.
+    /// follower must reconstruct them; absent for Mainnet and the default Testnet, whose
+    /// heights are fixed by the network kind.
+    ///
+    /// Note: a *custom* (non-default) Testnet is not supported here — its heights are not
+    /// reported, so a follower would reconstruct the default public Testnet instead. Only
+    /// Mainnet, the default Testnet, and Regtest are supported for bootstrap.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     regtest_activation_heights: Option<ConfiguredActivationHeights>,
 }
@@ -28,6 +32,9 @@ pub struct ReadStateNetworkInfo {
 #[serde(rename_all = "camelCase")]
 pub struct GetReadStateInfo {
     /// The node's indexer gRPC listen address, or `None` if the indexer is not enabled.
+    ///
+    /// This reflects the operator's configured `indexer_listen_addr` and may be a public
+    /// bind address; treat it as you would the indexer port itself.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     indexer_grpc_addr: Option<String>,
     /// The live on-disk path of the node's finalized-state database.
@@ -51,6 +58,10 @@ pub fn network_info(network: &Network) -> ReadStateNetworkInfo {
     .to_string();
 
     let regtest_activation_heights = network.is_regtest().then(|| {
+        // The *effective* activation height of each upgrade: an unconfigured upgrade
+        // reports its successor's height (`activation_height` falls through), so the
+        // heights are monotonic. Feeding them back through `Network::new_regtest`
+        // reproduces the same `activation_list`, so this extraction is lossless.
         let h = |nu: NetworkUpgrade| nu.activation_height(network).map(|height| height.0);
         // `..Default::default()` covers the cfg-gated `zfuture` field without a cfg here.
         #[allow(clippy::needless_update)]
