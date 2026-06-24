@@ -13,10 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of panicking when a read-only state cannot be opened: `FinalizedState::new`,
   `FinalizedState::new_with_debug`, `init_read_only`, `spawn_init_read_only`, and the
   lower-level `ZebraDb::new` / `DiskDb::new`. A read-only open against a missing or
-  unreadable cache directory, or with no existing database on disk, now returns the
-  new public `StateInitError` rather than panicking. The read-write open path is
-  unchanged.
+  unreadable cache directory, with no existing database on disk, or with an ephemeral
+  database also configured (a read-only secondary must not delete the primary's
+  files), now returns the new public `StateInitError` rather than panicking. The
+  read-write open path is unchanged.
   ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `ReadRequest::NonFinalizedBlocksListener` is now a struct variant carrying the
+  caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
+  blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
+  is now re-exported from the crate root.
 
 ## [9.0.1] - 2026-06-18
 

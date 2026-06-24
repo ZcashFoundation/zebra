@@ -28,6 +28,7 @@ jobs:
     outputs:
       lint: ${{ steps.filter.outputs.lint || 'true' }}
       hadolint: ${{ steps.filter.outputs.hadolint || 'true' }}
+      shellcheck: ${{ steps.filter.outputs.shellcheck || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name == 'pull_request'
@@ -340,6 +341,25 @@ jobs:
           dockerfile: docker/Dockerfile
           failure-threshold: warning
 
+  shellcheck:
+    name: shellcheck
+    needs: changes
+    if: needs.changes.outputs.shellcheck == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # shellcheck is preinstalled on the ubuntu-latest runner image.
+      - name: Run shellcheck
+        run: |
+          find . -type f -name '*.sh' \
+            -not -path './target/*' \
+            -print0 | xargs -0 -r shellcheck --color=always
+
   lint:
     runs-on: ubuntu-latest
     if: always()
@@ -357,10 +377,11 @@ jobs:
       - deny
       - vet
       - hadolint
+      - shellcheck
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, vet, hadolint
+          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, vet, hadolint, shellcheck

@@ -23,6 +23,11 @@ hadolint:
   - ".github/workflows/lint.yml"
   - ".github/path-filters.yml"
 
+shellcheck:
+  - "**/*.sh"
+  - ".github/workflows/lint.yml"
+  - ".github/path-filters.yml"
+
 unit_tests:
   - "**/*.rs"
   - "**/Cargo.toml"

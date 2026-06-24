@@ -1,32 +1,96 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::BoxError;
 use zebra_chain::{
-    block::Height,
+    block::{Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
+    serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
+use zebra_state::{HashOrHeight, ReadRequest, ReadResponse};
 use zebra_test::{
-    mock_service::MockService,
+    mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
 };
 
-use crate::indexer::{self, indexer_client::IndexerClient, Empty};
+use crate::indexer::{self, indexer_client::IndexerClient, BlockRequest, Empty};
 
 #[tokio::test]
 async fn rpc_server_spawn() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let (_server_task, client, mock_chain_tip_sender, mempool_transaction_sender) =
-        start_server_and_get_client().await?;
+    let (
+        _server_task,
+        client,
+        mock_read_service,
+        mock_chain_tip_sender,
+        mempool_transaction_sender,
+    ) = start_server_and_get_client().await?;
 
     test_chain_tip_change(client.clone(), mock_chain_tip_sender).await?;
     test_mempool_change(client.clone(), mempool_transaction_sender).await?;
+    test_get_block(client.clone(), mock_read_service).await?;
+
+    Ok(())
+}
+
+/// Tests that the `GetBlock` method returns the requested block and rejects an empty request.
+async fn test_get_block(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
+) -> Result<()> {
+    // A request whose bytes are neither a 32-byte hash nor a 4-byte height is rejected without
+    // touching the state.
+    let status = client
+        .get_block(tonic::Request::new(BlockRequest {
+            hash_or_height: Vec::new(),
+        }))
+        .await
+        .expect_err("a block request without a valid hash or height should be rejected");
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+
+    // A height above the maximum valid block height is rejected without touching the state.
+    let status = client
+        .get_block(tonic::Request::new(BlockRequest {
+            hash_or_height: u32::MAX.to_be_bytes().to_vec(),
+        }))
+        .await
+        .expect_err("an out-of-range block height should be rejected");
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+
+    // A block requested by height is returned along with its hash.
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let expected_hash = block.hash();
+    let height = block
+        .coinbase_height()
+        .expect("test block has a coinbase height");
+
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: height.0.to_be_bytes().to_vec(),
+            }))
+            .await
+    });
+
+    mock_read_service
+        .expect_request(ReadRequest::Block(HashOrHeight::Height(height)))
+        .await
+        .respond(ReadResponse::Block(Some(block.clone())));
+
+    let response = request_task
+        .await?
+        .expect("get_block should succeed")
+        .into_inner();
+    let (decoded_block, decoded_hash) = response.decode().expect("response should decode");
+    assert_eq!(decoded_hash, expected_hash);
+    assert_eq!(decoded_block.hash(), expected_hash);
 
     Ok(())
 }
@@ -79,6 +143,7 @@ async fn test_mempool_change(
 async fn start_server_and_get_client() -> Result<(
     JoinHandle<Result<(), BoxError>>,
     IndexerClient<tonic::transport::Channel>,
+    MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
     MockChainTipSender,
     broadcast::Sender<MempoolChange>,
 )> {
@@ -95,7 +160,7 @@ async fn start_server_and_get_client() -> Result<(
     let mempool_tx_subscriber = MempoolTxSubscriber::new(mempool_transaction_sender.clone());
     let (server_task, listen_addr) = indexer::server::init(
         listen_addr,
-        mock_read_service,
+        mock_read_service.clone(),
         mock_chain_tip_change,
         mempool_tx_subscriber.clone(),
     )
@@ -117,6 +182,7 @@ async fn start_server_and_get_client() -> Result<(
     Ok((
         server_task,
         client,
+        mock_read_service,
         mock_chain_tip_change_sender,
         mempool_transaction_sender,
     ))
