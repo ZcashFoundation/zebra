@@ -84,18 +84,21 @@ body = """
 """
 trim = true
 postprocessors = [
-    { pattern = "(?m)^- [[:alpha:]]+(\\([^)]*\\))?!?:[[:space:]]*", replace = "- " },
+    { pattern = "(?m)^- (\\[\\*\\*breaking\\*\\*\\] )?[[:alpha:]]+(\\([^)]*\\))?!?:[[:space:]]*", replace = "- ${1}" },
 ]
 protect_breaking_commits = true
 sort_commits = "oldest"
+# Changelog display only; release triggering is `release_commits` above. Skipped
+# types still publish (they just print no changelog line), and
+# `protect_breaking_commits = true` keeps breaking commits visible even when
+# their type is skipped, so breaking changes never silently vanish.
 commit_parsers = [
     { message = "^feat", group = "Added" },
     { message = "^fix", group = "Fixed" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Changed" },
-    { message = "^docs", group = "Documentation" },
-    { message = "^build\\(deps\\)", group = "Dependencies" },
-    { message = "^build", group = "Build" },
+    { message = "^perf", group = "Changed" },
+    { message = "^refactor", skip = true },
+    { message = "^docs", skip = true },
+    { message = "^build", skip = true },
     { message = "^test", skip = true },
     { message = "^ci", skip = true },
     { message = "^chore", skip = true },
