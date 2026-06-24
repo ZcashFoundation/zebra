@@ -7,6 +7,8 @@ Contents:
 - [Download Zebra](#download-and-build-zebra)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
+  - [Extra coinbase data](#extra-coinbase-data)
+  - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
@@ -40,7 +42,11 @@ Tweak the following options in order to prepare for mining.
 
 [#miner-address]: #miner-address
 
-Node miner address is required. At the moment zebra only allows `p2pkh` or `p2sh` transparent addresses.
+A miner address is required. Zebra accepts:
+
+- a transparent `p2pkh` or `p2sh` address,
+- a Sapling shielded address, or
+- a Unified Address.
 
 ```toml
 [mining]
@@ -48,6 +54,44 @@ miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 ```
 
 The above address is the ZF Mainnet funding stream address. It is used here purely as an example.
+
+If `miner_address` is a Unified Address with more than one receiver, Zebra sends the block reward (and the [miner memo](#miner-memo), if set) to a single receiver, preferring Orchard, then Sapling, then transparent — whichever is the first of those present in the address.
+
+### Extra coinbase data
+
+[#extra-coinbase-data]: #extra-coinbase-data
+
+Zebra does not tag its blocks by default. If you don't set `extra_coinbase_data`, the blocks you mine carry no identifying data. Setting this option fixes that:
+
+```toml
+[mining]
+miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
+extra_coinbase_data = "/MyPoolName/"
+```
+
+A few important details about how this value is used:
+
+- The string is inserted into the transparent input script of the coinbase transaction, immediately after the encoded block height.
+- The string is always encoded as raw UTF-8 bytes. It is **not** hex-decoded, even if it looks like a valid hex string — `extra_coinbase_data = "deadbeef"` puts the eight ASCII characters `deadbeef` in the coinbase script, not the two bytes `0xde 0xad`. If you need to embed specific raw bytes, write them out as UTF-8 text (most mining tags are short, human-readable pool names or identifiers, so this is usually what you want anyway).
+- The encoded value, including Zebra's script push overhead, is limited to 94 bytes. Because that limit includes 1-2 bytes of push-opcode overhead, keep your tag at 92 bytes or less to be safe. If the limit is exceeded, Zebra refuses to build a block template until the value is shortened.
+- This field is optional. Leaving it unset is valid — Zebra just won't tag the block.
+
+You can confirm the tag is being applied by calling `getblocktemplate` and checking the `coinbasetxn.data` field (see [Testing the setup](#testing-the-setup)): the hex string after the height bytes should decode back to your configured text.
+
+### Miner memo
+
+[#miner-memo]: #miner-memo
+
+`miner_memo` sets the shielded memo field attached to the miner's reward output, for pools or solo miners who want to leave a message that's only visible to whoever can view the shielded output (rather than in plaintext on-chain, like `extra_coinbase_data`).
+
+```toml
+[mining]
+miner_address = 'u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a'
+miner_memo = "Mined by MyPoolName"
+```
+
+- Like `extra_coinbase_data`, the value is always encoded as raw UTF-8 bytes (no hex-decoding), and is limited to 512 bytes.
+- It only takes effect if the block reward is actually paid to a shielded receiver. That means `miner_address` must be a Sapling address, or a Unified Address whose preferred receiver (per the [miner address](#miner-address) rules above) is Orchard or Sapling. If `miner_address` resolves to a transparent receiver, `miner_memo` is configured but silently has no effect, since there is no shielded output to attach it to.
 
 ### RPC section
 
