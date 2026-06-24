@@ -32,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   secondary must not delete the primary's files). The read-write open path is
   unchanged.
 
+### Fixed
+
+- Released `zebrad` binaries report their source commit in `zebrad version`
+  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+
+### Security
+
+- Zebra's release Docker images are now reproducible: an independent rebuild of a
+  published `zebrad` from the same commit produces the same binary. The Rust
+  toolchain and the Rust and Debian base images are pinned by exact version and
+  digest, and build paths and file timestamps are normalized, so two independent
+  builds of the same commit produce the same binary. Release images are also built
+  without the shared build cache, so a published image cannot inherit a layer from
+  a lower-trust build
+  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+- Release Docker images are signed and carry build provenance. Each production
+  release gets a Cosign keyless signature and a signed SLSA provenance attestation,
+  so anyone can confirm an image came from Zebra's CI with `cosign verify` or
+  `gh attestation verify`
+  ([#XXXX](https://github.com/ZcashFoundation/zebra/pull/XXXX))
+
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
