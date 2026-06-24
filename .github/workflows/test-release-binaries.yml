@@ -1,0 +1,31 @@
+# Validation harness for the release-binaries build and signing path.
+# Builds from the current ref with the same reusable workflow the release uses,
+# and uploads the result as a CI artifact instead of to a release.
+#
+# Runs a full release build, so it is scoped to this branch. Temporary: remove
+# once the release path has run on a real release.
+name: Test release binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the test archives"
+        required: false
+        type: string
+        default: "0.0.0-test"
+  push:
+    branches:
+      - build/release-binary-downloads
+
+permissions: {}
+
+jobs:
+  test:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      version: ${{ inputs.version || '0.0.0-test' }}
