@@ -32,7 +32,7 @@ use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_end
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    write_database_format_version_to_disk, Config,
+    write_database_format_version_to_disk, Config, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -88,10 +88,9 @@ pub struct DiskDb {
     /// The configured network for this database.
     network: Network,
 
-    /// The configured temporary database setting.
-    ///
-    /// If true, the database files are deleted on drop.
-    ephemeral: bool,
+    /// How this database was opened: a read-write primary (persistent or ephemeral)
+    /// or a read-only secondary. See [`DbMode`].
+    mode: DbMode,
 
     /// A boolean flag indicating whether the db format change task has finished
     /// applying any format changes that may have been required.
@@ -380,6 +379,38 @@ pub trait ReadDisk {
         R: RangeBounds<K>;
 }
 
+/// How a [`DiskDb`] instance is opened.
+///
+/// These modes are mutually exclusive — an ephemeral database is a read-write primary
+/// this process owns and deletes on drop, a persistent database is a read-write primary
+/// whose files are kept, and a read-only secondary follows another process's primary and
+/// never writes, flushes, or deletes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DbMode {
+    /// A read-write primary backed by persistent on-disk files that are kept on drop.
+    Persistent,
+
+    /// A read-write primary backed by temporary files that are deleted on drop.
+    Ephemeral,
+
+    /// A read-only secondary that follows an existing primary's on-disk state. It owns
+    /// no files and never writes, flushes, or deletes them.
+    ReadOnlySecondary,
+}
+
+impl DbMode {
+    /// Returns true if dropping the database should delete its files.
+    fn deletes_files_on_drop(self) -> bool {
+        matches!(self, DbMode::Ephemeral)
+    }
+
+    /// Returns true if this is a read-only secondary instance, which RocksDB does not
+    /// allow writes or flushes on.
+    fn is_read_only(self) -> bool {
+        matches!(self, DbMode::ReadOnlySecondary)
+    }
+}
+
 impl PartialEq for DiskDb {
     fn eq(&self, other: &Self) -> bool {
         if self.db.path() == other.db.path() {
@@ -388,7 +419,8 @@ impl PartialEq for DiskDb {
                 "database with same path but different network configs",
             );
             assert_eq!(
-                self.ephemeral, other.ephemeral,
+                self.mode.deletes_files_on_drop(),
+                other.mode.deletes_files_on_drop(),
                 "database with same path but different ephemeral configs",
             );
 
@@ -965,9 +997,13 @@ impl DiskDb {
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
     ///
+    /// # Errors
+    ///
+    /// - In read-only mode, if the cache directory is missing or unreadable.
+    ///
     /// # Panics
     ///
-    /// - If the cache directory does not exist and can't be created.
+    /// - In read-write mode, if the cache directory does not exist and can't be created.
     /// - If the database cannot be opened for whatever reason.
     pub fn new(
         config: &Config,
@@ -976,10 +1012,30 @@ impl DiskDb {
         network: &Network,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
-    ) -> DiskDb {
+    ) -> Result<DiskDb, StateInitError> {
+        // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
+        // database is a read-write primary this process owns and deletes on drop, while
+        // a read-only secondary follows another process's primary and must never delete
+        // it. Combining them is a configuration error — it would delete the primary's
+        // files on drop — so reject it here rather than silently coercing it (a check
+        // that must hold in release builds, not just debug).
+        let mode = match (read_only, config.ephemeral) {
+            (true, true) => return Err(StateInitError::ReadOnlyEphemeralConflict),
+            (true, false) => DbMode::ReadOnlySecondary,
+            (false, true) => DbMode::Ephemeral,
+            (false, false) => DbMode::Persistent,
+        };
+
         // If the database is ephemeral, we don't need to check the cache directory.
         if !config.ephemeral {
-            DiskDb::validate_cache_dir(&config.cache_dir);
+            if read_only {
+                // A read-only secondary instance must never create the primary cache
+                // directory: the primary zebrad owns it. At most, verify it already
+                // exists and is readable, and fail with a clear error otherwise.
+                DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+            } else {
+                DiskDb::validate_cache_dir(&config.cache_dir);
+            }
         }
 
         let db_kind = db_kind.as_ref();
@@ -1020,14 +1076,14 @@ impl DiskDb {
                     db_kind: db_kind.to_string(),
                     format_version_in_code: format_version_in_code.clone(),
                     network: network.clone(),
-                    ephemeral: config.ephemeral,
+                    mode,
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();
 
-                db
+                Ok(db)
             }
 
             Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
@@ -1439,7 +1495,7 @@ impl DiskDb {
             let mut ephemeral_note = "";
 
             if force {
-                if self.ephemeral {
+                if self.mode.deletes_files_on_drop() {
                     ephemeral_note = " and removing ephemeral files";
                 }
 
@@ -1457,7 +1513,7 @@ impl DiskDb {
                     ephemeral_note,
                 );
             } else {
-                if self.ephemeral {
+                if self.mode.deletes_files_on_drop() {
                     ephemeral_note = " and files";
                 }
 
@@ -1482,39 +1538,42 @@ impl DiskDb {
         let path = self.path();
         debug!(?path, "flushing database to disk");
 
-        // These flushes can fail during forced shutdown or during Drop after a shutdown,
-        // particularly in tests. If they fail, there's nothing we can do about it anyway.
-        if let Err(error) = self.db.flush() {
-            let error = format!("{error:?}");
-            if error.to_ascii_lowercase().contains("shutdown in progress") {
-                debug!(
-                    ?error,
-                    ?path,
-                    "expected shutdown error flushing database SST files to disk"
-                );
-            } else {
-                info!(
-                    ?error,
-                    ?path,
-                    "unexpected error flushing database SST files to disk during shutdown"
-                );
+        // A read-only secondary instance has nothing to flush, and RocksDB rejects
+        // `flush()`/`flush_wal()` on secondaries with "Not supported operation in
+        // secondary mode". Only a read-write primary needs flushing on shutdown.
+        if !self.mode.is_read_only() {
+            // These flushes can fail during forced shutdown or during Drop after a shutdown,
+            // particularly in tests. If they fail, there's nothing we can do about it anyway.
+            if let Err(error) = self.db.flush() {
+                if matches!(error.kind(), ErrorKind::ShutdownInProgress) {
+                    debug!(
+                        ?error,
+                        ?path,
+                        "expected shutdown error flushing database SST files to disk"
+                    );
+                } else {
+                    info!(
+                        ?error,
+                        ?path,
+                        "unexpected error flushing database SST files to disk during shutdown"
+                    );
+                }
             }
-        }
 
-        if let Err(error) = self.db.flush_wal(true) {
-            let error = format!("{error:?}");
-            if error.to_ascii_lowercase().contains("shutdown in progress") {
-                debug!(
-                    ?error,
-                    ?path,
-                    "expected shutdown error flushing database WAL buffer to disk"
-                );
-            } else {
-                info!(
-                    ?error,
-                    ?path,
-                    "unexpected error flushing database WAL buffer to disk during shutdown"
-                );
+            if let Err(error) = self.db.flush_wal(true) {
+                if matches!(error.kind(), ErrorKind::ShutdownInProgress) {
+                    debug!(
+                        ?error,
+                        ?path,
+                        "expected shutdown error flushing database WAL buffer to disk"
+                    );
+                } else {
+                    info!(
+                        ?error,
+                        ?path,
+                        "unexpected error flushing database WAL buffer to disk during shutdown"
+                    );
+                }
             }
         }
 
@@ -1599,7 +1658,7 @@ impl DiskDb {
         // This function and all functions that it calls should avoid cloning the shared database
         // instance. See `shutdown()` for details.
 
-        if !self.ephemeral {
+        if !self.mode.deletes_files_on_drop() {
             return;
         }
 
@@ -1664,6 +1723,23 @@ impl DiskDb {
                 self.zs_is_empty(&default_cf),
                 "Zebra should not store data in the 'default' column family"
             );
+        }
+    }
+
+    // Checks that a cache directory already exists and is readable, without creating it.
+    //
+    // Used when opening a read-only secondary instance, which must never create the
+    // primary's cache directory. Returns a [`StateInitError`] if the directory is missing
+    // or unreadable.
+    pub(crate) fn check_cache_dir_readable(
+        cache_dir: &std::path::Path,
+    ) -> Result<(), StateInitError> {
+        match fs::read_dir(cache_dir) {
+            Ok(_) => Ok(()),
+            Err(source) => Err(StateInitError::ReadOnlyCacheDirUnreadable {
+                path: cache_dir.to_path_buf(),
+                source,
+            }),
         }
     }
 

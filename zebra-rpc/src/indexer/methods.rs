@@ -1,6 +1,6 @@
 //! Implements `Indexer` methods on the `IndexerRPC` type
 
-use std::pin::Pin;
+use std::{collections::HashSet, pin::Pin, time::Duration};
 
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -8,17 +8,25 @@ use tonic::{Response, Status};
 use tower::util::ServiceExt;
 
 use tracing::Span;
-use zebra_chain::{chain_tip::ChainTip, serialization::BytesInDisplayOrder};
+use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse, ReadState};
+use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
 
 use super::{
-    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
-    MempoolChangeMessage,
+    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
+    Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
+
+/// How long to wait for a backpressured send to the non-finalized stream before treating the
+/// consumer as hung and dropping the subscription.
+///
+/// The non-finalized stream applies backpressure (rather than dropping blocks) so a slow consumer
+/// doesn't miss blocks, but without a bound a consumer whose connection is half-open (dead TCP not
+/// yet detected) would block the listener task indefinitely.
+const NON_FINALIZED_SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -83,16 +91,20 @@ where
 
     async fn non_finalized_state_change(
         &self,
-        _: tonic::Request<Empty>,
+        request: tonic::Request<NonFinalizedStateChangeRequest>,
     ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
         let span = Span::current();
         let read_state = self.read_state.clone();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
 
+        // The caller may provide the hashes of the chain tips it already has so the server only
+        // streams blocks after those tips. Malformed hashes (wrong length) are rejected up front.
+        let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
+
         tokio::spawn(async move {
             let mut non_finalized_state_change = match read_state
-                .oneshot(ReadRequest::NonFinalizedBlocksListener)
+                .oneshot(ReadRequest::NonFinalizedBlocksListener { known_chain_tips })
                 .await
             {
                 Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
@@ -114,11 +126,18 @@ where
                 }
             };
 
-            // Notify the client of chain tip changes until the channel is closed
+            // Notify the client of new blocks until the channel is closed.
+            //
+            // Unlike the other streams, this uses `send().await` to apply backpressure to the
+            // non-finalized state listener rather than dropping blocks for a slow consumer. A send
+            // error means the client disconnected; a send that doesn't complete within
+            // `NON_FINALIZED_SEND_TIMEOUT` means the consumer is hung. In both cases the task ends
+            // rather than blocking forever.
             while let Some((hash, block)) = non_finalized_state_change.recv().await {
-                match response_sender.try_send(Ok(BlockAndHash::new(hash, block))) {
-                    Ok(()) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                let send = response_sender.send(Ok(BlockAndHash::new(hash, block)));
+                match tokio::time::timeout(NON_FINALIZED_SEND_TIMEOUT, send).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
                         span.in_scope(|| {
                             tracing::info!(
                                 "client disconnected, dropping non_finalized_state_change task"
@@ -126,10 +145,11 @@ where
                         });
                         return;
                     }
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    Err(_) => {
                         span.in_scope(|| {
                             tracing::warn!(
-                                "slow consumer, dropping non_finalized_state_change stream"
+                                "slow consumer, dropping non_finalized_state_change stream after \
+                                 send timed out"
                             );
                         });
                         return;
@@ -211,5 +231,151 @@ where
         });
 
         Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn get_block(
+        &self,
+        request: tonic::Request<BlockRequest>,
+    ) -> Result<Response<BlockAndHash>, Status> {
+        // The request carries a single `hash_or_height` byte string: a 32-byte block hash in
+        // display order, or a 4-byte big-endian block height. The length tells the two apart.
+        let hash_or_height = request.into_inner().hash_or_height;
+        let hash_or_height = match hash_or_height.len() {
+            32 => zebra_state::HashOrHeight::Hash(hash_from_display_bytes(hash_or_height)?),
+            4 => {
+                let height = u32::from_be_bytes(
+                    hash_or_height
+                        .try_into()
+                        .expect("a 4-byte vec always converts to a [u8; 4]"),
+                );
+                let height = block::Height::try_from(height).map_err(|_| {
+                    Status::invalid_argument(format!("block height out of range: {height}"))
+                })?;
+                zebra_state::HashOrHeight::Height(height)
+            }
+            len => {
+                return Err(Status::invalid_argument(format!(
+                    "block request must be a 32-byte hash or a 4-byte height, got {len} bytes"
+                )));
+            }
+        };
+
+        match self
+            .read_state
+            .clone()
+            .oneshot(ReadRequest::Block(hash_or_height))
+            .await
+        {
+            Ok(ReadResponse::Block(Some(block))) => {
+                Ok(Response::new(BlockAndHash::new(block.hash(), block)))
+            }
+            Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => Err(Status::unavailable(format!(
+                "failed to read block: {error}"
+            ))),
+        }
+    }
+}
+
+/// Decodes the chain tip hashes from a [`NonFinalizedStateChangeRequest`] into a set of
+/// [`block::Hash`]es.
+///
+/// Each hash is expected to be 32 bytes in display order, matching the encoding used when the
+/// server streams [`BlockAndHash`] messages back to the caller.
+///
+/// # Errors
+///
+/// Returns an [`invalid_argument`](Status::invalid_argument) status if there are more hashes than
+/// the non-finalized state can hold chains ([`MAX_NON_FINALIZED_CHAIN_FORKS`]), or if any hash is
+/// not exactly 32 bytes long.
+fn decode_known_chain_tips(chain_tip_hashes: Vec<Vec<u8>>) -> Result<HashSet<block::Hash>, Status> {
+    // The non-finalized state holds at most `MAX_NON_FINALIZED_CHAIN_FORKS` chains, so a caller can
+    // never legitimately have more chain tips than that. Bound the untrusted input up front rather
+    // than allocating a set sized by the request.
+    if chain_tip_hashes.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
+        return Err(Status::invalid_argument(format!(
+            "too many chain tip hashes: got {}, expected at most {MAX_NON_FINALIZED_CHAIN_FORKS}",
+            chain_tip_hashes.len(),
+        )));
+    }
+
+    chain_tip_hashes
+        .into_iter()
+        .map(hash_from_display_bytes)
+        .collect()
+}
+
+/// Decodes a 32-byte block hash in display order, rejecting wrong-length input.
+fn hash_from_display_bytes(hash: Vec<u8>) -> Result<block::Hash, Status> {
+    let bytes: [u8; 32] = hash.try_into().map_err(|hash: Vec<u8>| {
+        Status::invalid_argument(format!(
+            "invalid block hash length: expected 32 bytes, got {}",
+            hash.len()
+        ))
+    })?;
+
+    Ok(block::Hash::from_bytes_in_display_order(&bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonic::Code;
+
+    fn hash(byte: u8) -> block::Hash {
+        block::Hash::from_bytes_in_display_order(&[byte; 32])
+    }
+
+    #[test]
+    fn decode_known_chain_tips_round_trips_display_order() {
+        let hashes = [hash(1), hash(2), hash(3)];
+        let encoded = hashes
+            .iter()
+            .map(|h| h.bytes_in_display_order().to_vec())
+            .collect();
+
+        let decoded = decode_known_chain_tips(encoded).expect("valid hashes should decode");
+
+        assert_eq!(decoded, hashes.into_iter().collect());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_accepts_empty() {
+        assert!(decode_known_chain_tips(Vec::new())
+            .expect("empty input should decode")
+            .is_empty());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_dedups() {
+        let encoded = vec![
+            hash(7).bytes_in_display_order().to_vec(),
+            hash(7).bytes_in_display_order().to_vec(),
+        ];
+
+        let decoded = decode_known_chain_tips(encoded).expect("duplicate hashes should decode");
+
+        assert_eq!(decoded, std::iter::once(hash(7)).collect());
+    }
+
+    #[test]
+    fn decode_known_chain_tips_rejects_wrong_length() {
+        let status = decode_known_chain_tips(vec![vec![0; 31]])
+            .expect_err("a 31-byte hash should be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    #[test]
+    fn decode_known_chain_tips_rejects_too_many() {
+        let encoded = (0..=MAX_NON_FINALIZED_CHAIN_FORKS as u8)
+            .map(|b| hash(b).bytes_in_display_order().to_vec())
+            .collect();
+
+        let status = decode_known_chain_tips(encoded)
+            .expect_err("more than MAX_NON_FINALIZED_CHAIN_FORKS hashes should be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
     }
 }

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `parameters::NetworkUpgrade::Nu6_3`
 - `parameters::testnet::ConfiguredActivationHeights::nu6_3`
+- `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:
+  optional override for whether Regtest allows coinbase outputs to be spent into
+  transparent outputs. Defaults to allowing them, and does not affect
+  `Network::is_regtest()`.
 - `ironwood` module
 - `orchard::shielded_data::Flags::ENABLE_CROSS_ADDRESS`
 - `block::Block::{ironwood_note_commitments, ironwood_nullifiers, ironwood_transactions_count}`

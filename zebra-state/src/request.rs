@@ -1422,7 +1422,15 @@ pub enum ReadRequest {
 
     /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
     /// allowing the caller to listen for new blocks in the non-finalized state.
-    NonFinalizedBlocksListener,
+    NonFinalizedBlocksListener {
+        /// The hashes of the chain tips the caller already has.
+        ///
+        /// Only blocks that come after these tips are streamed: walking each
+        /// non-finalized chain from its tip downwards, blocks are sent until a
+        /// hash in this set is reached. If empty, every block currently in the
+        /// non-finalized state is sent.
+        known_chain_tips: HashSet<block::Hash>,
+    },
 
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
@@ -1469,7 +1477,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
-            ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
+            ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
         }
     }

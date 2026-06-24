@@ -754,7 +754,8 @@ impl ParametersBuilder {
         self
     }
 
-    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    /// Sets whether coinbase outputs may be spent into transparent outputs in the
+    /// [`Parameters`] being built (the inverse of zcashd's `-regtestshieldcoinbase`).
     pub fn with_unshielded_coinbase_spends(
         mut self,
         should_allow_unshielded_coinbase_spends: bool,
@@ -956,6 +957,9 @@ pub struct RegtestParameters {
     pub checkpoints: Option<ConfiguredCheckpoints>,
     /// Whether funding stream addresses should be repeated to fill all required funding stream periods.
     pub extend_funding_stream_addresses_as_required: Option<bool>,
+    /// Whether to allow coinbase spends to have transparent outputs (inverse of
+    /// zcashd's `-regtestshieldcoinbase`).
+    pub should_allow_unshielded_coinbase_spends: Option<bool>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -1029,6 +1033,7 @@ impl Parameters {
             lockbox_disbursements,
             checkpoints,
             extend_funding_stream_addresses_as_required,
+            should_allow_unshielded_coinbase_spends,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1036,7 +1041,9 @@ impl Parameters {
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
             .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))?
             .with_disable_pow(true)
-            .with_unshielded_coinbase_spends(true)
+            .with_unshielded_coinbase_spends(
+                should_allow_unshielded_coinbase_spends.unwrap_or(true),
+            )
             .with_slow_start_interval(Height::MIN)
             // Like the default Testnet activation heights stripped below, the default Testnet's
             // temporary Orchard-disabling soft fork does not apply to Regtest.
@@ -1083,7 +1090,8 @@ impl Parameters {
             funding_streams: _,
             target_difficulty_limit,
             disable_pow,
-            should_allow_unshielded_coinbase_spends,
+            // Configurable on Regtest
+            should_allow_unshielded_coinbase_spends: _,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements: _,
@@ -1097,8 +1105,6 @@ impl Parameters {
             && self.slow_start_shift == slow_start_shift
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
-            && self.should_allow_unshielded_coinbase_spends
-                == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
