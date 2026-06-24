@@ -122,9 +122,9 @@ Check that the release will work:
   - [ ] Update the crate `CHANGELOG.md` listing the API changes or other
         relevant information for a crate consumer. Use `public-api` to list all
         API changes: `cargo public-api diff latest -p <crate> -sss`, or run
-        `zebra-utils/check-api <previous_tag>` once to get the full per-crate
-        diff plus dependency and (with `--with-values`) const/static value and
-        doc changes in one pass. You can use
+        [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once
+        to get the full per-crate diff plus dependency and (with `--with-values`)
+        const/static value and doc changes in one pass. You can use
         e.g. copilot to turn it into a human-readable list, e.g. (write the output
         to `api.txt` beforehand):
         ```
