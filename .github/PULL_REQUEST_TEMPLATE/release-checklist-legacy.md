@@ -1,6 +1,6 @@
 ---
-name: "Release Checklist Template"
-about: "Checklist to create and publish a Zebra release"
+name: "Legacy Release Checklist Template"
+about: "Manual fallback checklist to create and publish a Zebra release"
 title: "Release Zebra (version)"
 labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
 assignees: ""
@@ -76,7 +76,7 @@ fastmod --fixed-strings '1.58' '1.65'
 
 - [ ] Push the updated changelog and README into a new branch
       for example: `bump-v1.0.0` - this needs to be different to the tag name
-- [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
+- [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
