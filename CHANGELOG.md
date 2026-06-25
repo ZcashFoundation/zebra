@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 5.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.3.0) - 2026-06-25
+
+
+### Added
+
+- Add check-api script for public-API and dependency diffs ([#10721](https://github.com/ZcashFoundation/zebra/pull/10721))
+- Resumable non-finalized streaming, finalized-gap bridging, and syncer hardening ([#10776](https://github.com/ZcashFoundation/zebra/pull/10776))
+- Add FindForkPoint read request for locating chain reorg fork points ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764))
+- Expose `should_allow_unshielded_coinbase_spends` for regtest ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+
+### Fixed
+
+- Surface RocksDB error messages in the block-write panic ([#10722](https://github.com/ZcashFoundation/zebra/pull/10722))
+- Don't flush read-only secondary databases on shutdown ([#10784](https://github.com/ZcashFoundation/zebra/pull/10784))
+- Make read-only state DB open safe and back off the read-state syncer ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+
+### Release
+
+- Zebra v5.1.1 ([#10711](https://github.com/ZcashFoundation/zebra/pull/10711))
+- Zebra v5.2.0 ([#10731](https://github.com/ZcashFoundation/zebra/pull/10731))
+
 ### Added
 
 - Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,

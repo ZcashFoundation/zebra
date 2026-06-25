@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.0.0](https://github.com/ZcashFoundation/zebra/compare/zebra-rpc-v10.0.1...zebra-rpc-v11.0.0) - 2026-06-25
+
+
+### Added
+
+- Resumable non-finalized streaming, finalized-gap bridging, and syncer hardening ([#10776](https://github.com/ZcashFoundation/zebra/pull/10776))
+
+### Fixed
+
+- Make read-only state DB open safe and back off the read-state syncer ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+
 ### Added
 
 - The indexer gRPC service has a new unary `GetBlock` method that returns a block

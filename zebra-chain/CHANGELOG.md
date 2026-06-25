@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.0.0](https://github.com/ZcashFoundation/zebra/compare/zebra-chain-v10.1.0...zebra-chain-v11.0.0) - 2026-06-25
+
+
+### Added
+
+- Expose `should_allow_unshielded_coinbase_spends` for regtest ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+
 ### Added
 
 - `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:

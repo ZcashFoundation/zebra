@@ -1,6 +1,6 @@
 [package]
 name = "tower-fallback"
-version = "0.2.41"
+version = "0.2.42"
 authors.workspace = true
 description = "A Tower service combinator that sends requests to a first service, then retries processing on a second fallback service if the first service errors."
 license.workspace = true
@@ -25,7 +25,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "3.0.0" }
+zebra-test = { path = "../zebra-test/", version = "4.0.0" }
 
 [lints]
 workspace = true

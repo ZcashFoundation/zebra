@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0](https://github.com/ZcashFoundation/zebra/compare/zebra-state-v9.0.1...zebra-state-v10.0.0) - 2026-06-25
+
+
+### Added
+
+- Resumable non-finalized streaming, finalized-gap bridging, and syncer hardening ([#10776](https://github.com/ZcashFoundation/zebra/pull/10776))
+- Add FindForkPoint read request for locating chain reorg fork points ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764))
+
+### Fixed
+
+- Surface RocksDB error messages in the block-write panic ([#10722](https://github.com/ZcashFoundation/zebra/pull/10722))
+- Make read-only state DB open safe and back off the read-state syncer ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- Don't flush read-only secondary databases on shutdown ([#10784](https://github.com/ZcashFoundation/zebra/pull/10784))
+
 ### Breaking Changes
 
 - The finalized-state open functions now return `Result<_, StateInitError>` instead

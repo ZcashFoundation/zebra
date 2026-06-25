@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.0](https://github.com/ZcashFoundation/zebra/compare/zebra-network-v9.0.0...zebra-network-v9.1.0) - 2026-06-25
+
+
+### Added
+
+- Expose `should_allow_unshielded_coinbase_spends` for regtest ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+
+### Release
+
+- Zebra v5.1.1 ([#10711](https://github.com/ZcashFoundation/zebra/pull/10711))
+- Zebra v5.2.0 ([#10731](https://github.com/ZcashFoundation/zebra/pull/10731))
+
 ### Added
 
 - Added the Regtest-only network config option `should_allow_unshielded_coinbase_spends`,

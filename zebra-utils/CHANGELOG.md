@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.1.0](https://github.com/ZcashFoundation/zebra/compare/zebra-utils-v8.0.1...zebra-utils-v8.1.0) - 2026-06-25
+
+
+### Added
+
+- Add check-api script for public-API and dependency diffs ([#10721](https://github.com/ZcashFoundation/zebra/pull/10721))
+
 ## [8.0.1] - 2026-06-18
 
 ### Changed

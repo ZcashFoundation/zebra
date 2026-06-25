@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0](https://github.com/ZcashFoundation/zebra/compare/zebra-test-v3.0.0...zebra-test-v4.0.0) - 2026-06-25
+
+
+### Added
+
+- Support ZIP-213 ([#10048](https://github.com/ZcashFoundation/zebra/pull/10048))
+
+### Fixed
+
+- Update README to reference zebrad installation tag v4.3.0 ([#10432](https://github.com/ZcashFoundation/zebra/pull/10432))
+
+### Release
+
+- Zebra 4.3.1 ([#10495](https://github.com/ZcashFoundation/zebra/pull/10495))
+- V4.4.1, reject v5 SIGHASH_SINGLE without a corresponding output  ([#10542](https://github.com/ZcashFoundation/zebra/pull/10542))
+- V4.5.0 ([#10647](https://github.com/ZcashFoundation/zebra/pull/10647))
+- V4.5.1 ([#10657](https://github.com/ZcashFoundation/zebra/pull/10657))
+- V4.5.3
+- Zebra v5.1.0 ([#10707](https://github.com/ZcashFoundation/zebra/pull/10707))
+- Zebra v5.1.1 ([#10711](https://github.com/ZcashFoundation/zebra/pull/10711))
+- Zebra v5.2.0 ([#10731](https://github.com/ZcashFoundation/zebra/pull/10731))
+
 ## [3.0.0] - 2026-03-12
 
 ### Breaking Changes
