@@ -133,7 +133,7 @@ After each push to `main`, release-plz opens or updates a Release PR when it fin
 The generated Release PR contains version bumps and changelog updates for the crates that changed.
 The Release PR is the manual review gate: after maintainers review and merge it, the release workflow publishes crates to crates.io, creates the release git tags, and creates the public `zebrad` GitHub Release.
 
-The `zebrad` GitHub Release triggers the downstream release workflows that build and publish Docker images and deploy long-lived GCP nodes.
+The `zebrad` GitHub Release triggers the downstream release workflows that build and publish signed Docker images, attach signed, checksummed standalone `zebrad` binaries (Linux `x86_64` and `aarch64`) to the GitHub Release, and deploy long-lived GCP nodes.
 Until release-preparation data is automated, any required checkpoint, end-of-support height, README, or operational release-note changes should land on `main` before the generated Release PR is merged.
 
 release-plz embeds the release checklist in the generated Release PR body using the `pr_body` configured in `.release-plz.toml`.
