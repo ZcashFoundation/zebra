@@ -430,19 +430,17 @@ impl NonFinalizedState {
         // Locate the record but keep it live until replay succeeds, so a
         // recoverable error can't lose it; it is `shift_remove`d atomically with
         // the insert below.
-        let (height, invalidated_blocks_arc) = self
+        let (height, invalidated_blocks) = self
             .invalidated_blocks
             .iter()
             .find_map(|(height, blocks)| {
                 if blocks.first()?.hash == block_hash {
-                    Some((*height, blocks.clone()))
+                    Some((*height, (**blocks).clone()))
                 } else {
                     None
                 }
             })
             .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
-
-        let invalidated_blocks = Arc::unwrap_or_clone(invalidated_blocks_arc);
 
         let invalidated_block_hashes = invalidated_blocks
             .iter()

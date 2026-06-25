@@ -220,7 +220,7 @@ pub enum ReconsiderError {
     ReconsiderResponseDropped,
 
     /// Replaying an invalidated block into the restored chain failed contextual
-    /// validation. Previously this case panicked via `Chain::push().expect(...)`.
+    /// validation.
     #[error("replaying a previously invalidated block failed contextual validation: {0}")]
     ReplayFailed(#[source] ValidateContextError),
 }
