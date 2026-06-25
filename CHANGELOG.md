@@ -9,7 +9,82 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
+- Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
+  to forbid spending coinbase outputs into transparent outputs (the inverse of
+  zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
+  existing Regtest behavior ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+- When the indexer RPC is enabled, a co-located read-state consumer can follow the
+  node more efficiently: the non-finalized block subscription resumes from the
+  consumer's known chain tips instead of re-streaming the whole non-finalized state,
+  and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
+  while its finalized state catches up.
+- New `zebra-state` read request `ReadRequest::FindForkPoint` (with response
+  `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
+  locator that is on the best chain — the fork point — for clients tracking chain
+  reorganizations through a read-only state service.
+
+### Changed
+
+- Opening a Zebra state read-only (for example, as a secondary instance over a
+  running node's database) now fails with a clear error instead of panicking when
+  the cache directory is missing or unreadable, when no database exists at the
+  configured path, or when an ephemeral database is also configured (a read-only
+  secondary must not delete the primary's files). The read-write open path is
+  unchanged.
+
+## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
+
+This release increases Zebra's local rollback window as a defence-in-depth measure
+against sustained consensus splits.
+
+### Changed
+
+- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
+  1000 blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
+
+## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
+
+This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
+expected at the end of July 2026, so that nodes running outdated versions stop before
+the upgrade activates.
+
+### Changed
+
+- Reduced the end-of-support period from 105 to 44 days, and updated the estimated
+  release height, ahead of the NU7 network upgrade
+  ([#10710](https://github.com/ZcashFoundation/zebra/pull/10710))
+
+## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
+
+This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
+during initial block download, bumps the minimum network protocol version to NU6.2,
+extends the `getpeerinfo` RPC, and includes several performance and correctness fixes.
+
+### Breaking Changes
+
+- The minimum network protocol version is now NU6.2 (170150). Peers running protocol
+  versions below NU6.2 will be disconnected. Update to Zebra 5.0.0 or later to remain
+  compatible ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692)).
+
+### Added
+
+- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`,
+  `banscore`, and `connection_state` fields ([#10443](https://github.com/ZcashFoundation/zebra/pull/10443))
+
+### Fixed
+
+- Fixed genesis-to-tip sync stall that could cause new nodes to hang during initial
+  block download ([#10679](https://github.com/ZcashFoundation/zebra/pull/10679))
+- Fixed mempool index being unnecessarily rebuilt per transaction in `getrawmempool`
+  ([#10599](https://github.com/ZcashFoundation/zebra/pull/10599))
+- Fixed `dequeue_children` by-height index handling in the state service
+  ([#10604](https://github.com/ZcashFoundation/zebra/pull/10604))
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@andres-pcg, @conradoplg, @gustavovalverde, @judah-caruso, @oxarbitrage, @syszery and @upbqdn
 
 ### Fixed
 

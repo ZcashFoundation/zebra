@@ -21,6 +21,7 @@ jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
+    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
     permissions:
       contents: read
       id-token: write
@@ -42,7 +43,10 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   dockerhub-description:
-    if: github.repository_owner == 'ZcashFoundation'
+    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    # Updating Docker Hub metadata must not turn a successfully published
+    # release image into a failed release.
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -60,15 +64,17 @@ jobs:
   release-binaries-success:
     name: Release binaries success
     runs-on: ubuntu-latest
-    # Only run when the Docker Hub update job is allowed to execute
+    # Only run for the official v-prefixed zebrad release tags.
+    # `always()` keeps this aggregator running when `build` fails or is cancelled;
+    # otherwise GitHub skips jobs with failed `needs`.
     if: >-
       ${{
         always() &&
-        github.repository_owner == 'ZcashFoundation'
+        github.repository_owner == 'ZcashFoundation' &&
+        startsWith(github.event.release.tag_name, 'v')
       }}
     needs:
       - build
-      - dockerhub-description
     timeout-minutes: 1
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -79,7 +85,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, dockerhub-description ]
+    needs: [ build ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest

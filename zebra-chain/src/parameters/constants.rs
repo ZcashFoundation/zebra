@@ -1,6 +1,7 @@
 //! Definitions of Zebra chain constants, including:
 //! - slow start interval,
-//! - slow start shift
+//! - slow start shift,
+//! - maximum reorg height
 
 use crate::block::Height;
 
@@ -15,6 +16,18 @@ pub const SLOW_START_INTERVAL: Height = Height(20_000);
 ///
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
+
+/// The maximum chain reorganisation height.
+///
+/// This threshold determines the maximum length of the best non-finalized
+/// chain. Once the chain grows past this height, Zebra finalizes its oldest
+/// blocks; deeper reorganisations are outside Zebra's rollback window.
+///
+/// This is a local-only node policy; it is not part of consensus. The window is
+/// sized as a defence-in-depth measure against sustained consensus splits.
+//
+// TODO: change to HeightDiff
+pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
 
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {

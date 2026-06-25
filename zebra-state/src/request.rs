@@ -821,6 +821,10 @@ pub enum Request {
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
+    /// Note: Zebra's local rollback window
+    /// ([`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT)) is now 1000 blocks, larger
+    /// than the 100 quoted from the protocol specification above.
+    ///
     /// # Correctness
     ///
     /// Block commit requests should be wrapped in a timeout, so that
@@ -1265,6 +1269,33 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Finds the fork point between the locator `known_blocks` and the best chain.
+    ///
+    /// `known_blocks` is a block locator. Returns the most recent locator entry that is
+    /// on the best chain (the fork point), or `None` if no entry is on the best chain.
+    /// Returns `None` if the state is empty.
+    ///
+    /// This is intentionally a narrow, best-chain-only query: it reports a single
+    /// locator intersection against the best chain. It does not enumerate side-chain
+    /// tips, branch lengths, or per-tip statuses, so it is not a general
+    /// fork-monitoring API in the style of `getchaintips`. Callers that need to
+    /// observe side chains should use a dedicated request rather than building on this
+    /// one.
+    ///
+    /// The read state service rejects this request with an error if `known_blocks`
+    /// is longer than [`MAX_BLOCK_LOCATOR_LENGTH`](zebra_chain::block::MAX_BLOCK_LOCATOR_LENGTH),
+    /// so an untrusted caller cannot force an unbounded number of lookups. A locator
+    /// built the usual way (one hash per standard block-locator height) is always
+    /// within that bound.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)`](ReadResponse::ForkPoint).
+    FindForkPoint {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1399,7 +1430,15 @@ pub enum ReadRequest {
 
     /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
     /// allowing the caller to listen for new blocks in the non-finalized state.
-    NonFinalizedBlocksListener,
+    NonFinalizedBlocksListener {
+        /// The hashes of the chain tips the caller already has.
+        ///
+        /// Only blocks that come after these tips are streamed: walking each
+        /// non-finalized chain from its tip downwards, blocks are sent until a
+        /// hash in this set is reached. If empty, every block currently in the
+        /// non-finalized state is sent.
+        known_chain_tips: HashSet<block::Hash>,
+    },
 
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
@@ -1428,6 +1467,7 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
@@ -1446,7 +1486,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
-            ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
+            ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
         }
     }

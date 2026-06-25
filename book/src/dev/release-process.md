@@ -128,4 +128,14 @@ To help ensure that you have sufficient time and a clear path to update, this is
 
 ## Release candidate & release process
 
-Our release checklist is available as a template, which defines each step our team needs to follow to create a new pre-release or release, and to also build and push the binaries to the official channels [Release Checklist Template](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md).
+Stable releases are generated from `main` by `release-plz`.
+After each push to `main`, release-plz opens or updates a Release PR when it finds releasable crate changes.
+The generated Release PR contains version bumps and changelog updates for the crates that changed.
+The Release PR is the manual review gate: after maintainers review and merge it, the release workflow publishes crates to crates.io, creates the release git tags, and creates the public `zebrad` GitHub Release.
+
+The `zebrad` GitHub Release triggers the downstream release workflows that build and publish Docker images and deploy long-lived GCP nodes.
+Until release-preparation data is automated, any required checkpoint, end-of-support height, README, or operational release-note changes should land on `main` before the generated Release PR is merged.
+
+release-plz embeds the release checklist in the generated Release PR body using the `pr_body` configured in `.release-plz.toml`.
+GitHub pull request templates are only used when a maintainer manually opens a pull request in the GitHub UI.
+If the automated workflow is not usable, use the legacy manual release checklist: [Legacy Release Checklist Template](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).

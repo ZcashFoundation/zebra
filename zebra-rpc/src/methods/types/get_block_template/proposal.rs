@@ -217,7 +217,14 @@ pub fn proposal_block_from_template(
         | NetworkUpgrade::Nu6_1
         | NetworkUpgrade::Nu6_2
         | NetworkUpgrade::Nu7 => block_commitments_hash.bytes_in_serialized_order(),
-        _ => Err(SerializationError::Parse(
+        #[cfg(zcash_unstable = "zfuture")]
+        NetworkUpgrade::ZFuture => block_commitments_hash.bytes_in_serialized_order(),
+        NetworkUpgrade::Genesis
+        | NetworkUpgrade::BeforeOverwinter
+        | NetworkUpgrade::Overwinter
+        | NetworkUpgrade::Sapling
+        | NetworkUpgrade::Blossom
+        | NetworkUpgrade::Heartwood => Err(SerializationError::Parse(
             "Zebra does not support generating pre-Canopy block templates",
         ))?,
     }

@@ -57,7 +57,7 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, StateInitError,
 };
 
 pub mod block_iter;
@@ -90,7 +90,8 @@ pub use self::traits::{ReadState, State};
 /// A read-write service for Zebra's cached blockchain state.
 ///
 /// This service modifies and provides access to:
-/// - the non-finalized state: the ~100 most recent blocks.
+/// - the non-finalized state: the most recent blocks, up to
+///   [`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT) of them.
 ///   Zebra allows chain forks in the non-finalized state,
 ///   stores it in memory, and re-downloads it when restarted.
 /// - the finalized state: older blocks that have many confirmations.
@@ -192,7 +193,8 @@ pub(crate) struct StateService {
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
-/// - the non-finalized state: the ~100 most recent blocks.
+/// - the non-finalized state: the most recent blocks, up to
+///   [`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT) of them.
 /// - the finalized state: older blocks that have many confirmations.
 ///
 /// Requests to this service are processed in parallel,
@@ -322,6 +324,11 @@ impl StateService {
                     &network,
                     #[cfg(feature = "elasticsearch")]
                     true,
+                )
+                .expect(
+                    "opening the read-write finalized state database failed; check that the \
+                     state cache directory is writable and not locked by another Zebra instance, \
+                     and that there is free disk space",
                 );
                 timer.finish_desc("opening finalized state database");
 
@@ -1364,12 +1371,12 @@ impl Service<ReadRequest> for ReadStateService {
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
 
-        if req == ReadRequest::NonFinalizedBlocksListener {
+        if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
             let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
-                self.network.clone(),
                 self.non_finalized_state_receiver.clone(),
+                known_chain_tips,
             );
 
             return async move {
@@ -1548,6 +1555,28 @@ impl Service<ReadRequest> for ReadStateService {
                 .map(|header| CountedHeader { header })
                 .collect(),
             )),
+
+            ReadRequest::FindForkPoint { known_blocks } => {
+                // Reject over-long locators before doing any work, so an untrusted
+                // caller can't force unbounded lookups.
+                let locator_len: u64 = known_blocks
+                    .len()
+                    .try_into()
+                    .expect("usize always fits in u64 on supported (<=64-bit) platforms");
+                if locator_len > block::MAX_BLOCK_LOCATOR_LENGTH {
+                    return Err(BoxError::from(format!(
+                        "FindForkPoint locator length {locator_len} exceeds \
+                         MAX_BLOCK_LOCATOR_LENGTH ({})",
+                        block::MAX_BLOCK_LOCATOR_LENGTH,
+                    )));
+                }
+
+                Ok(ReadResponse::ForkPoint(read::find_fork_point(
+                    state.latest_best_chain(),
+                    &state.db,
+                    known_blocks,
+                )))
+            }
 
             ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
                 read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
@@ -1764,7 +1793,7 @@ impl Service<ReadRequest> for ReadStateService {
                 ))
             }
 
-            ReadRequest::NonFinalizedBlocksListener => {
+            ReadRequest::NonFinalizedBlocksListener { .. } => {
                 unreachable!("should return early");
             }
 
@@ -1831,11 +1860,14 @@ pub async fn init(
 pub fn init_read_only(
     config: Config,
     network: &Network,
-) -> (
-    ReadStateService,
-    ZebraDb,
-    tokio::sync::watch::Sender<NonFinalizedState>,
-) {
+) -> Result<
+    (
+        ReadStateService,
+        ZebraDb,
+        tokio::sync::watch::Sender<NonFinalizedState>,
+    ),
+    StateInitError,
+> {
     let finalized_state = FinalizedState::new_with_debug(
         &config,
         network,
@@ -1843,11 +1875,11 @@ pub fn init_read_only(
         #[cfg(feature = "elasticsearch")]
         false,
         true,
-    );
+    )?;
     let (non_finalized_state_sender, non_finalized_state_receiver) =
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 
-    (
+    Ok((
         ReadStateService::new(
             &finalized_state,
             None,
@@ -1855,19 +1887,28 @@ pub fn init_read_only(
         ),
         finalized_state.db.clone(),
         non_finalized_state_sender,
-    )
+    ))
 }
 
 /// Calls [`init_read_only`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// Returns a [`tokio::task::JoinHandle`] with a read state service and chain tip sender.
+///
+/// Returns a [`tokio::task::JoinHandle`] whose output is a [`Result`]: awaiting it yields a
+/// [`JoinError`](tokio::task::JoinError) if the blocking task panicked or was cancelled, and
+/// otherwise an `Err(`[`StateInitError`]`)` if the read-only state could not be opened (for
+/// example, a missing read-only database).
 pub fn spawn_init_read_only(
     config: Config,
     network: &Network,
-) -> tokio::task::JoinHandle<(
-    ReadStateService,
-    ZebraDb,
-    tokio::sync::watch::Sender<NonFinalizedState>,
-)> {
+) -> tokio::task::JoinHandle<
+    Result<
+        (
+            ReadStateService,
+            ZebraDb,
+            tokio::sync::watch::Sender<NonFinalizedState>,
+        ),
+        StateInitError,
+    >,
+> {
     let network = network.clone();
     tokio::task::spawn_blocking(move || init_read_only(config, &network))
 }
