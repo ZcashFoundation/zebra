@@ -39,7 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
-
 - Released `zebrad` binaries report their source commit in `zebrad version`
   ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 - Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
