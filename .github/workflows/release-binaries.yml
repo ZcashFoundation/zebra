@@ -53,7 +53,7 @@ jobs:
   # Build and attach downloadable zebrad binaries to the GitHub release.
   binaries:
     name: Attach release binaries
-    if: github.repository_owner == 'ZcashFoundation'
+    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
     permissions:
       contents: write
       id-token: write
