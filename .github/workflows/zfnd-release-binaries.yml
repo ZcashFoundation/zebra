@@ -101,7 +101,10 @@ jobs:
 
       # Generated in the build job so the attestation reflects the matrix
       # runner (ubuntu-22.04 / ubuntu-22.04-arm), not the publish job's runner.
+      # Gated to release runs so the test harness cannot mint attestations
+      # under the same --signer-workflow path users are told to trust.
       - name: Attest build provenance
+        if: inputs.release_tag != ''
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: dist/*.tar.gz
@@ -138,13 +141,16 @@ jobs:
           ( cd dist && sha256sum -- *.tar.gz > SHA256SUMS )
 
       - name: Install Cosign
+        if: inputs.release_tag != ''
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign the checksum manifest
+        if: inputs.release_tag != ''
         working-directory: dist
         run: cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
 
       - name: Verify signatures
+        if: inputs.release_tag != ''
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
