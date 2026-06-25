@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Released `zebrad` binaries report their source commit in `zebrad version`
   ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
+  same-height sibling-tip invalidation, repeated reconsideration) without panicking
+  ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
 
 ### Security
 
