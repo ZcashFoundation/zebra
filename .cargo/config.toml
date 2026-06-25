@@ -3,6 +3,12 @@
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
+    # Enable tx_v6 everywhere by default
+    "--cfg", 'feature="tx_v6"',
+
+    # TODO: Remove when ZSA is stable
+    "--cfg", "zcash_unstable=\"nu7\"",
+
     # Zebra standard lints for Rust 1.65+
 
     # High-risk code
@@ -82,6 +88,12 @@ rustflags = [
 
 [build]
 rustdocflags = [
+    # Enable tx_v6 everywhere by default
+    "--cfg", 'feature="tx_v6"',
+
+    # TODO: Remove when ZSA is stable
+    "--cfg", "zcash_unstable=\"nu7\"",
+
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
     # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-deploy-firebase.yml#L68
 

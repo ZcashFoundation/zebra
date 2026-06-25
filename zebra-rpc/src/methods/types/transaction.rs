@@ -10,7 +10,7 @@ use hex::ToHex;
 
 use zcash_script::script::Asm;
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
     parameters::Network,
@@ -299,6 +299,25 @@ pub struct TransactionObject {
     #[serde(rename = "blocktime", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) block_time: Option<i64>,
+
+    /// The burn amount for this transaction, if any.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(
+        rename = "zip233amount",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    #[getter(copy)]
+    pub(crate) zip233_amount: Option<Amount<NonNegative>>,
+
+    /// Whether this transaction contains OrchardZSA issuance data.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(
+        rename = "issuanceexists",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) issuance_exists: Option<bool>,
 }
 
 /// The transparent input of a transaction.
@@ -558,7 +577,7 @@ impl ShieldedOutput {
 
 /// Object with Orchard-specific information.
 #[serde_with::serde_as]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -586,6 +605,64 @@ pub struct Orchard {
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[getter(copy)]
     binding_sig: Option<[u8; 64]>,
+    /// Whether OrchardZSA burn data is present.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(
+        rename = "burnexists",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) burn_exists: Option<bool>,
+}
+
+impl Orchard {
+    /// Constructs an [`Orchard`] from [`orchard::ShieldedData`].
+    /// Works for both `OrchardVanilla` and `OrchardZSA`.
+    fn from_shielded_data<Flavor: orchard::ShieldedDataFlavor>(
+        shielded_data: &orchard::ShieldedData<Flavor>,
+        value_balance: Amount<NegativeAllowed>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] burn_exists: Option<bool>,
+    ) -> Self {
+        Self {
+            actions: shielded_data
+                .actions
+                .iter()
+                .map(|authorized| {
+                    let spend_auth_sig: [u8; 64] = authorized.spend_auth_sig.into();
+                    let cv: [u8; 32] = authorized.action.cv.into();
+                    let nullifier: [u8; 32] = authorized.action.nullifier.into();
+                    let rk: [u8; 32] = authorized.action.rk.into();
+                    let cm_x: [u8; 32] = authorized.action.cm_x.into();
+                    let ephemeral_key: [u8; 32] = authorized.action.ephemeral_key.into();
+                    let enc_ciphertext = authorized.action.enc_ciphertext.as_ref().to_vec();
+                    let out_ciphertext: [u8; 80] = authorized.action.out_ciphertext.into();
+                    OrchardAction {
+                        cv,
+                        nullifier,
+                        rk,
+                        cm_x,
+                        ephemeral_key,
+                        enc_ciphertext,
+                        spend_auth_sig,
+                        out_ciphertext,
+                    }
+                })
+                .collect(),
+            value_balance: Zec::from(value_balance).lossy_zec(),
+            value_balance_zat: value_balance.zatoshis(),
+            flags: Some(OrchardFlags::new(
+                shielded_data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
+                shielded_data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                shielded_data.flags.contains(orchard::Flags::ENABLE_ZSA),
+            )),
+            anchor: Some(shielded_data.shared_anchor.bytes_in_display_order()),
+            proof: Some(shielded_data.proof.bytes_in_display_order()),
+            binding_sig: Some(shielded_data.binding_sig.into()),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            burn_exists,
+        }
+    }
 }
 
 /// Object with Orchard-specific information.
@@ -597,6 +674,10 @@ pub struct OrchardFlags {
     /// Whether Orchard spends are enabled.
     #[serde(rename = "enableSpends")]
     enable_spends: bool,
+    /// Whether OrchardZSA is enabled.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(rename = "enableZSA")]
+    enable_zsa: bool,
 }
 
 /// The Orchard action of a transaction.
@@ -619,8 +700,8 @@ pub struct OrchardAction {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "arrayhex")]
-    enc_ciphertext: [u8; 580],
+    #[serde(rename = "encCiphertext", with = "hex")]
+    enc_ciphertext: Vec<u8>,
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]
     spend_auth_sig: [u8; 64],
@@ -660,6 +741,10 @@ impl Default for TransactionObject {
             expiry_height: None,
             block_hash: None,
             block_time: None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            zip233_amount: None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issuance_exists: None,
         }
     }
 }
@@ -859,63 +944,34 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: Some(Orchard {
-                actions: tx
-                    .orchard_actions()
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|action| {
-                        let spend_auth_sig: [u8; 64] = tx
-                            .orchard_shielded_data()
-                            .and_then(|shielded_data| {
-                                shielded_data
-                                    .actions
-                                    .iter()
-                                    .find(|authorized_action| authorized_action.action == **action)
-                                    .map(|authorized_action| {
-                                        authorized_action.spend_auth_sig.into()
-                                    })
-                            })
-                            .unwrap_or([0; 64]);
-
-                        let cv: [u8; 32] = action.cv.into();
-                        let nullifier: [u8; 32] = action.nullifier.into();
-                        let rk: [u8; 32] = action.rk.into();
-                        let cm_x: [u8; 32] = action.cm_x.into();
-                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
-
-                        OrchardAction {
-                            cv,
-                            nullifier,
-                            rk,
-                            cm_x,
-                            ephemeral_key,
-                            enc_ciphertext,
-                            spend_auth_sig,
-                            out_ciphertext,
-                        }
-                    })
-                    .collect(),
-                value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
-                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-                flags: tx.orchard_shielded_data().map(|data| {
-                    OrchardFlags::new(
-                        data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
-                        data.flags.contains(orchard::Flags::ENABLE_SPENDS),
-                    )
-                }),
-                anchor: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.shared_anchor.bytes_in_display_order()),
-                proof: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.proof.bytes_in_display_order()),
-                binding_sig: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.binding_sig.into()),
-            }),
+            orchard: Some(
+                (match tx.as_ref() {
+                    Transaction::V5 {
+                        orchard_shielded_data,
+                        ..
+                    } => orchard_shielded_data.as_ref().map(|data| {
+                        Orchard::from_shielded_data(
+                            data,
+                            tx.orchard_value_balance().orchard_amount(),
+                            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                            None,
+                        )
+                    }),
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    Transaction::V6 {
+                        orchard_shielded_data,
+                        ..
+                    } => orchard_shielded_data.as_ref().map(|data| {
+                        Orchard::from_shielded_data(
+                            data,
+                            tx.orchard_value_balance().orchard_amount(),
+                            Some(!data.burn.as_ref().is_empty()),
+                        )
+                    }),
+                    _ => None,
+                })
+                .unwrap_or_default(),
+            ),
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.
@@ -942,6 +998,19 @@ impl TransactionObject {
             },
             block_hash,
             block_time,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            zip233_amount: match tx.as_ref() {
+                Transaction::V6 { zip233_amount, .. } => Some(*zip233_amount),
+                _ => None,
+            },
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issuance_exists: match tx.as_ref() {
+                Transaction::V6 {
+                    orchard_zsa_issue_data,
+                    ..
+                } => Some(orchard_zsa_issue_data.is_some()),
+                _ => None,
+            },
         }
     }
 }

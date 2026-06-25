@@ -22,4 +22,4 @@
 !zebra-*
 !zebrad
 !docker/entrypoint.sh
-!docker/default-zebra-config.toml
+!testnet-single-node-deploy

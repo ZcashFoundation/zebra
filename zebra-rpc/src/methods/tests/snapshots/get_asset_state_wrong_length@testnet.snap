@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 710
+expression: wrong_length
+---
+{
+  "code": -8,
+  "message": "expected 32 bytes (64 hex chars)"
+}

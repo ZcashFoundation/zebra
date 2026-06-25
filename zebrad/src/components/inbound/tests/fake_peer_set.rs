@@ -15,7 +15,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::Network::{self, *},
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{SigHash, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{
@@ -172,6 +172,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
                 std::sync::Arc::new(vec![]),
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         ));
@@ -281,6 +282,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
                 std::sync::Arc::new(vec![]),
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         ));
@@ -384,6 +386,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
                 std::sync::Arc::new(vec![]),
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         ));
@@ -524,6 +527,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
                 std::sync::Arc::new(vec![]),
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         ));

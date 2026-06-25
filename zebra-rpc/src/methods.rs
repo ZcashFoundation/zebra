@@ -59,7 +59,7 @@ use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
-use zcash_primitives::consensus::Parameters;
+use zcash_protocol::consensus::Parameters;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
@@ -167,9 +167,22 @@ pub(super) const PARAM_VERBOSITY_DESC: &str = "Whether to include verbose output
 pub(super) const PARAM_N_DESC: &str = "The output index in the transaction.";
 pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
     "Whether to include mempool transactions in the response.";
+pub(super) const PARAM_ASSET_BASE_DESC: &str =
+    "The asset base as 32 bytes encoded as 64 hex characters.";
+pub(super) const PARAM_INCLUDE_NON_FINALIZED_DESC: &str =
+    "Whether to query the best chain tip including non-finalized state. Defaults to true.";
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::AssetState;
+
+/// Dummy type to allow `get_asset_state` to be declared in the `Rpc` trait unconditionally,
+/// since `zebra_chain::orchard_zsa::AssetState` is not available without these flags.
+#[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetState;
 
 #[rpc(server)]
 /// RPC method signatures.
@@ -458,6 +471,23 @@ pub trait Rpc {
         &self,
         request: GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse>;
+
+    /// Returns the asset state of the provided asset base at the best chain tip or finalized chain tip.
+    ///
+    /// # Parameters
+    ///
+    /// - `asset_base`: hex-encoded 32-byte asset base to query.
+    /// - `include_non_finalized`: if `true`, query the best chain tip, including non-finalized state;
+    ///   if `false`, query only the finalized chain tip.
+    ///
+    /// method: post
+    /// tags: blockchain
+    #[method(name = "getassetstate")]
+    async fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> Result<AssetState>;
 
     /// Stop the running zebrad process.
     ///
@@ -1879,7 +1909,7 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
-        let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
+        let sapling_nu = zcash_protocol::consensus::NetworkUpgrade::Sapling;
         let sapling = if network.is_nu_active(sapling_nu, height.into()) {
             match read_state
                 .ready()
@@ -1900,7 +1930,7 @@ where
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
+        let orchard_nu = zcash_protocol::consensus::NetworkUpgrade::Nu5;
         let orchard = if network.is_nu_active(orchard_nu, height.into()) {
             match read_state
                 .ready()
@@ -2121,6 +2151,60 @@ where
                 },
             ))
         }
+    }
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    async fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> Result<zebra_chain::orchard_zsa::AssetState> {
+        let read_state = self.read_state.clone();
+        let include_non_finalized = include_non_finalized.unwrap_or(true);
+
+        if asset_base.len() != 64 {
+            return Err("expected 32 bytes (64 hex chars)")
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
+        let asset_base_bytes: [u8; 32] = hex::decode(&asset_base)
+            .map_error_with_prefix(
+                server::error::LegacyCode::InvalidParameter,
+                "invalid hex encoding",
+            )?
+            .try_into()
+            .expect("length already checked above");
+
+        let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(&asset_base_bytes)
+            .into_option()
+            .ok_or_error(
+                server::error::LegacyCode::InvalidParameter,
+                "invalid asset base",
+            )?;
+
+        let request = zebra_state::ReadRequest::AssetState {
+            asset_base,
+            include_non_finalized,
+        };
+
+        let zebra_state::ReadResponse::AssetState(asset_state) =
+            read_state.oneshot(request).await.map_misc_error()?
+        else {
+            unreachable!("unexpected response from state service");
+        };
+
+        asset_state.ok_or_misc_error("asset base not found")
+    }
+
+    // Dummy implementation required to satisfy the `Rpc` trait when the real
+    // `AssetState` type and implementation are not compiled in.
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+    async fn get_asset_state(
+        &self,
+        _asset_base: String,
+        _include_non_finalized: Option<bool>,
+    ) -> Result<AssetState> {
+        Err(ErrorCode::MethodNotFound.into())
     }
 
     fn stop(&self) -> Result<String> {

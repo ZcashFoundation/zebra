@@ -143,7 +143,17 @@ allow-git = [
     "https://github.com/zcash/librustzcash.git",
     "https://github.com/zcash/incrementalmerkletree",
     "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto"
+    "https://github.com/zcash/sapling-crypto",
+
+    "https://github.com/zcash/halo2",
+    "https://github.com/zcash/sinsemilla",
+    "https://github.com/zcash/zcash_note_encryption",
+
+    # TODO: remove these QED-it fork entries once the required changes are merged upstream.
+    "https://github.com/QED-it/librustzcash",
+    "https://github.com/QED-it/orchard",
+    "https://github.com/QED-it/sapling-crypto",
+    "https://github.com/QED-it/zcash_spec",
 ]
 
 [sources.allow-org]

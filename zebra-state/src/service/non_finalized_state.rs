@@ -18,6 +18,9 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
+
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
@@ -25,6 +28,9 @@ use crate::{
     service::{check, finalized_state::ZebraDb, InvalidateError},
     SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use crate::service::read;
 
 mod backup;
 mod chain;
@@ -574,6 +580,15 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let issued_assets = IssuedAssetChanges::validate_and_get_changes(
+            &prepared.block.transactions,
+            prepared.transaction_sighashes.as_deref(),
+            |asset_base: &AssetBase| {
+                read::asset_state(Some(&new_chain), finalized_state, asset_base)
+            },
+        )?;
+
         // Reads from disk
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
@@ -592,6 +607,9 @@ impl NonFinalizedState {
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            // TODO: Refactor this into repeated `With::with()` calls, see http_request_compatibility module.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issued_assets,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

@@ -127,7 +127,7 @@ impl SigHasher {
     /// Returns the Orchard bundle in the precomputed transaction data.
     pub fn orchard_bundle(
         &self,
-    ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
+    ) -> Option<zcash_primitives::transaction::OrchardBundle<::orchard::bundle::Authorized>> {
         self.precomputed_tx_data.orchard_bundle()
     }
 

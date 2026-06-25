@@ -65,7 +65,7 @@ pub fn transparent_spend(
 
             // The state service returns UTXOs from pending blocks,
             // which can be rejected by later contextual checks.
-            // This is a particular issue for v5 transactions,
+            // This is a particular issue for v5 and v6 transactions,
             // because their authorizing data is only bound to the block data
             // during contextual validation (#2336).
             //

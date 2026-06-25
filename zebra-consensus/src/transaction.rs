@@ -23,6 +23,8 @@ use tower::{
 };
 use tracing::Instrument;
 
+use zcash_primitives::transaction::OrchardBundle;
+
 use zcash_protocol::value::ZatBalance;
 
 use zebra_chain::{
@@ -204,6 +206,9 @@ pub enum Response {
         /// The number of legacy signature operations in this transaction's
         /// transparent inputs and outputs.
         sigops: u32,
+
+        /// Shielded sighash for this transaction.
+        tx_sighash: SigHash,
     },
 
     /// A response to a mempool transaction verification request.
@@ -407,7 +412,8 @@ where
                 return Ok(Response::Block {
                     tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.legacy_sigop_count
+                    sigops: verified_tx.legacy_sigop_count,
+                    tx_sighash: verified_tx.tx_sighash,
                 });
             }
 
@@ -494,7 +500,7 @@ where
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let mut async_checks = match tx.as_ref() {
+            let (mut async_checks, tx_sighash) = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
@@ -584,6 +590,7 @@ where
                     tx_id,
                     miner_fee,
                     sigops,
+                    tx_sighash
                 },
                 Request::Mempool { transaction: tx, .. } => {
                     // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
@@ -597,6 +604,7 @@ where
                         miner_fee.expect("fee should have been checked earlier"),
                         sigops,
                         spent_outputs.into(),
+                        tx_sighash,
                     )?;
 
                     if let Some(mut mempool) = mempool {
@@ -896,7 +904,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         let tx = request.transaction();
         let nu = request.upgrade(network);
 
@@ -908,13 +916,15 @@ where
             .sighasher()
             .sighash(HashType::ALL, None);
 
-        Ok(Self::verify_transparent_inputs_and_outputs(
+        let async_check = Self::verify_transparent_inputs_and_outputs(
             request,
             script_verifier,
             cached_ffi_transaction,
         )?
         .and(Self::verify_sprout_shielded_data(joinsplit_data, &sighash)?)
-        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash)))
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash));
+
+        Ok((async_check, sighash))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -944,7 +954,8 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1 => Ok(()),
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -952,8 +963,7 @@ where
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
-            | NetworkUpgrade::Overwinter
-            | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
                 network_upgrade,
             )),
@@ -985,7 +995,7 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         let transaction = request.transaction();
         let nu = request.upgrade(network);
 
@@ -998,13 +1008,15 @@ where
             .sighasher()
             .sighash(HashType::ALL, None);
 
-        Ok(Self::verify_transparent_inputs_and_outputs(
+        let async_check = Self::verify_transparent_inputs_and_outputs(
             request,
             script_verifier,
             cached_ffi_transaction,
         )?
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
-        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash)))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash));
+
+        Ok((async_check, sighash))
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -1047,15 +1059,98 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    /// Verify a V5 transaction.
+    ///
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+    /// - transparent transfers
+    /// - sapling shielded data
+    /// - orchard shielded data
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the prepared `cached_ffi_transaction` used by the script verifier
+    /// - the sapling shielded data of the transaction, if any
+    /// - the orchard shielded data of the transaction, if any
+    // FIXME: This function performs no V6-specific issuance or burn semantic checks
+    // (ZIP-226 / ZIP-227). Those rules are enforced only in `zebra-state` via
+    // `IssuedAssetChanges::validate_and_get_changes`. Either move that validation here
+    // or document the contract that the state layer cannot be bypassed.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-    ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
+        let transaction = request.transaction();
+        let nu = request.upgrade(network);
+
+        Self::verify_v6_transaction_network_upgrade(&transaction, nu)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        let async_check = Self::verify_transparent_inputs_and_outputs(
+            request,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash));
+
+        Ok((async_check, sighash))
+    }
+
+    /// Verifies if a V6 `transaction` is supported by `network_upgrade`.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            // TODO: update V6 group ID in the comment below after it's chosen
+            // Supports V6 transactions
+            //
+            // # Consensus
+            //
+            // > [NU7 onward] The transaction version number MUST be 4, 5, or 6.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
+            // > If the transaction version number is 6 then the version group ID MUST be 0x77777777.
+            //
+            // Note: Here we verify the transaction version number of the above rule. The version
+            // group ID is checked in the zebra-chain crate during transaction deserialization.
+            NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // Does not support V6 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1225,9 +1320,11 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_bundle(
-        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        bundle: Option<OrchardBundle<::orchard::bundle::Authorized>>,
         sighash: &SigHash,
     ) -> AsyncChecks {
+        use zcash_primitives::transaction::OrchardBundle;
+
         let mut async_checks = AsyncChecks::new();
 
         if let Some(bundle) = bundle {
@@ -1242,11 +1339,20 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            async_checks.push(
-                primitives::halo2::VERIFIER
+            let item = primitives::halo2::Item::new(bundle.clone(), *sighash);
+            let check = match &bundle {
+                OrchardBundle::OrchardVanilla(_) => primitives::halo2::VERIFIER_VANILLA
                     .clone()
-                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
-            );
+                    .oneshot(item)
+                    .boxed(),
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                OrchardBundle::OrchardZSA(_) => primitives::halo2::VERIFIER_ZSA
+                    .clone()
+                    .oneshot(item)
+                    .boxed(),
+            };
+
+            async_checks.push(check);
         }
 
         async_checks

@@ -24,6 +24,9 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
+
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
@@ -258,6 +261,9 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+    /// A precomputed list of the sighashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
+    pub transaction_sighashes: Option<Arc<[transaction::SigHash]>>,
     /// This block's deferred pool value balance change.
     pub deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
 }
@@ -318,8 +324,19 @@ pub struct ContextuallyVerifiedBlock {
     /// in the same order as `block.transactions`.
     pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
 
+    /// A precomputed list of the sighashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
+    pub transaction_sighashes: Option<Arc<[transaction::SigHash]>>,
+
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Asset state changes for assets modified in this block.
+    /// Maps asset_base -> (old_state, new_state) where:
+    /// - old_state: the state before this block was applied
+    /// - new_state: the state after this block was applied
+    pub(crate) issued_asset_changes: IssuedAssetChanges,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -392,12 +409,22 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Asset state changes to be applied to the finalized state.
+    /// Contains (old_state, new_state) pairs for assets modified in this block.
+    /// If `None`, the changes will be recalculated from the block's transactions.
+    pub issued_asset_changes: Option<IssuedAssetChanges>,
 }
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -405,11 +432,24 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let issued_asset_changes = Some(block.issued_asset_changes.clone());
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issued_asset_changes,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
-    fn from_semantically_verified(block: SemanticallyVerifiedBlock, treestate: Treestate) -> Self {
+    fn from_semantically_verified(
+        block: SemanticallyVerifiedBlock,
+        treestate: Treestate,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] issued_asset_changes: Option<
+            IssuedAssetChanges,
+        >,
+    ) -> Self {
         Self {
             block: block.block,
             hash: block.hash,
@@ -418,6 +458,8 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change: block.deferred_pool_balance_change,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issued_asset_changes,
         }
     }
 }
@@ -483,6 +525,8 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        issued_asset_changes: IssuedAssetChanges,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -490,6 +534,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             deferred_pool_balance_change,
         } = semantically_verified;
 
@@ -506,10 +551,13 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             spent_outputs: spent_outputs.clone(),
             transaction_hashes,
+            transaction_sighashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
             )?,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issued_asset_changes,
         })
     }
 }
@@ -526,6 +574,7 @@ impl CheckpointVerifiedBlock {
         block.deferred_pool_balance_change = deferred_pool_balance_change;
         block
     }
+
     /// Creates a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
     ///
@@ -551,6 +600,8 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            // Not used in checkpoint paths.
+            transaction_sighashes: None,
             deferred_pool_balance_change: None,
         }
     }
@@ -567,7 +618,7 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        Self(SemanticallyVerifiedBlock::from(block))
     }
 }
 
@@ -586,6 +637,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes: None,
             deferred_pool_balance_change: None,
         }
     }
@@ -599,22 +651,10 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
+            transaction_sighashes: valid.transaction_sighashes,
             deferred_pool_balance_change: Some(DeferredPoolBalanceChange::new(
                 valid.chain_value_pool_change.deferred_amount(),
             )),
-        }
-    }
-}
-
-impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
-    fn from(finalized: FinalizedBlock) -> Self {
-        Self {
-            block: finalized.block,
-            hash: finalized.hash,
-            height: finalized.height,
-            new_outputs: finalized.new_outputs,
-            transaction_hashes: finalized.transaction_hashes,
-            deferred_pool_balance_change: finalized.deferred_pool_balance_change,
         }
     }
 }
@@ -1410,6 +1450,17 @@ pub enum ReadRequest {
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
     IsTransparentOutputSpent(transparent::OutPoint),
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
+    /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
+    /// on the `include_non_finalized` flag).
+    AssetState {
+        /// The [`AssetBase`] to return the asset state for.
+        asset_base: AssetBase,
+        /// Whether to include the issued asset state changes in the non-finalized state.
+        include_non_finalized: bool,
+    },
 }
 
 impl ReadRequest {
@@ -1454,6 +1505,8 @@ impl ReadRequest {
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            ReadRequest::AssetState { .. } => "asset_state",
         }
     }
 

@@ -13,6 +13,9 @@ use zebra_chain::{
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, AssetState};
+
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 use super::block::HEIGHT_DISK_BYTES;
@@ -211,5 +214,45 @@ impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
             Height::from_bytes(height_bytes),
             Node::from_bytes(node_bytes),
         )
+    }
+}
+
+// TODO: Replace `.unwrap()`s with `.expect()`s
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl IntoDisk for AssetState {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+            .expect("asset state should serialize successfully")
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl FromDisk for AssetState {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        Self::from_bytes(bytes.as_ref()).expect("asset state should deserialize successfully")
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl IntoDisk for AssetBase {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl FromDisk for AssetBase {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes
+            .as_ref()
+            .try_into()
+            .ok()
+            .and_then(|asset_bytes| Option::from(Self::from_bytes(asset_bytes)))
+            .expect("asset base should deserialize successfully")
     }
 }

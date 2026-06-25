@@ -42,6 +42,9 @@ pub mod transparent;
 pub mod value_balance;
 pub mod work;
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub mod orchard_zsa;
+
 pub use bounded_vec::BoundedVec;
 pub use error::Error;
 

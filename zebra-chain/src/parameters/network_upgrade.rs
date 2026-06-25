@@ -198,11 +198,11 @@ impl fmt::Display for ConsensusBranchId {
     }
 }
 
-impl TryFrom<ConsensusBranchId> for zcash_primitives::consensus::BranchId {
+impl TryFrom<ConsensusBranchId> for zcash_protocol::consensus::BranchId {
     type Error = crate::Error;
 
     fn try_from(id: ConsensusBranchId) -> Result<Self, Self::Error> {
-        zcash_primitives::consensus::BranchId::try_from(u32::from(id))
+        zcash_protocol::consensus::BranchId::try_from(u32::from(id))
             .map_err(|_| Self::Error::InvalidConsensusBranchId)
     }
 }
@@ -226,9 +226,9 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
-    // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
-    #[cfg(any(test, feature = "zebra-test"))]
-    (Nu7, ConsensusBranchId(0xffffffff)),
+    // Registered unconditionally so chain history works in builds without
+    // `zcash_unstable="nu7"`; Nu7-specific code paths remain cfg-gated elsewhere.
+    (Nu7, ConsensusBranchId(0x77190ad8)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xffffffff)),
 ];
@@ -520,7 +520,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zcash_protocol::consensus::NetworkUpgrade::ZFuture => Self::ZFuture,

@@ -178,9 +178,14 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
-        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-            if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+        if let Some(orchard_flags) = tx.orchard_flags() {
+            if orchard_flags.contains(Flags::ENABLE_SPENDS) {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
+            }
+            // ZIP-230: coinbase must not set enableZSA.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            if orchard_flags.contains(Flags::ENABLE_ZSA) {
+                return Err(TransactionError::CoinbaseHasEnableZSA);
             }
         }
     }

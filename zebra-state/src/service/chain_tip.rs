@@ -115,6 +115,9 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             height,
             new_outputs: _,
             transaction_hashes,
+            // Sighashes are not needed here - they are only used during block validation,
+            // which has already completed before a block reaches `ChainTipBlock`.
+            transaction_sighashes: _,
             deferred_pool_balance_change: _,
         } = prepared;
 

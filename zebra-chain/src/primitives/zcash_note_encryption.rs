@@ -7,7 +7,14 @@ use crate::{
     transaction::Transaction,
 };
 
-/// Returns true if all Sapling or Orchard outputs, if any, decrypt successfully with
+use orchard::{
+    bundle::{Authorization, Bundle},
+    primitives::OrchardPrimitives,
+};
+
+use zcash_primitives::transaction::OrchardBundle;
+
+/// Returns true if **all** Sapling or Orchard outputs decrypt successfully with
 /// an all-zeroes outgoing viewing key.
 pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height) -> bool {
     let nu = NetworkUpgrade::current(network, height);
@@ -40,20 +47,32 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
     }
 
     if let Some(bundle) = tx.orchard_bundle() {
-        for act in bundle.actions() {
-            if zcash_note_encryption::try_output_recovery_with_ovk(
-                &orchard::note_encryption::OrchardDomain::for_action(act),
-                &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
-                act,
-                act.cv_net(),
-                &act.encrypted_note().out_ciphertext,
-            )
-            .is_none()
-            {
-                return false;
-            }
+        let is_decrypted_successfully = match bundle {
+            OrchardBundle::OrchardVanilla(bundle) => orchard_bundle_decrypts_successfully(bundle),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
+        };
+
+        if !is_decrypted_successfully {
+            return false;
         }
     }
 
     true
+}
+
+/// Checks if all actions in an Orchard bundle decrypt successfully.
+fn orchard_bundle_decrypts_successfully<A: Authorization, V, D: OrchardPrimitives>(
+    bundle: &Bundle<A, V, D>,
+) -> bool {
+    bundle.actions().iter().all(|act| {
+        zcash_note_encryption::try_output_recovery_with_ovk(
+            &orchard::primitives::OrchardDomain::for_action(act),
+            &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
+            act,
+            act.cv_net(),
+            &act.encrypted_note().out_ciphertext,
+        )
+        .is_some()
+    })
 }

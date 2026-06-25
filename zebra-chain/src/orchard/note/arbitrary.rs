@@ -2,13 +2,13 @@ use proptest::{collection::vec, prelude::*};
 
 use super::*;
 
-impl Arbitrary for EncryptedNote {
+impl<const SIZE: usize> Arbitrary for EncryptedNote<SIZE> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (vec(any::<u8>(), 580))
+        (vec(any::<u8>(), SIZE))
             .prop_map(|v| {
-                let mut bytes = [0; 580];
+                let mut bytes = [0; SIZE];
                 bytes.copy_from_slice(v.as_slice());
                 Self(bytes)
             })

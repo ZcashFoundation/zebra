@@ -1720,6 +1720,20 @@ impl Service<ReadRequest> for ReadStateService {
                 let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
                 Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
             }
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            ReadRequest::AssetState {
+                asset_base,
+                include_non_finalized,
+            } => {
+                let best_chain = include_non_finalized
+                    .then(|| state.latest_best_chain())
+                    .flatten();
+
+                let response = read::asset_state(best_chain, &state.db, &asset_base);
+
+                Ok(ReadResponse::AssetState(response))
+            }
         };
 
         timed_span.spawn_blocking(request_handler)

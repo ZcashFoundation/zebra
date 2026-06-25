@@ -82,7 +82,7 @@ const DEFAULT_PROXY_CHANNEL_SIZE: usize = 100;
 ///
 /// We've seen delays up to 67ms on busy Linux and macOS machines,
 /// and some other timeout failures even with a 150ms timeout.
-pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(300);
+pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// An internal type representing the item that's sent in the [`broadcast`] channel.
 ///

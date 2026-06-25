@@ -56,3 +56,6 @@ pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod orchard_zsa;

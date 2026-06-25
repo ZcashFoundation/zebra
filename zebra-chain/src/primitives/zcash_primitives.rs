@@ -135,6 +135,15 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
+    for IdentityMap
+{
+    fn map_issue_authorization(&self, s: orchard::issuance::Signed) -> orchard::issuance::Signed {
+        s
+    }
+}
+
 #[derive(Debug)]
 struct PrecomputedAuth {}
 
@@ -142,6 +151,9 @@ impl zp_tx::Authorization for PrecomputedAuth {
     type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = zp_tx::components::tze::Authorized;
@@ -268,6 +280,8 @@ impl PrecomputedTxData {
             f_transparent,
             IdentityMap,
             IdentityMap,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            IdentityMap,
             #[cfg(zcash_unstable = "zfuture")]
             (),
         );
@@ -282,7 +296,7 @@ impl PrecomputedTxData {
     /// Returns the Orchard bundle in `tx_data`.
     pub fn orchard_bundle(
         &self,
-    ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+    ) -> Option<zcash_primitives::transaction::OrchardBundle<orchard::bundle::Authorized>> {
         self.tx_data.orchard_bundle().cloned()
     }
 

@@ -47,6 +47,10 @@ pub enum TransactionError {
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[error("coinbase transaction MUST NOT have the EnableZSA flag set")]
+    CoinbaseHasEnableZSA,
+
     #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
     CoinbaseOutputsNotDecryptable,
 
@@ -295,6 +299,9 @@ impl TransactionError {
             | NotEnoughFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId => 100,
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            CoinbaseHasEnableZSA => 100,
 
             _other => 0,
         }

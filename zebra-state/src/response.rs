@@ -18,6 +18,9 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::AssetState;
+
 use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
@@ -303,6 +306,7 @@ impl Eq for NonFinalizedBlocksListener {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
+#[allow(clippy::large_enum_variant)]
 pub enum ReadResponse {
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
@@ -453,6 +457,10 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::IsTransparentOutputSpent`]
     IsTransparentOutputSpent(bool),
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Response to [`ReadRequest::AssetState`]
+    AssetState(Option<AssetState>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -560,6 +568,9 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            ReadResponse::AssetState(_) => Err("there is no corresponding Response for this ReadResponse"),
         }
     }
 }

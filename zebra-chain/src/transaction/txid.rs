@@ -41,7 +41,7 @@ impl<'a> TxIdBuilder<'a> {
         Some(Hash(hash_writer.finish()))
     }
 
-    /// Compute the Transaction ID for a V5 transaction in the given network upgrade.
+    /// Compute the Transaction ID for transactions V5 to V6.
     /// In this case it's the hash of a tree of hashes of specific parts of the
     /// transaction, as specified in ZIP-244 and ZIP-225.
     fn txid_v5(self) -> Option<Hash> {

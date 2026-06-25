@@ -2,7 +2,11 @@ name: Test Crate Build
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      # TODO: Temporary ZSA integration branches. Remove before merging to main.
+      - zsa-support
+      - v4.2.0-dev
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -57,7 +61,8 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
-          toolchain: stable
+          # TODO: QED-it temp Rust 1.94 pin: stable for Zebra v4.2.0 CI; remove before upstream merge.
+          toolchain: "1.94"
           components: clippy
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
@@ -109,7 +114,8 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
-          toolchain: stable
+          # TODO: QED-it temp Rust 1.94 pin: stable for Zebra v4.2.0 CI; remove before upstream merge.
+          toolchain: "1.94"
           components: clippy
           cache-key: crate-build-${{ matrix.crate }}
           cache-on-failure: true
@@ -183,7 +189,6 @@ jobs:
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
-
 
   test-crate-build-success:
     name: test crate build success

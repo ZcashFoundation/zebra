@@ -10,10 +10,13 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use orchard::{bundle::BatchValidator, circuit::VerifyingKey};
+use orchard::{bundle::BatchValidator, circuit::VerifyingKey, flavor::OrchardVanilla};
 use rand::thread_rng;
-use zcash_protocol::value::ZatBalance;
+use zcash_primitives::transaction::OrchardBundle;
 use zebra_chain::transaction::SigHash;
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use orchard::flavor::OrchardZSA;
 
 use crate::BoxError;
 use thiserror::Error;
@@ -50,29 +53,38 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
-    /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
+    /// The halo2 proof verifying key for OrchardVanilla.
+    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey =
+        ItemVerifyingKey::build::<OrchardVanilla>();
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+lazy_static::lazy_static! {
+    /// The halo2 proof verifying key for OrchardZSA.
+    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey =
+        ItemVerifyingKey::build::<OrchardZSA>();
 }
 
 /// A Halo2 verification item, used as the request type of the service.
 #[derive(Clone, Debug)]
 pub struct Item {
-    bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+    bundle: OrchardBundle<orchard::bundle::Authorized>,
     sighash: SigHash,
 }
 
 impl RequestWeight for Item {
     fn request_weight(&self) -> usize {
-        self.bundle.actions().len()
+        match &self.bundle {
+            OrchardBundle::OrchardVanilla(b) => b.actions().len(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            OrchardBundle::OrchardZSA(b) => b.actions().len(),
+        }
     }
 }
 
 impl Item {
     /// Creates a new [`Item`] from a bundle and sighash.
-    pub fn new(
-        bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
-        sighash: SigHash,
-    ) -> Self {
+    pub fn new(bundle: OrchardBundle<orchard::bundle::Authorized>, sighash: SigHash) -> Self {
         Self { bundle, sighash }
     }
 
@@ -93,7 +105,11 @@ trait QueueBatchVerify {
 
 impl QueueBatchVerify for BatchValidator {
     fn queue(&mut self, Item { bundle, sighash }: Item) {
-        self.add_bundle(&bundle, sighash.0);
+        match bundle {
+            OrchardBundle::OrchardVanilla(b) => self.add_bundle(&b, sighash.0),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            OrchardBundle::OrchardZSA(b) => self.add_bundle(&b, sighash.0),
+        }
     }
 }
 
@@ -130,7 +146,7 @@ impl From<halo2::plonk::Error> for Halo2Error {
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-pub static VERIFIER: Lazy<
+pub static VERIFIER_VANILLA: Lazy<
     Fallback<
         Batch<Verifier, Item>,
         ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
@@ -138,7 +154,7 @@ pub static VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&VERIFYING_KEY),
+            Verifier::new(&VERIFYING_KEY_VANILLA),
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -153,7 +169,29 @@ pub static VERIFIER: Lazy<
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
-            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY).boxed())
+            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY_VANILLA).boxed())
+                as fn(_) -> _,
+        ),
+    )
+});
+
+/// Like [`VERIFIER_VANILLA`], but for OrchardZSA proofs.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub static VERIFIER_ZSA: Lazy<
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+    >,
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::new(&VERIFYING_KEY_ZSA),
+            HALO2_MAX_BATCH_SIZE,
+            None,
+            super::MAX_BATCH_LATENCY,
+        ),
+        tower::service_fn(
+            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY_ZSA).boxed())
                 as fn(_) -> _,
         ),
     )

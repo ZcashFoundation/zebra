@@ -34,6 +34,9 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
+
 use crate::{
     request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
     TransactionLocation, ValidateContextError,
@@ -193,6 +196,10 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// The ZIP-0227 `issued_assets` state for this chain.
+    pub(crate) issued_assets: HashMap<AssetBase, AssetState>,
+
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
@@ -261,6 +268,8 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -988,6 +997,49 @@ impl Chain {
         }
     }
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Returns the Orchard issued asset state if one is present in
+    /// the chain for the provided asset base.
+    pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
+        self.issued_assets.get(asset_base).cloned()
+    }
+
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Revert the issued-asset state changes recorded for a block.
+    ///
+    /// At `RevertPosition::Tip`, restores `issued_assets` to the per-asset `old_state`
+    /// captured when the block was applied. At `RevertPosition::Root` this is a no-op
+    /// because finalized issuance state lives in the on-disk column family.
+    fn revert_issued_assets(
+        &mut self,
+        position: RevertPosition,
+        issued_asset_changes: &IssuedAssetChanges,
+    ) {
+        if position == RevertPosition::Root {
+            // `issued_assets` grows monotonically (no eviction on finalization).
+            // At ~112 bytes per asset this is negligible for realistic asset counts.
+            // Revisit if ZSA adoption reaches hundreds of thousands of unique assets.
+        } else {
+            trace!(
+                ?position,
+                "restoring previous issued asset states for tip block"
+            );
+            // Simply restore the old states
+            for (asset_base, (old_state, new_state)) in issued_asset_changes.iter() {
+                assert_eq!(
+                    self.issued_assets.get(asset_base),
+                    Some(new_state),
+                    "tip revert: current state differs from recorded new_state for {:?}",
+                    asset_base
+                );
+                match old_state {
+                    Some(state) => self.issued_assets.insert(*asset_base, *state),
+                    None => self.issued_assets.remove(asset_base),
+                };
+            }
+        }
+    }
+
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
@@ -1502,6 +1554,29 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        for (asset_base, (old_state_from_block, new_state)) in
+            contextually_valid.issued_asset_changes.iter()
+        {
+            self.issued_assets
+                .entry(*asset_base)
+                .and_modify(|current_state| {
+                    assert_eq!(
+                        old_state_from_block.as_ref(),
+                        Some(&*current_state),
+                        "issued asset state mismatch for {:?}",
+                        asset_base
+                    );
+                    *current_state = *new_state;
+                })
+                .or_insert_with(|| {
+                    // When `old_state_from_block` is `Some` but the asset is missing from
+                    // the in-memory map, it means the entry was evicted during finalization
+                    // and lives in the finalized DB.
+                    *new_state
+                });
+        }
+
         Ok(())
     }
 
@@ -1555,21 +1630,23 @@ impl Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
+            let transaction_data = match transaction.deref() {
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    &None
+                    ),
                 V5 {
                     inputs,
                     outputs,
@@ -1583,6 +1660,8 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    &None,
                 ),
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 V6 {
@@ -1597,6 +1676,7 @@ impl Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
+                    &None,
                     orchard_shielded_data,
                 ),
 
@@ -1604,6 +1684,27 @@ impl Chain {
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
+
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+            ) = transaction_data;
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+                orchard_shielded_data_zsa,
+            ) = transaction_data;
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
             let transaction_location = TransactionLocation::from_usize(height, transaction_index);
@@ -1631,7 +1732,9 @@ impl Chain {
                 &transaction_hash,
             ))?;
             self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
-            self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+            self.update_chain_tip_with(&(orchard_shielded_data_vanilla, &transaction_hash))?;
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            self.update_chain_tip_with(&(orchard_shielded_data_zsa, &transaction_hash))?;
         }
 
         // update the chain value pool balances
@@ -1721,6 +1824,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.chain_value_pool_change,
         );
 
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let issued_asset_changes = &contextually_valid.issued_asset_changes;
+
         // remove the blocks hash from `height_by_hash`
         assert!(
             self.height_by_hash.remove(&hash).is_some(),
@@ -1740,21 +1846,22 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
+            let transaction_data = match transaction.deref() {
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    &None),
                 V5 {
                     inputs,
                     outputs,
@@ -1768,6 +1875,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    &None,
                 ),
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 V6 {
@@ -1782,6 +1891,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
+                    &None,
                     orchard_shielded_data,
                 ),
 
@@ -1789,6 +1899,27 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
+
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+            ) = transaction_data;
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+                orchard_shielded_data_zsa,
+            ) = transaction_data;
 
             // remove the utxos this produced
             self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
@@ -1816,7 +1947,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 &(sapling_shielded_data_shared_anchor, transaction_hash),
                 position,
             );
-            self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
+            self.revert_chain_with(&(orchard_shielded_data_vanilla, transaction_hash), position);
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            self.revert_chain_with(&(orchard_shielded_data_zsa, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -1826,6 +1959,10 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
+
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        // In revert_chain_with for ContextuallyVerifiedBlock:
+        self.revert_issued_assets(position, issued_asset_changes);
 
         // revert the chain value pool balances, if needed
         // note that size is 0 because it isn't need for reverting
@@ -2162,12 +2299,17 @@ where
     }
 }
 
-impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Chain {
+impl<Flavor: orchard::ShieldedDataFlavor>
+    UpdateWith<(
+        &Option<orchard::ShieldedData<Flavor>>,
+        &SpendingTransactionId,
+    )> for Chain
+{
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
         &(orchard_shielded_data, revealing_tx_id): &(
-            &Option<orchard::ShieldedData>,
+            &Option<orchard::ShieldedData<Flavor>>,
             &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
@@ -2192,7 +2334,7 @@ impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Ch
     fn revert_chain_with(
         &mut self,
         (orchard_shielded_data, _revealing_tx_id): &(
-            &Option<orchard::ShieldedData>,
+            &Option<orchard::ShieldedData<Flavor>>,
             &SpendingTransactionId,
         ),
         _position: RevertPosition,

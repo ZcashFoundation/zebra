@@ -14,6 +14,12 @@ use halo2::{
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use orchard::{
+    note::AssetBase,
+    value::{ValueCommitTrapdoor, ValueSum},
+};
+
 use crate::{
     amount::Amount,
     error::RandError,
@@ -236,7 +242,13 @@ impl ValueCommitment {
     {
         let rcv = generate_trapdoor(csprng)?;
 
-        Ok(Self::new(rcv, value))
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let vc = Self::new(rcv, ValueSum::from_raw(value.into()), AssetBase::zatoshi());
+
+        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+        let vc = Self::new(rcv, value);
+
+        Ok(vc)
     }
 
     /// Generate a new `ValueCommitment` from an existing `rcv on a `value`.
@@ -244,10 +256,28 @@ impl ValueCommitment {
     /// ValueCommit^Orchard(v) :=
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-    #[allow(non_snake_case)]
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
         let v = pallas::Scalar::from(value);
         Self::from(*V * v + *R * rcv)
+    }
+
+    /// Generate a new `ValueCommitment` accounting for `rcv`, `value` and `assetBase`.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    pub fn new(rcv: pallas::Scalar, value: ValueSum, asset: AssetBase) -> Self {
+        // TODO: Can be simplified if `ValueCommitTrapdoor` and `ValueCommitment` are exposed in Orchard.
+        Self(
+            pallas::Affine::from_bytes(
+                &orchard::value::ValueCommitment::derive(
+                    value,
+                    ValueCommitTrapdoor::from_bytes(rcv.to_repr())
+                        .expect("canonical scalar representation round-trip"),
+                    asset,
+                )
+                .to_bytes(),
+            )
+            .expect("valid commitment point round-trip"),
+        )
     }
 }
 

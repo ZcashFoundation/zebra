@@ -834,7 +834,6 @@ fn calculate_orchard_subtree(
         let orchard_note_commitments = block
             .orchard_note_commitments()
             .take(prev_remaining_notes)
-            .cloned()
             .collect();
 
         // This takes less than 1 second per tree, so we don't need to make it cancellable.
