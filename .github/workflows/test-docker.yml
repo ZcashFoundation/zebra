@@ -80,6 +80,7 @@ jobs:
         with:
           name: zebrad-test
           path: ${{ runner.temp }}/zebrad-test.tar
+          retention-days: 7
 
   test-configurations:
     name: Test ${{ matrix.name }}
