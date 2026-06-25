@@ -32,10 +32,9 @@ impl RpcRequestClient {
     /// Use [`RpcRequestClient::new()`] for the default timeout.
     pub fn new_with_timeout(rpc_address: SocketAddr, timeout: Duration) -> Self {
         Self {
-            client: Client::builder()
-                .timeout(timeout)
-                .build()
-                .expect("reqwest::Client build only fails for invalid TLS config, not a plain timeout"),
+            client: Client::builder().timeout(timeout).build().expect(
+                "reqwest::Client build only fails for invalid TLS config, not a plain timeout",
+            ),
             rpc_address,
         }
     }
@@ -138,10 +137,7 @@ impl RpcRequestClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
+    use std::sync::{Arc, Mutex};
 
     /// Proves that `RpcRequestClient` times out instead of hanging indefinitely
     /// when a server accepts a TCP connection but never sends a response.
