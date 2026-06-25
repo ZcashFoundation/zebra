@@ -22,8 +22,12 @@ permissions: {}
 
 jobs:
   test:
+    # Harness only uploads a CI artifact (no release upload). Read-only contents
+    # keeps the GITHUB_TOKEN scope minimal even though the called workflow declares
+    # contents:write for its release-upload step (which never runs here because
+    # release_tag is not passed).
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     uses: ./.github/workflows/zfnd-release-binaries.yml
