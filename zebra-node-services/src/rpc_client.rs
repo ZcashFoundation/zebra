@@ -35,7 +35,7 @@ impl RpcRequestClient {
             client: Client::builder()
                 .timeout(timeout)
                 .build()
-                .expect("should be able to build reqwest::Client"),
+                .expect("reqwest::Client build only fails for invalid TLS config, not a plain timeout"),
             rpc_address,
         }
     }
