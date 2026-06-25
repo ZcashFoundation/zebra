@@ -32,6 +32,10 @@ SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 # Make the build platform available as a variable
 ARG BUILDPLATFORM
 
+# Forwarded from the caller workflow so rustc, dpkg, and other tools honour it.
+ARG SOURCE_DATE_EPOCH
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
@@ -48,10 +52,6 @@ ENV CARGO_HOME=${CARGO_HOME}
 
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
-
-# Forwarded from the caller workflow so rustc, dpkg, and other tools honour it.
-ARG SOURCE_DATE_EPOCH
-ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 # This stage builds tests without running them.
 #
