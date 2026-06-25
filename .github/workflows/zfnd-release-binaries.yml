@@ -86,7 +86,21 @@ jobs:
           # statically; the binary then depends only on glibc and libstdc++.
           cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-          echo "glibc floor: $(objdump -T target/release/zebrad | grep -oE 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -V | tail -1)"
+          # Documented floor for Zebra's pre-built binaries (Ubuntu 22.04+,
+          # Debian 12+, RHEL 9+, Amazon Linux 2023). Bump together with
+          # book/src/user/install.md if you raise this.
+          MAX_GLIBC=2.34
+          # `|| floor=""` keeps pipefail from aborting before the explicit check.
+          floor=$(objdump -T target/release/zebrad | grep -oE 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -V | tail -1) || floor=""
+          if [ -z "${floor}" ]; then
+            echo "::error::could not parse glibc floor from zebrad"
+            exit 1
+          fi
+          echo "glibc floor: ${floor}"
+          if [ "$(printf '%s\n%s\n' "${floor}" "${MAX_GLIBC}" | sort -V | tail -1)" != "${MAX_GLIBC}" ]; then
+            echo "::error::glibc floor ${floor} exceeds documented ${MAX_GLIBC}"
+            exit 1
+          fi
 
           stage="zebrad-${version}-${TARGET}"
           mkdir -p "dist/${stage}"
@@ -101,7 +115,10 @@ jobs:
 
       # Generated in the build job so the attestation reflects the matrix
       # runner (ubuntu-22.04 / ubuntu-22.04-arm), not the publish job's runner.
+      # Gated to release runs so the test harness cannot mint attestations
+      # under the same --signer-workflow path users are told to trust.
       - name: Attest build provenance
+        if: inputs.release_tag != ''
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: dist/*.tar.gz
@@ -138,13 +155,16 @@ jobs:
           ( cd dist && sha256sum -- *.tar.gz > SHA256SUMS )
 
       - name: Install Cosign
+        if: inputs.release_tag != ''
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign the checksum manifest
+        if: inputs.release_tag != ''
         working-directory: dist
         run: cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
 
       - name: Verify signatures
+        if: inputs.release_tag != ''
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
