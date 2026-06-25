@@ -427,25 +427,20 @@ impl NonFinalizedState {
         block_hash: block::Hash,
         finalized_state: &ZebraDb,
     ) -> Result<Vec<block::Hash>, ReconsiderError> {
-        // Get the invalidated blocks that were invalidated by the given block_hash
-        let height = self
+        // Locate the record but keep it live until replay succeeds, so a
+        // recoverable error can't lose it; it is `shift_remove`d atomically with
+        // the insert below.
+        let (height, invalidated_blocks) = self
             .invalidated_blocks
             .iter()
             .find_map(|(height, blocks)| {
                 if blocks.first()?.hash == block_hash {
-                    Some(height)
+                    Some((*height, (**blocks).clone()))
                 } else {
                     None
                 }
             })
             .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
-
-        let invalidated_blocks = Arc::unwrap_or_clone(
-            self.invalidated_blocks
-                .clone()
-                .shift_remove(height)
-                .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?,
-        );
 
         let invalidated_block_hashes = invalidated_blocks
             .iter()
@@ -486,10 +481,15 @@ impl NonFinalizedState {
         for block in invalidated_blocks {
             modified_chain = modified_chain
                 .push(block)
-                .expect("previously invalidated block should be valid for chain");
+                .map_err(ReconsiderError::ReplayFailed)?;
         }
 
-        let (height, hash) = modified_chain.non_finalized_tip();
+        let (tip_height, tip_hash) = modified_chain.non_finalized_tip();
+
+        // All fallible steps have succeeded; remove the invalidation record
+        // atomically with installing the restored chain so a failed attempt
+        // does not destroy the record.
+        self.invalidated_blocks.shift_remove(&height);
 
         // Only track invalidated_blocks that are not yet finalized. Once blocks are finalized (below the best_chain_root_height)
         // we can discard the block.
@@ -502,7 +502,7 @@ impl NonFinalizedState {
             chain_set.retain(|chain| chain.non_finalized_tip_hash() != root_parent_hash)
         });
 
-        self.update_metrics_for_committed_block(height, hash);
+        self.update_metrics_for_committed_block(tip_height, tip_hash);
 
         Ok(invalidated_block_hashes)
     }

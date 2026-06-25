@@ -218,6 +218,11 @@ pub enum ReconsiderError {
     /// The reconsider request was dropped before processing.
     #[error("reconsider block request was unexpectedly dropped")]
     ReconsiderResponseDropped,
+
+    /// Replaying an invalidated block into the restored chain failed contextual
+    /// validation.
+    #[error("replaying a previously invalidated block failed contextual validation: {0}")]
+    ReplayFailed(#[source] ValidateContextError),
 }
 
 /// An error describing why a block failed contextual validation.
