@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   secondary must not delete the primary's files). The read-write open path is
   unchanged.
 
+### Fixed
+
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and same-height sibling-tip invalidation, repeated reconsideration) without panicking ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 
 This release increases Zebra's local rollback window as a defence-in-depth measure
@@ -85,10 +89,6 @@ extends the `getpeerinfo` RPC, and includes several performance and correctness 
 
 Thank you to everyone who contributed to this release:
 @andres-pcg, @conradoplg, @gustavovalverde, @judah-caruso, @oxarbitrage, @syszery and @upbqdn
-
-### Fixed
-
-- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and same-height sibling-tip invalidation, repeated reconsideration) without panicking ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
