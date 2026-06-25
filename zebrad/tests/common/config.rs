@@ -1,4 +1,4 @@
-//! `zebrad` config-specific shared code for the `zebrad` acceptance tests.
+//! `zebrad` config-specific shared code for the `zebrad` tests.
 //!
 //! # Warning
 //!

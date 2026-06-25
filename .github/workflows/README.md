@@ -25,12 +25,18 @@ Below is a simplified Mermaid diagram showing the current workflows, their key t
 graph TB
   %% Triggers
   subgraph Triggers
-    PR[Pull Request] & Push[Push to main] & Schedule[Weekly] & Manual[Manual]
+    PR[Pull Request] & Push[Push to main] & ReleaseEvent[GitHub Release] & Schedule[Weekly] & Manual[Manual]
   end
 
   %% Reusable build
   subgraph Build
     BuildDocker[zfnd-build-docker-image.yml]
+  end
+
+  %% Release automation
+  subgraph Release
+    ReleaseWorkflow[release.yml]
+    ReleaseBinaries[release-binaries.yml]
   end
 
   %% CI workflows
@@ -55,7 +61,9 @@ graph TB
 
   %% Trigger wiring
   PR --> Unit & Lint & DockerCfg & CrateBuild & IT & Security
-  Push --> Unit & Lint & Coverage & Docs & Security
+  Push --> Unit & Lint & Coverage & Docs & Security & ReleaseWorkflow
+  ReleaseWorkflow --> ReleaseEvent
+  ReleaseEvent --> ReleaseBinaries & DeployNodes
   Schedule --> IT
   Manual --> IT & DeployNodes & Cleanup
 
@@ -68,9 +76,10 @@ graph TB
   classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
   classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
   class BuildDocker primary
+  class ReleaseWorkflow,ReleaseBinaries primary
   class Unit,Lint,Coverage,DockerCfg,CrateBuild,Docs,Security secondary
   class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
-  class PR,Push,Schedule,Manual trigger
+  class PR,Push,ReleaseEvent,Schedule,Manual trigger
 ```
 
 _The diagram above illustrates the parallel execution patterns in our CI/CD system. All triggers can initiate the pipeline concurrently, unit tests run in parallel after the Docker image build, and integration tests follow a mix of parallel and sequential steps. The infrastructure components support their respective workflow parts concurrently._
@@ -148,9 +157,9 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
+- **Release** (`release.yml`): Creates/updates release-plz Release PRs, then publishes crates, tags, and one app-authored `zebrad` GitHub Release after a Release PR merge
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
-- **Release Drafter** (`release-drafter.yml`): Automates release notes
-- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, cached disks, lwd flows
+- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
@@ -174,24 +183,24 @@ Our test execution is centralized through our Docker [entrypoint script](../../d
 We use `nextest` profiles defined in [`.config/nextest.toml`](../../.config/nextest.toml) to manage test suites. A single environment variable, `NEXTEST_PROFILE`, selects the profile to run.
 
 ```bash
-# Run the full test suite using the 'all-tests' profile
-docker run --rm -e NEXTEST_PROFILE=all-tests zebra-tests
+# Run unit + integration tests using the 'ci' profile
+docker run --rm -e NEXTEST_PROFILE=ci zebra-tests
 
-# Run a specific test suite, like the lightwalletd integration tests
-docker run --rm -e NEXTEST_PROFILE=lwd-integration zebra-tests
+# Run a specific stateful test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-stateful -e "NEXTEST_FILTER=test(=stateful::sync::sync_update_mainnet)" zebra-tests
+
+# Run a specific E2E test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-e2e -e "NEXTEST_FILTER=test(=e2e::sync::sync_full_mainnet)" zebra-tests
 ```
 
 #### Test Categories
 
-Our tests are organized into different categories:
+The canonical test tier definitions and local nextest examples live in
+[`zebrad/tests/main.rs`](../../zebrad/tests/main.rs). The nextest profile filters
+live in [`.config/nextest.toml`](../../.config/nextest.toml).
 
-- **Unit & Integration Tests**: Basic functionality and component testing
-- **Network Sync Tests**: Testing blockchain synchronization from various states
-- **Lightwalletd Tests**: Integration with the lightwalletd service
-- **RPC Tests**: JSON-RPC endpoint functionality
-- **Checkpoint Tests**: Blockchain checkpoint generation and validation
-
-Each test category has specific profiles that can be run individually using the `NEXTEST_PROFILE` environment variable.
+The `ci` profile runs the fast PR test set. The `ci-stateful` and `ci-e2e`
+profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests.
 
 ### Pull Request Testing
 

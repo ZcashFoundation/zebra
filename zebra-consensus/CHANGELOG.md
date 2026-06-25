@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [9.0.1] - 2026-06-18
+
+### Changed
+
+- `zebra-state` dependency bumped to `9.0.1`
+
+## [9.0.0] - 2026-06-10
+
+### Changed
+
+- Deferred pool balance change calculation moved out of the checkpoint verifier.
+  `CheckpointVerifiedBlock::new()` no longer takes a `deferred_pool_balance_change`
+  parameter; it is now computed by the finalized state on commit.
+- `zebra-chain` dependency bumped to `10.0.0`.
+
 ## [8.0.0] - 2026-06-02
 
 ### Added

@@ -119,9 +119,9 @@ jobs:
           else
             MATRIX='{"include":[{"platform":"linux/amd64","runner":"'"$AMD64_RUNNER"'"}]}'
           fi
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "Runners: AMD64=$AMD64_RUNNER, ARM64=$ARM64_RUNNER"
-          echo "Platforms: $(echo $MATRIX | jq -r '.include[].platform' | paste -sd ',' -)"
+          echo "Platforms: $(echo "$MATRIX" | jq -r '.include[].platform' | paste -sd ',' -)"
 
   build:
     name: Build images (${{ matrix.platform }})
@@ -150,6 +150,10 @@ jobs:
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
+
+      # Pin image timestamps to the commit time for reproducible builds
+      - name: Set SOURCE_DATE_EPOCH from the commit
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
@@ -238,7 +242,8 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
           provenance: mode=max
@@ -264,7 +269,8 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+          outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
@@ -297,6 +303,7 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      attestations: write
     outputs:
       image_digest: ${{ steps.create.outputs.digest }}
     steps:
@@ -365,16 +372,73 @@ jobs:
         id: create
         working-directory: /tmp/digests
         run: |
-          # Create array of image references from digests
+          # The -t flags and the per-arch image refs expand to separate args.
+          # shellcheck disable=SC2046
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}@sha256:%s ' *)
 
           # Get digest of the merged manifest
           docker buildx imagetools inspect us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }} \
             --format '{{json .Manifest}}' | jq -r '.digest' | tee /tmp/digest.txt
-          echo "digest=$(cat /tmp/digest.txt)" >> $GITHUB_OUTPUT
+          echo "digest=$(cat /tmp/digest.txt)" >> "$GITHUB_OUTPUT"
         env:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+
+      # Sign + attest the released image
+      - name: Attest build provenance
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: docker.io/zfnd/${{ inputs.image_name }}
+          subject-digest: ${{ steps.create.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install Cosign
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign images with Cosign
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          DIGEST: ${{ steps.create.outputs.digest }}
+          GAR_IMAGE: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
+          HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+        run: |
+          cosign sign --yes "${GAR_IMAGE}@${DIGEST}"
+          cosign sign --yes "${HUB_IMAGE}@${DIGEST}"
+
+      - name: Generate SBOM
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: docker.io/zfnd/${{ inputs.image_name }}@${{ steps.create.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest SBOM
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: docker.io/zfnd/${{ inputs.image_name }}
+          subject-digest: ${{ steps.create.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      # Fail the release if the signature or attestations don't verify.
+      - name: Verify release signatures
+        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          DIGEST: ${{ steps.create.outputs.digest }}
+          HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cosign verify "${HUB_IMAGE}@${DIGEST}" \
+            --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+          gh attestation verify "oci://${HUB_IMAGE}@${DIGEST}" \
+            --owner ZcashFoundation \
+            --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
 
       # For the merged multi-arch manifest, display:
       # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)
