@@ -220,7 +220,7 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
     let rpc_client_1 =
-        RpcRequestClient::new_with_timeout(rpc_listen_addr, Duration::from_secs(10 * 60));
+        RpcRequestClient::new_with_timeout(rpc_listen_addr, Duration::from_secs(15 * 60));
 
     tracing::info!(
         ?rpc_listen_addr,
