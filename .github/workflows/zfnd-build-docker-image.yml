@@ -119,9 +119,9 @@ jobs:
           else
             MATRIX='{"include":[{"platform":"linux/amd64","runner":"'"$AMD64_RUNNER"'"}]}'
           fi
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "Runners: AMD64=$AMD64_RUNNER, ARM64=$ARM64_RUNNER"
-          echo "Platforms: $(echo $MATRIX | jq -r '.include[].platform' | paste -sd ',' -)"
+          echo "Platforms: $(echo "$MATRIX" | jq -r '.include[].platform' | paste -sd ',' -)"
 
   build:
     name: Build images (${{ matrix.platform }})
@@ -372,14 +372,15 @@ jobs:
         id: create
         working-directory: /tmp/digests
         run: |
-          # Create array of image references from digests
+          # The -t flags and the per-arch image refs expand to separate args.
+          # shellcheck disable=SC2046
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}@sha256:%s ' *)
 
           # Get digest of the merged manifest
           docker buildx imagetools inspect us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }} \
             --format '{{json .Manifest}}' | jq -r '.digest' | tee /tmp/digest.txt
-          echo "digest=$(cat /tmp/digest.txt)" >> $GITHUB_OUTPUT
+          echo "digest=$(cat /tmp/digest.txt)" >> "$GITHUB_OUTPUT"
         env:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
 
