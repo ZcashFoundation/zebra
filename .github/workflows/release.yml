@@ -40,10 +40,10 @@ jobs:
     steps:
       - name: Generate release app token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
@@ -86,10 +86,10 @@ jobs:
     steps:
       - name: Generate release app token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: read
@@ -119,7 +119,7 @@ jobs:
       - name: Validate release app token
         if: steps.release-pr.outputs.merged == 'true' && steps.app-token.outputs.token == ''
         run: |
-          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
+          echo "::error::Configure RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
       - name: Publish crates and create tags
         id: release-plz
@@ -184,7 +184,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
+            echo "::error::Configure RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
             exit 1
           fi
 

@@ -30,7 +30,7 @@ pr_body = """
 - [ ] Per-crate `CHANGELOG.md` entries describe crate-consumer impact
 - [ ] No git dependencies remain in crates that will publish to crates.io (`check-no-git-dependencies`)
 - [ ] Any required checkpoint, end-of-support height, README, or operational release-note changes already landed before this generated Release PR
-- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are both configured at repository or organization scope
+- [ ] `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY` are both configured at repository or organization scope
 - [ ] Merge this Release PR only when crates should be published and the public `zebrad` GitHub Release should be created
 
 ## Release Summary
