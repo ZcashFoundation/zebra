@@ -26,6 +26,11 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      # Required so the called workflow's attest-build-provenance and
+      # attest-sbom steps can write attestations on the release image.
+      # Reusable workflows cannot grant themselves permissions the caller
+      # has not granted.
+      attestations: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
