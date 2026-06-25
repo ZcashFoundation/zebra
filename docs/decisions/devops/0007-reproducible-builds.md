@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-24
 story: Verifiable release images for zebrad
 ---
