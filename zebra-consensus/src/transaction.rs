@@ -746,19 +746,19 @@ where
 
                     utxo
                 } else {
-                    let query = state
+                    let response = state
                         .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
+                        .await
+                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                            Ok(_) => TransactionError::TransparentInputNotFound,
+                            Err(boxed_error) => TransactionError::from(boxed_error),
+                        })?;
 
-                    match query.await {
-                        Ok(zebra_state::Response::Utxo(utxo)) => utxo,
-                        Ok(_) => unreachable!("AwaitUtxo always responds with Utxo"),
-                        Err(err) => {
-                            return match err.downcast::<Elapsed>() {
-                                Ok(_) => Err(TransactionError::TransparentInputNotFound),
-                                Err(err) => Err(err.into()),
-                            };
-                        }
+                    if let zebra_state::Response::Utxo(utxo) = response {
+                        utxo
+                    } else {
+                        unreachable!("AwaitUtxo always responds with Utxo")
                     }
                 };
                 tracing::trace!(?utxo, "got UTXO");
