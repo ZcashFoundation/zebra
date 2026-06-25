@@ -62,7 +62,7 @@ where
                     Ok(()) => {}
                     Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                         span.in_scope(|| {
-                            tracing::info!("client disconnected, dropping chain_tip_change task");
+                            tracing::debug!("client disconnected, dropping chain_tip_change task");
                         });
                         return;
                     }
@@ -139,7 +139,7 @@ where
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => {
                         span.in_scope(|| {
-                            tracing::info!(
+                            tracing::debug!(
                                 "client disconnected, dropping non_finalized_state_change task"
                             );
                         });
@@ -205,7 +205,9 @@ where
                         Ok(()) => {}
                         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                             span.in_scope(|| {
-                                tracing::info!("client disconnected, dropping mempool_change task");
+                                tracing::debug!(
+                                    "client disconnected, dropping mempool_change task"
+                                );
                             });
                             return;
                         }

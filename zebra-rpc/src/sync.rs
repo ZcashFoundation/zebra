@@ -42,12 +42,33 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 /// How long to wait for a keep-alive ping response before treating the connection as dead.
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// How long to wait before re-subscribing after a block fails to commit to the non-finalized state.
+/// How long to wait between attempts to commit the same streamed block while it can't yet attach to
+/// the non-finalized chain.
 ///
 /// A block can persistently fail to commit (e.g. [`ValidateContextError::NotReadyToBeCommitted`])
-/// when the secondary finalized state hasn't yet caught up with the primary. Without this delay,
-/// re-subscribing immediately turns that into a full-speed busy loop that saturates the logs.
+/// when the secondary finalized state hasn't yet caught up with the primary. The syncer retries the
+/// same block in place (see [`MAX_IN_PLACE_COMMIT_RETRIES`]); this delay keeps that retry from
+/// becoming a full-speed busy loop while the finalized state catches up.
 const COMMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// How many times to retry committing the same streamed block in place — keeping the existing
+/// subscription open — before giving up and re-subscribing.
+///
+/// A commit failure is almost always transient: the secondary's finalized state hasn't caught up
+/// enough for the streamed block to attach yet, and [`TrustedChainSync::try_commit`] advances that
+/// catch-up on every attempt, so the block becomes committable as the gap closes. Retrying in place
+/// rather than tearing the subscription down avoids churning the connection — and flooding the
+/// server with `client disconnected` logs — because re-subscribing would only replay the same
+/// backlog from our unchanged chain tips.
+///
+/// This bound is only a wedge backstop, not the reorg path: a healthy syncer following the tip
+/// receives reorg blocks on its open subscription and commits them like any other block, so this
+/// retry loop isn't entered at all. It runs only while a block is actively failing to commit, and
+/// after `MAX_IN_PLACE_COMMIT_RETRIES * COMMIT_RETRY_DELAY` of that, the syncer re-subscribes to
+/// recover a possibly-wedged stream and refresh the blocks the server sends from its current tips.
+/// The bound is kept below the server's non-finalized send timeout so the syncer re-subscribes
+/// before the server drops it as a slow consumer.
+const MAX_IN_PLACE_COMMIT_RETRIES: usize = 30;
 
 /// How long to wait for a single `get_block` fetch while bridging the finalized gap before giving
 /// up. A single block fetch from a co-located node should return promptly, so this bounds a wedged
@@ -303,30 +324,50 @@ impl TrustedChainSync {
             }
 
             let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
-            match self.try_commit(block.clone()).await {
-                Ok(()) => {
-                    last_failed_commit_hash = None;
-                }
-                Err(error) => {
-                    // Only log on transitions to avoid saturating the logs when the same block
-                    // persistently fails to commit (e.g. when the secondary finalized state hasn't
-                    // caught up with the primary yet).
-                    if last_failed_commit_hash != Some(hash) {
-                        tracing::warn!(
-                            ?error,
-                            ?hash,
-                            "failed to commit block to non-finalized state"
-                        );
-                        last_failed_commit_hash = Some(hash);
+
+            // Commit the block, retrying it in place while it can't yet attach because our finalized
+            // state is still catching up to the primary. Keep the existing subscription open across
+            // retries rather than tearing it down: re-subscribing would replay the same backlog from
+            // our unchanged chain tips and churn the connection (flooding the server with
+            // `client disconnected` logs), while `try_commit` advances the secondary's finalized
+            // state on each attempt so the block becomes committable as the gap closes.
+            let mut committed = false;
+            for _ in 0..MAX_IN_PLACE_COMMIT_RETRIES {
+                match self.try_commit(block.clone()).await {
+                    Ok(()) => {
+                        committed = true;
+                        break;
                     }
+                    Err(error) => {
+                        // Only log on transitions to avoid saturating the logs while the same block
+                        // fails repeatedly (e.g. while the secondary finalized state hasn't caught
+                        // up with the primary yet).
+                        if last_failed_commit_hash != Some(hash) {
+                            tracing::warn!(
+                                ?error,
+                                ?hash,
+                                "block not yet committable; finalized state is catching up, retrying"
+                            );
+                            last_failed_commit_hash = Some(hash);
+                        }
 
-                    non_finalized_blocks_listener = None;
-
-                    // Back off before re-subscribing so a persistently failing block doesn't turn
-                    // re-subscription into a full-speed busy loop.
-                    tokio::time::sleep(COMMIT_RETRY_DELAY).await;
+                        // Back off between attempts so a persistently failing block doesn't turn the
+                        // retry into a full-speed busy loop.
+                        tokio::time::sleep(COMMIT_RETRY_DELAY).await;
+                    }
                 }
-            };
+            }
+
+            if committed {
+                last_failed_commit_hash = None;
+            } else {
+                // The block stayed uncommittable for the whole in-place retry budget. Drop the
+                // subscription so the next iteration re-subscribes, recovering a possibly-wedged
+                // stream and refreshing which blocks the server sends from our current tips. This is
+                // not the reorg path: a healthy syncer commits reorg blocks as they arrive on the
+                // open subscription, so it never reaches here.
+                non_finalized_blocks_listener = None;
+            }
         }
     }
 

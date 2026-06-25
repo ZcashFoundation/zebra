@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails to commit to the non-finalized state: it now backs off before re-subscribing
   and only logs the warning on transitions.
   ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `TrustedChainSync` no longer tears down and re-subscribes its non-finalized block
+  subscription roughly once per second while its finalized state catches up to the
+  primary. It now retries committing the streamed block in place, keeping the
+  subscription open, and only re-subscribes as a bounded backstop. The server-side
+  stream-teardown messages (`client disconnected, dropping … task`) are logged at
+  `debug` instead of `info`, so a normal consumer disconnect no longer floods the
+  node's logs. ([#10803](https://github.com/ZcashFoundation/zebra/issues/10803))
 
 ## [10.0.1] - 2026-06-18
 
