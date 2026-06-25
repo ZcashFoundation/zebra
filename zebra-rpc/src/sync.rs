@@ -23,6 +23,9 @@ use crate::indexer::{
     NonFinalizedStateChangeRequest,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_secs(5);
 
@@ -457,7 +460,7 @@ impl TrustedChainSync {
                         ?error,
                         ?next_height,
                         "failed to fetch a block while bridging the finalized gap; \
-                         will retry on the next subscription"
+                         will retry"
                     );
                     return;
                 }
@@ -469,7 +472,7 @@ impl TrustedChainSync {
                     ?error,
                     ?next_height,
                     "failed to commit a block while bridging the finalized gap; \
-                     will retry on the next subscription"
+                     will retry"
                 );
                 return;
             }
