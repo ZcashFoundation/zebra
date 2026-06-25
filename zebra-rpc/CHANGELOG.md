@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The indexer gRPC service has a new unary `GetBlock` method that returns a block
+  from the best chain by hash or height.
+- The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
+  tip hashes and streams only the blocks above them, so a re-subscribing consumer
+  resumes instead of being sent the entire non-finalized state again.
+
+### Changed
+
+- The read-state syncer (`TrustedChainSync`) applies backpressure to the non-finalized
+  block stream instead of dropping blocks for a slow consumer, bridges the gap between
+  a lagging finalized tip and the streamed non-finalized chain by fetching the missing
+  finalized blocks via `GetBlock`, and bounds its indexer streams with read timeouts
+  and HTTP/2 keep-alive so a half-open connection re-subscribes instead of hanging.
+
+### Fixed
+
+- `TrustedChainSync` no longer busy-loops and saturates logs when a block repeatedly
+  fails to commit to the non-finalized state: it now backs off before re-subscribing
+  and only logs the warning on transitions.
+  ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+
 ## [10.0.1] - 2026-06-18
 
 ### Changed

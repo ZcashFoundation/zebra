@@ -47,7 +47,7 @@ Here's how we make sure we got everything:
 
 # Prepare and Publish the Release
 
-Follow the steps in the [release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md) to prepare the release:
+The automated release workflow creates the Release PR and embeds its checklist from `.release-plz.toml`. If the automated workflow is not usable, follow the [legacy manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md):
 
 Release PR:
 

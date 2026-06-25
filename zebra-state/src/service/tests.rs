@@ -609,3 +609,74 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
             )
         })
 }
+
+/// Opening a read-only state against an existing but empty cache directory (no database on
+/// disk) must fail with [`StateInitError::ReadOnlyDatabaseNotFound`] rather than silently
+/// creating a new, empty database.
+#[test]
+fn read_only_open_with_no_database_returns_error() {
+    let network = Network::Mainnet;
+
+    // An existing, readable, but empty cache directory: it contains no database.
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyDatabaseNotFound { .. }) => {}
+        Err(other) => panic!("expected ReadOnlyDatabaseNotFound, got: {other:?}"),
+        Ok(_) => panic!("expected an error when opening a read-only state with no database"),
+    }
+}
+
+/// Opening a read-only state against a missing or unreadable cache directory must fail with a
+/// typed [`StateInitError::ReadOnlyCacheDirUnreadable`] rather than panicking while reading the
+/// on-disk format version.
+#[test]
+fn read_only_open_with_unreadable_cache_dir_returns_error() {
+    let network = Network::Mainnet;
+
+    // A cache directory that does not exist. `read_dir` fails for a missing directory the same way
+    // it does for an unreadable one, without depending on filesystem permissions (which `root`
+    // ignores, so a chmod-based unreadable directory would not be a reliable test under CI).
+    let parent = tempfile::tempdir().expect("creating a temporary directory should succeed");
+    let config = Config {
+        cache_dir: parent.path().join("missing"),
+        ephemeral: false,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyCacheDirUnreadable { .. }) => {}
+        Err(other) => panic!("expected ReadOnlyCacheDirUnreadable, got: {other:?}"),
+        Ok(_) => {
+            panic!("expected an error when opening a read-only state with an unreadable cache dir")
+        }
+    }
+}
+
+/// Opening a read-only state with an ephemeral database configured must fail with
+/// [`StateInitError::ReadOnlyEphemeralConflict`]: a read-only secondary follows another
+/// process's primary database and must never delete it, so it cannot also be ephemeral
+/// (which would delete the primary's files on drop).
+#[test]
+fn read_only_open_with_ephemeral_config_returns_error() {
+    let network = Network::Mainnet;
+
+    let config = Config {
+        ephemeral: true,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyEphemeralConflict) => {}
+        Err(other) => panic!("expected ReadOnlyEphemeralConflict, got: {other:?}"),
+        Ok(_) => {
+            panic!("expected an error when opening a read-only state with an ephemeral config")
+        }
+    }
+}

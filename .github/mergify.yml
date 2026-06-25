@@ -44,7 +44,19 @@ queue_rules:
     batch_size: 5
     # Wait a short time to embark hotfixes together in a merge train
     batch_max_wait_time: "2 minutes"
+    # A queue_rule's `queue_conditions` REPLACES the value from
+    # `defaults.queue_rule.queue_conditions` rather than extending it. Restate
+    # the same gates here so a P-Critical label cannot bypass the approval,
+    # changes-requested, base-branch, and required-check checks.
     queue_conditions:
+      - base=main
+      - -draft
+      - label!=do-not-merge
+      - "#approved-reviews-by >= 1"
+      - "#changes-requested-reviews-by = 0"
+      - check-success=lint
+      - check-success=unit-tests
+      - check-success=test-crates
       # is labeled with Critical priority
       - 'label~=^P-Critical'
 
