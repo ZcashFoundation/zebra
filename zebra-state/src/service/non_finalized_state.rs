@@ -382,11 +382,7 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
-            // Retain by tip hash rather than calling `BTreeSet::remove(&chain)`,
-            // which would compare the stored chain against itself.
-            let tip_hash = chain.non_finalized_tip_hash();
-            self.chain_set
-                .retain(|c| c.non_finalized_tip_hash() != tip_hash);
+            self.chain_set.remove(&chain);
             chain.blocks.values().cloned().collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
