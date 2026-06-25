@@ -242,6 +242,7 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
@@ -268,6 +269,7 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options

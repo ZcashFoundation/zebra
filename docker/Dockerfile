@@ -49,6 +49,10 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
+# Forwarded from the caller workflow so rustc, dpkg, and other tools honour it.
+ARG SOURCE_DATE_EPOCH
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+
 # This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
@@ -174,6 +178,9 @@ FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
+
+ARG SOURCE_DATE_EPOCH
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 # Create a non-privileged user for running `zebrad`.
 #
