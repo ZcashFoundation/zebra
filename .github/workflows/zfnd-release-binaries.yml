@@ -86,9 +86,10 @@ jobs:
           # statically; the binary then depends only on glibc and libstdc++.
           cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-          # Documented floor for Zebra's pre-built binaries (Ubuntu 22.04+, Debian 12+).
-          # Bump together with book/src/user/install.md if you raise this.
-          MAX_GLIBC=2.35
+          # Documented floor for Zebra's pre-built binaries (Ubuntu 22.04+,
+          # Debian 12+, RHEL 9+, Amazon Linux 2023). Bump together with
+          # book/src/user/install.md if you raise this.
+          MAX_GLIBC=2.34
           # `|| floor=""` keeps pipefail from aborting before the explicit check.
           floor=$(objdump -T target/release/zebrad | grep -oE 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -V | tail -1) || floor=""
           if [ -z "${floor}" ]; then

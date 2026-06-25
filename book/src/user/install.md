@@ -8,8 +8,9 @@ Started](https://zebra.zfnd.org/index.html#getting-started) section.
 Every [GitHub release](https://github.com/ZcashFoundation/zebra/releases) ships
 pre-built `zebrad` binaries for Linux on `x86_64` and `aarch64`, as
 `zebrad-<version>-<target>.tar.gz` archives. They are built on Ubuntu 22.04 and
-need glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+); on older or other platforms
-use the [Docker image](https://hub.docker.com/r/zfnd/zebra) or build from source.
+need glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023);
+on older or other platforms use the [Docker image](https://hub.docker.com/r/zfnd/zebra)
+or build from source.
 
 Install the latest release with
 [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
