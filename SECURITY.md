@@ -27,7 +27,7 @@ Zcash ecosystem disclosure process.
 For critical vulnerabilities, notify us on Signal. Create a new Signal group
 (do not reuse a previous group for a separate issue) that includes:
 
-- `@pilizcash.01`
+- `pilizcash.01`
 
 Treat a vulnerability as critical if it could cause consensus divergence or a
 chain split, loss or counterfeiting of funds, a persistent node halt, state
