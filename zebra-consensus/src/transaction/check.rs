@@ -142,7 +142,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_enough_orchard_flags() {
-        return Err(TransactionError::NotEnoughFlags);
+        return Err(TransactionError::NotEnoughOrchardFlags);
     }
     Ok(())
 }

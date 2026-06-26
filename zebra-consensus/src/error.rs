@@ -193,7 +193,7 @@ pub enum TransactionError {
     DuplicateIronwoodNullifier(ironwood::Nullifier),
 
     #[error("must have at least one active orchard flag")]
-    NotEnoughFlags,
+    NotEnoughOrchardFlags,
 
     #[error("must have at least one active ironwood flag")]
     NotEnoughIronwoodFlags,
@@ -383,7 +383,7 @@ impl TransactionError {
             | BothVPubsNonZero
             | DisabledAddToSproutPool
             | NegativeOrchardValueBalance
-            | NotEnoughFlags
+            | NotEnoughOrchardFlags
             | NotEnoughIronwoodFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId

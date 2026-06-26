@@ -145,7 +145,7 @@ fn v5_transaction_with_orchard_actions_has_flags() {
         // The check will fail if the transaction has no flags
         assert_eq!(
             check::has_enough_orchard_flags(&tx),
-            Err(TransactionError::NotEnoughFlags)
+            Err(TransactionError::NotEnoughOrchardFlags)
         );
 
         // If we add ENABLE_SPENDS flag it will pass.
