@@ -17,8 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
   tip hashes and streams only the blocks above them, so a re-subscribing consumer
   resumes instead of being sent the entire non-finalized state again.
+- The indexer gRPC service has a new unary `GetStateInfo` method that returns the node's live
+  runtime database path (including an ephemeral node's temp dir), the in-code database format
+  version, and the network, so a co-located read-only follower can open the node's finalized
+  database at its exact path.
 
 ### Changed
+
+- `zebra_rpc::sync::init_read_state_with_syncer` no longer takes a `zebra_state::Config` or
+  `Network`; it takes only the indexer gRPC address, calls `GetStateInfo` to learn the node's
+  database path and network, and opens the finalized state read-only at that path. It now supports
+  following an **ephemeral** node (the previous ephemeral rejection is removed). The follower opens
+  as a read-only secondary and never deletes the primary's files. Following a node on a
+  configured/custom testnet via `GetStateInfo` is not yet supported (only `Mainnet`/`Testnet`).
+- The read-state syncer was reorganized into the `sync/` module (`syncer.rs`, `stream.rs`,
+  `init.rs`); behavior is unchanged apart from the bootstrap change above.
 
 - The read-state syncer (`TrustedChainSync`) now drives everything from the single
   `ChainStateChange` stream in one task: it commits non-finalized blocks and, on a

@@ -96,6 +96,22 @@ message MempoolChangeMessage {
   bytes auth_digest = 3;
 };
 
+// Metadata describing the node's finalized state, so a co-located read-only
+// follower can open this node's database at its exact runtime path.
+message StateInfo {
+  // The live runtime path of the finalized-state database, as a UTF-8 string.
+  // For an ephemeral node this is a temporary directory that is removed when
+  // the node exits.
+  string db_path = 1;
+
+  // The database format version implemented by the node's running code
+  // (a semver string such as "27.0.0").
+  string db_format_version = 2;
+
+  // The Zcash network the node is running ("Mainnet" or "Testnet").
+  string network = 3;
+};
+
 service Indexer {
   // Notifies listeners of chain state changes: new non-finalized blocks
   // interleaved with finalized-chain-tip-change signals.
@@ -128,6 +144,11 @@ service Indexer {
 
   // Notifies listeners of mempool changes
   rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);
+
+  // Returns metadata about the node's finalized state (live database path,
+  // database format version, and network) so a co-located read-only follower
+  // can open this node's database directly.
+  rpc GetStateInfo(Empty) returns (StateInfo);
 
   // Returns the block with the given hash or height from the best chain.
   //

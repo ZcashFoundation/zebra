@@ -107,7 +107,7 @@ impl ZebraDb {
         // checked for readability first, so a missing or unreadable directory returns a typed
         // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
         let disk_version = if read_only {
-            DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+            DiskDb::check_cache_dir_readable(config.read_only_dir_to_check())?;
 
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
                 .expect("unable to read database format version file")

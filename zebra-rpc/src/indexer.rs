@@ -19,6 +19,26 @@ tonic::include_proto!("zebra.indexer.rpc");
 pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
     tonic::include_file_descriptor_set!("indexer_descriptor");
 
+/// Provides live state metadata to the indexer gRPC server (see `GetStateInfo`).
+///
+/// This is a small bridge trait, local to this crate, that lets the generic indexer server call
+/// the inherent [`ReadStateService::state_info`](zebra_state::ReadStateService::state_info) method
+/// on the concrete read-state service without widening the blanket-impl'd
+/// [`ReadState`](zebra_state::ReadState) marker trait.
+///
+/// It is `pub` (rather than `pub(crate)`) only because it appears in the bounds of the public
+/// [`IndexerRPC`](server::IndexerRPC) type and [`init`](server::init) function.
+pub trait StateInfoProvider {
+    /// Returns live metadata about this node's finalized state.
+    fn state_info(&self) -> zebra_state::StateInfo;
+}
+
+impl StateInfoProvider for zebra_state::ReadStateService {
+    fn state_info(&self) -> zebra_state::StateInfo {
+        zebra_state::ReadStateService::state_info(self)
+    }
+}
+
 impl BlockHashAndHeight {
     /// Create a new [`BlockHashAndHeight`] from a [`block::Hash`] and [`block::Height`].
     pub fn new(hash: block::Hash, block::Height(height): block::Height) -> Self {

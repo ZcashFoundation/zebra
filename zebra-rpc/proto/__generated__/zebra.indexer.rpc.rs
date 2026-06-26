@@ -153,6 +153,24 @@ pub mod mempool_change_message {
         }
     }
 }
+/// Metadata describing the node's finalized state, so a co-located read-only
+/// follower can open this node's database at its exact runtime path.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StateInfo {
+    /// The live runtime path of the finalized-state database, as a UTF-8 string.
+    /// For an ephemeral node this is a temporary directory that is removed when
+    /// the node exits.
+    #[prost(string, tag = "1")]
+    pub db_path: ::prost::alloc::string::String,
+    /// The database format version implemented by the node's running code
+    /// (a semver string such as "27.0.0").
+    #[prost(string, tag = "2")]
+    pub db_format_version: ::prost::alloc::string::String,
+    /// The Zcash network the node is running ("Mainnet" or "Testnet").
+    #[prost(string, tag = "3")]
+    pub network: ::prost::alloc::string::String,
+}
 /// Generated client implementations.
 pub mod indexer_client {
     #![allow(
@@ -369,6 +387,30 @@ pub mod indexer_client {
                 .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "MempoolChange"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Returns metadata about the node's finalized state (live database path,
+        /// database format version, and network) so a co-located read-only follower
+        /// can open this node's database directly.
+        pub async fn get_state_info(
+            &mut self,
+            request: impl tonic::IntoRequest<super::Empty>,
+        ) -> std::result::Result<tonic::Response<super::StateInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/zebra.indexer.rpc.Indexer/GetStateInfo",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "GetStateInfo"));
+            self.inner.unary(req, path, codec).await
+        }
         /// Returns the block with the given hash or height from the best chain.
         ///
         /// Deprecated: a follower obtains finalized blocks from its own finalized
@@ -482,6 +524,13 @@ pub mod indexer_server {
             tonic::Response<Self::MempoolChangeStream>,
             tonic::Status,
         >;
+        /// Returns metadata about the node's finalized state (live database path,
+        /// database format version, and network) so a co-located read-only follower
+        /// can open this node's database directly.
+        async fn get_state_info(
+            &self,
+            request: tonic::Request<super::Empty>,
+        ) -> std::result::Result<tonic::Response<super::StateInfo>, tonic::Status>;
         /// Returns the block with the given hash or height from the best chain.
         ///
         /// Deprecated: a follower obtains finalized blocks from its own finalized
@@ -748,6 +797,49 @@ pub mod indexer_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/zebra.indexer.rpc.Indexer/GetStateInfo" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetStateInfoSvc<T: Indexer>(pub Arc<T>);
+                    impl<T: Indexer> tonic::server::UnaryService<super::Empty>
+                    for GetStateInfoSvc<T> {
+                        type Response = super::StateInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::Empty>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Indexer>::get_state_info(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetStateInfoSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

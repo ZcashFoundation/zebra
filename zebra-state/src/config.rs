@@ -82,6 +82,16 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// An explicit, already-existing finalized-state database path to open, bypassing the
+    /// `cache_dir`/version/network derivation in [`Config::db_path`].
+    ///
+    /// Runtime-only (never read from or written to config files): used by a read-only
+    /// secondary follower to open a primary node's live database at the exact path the
+    /// primary reported over the indexer gRPC, including an ephemeral primary's temp dir
+    /// whose random path cannot be re-derived. Has no effect on a read-write primary.
+    #[serde(skip)]
+    pub(crate) db_path_override: Option<PathBuf>,
+
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
     ///
     /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
@@ -157,6 +167,13 @@ impl Config {
         major_version: u64,
         network: &Network,
     ) -> PathBuf {
+        // A read-only secondary may pin an explicit primary path (e.g. an ephemeral temp dir
+        // that can't be re-derived); when set, it overrides the derived path for both the db
+        // files and the version file (via `version_file_path`, which builds on `db_path`).
+        if let Some(path) = &self.db_path_override {
+            return path.clone();
+        }
+
         let db_kind = db_kind.as_ref();
         let major_version = format!("v{major_version}");
         let net_dir = network.lowercase_name();
@@ -207,6 +224,26 @@ impl Config {
             ..Config::default()
         }
     }
+
+    /// Returns this config adjusted to open the finalized state **read-only** at an explicit,
+    /// already-existing database path — the live runtime path of a primary node, including an
+    /// ephemeral primary's temp dir.
+    ///
+    /// Forces `ephemeral = false` (the follower is a read-only secondary that must never delete
+    /// the primary's files), disables old-database cleanup, and pins the db path to `db_path`,
+    /// bypassing path derivation.
+    pub fn with_read_only_db_path(mut self, db_path: PathBuf) -> Config {
+        self.ephemeral = false;
+        self.delete_old_database = false;
+        self.db_path_override = Some(db_path);
+        self
+    }
+
+    /// The directory whose readability is checked before opening a read-only secondary:
+    /// the explicit override path when pinned, otherwise the configured `cache_dir`.
+    pub(crate) fn read_only_dir_to_check(&self) -> &Path {
+        self.db_path_override.as_deref().unwrap_or(&self.cache_dir)
+    }
 }
 
 impl Default for Config {
@@ -214,6 +251,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            db_path_override: None,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,

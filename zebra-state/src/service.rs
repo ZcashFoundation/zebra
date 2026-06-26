@@ -190,6 +190,22 @@ pub(crate) struct StateService {
     max_finalized_queue_height: f64,
 }
 
+/// Live metadata about a node's finalized state, for a co-located read-only follower.
+///
+/// Returned by [`ReadStateService::state_info`] and surfaced over the indexer gRPC
+/// `GetStateInfo` method so a follower can open this node's finalized database at its
+/// exact runtime path.
+#[derive(Clone, Debug)]
+pub struct StateInfo {
+    /// The live runtime path of the finalized-state database (an ephemeral node's temp dir
+    /// when ephemeral). May not exist after the node exits.
+    pub db_path: std::path::PathBuf,
+    /// The database format version implemented by the running code.
+    pub db_format_version: semver::Version,
+    /// The Zcash network the node is running.
+    pub network: zebra_chain::parameters::Network,
+}
+
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
@@ -973,6 +989,18 @@ impl ReadStateService {
         tracing::debug!("created new read-only state service");
 
         read_service
+    }
+
+    /// Returns live metadata about this node's finalized state.
+    ///
+    /// Used by the indexer gRPC `GetStateInfo` method so a co-located read-only follower can
+    /// open this node's finalized database at its exact runtime path.
+    pub fn state_info(&self) -> StateInfo {
+        StateInfo {
+            db_path: self.db.path().to_path_buf(),
+            db_format_version: self.db.format_version_in_code(),
+            network: self.network.clone(),
+        }
     }
 
     /// Return the tip of the current best chain.

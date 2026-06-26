@@ -9,14 +9,17 @@ use zebra_chain::chain_tip::ChainTip;
 use zebra_node_services::mempool::MempoolTxSubscriber;
 use zebra_state::ReadState;
 
-use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_MSG};
+use crate::{
+    indexer::{indexer_server::IndexerServer, StateInfoProvider},
+    server::OPENED_RPC_ENDPOINT_MSG,
+};
 
 type ServerTask = JoinHandle<Result<(), BoxError>>;
 
 /// Indexer RPC service.
 pub struct IndexerRPC<ReadStateService, Tip>
 where
-    ReadStateService: ReadState,
+    ReadStateService: ReadState + StateInfoProvider,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     pub(super) read_state: ReadStateService,
@@ -33,7 +36,7 @@ pub async fn init<ReadStateService, Tip>(
     mempool_change: MempoolTxSubscriber,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
 where
-    ReadStateService: ReadState,
+    ReadStateService: ReadState + StateInfoProvider,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     let indexer_service = IndexerRPC {

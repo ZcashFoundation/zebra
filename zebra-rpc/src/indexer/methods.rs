@@ -15,7 +15,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
     ChainStateChangeMessage, ChainStateChangeRequest, Empty, MempoolChangeMessage,
-    NonFinalizedStateChangeRequest,
+    NonFinalizedStateChangeRequest, StateInfo, StateInfoProvider,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -32,7 +32,7 @@ const NON_FINALIZED_SEND_TIMEOUT: Duration = Duration::from_secs(60);
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
 where
-    ReadStateService: ReadState,
+    ReadStateService: ReadState + StateInfoProvider,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     type ChainStateChangeStream =
@@ -309,11 +309,11 @@ where
         tokio::spawn(async move {
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(change) = mempool_change.recv().await {
-                for tx_id in change.tx_ids() {
-                    span.in_scope(|| {
-                        tracing::debug!("mempool change: {:?}", change);
-                    });
+                span.in_scope(|| {
+                    tracing::debug!("mempool change: {:?}", change);
+                });
 
+                for tx_id in change.tx_ids() {
                     let msg = Ok(MempoolChangeMessage {
                         change_type: match change.kind() {
                             MempoolChangeKind::Added => 0,
@@ -401,6 +401,21 @@ where
                 "failed to read block: {error}"
             ))),
         }
+    }
+
+    async fn get_state_info(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<Response<StateInfo>, Status> {
+        let info = self.read_state.state_info();
+
+        Ok(Response::new(StateInfo {
+            // `to_string_lossy` losslessly encodes UTF-8 paths (cache dirs are UTF-8 in practice);
+            // a non-UTF-8 path would be lossily encoded, which is acceptable and documented.
+            db_path: info.db_path.to_string_lossy().into_owned(),
+            db_format_version: info.db_format_version.to_string(),
+            network: info.network.to_string(),
+        }))
     }
 }
 

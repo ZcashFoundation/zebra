@@ -140,10 +140,8 @@ pub async fn start_state_service_with_cache_dir(
     LatestChainTip,
     ChainTipChange,
 )> {
-    let config = zebra_state::Config {
-        cache_dir: cache_dir.into(),
-        ..zebra_state::Config::default()
-    };
+    let mut config = zebra_state::Config::default();
+    config.cache_dir = cache_dir.into();
 
     // These tests don't need UTXOs to be verified efficiently, because they use cached states.
     Ok(zebra_state::init(config, network, Height::MAX, 0).await)
@@ -162,10 +160,8 @@ pub async fn load_finalized_tip_height_from_state_directory(
     network: &Network,
     state_path: &Path,
 ) -> Result<block::Height> {
-    let config = zebra_state::Config {
-        cache_dir: state_path.to_path_buf(),
-        ..zebra_state::Config::default()
-    };
+    let mut config = zebra_state::Config::default();
+    config.cache_dir = state_path.to_path_buf();
 
     let network = network.clone();
     let (_read_state, db, _sender) =

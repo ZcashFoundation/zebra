@@ -24,8 +24,21 @@ use zebra_test::{
 
 use crate::indexer::{
     self, chain_state_change_message::Change, indexer_client::IndexerClient, BlockRequest,
-    ChainStateChangeRequest, Empty,
+    ChainStateChangeRequest, Empty, StateInfoProvider,
 };
+
+// The generic indexer server requires its read-state service to implement `StateInfoProvider`
+// (used by `GetStateInfo`). The mock read service stands in for `ReadStateService` here, so it
+// returns placeholder metadata. A local trait on an external type is allowed in this crate.
+impl StateInfoProvider for MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError> {
+    fn state_info(&self) -> zebra_state::StateInfo {
+        zebra_state::StateInfo {
+            db_path: std::path::PathBuf::new(),
+            db_format_version: semver::Version::new(0, 0, 0),
+            network: Network::Mainnet,
+        }
+    }
+}
 
 #[tokio::test]
 async fn rpc_server_spawn() -> Result<()> {

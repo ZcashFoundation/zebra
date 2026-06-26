@@ -1032,7 +1032,7 @@ impl DiskDb {
                 // A read-only secondary instance must never create the primary cache
                 // directory: the primary zebrad owns it. At most, verify it already
                 // exists and is readable, and fail with a clear error otherwise.
-                DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+                DiskDb::check_cache_dir_readable(config.read_only_dir_to_check())?;
             } else {
                 DiskDb::validate_cache_dir(&config.cache_dir);
             }
@@ -1050,6 +1050,7 @@ impl DiskDb {
             // Use a tempfile for the secondary instance cache directory
             let secondary_config = Config {
                 ephemeral: true,
+                db_path_override: None,
                 ..config.clone()
             };
             let secondary_path =

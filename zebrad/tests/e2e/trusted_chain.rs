@@ -57,13 +57,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
-        zebra_rpc::sync::init_read_state_with_syncer(
-            config.state,
-            &config.network.network,
-            indexer_listen_addr,
-        )
-        .await?
-        .map_err(|err| eyre!(err))?;
+        zebra_rpc::sync::init_read_state_with_syncer(indexer_listen_addr)
+            .await?
+            .map_err(|err| eyre!(err))?;
 
     tracing::info!("waiting for first chain tip change");
 
@@ -285,13 +281,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
-        zebra_rpc::sync::init_read_state_with_syncer(
-            config.state,
-            &config.network.network,
-            indexer_listen_addr,
-        )
-        .await?
-        .map_err(|err| eyre!(err))?;
+        zebra_rpc::sync::init_read_state_with_syncer(indexer_listen_addr)
+            .await?
+            .map_err(|err| eyre!(err))?;
 
     tracing::info!("waiting for finalized chain tip changes");
 
