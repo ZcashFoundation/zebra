@@ -1300,10 +1300,13 @@ where
 
     /// Verifies a **v5** transaction's Orchard bundle.
     ///
-    /// A v5 Orchard bundle commits to the pre-NU6.3 circuit for its era, so the verifying key is
-    /// selected by `network_upgrade` via [`primitives::halo2::orchard_v5_verifier_for`] (the
-    /// historical insecure key before NU6.2, the fixed key from NU6.2 onward — including at NU6.3,
-    /// since the v5 format predates the NU6.3 circuit).
+    /// A v5 Orchard bundle commits to the Orchard Action circuit of the block's era, so the
+    /// verifying key is selected by `network_upgrade` via
+    /// [`primitives::halo2::orchard_v5_verifier_for`]: the historical insecure key before NU6.2, the
+    /// fixed key from NU6.2 until NU6.3, and the NU6.3 key from NU6.3 onward. The Orchard-pool
+    /// cross-address restriction applies to every Orchard Action from NU6.3 onward regardless of
+    /// transaction version (ZIP 229), so a v5 bundle at NU6.3 uses the NU6.3 circuit — the same key
+    /// as v6 Orchard and Ironwood bundles — not the fixed one.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,

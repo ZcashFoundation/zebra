@@ -89,13 +89,15 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
     );
 }
 
-/// The Orchard verifier routing selects the correct key by transaction version AND upgrade.
+/// The Orchard verifier routing selects the correct key by block era (network upgrade).
 ///
 /// We compare service identity by pointer: the routing functions return a borrow of one of the
 /// three global `Lazy` services, so routing to the wrong service is exactly routing to the wrong
-/// key. The key correctness property guarded here is that a **v5** Orchard bundle at NU6.3 routes
-/// to the *fixed* (post-NU6.2) key, NOT the NU6.3 cross-address key — a v5 bundle predates the
-/// NU6.3 circuit even when mined at NU6.3.
+/// key. The key correctness property guarded here is that the Orchard verifying key is a function
+/// of the block era, NOT the transaction version: a **v5** Orchard bundle at NU6.3 routes to the
+/// NU6.3 cross-address key — the same key as v6 Orchard and Ironwood — because the cross-address
+/// restriction applies to every Orchard Action from NU6.3 onward regardless of transaction version
+/// (ZIP 229), so it cannot be bypassed with a v5 transaction. Only NU6.2 uses the fixed key.
 ///
 /// This is an async test because forcing the global `Lazy` verifiers builds their `Batch` layer,
 /// which spawns a worker task and therefore needs a Tokio runtime.
@@ -118,23 +120,26 @@ async fn orchard_verifier_routing_selects_the_correct_key() {
         );
     }
 
-    // v5 Orchard bundles from NU6.2 onward route to the fixed key — including at NU6.3 and NU7,
-    // because a v5 bundle never uses the NU6.3 cross-address circuit. This is the regression guard
-    // for the routing bug.
-    for nu in [
-        NetworkUpgrade::Nu6_2,
-        NetworkUpgrade::Nu6_3,
-        NetworkUpgrade::Nu7,
-    ] {
+    // NU6.2 — and only NU6.2 — uses the fixed key: it is active from the NU6.2 activation height
+    // until NU6.3.
+    assert!(
+        std::ptr::eq(orchard_v5_verifier_for(NetworkUpgrade::Nu6_2), post),
+        "v5 Orchard at NU6.2 must route to the post-NU6.2 (fixed) verifier"
+    );
+
+    // v5 Orchard bundles from NU6.3 onward route to the NU6.3 (cross-address) key, NOT the fixed
+    // key — the cross-address restriction cannot be bypassed with a v5 transaction. This is the
+    // regression guard for the routing bug.
+    for nu in [NetworkUpgrade::Nu6_3, NetworkUpgrade::Nu7] {
         assert!(
-            std::ptr::eq(orchard_v5_verifier_for(nu), post),
-            "v5 Orchard at {nu:?} must route to the post-NU6.2 (fixed) verifier, not the NU6.3 key"
+            std::ptr::eq(orchard_v5_verifier_for(nu), post_nu6_3),
+            "v5 Orchard at {nu:?} must route to the NU6.3 verifier, not the post-NU6.2 fixed key"
         );
     }
 
-    // v6 Orchard + Ironwood bundles route to the NU6.3 (cross-address) key.
+    // v6 Orchard + Ironwood bundles route to the same NU6.3 (cross-address) key.
     assert!(
         std::ptr::eq(orchard_v6_verifier(), post_nu6_3),
-        "v6 Orchard/Ironwood must route to the post-NU6.3 (Ironwood) verifier"
+        "v6 Orchard/Ironwood must route to the NU6.3 verifier"
     );
 }
