@@ -91,67 +91,158 @@ pub mod chain_state_change_message {
         FinalizedTipChange(super::BlockHashAndHeight),
     }
 }
-/// Represents a change in the mempool.
+/// A transaction's unmined identifier.
+///
+/// `mined_id` is the 32-byte mined transaction id in display order. `auth_digest`
+/// is the 32-byte authorizing-data digest in display order for v5+ (witnessed)
+/// transactions, and empty for legacy (v1-v4) transactions, mirroring Zebra's
+/// `UnminedTxId::Legacy` vs `UnminedTxId::Witnessed`.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct MempoolChangeMessage {
-    /// The type of change that occurred.
-    #[prost(enumeration = "mempool_change_message::ChangeType", tag = "1")]
-    pub change_type: i32,
-    /// The hash of the transaction that changed.
+pub struct UnminedTxId {
+    /// The mined transaction id, 32 bytes in display order.
+    #[prost(bytes = "vec", tag = "1")]
+    pub mined_id: ::prost::alloc::vec::Vec<u8>,
+    /// The authorizing-data digest, 32 bytes in display order, or empty for a
+    /// legacy (v1-v4) transaction.
     #[prost(bytes = "vec", tag = "2")]
-    pub tx_hash: ::prost::alloc::vec::Vec<u8>,
-    /// The transaction auth digest.
-    #[prost(bytes = "vec", tag = "3")]
     pub auth_digest: ::prost::alloc::vec::Vec<u8>,
 }
-/// Nested message and enum types in `MempoolChangeMessage`.
-pub mod mempool_change_message {
-    /// The type of change that occurred.
+/// Transactions entered the download/verify pipeline at the given stage.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MempoolQueued {
+    /// The transactions that were queued.
+    #[prost(message, repeated, tag = "1")]
+    pub tx_ids: ::prost::alloc::vec::Vec<UnminedTxId>,
+    /// The pipeline stage the transactions reached.
+    #[prost(enumeration = "QueuedStage", tag = "2")]
+    pub stage: i32,
+}
+/// A transaction added to the verified mempool, carrying its content and the
+/// fee/sigop/ZIP-317 metadata a follower needs without a network round-trip.
+///
+/// The content is fetched from the source's local mempool (in-process), not
+/// streamed from a peer, so a follower never has to re-download an added tx.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MempoolAdded {
+    /// The serialized transaction. A follower reconstructs the unmined tx (and its
+    /// id and size) from these bytes.
+    #[prost(bytes = "vec", tag = "1")]
+    pub transaction: ::prost::alloc::vec::Vec<u8>,
+    /// The miner fee in zatoshi.
+    #[prost(uint64, tag = "2")]
+    pub miner_fee: u64,
+    /// The legacy transparent sigop count (`GetLegacySigOpCount`).
+    #[prost(uint32, tag = "3")]
+    pub legacy_sigop_count: u32,
+    /// The P2SH redeem-script sigop count (`GetP2SHSigOpCount`).
+    #[prost(uint32, tag = "4")]
+    pub p2sh_sigop_count: u32,
+    /// The number of conventional actions, as defined by ZIP-317.
+    #[prost(uint32, tag = "5")]
+    pub conventional_actions: u32,
+    /// The number of unpaid actions, as defined by ZIP-317 for block production.
+    #[prost(uint32, tag = "6")]
+    pub unpaid_actions: u32,
+    /// The fee weight ratio, as defined by ZIP-317 for block production.
+    #[prost(float, tag = "7")]
+    pub fee_weight_ratio: f32,
+}
+/// Transactions removed from the mempool pipeline, all for the same reason.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MempoolRemoved {
+    /// The transactions that were removed.
+    #[prost(message, repeated, tag = "1")]
+    pub tx_ids: ::prost::alloc::vec::Vec<UnminedTxId>,
+    /// Why the transactions were removed. "Mined" is not represented here: a mined
+    /// tx leaves as a reason-less removal because the chain replica shows the
+    /// block (design doc §5d), except where the source explicitly reports it.
+    #[prost(oneof = "mempool_removed::Reason", tags = "2, 3, 4, 5, 6, 7")]
+    pub reason: ::core::option::Option<mempool_removed::Reason>,
+}
+/// Nested message and enum types in `MempoolRemoved`.
+pub mod mempool_removed {
+    /// Why the transactions were removed. "Mined" is not represented here: a mined
+    /// tx leaves as a reason-less removal because the chain replica shows the
+    /// block (design doc §5d), except where the source explicitly reports it.
     #[derive(serde::Deserialize, serde::Serialize)]
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
-    #[repr(i32)]
-    pub enum ChangeType {
-        /// Represents a transaction being added to the mempool.
-        Added = 0,
-        /// Represents a transaction being invalidated and rejected from the mempool.
-        Invalidated = 1,
-        /// Represents a transaction being mined into a block on the best chain and
-        /// removed from the mempool.
-        Mined = 2,
+    ///Why a set of transactions was removed from the mempool pipeline.
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Reason {
+        /// The transaction's content could not be downloaded.
+        #[prost(message, tag = "2")]
+        FailedDownload(super::Empty),
+        /// The transaction did not pass verification. Carries a stable error code.
+        #[prost(string, tag = "3")]
+        FailedVerification(::prost::alloc::string::String),
+        /// The transaction was mined onto the best chain.
+        #[prost(message, tag = "4")]
+        Mined(super::BlockHashAndHeight),
+        /// The transaction expired before it could be mined.
+        #[prost(message, tag = "5")]
+        Expired(super::Empty),
+        /// The transaction was evicted (e.g. ZIP-401 cost-limit eviction).
+        #[prost(message, tag = "6")]
+        Evicted(super::Empty),
+        /// The transaction was re-queued for re-verification after a chain tip reset
+        /// (design doc §5a). This doubles as the reorg marker for the batch.
+        #[prost(message, tag = "7")]
+        Reorged(super::Empty),
     }
-    impl ChangeType {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                Self::Added => "ADDED",
-                Self::Invalidated => "INVALIDATED",
-                Self::Mined => "MINED",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "ADDED" => Some(Self::Added),
-                "INVALIDATED" => Some(Self::Invalidated),
-                "MINED" => Some(Self::Mined),
-                _ => None,
-            }
-        }
+}
+/// A single transaction-lifecycle event observed in a mempool change cycle.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MempoolEvent {
+    /// The lifecycle event that occurred.
+    #[prost(oneof = "mempool_event::Event", tags = "1, 2, 3")]
+    pub event: ::core::option::Option<mempool_event::Event>,
+}
+/// Nested message and enum types in `MempoolEvent`.
+pub mod mempool_event {
+    /// The lifecycle event that occurred.
+    #[derive(serde::Deserialize, serde::Serialize)]
+    ///A transaction-lifecycle event: queued, added, or removed.
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        /// Transactions entered the download/verify pipeline.
+        #[prost(message, tag = "1")]
+        Queued(super::MempoolQueued),
+        /// A transaction was added to the verified mempool.
+        #[prost(message, tag = "2")]
+        Added(super::MempoolAdded),
+        /// Transactions were removed from the mempool pipeline.
+        #[prost(message, tag = "3")]
+        Removed(super::MempoolRemoved),
     }
+}
+/// A per-cycle batch of mempool lifecycle events (design doc §5).
+///
+/// The wire unit is a batch, not an individual event: the source coalesces every
+/// change observed in one mempool change cycle into a single batch, then stamps
+/// it with the post-cycle checksum once the cycle's changes have settled. A
+/// follower applies the events atomically, then recomputes and compares the
+/// checksum; a mismatch is the divergence detector.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MempoolBatch {
+    /// Every lifecycle event observed in this change cycle, in order. Includes a
+    /// `reorged` removal marker for tip resets (design doc §5a).
+    #[prost(message, repeated, tag = "1")]
+    pub events: ::prost::alloc::vec::Vec<MempoolEvent>,
+    /// A hash of the source's full replica projection (verified + queued sets,
+    /// design doc §3a-1) after this batch settles. The follower recomputes and
+    /// compares; a mismatch triggers a re-bootstrap. Omitted on intermediate
+    /// bootstrap chunks.
+    #[prost(bytes = "vec", optional, tag = "2")]
+    pub checksum: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    /// True on the final bootstrap batch: the preceding batches replayed current
+    /// state; live cycles follow (the k8s SendInitialEvents bookmark).
+    #[prost(bool, tag = "3")]
+    pub initial_sync_complete: bool,
 }
 /// Metadata describing the node's finalized state, so a co-located read-only
 /// follower can open this node's database at its exact runtime path.
@@ -170,6 +261,36 @@ pub struct StateInfo {
     /// The Zcash network the node is running ("Mainnet" or "Testnet").
     #[prost(string, tag = "3")]
     pub network: ::prost::alloc::string::String,
+}
+/// The stage a queued transaction has reached in the download/verify pipeline.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum QueuedStage {
+    /// The transaction is queued and awaiting download of its content.
+    AwaitingDownload = 0,
+    /// The transaction has been downloaded and is awaiting verification.
+    AwaitingVerification = 1,
+}
+impl QueuedStage {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::AwaitingDownload => "AWAITING_DOWNLOAD",
+            Self::AwaitingVerification => "AWAITING_VERIFICATION",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "AWAITING_DOWNLOAD" => Some(Self::AwaitingDownload),
+            "AWAITING_VERIFICATION" => Some(Self::AwaitingVerification),
+            _ => None,
+        }
+    }
 }
 /// Generated client implementations.
 pub mod indexer_client {
@@ -362,12 +483,19 @@ pub mod indexer_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Notifies listeners of mempool changes
-        pub async fn mempool_change(
+        /// Streams the source mempool's transaction-lifecycle changes to a trusting
+        /// follower (design doc §5).
+        ///
+        /// The server first replays the current mempool state as bootstrap batch(es) of
+        /// `Queued`/`Added` events (the last carries `initial_sync_complete=true` and a
+        /// checksum), then forwards one `MempoolBatch` per source change cycle, each
+        /// carrying its post-cycle checksum. A checksum mismatch on the follower side is
+        /// the divergence detector and triggers a reconnect/re-bootstrap.
+        pub async fn sync_mempool(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
         ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::MempoolChangeMessage>>,
+            tonic::Response<tonic::codec::Streaming<super::MempoolBatch>>,
             tonic::Status,
         > {
             self.inner
@@ -380,11 +508,11 @@ pub mod indexer_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/zebra.indexer.rpc.Indexer/MempoolChange",
+                "/zebra.indexer.rpc.Indexer/SyncMempool",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "MempoolChange"));
+                .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "SyncMempool"));
             self.inner.server_streaming(req, path, codec).await
         }
         /// Returns metadata about the node's finalized state (live database path,
@@ -510,18 +638,25 @@ pub mod indexer_server {
             tonic::Response<Self::NonFinalizedStateChangeStream>,
             tonic::Status,
         >;
-        /// Server streaming response type for the MempoolChange method.
-        type MempoolChangeStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<super::MempoolChangeMessage, tonic::Status>,
+        /// Server streaming response type for the SyncMempool method.
+        type SyncMempoolStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::MempoolBatch, tonic::Status>,
             >
             + std::marker::Send
             + 'static;
-        /// Notifies listeners of mempool changes
-        async fn mempool_change(
+        /// Streams the source mempool's transaction-lifecycle changes to a trusting
+        /// follower (design doc §5).
+        ///
+        /// The server first replays the current mempool state as bootstrap batch(es) of
+        /// `Queued`/`Added` events (the last carries `initial_sync_complete=true` and a
+        /// checksum), then forwards one `MempoolBatch` per source change cycle, each
+        /// carrying its post-cycle checksum. A checksum mismatch on the follower side is
+        /// the divergence detector and triggers a reconnect/re-bootstrap.
+        async fn sync_mempool(
             &self,
             request: tonic::Request<super::Empty>,
         ) -> std::result::Result<
-            tonic::Response<Self::MempoolChangeStream>,
+            tonic::Response<Self::SyncMempoolStream>,
             tonic::Status,
         >;
         /// Returns metadata about the node's finalized state (live database path,
@@ -757,13 +892,13 @@ pub mod indexer_server {
                     };
                     Box::pin(fut)
                 }
-                "/zebra.indexer.rpc.Indexer/MempoolChange" => {
+                "/zebra.indexer.rpc.Indexer/SyncMempool" => {
                     #[allow(non_camel_case_types)]
-                    struct MempoolChangeSvc<T: Indexer>(pub Arc<T>);
+                    struct SyncMempoolSvc<T: Indexer>(pub Arc<T>);
                     impl<T: Indexer> tonic::server::ServerStreamingService<super::Empty>
-                    for MempoolChangeSvc<T> {
-                        type Response = super::MempoolChangeMessage;
-                        type ResponseStream = T::MempoolChangeStream;
+                    for SyncMempoolSvc<T> {
+                        type Response = super::MempoolBatch;
+                        type ResponseStream = T::SyncMempoolStream;
                         type Future = BoxFuture<
                             tonic::Response<Self::ResponseStream>,
                             tonic::Status,
@@ -774,7 +909,7 @@ pub mod indexer_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Indexer>::mempool_change(&inner, request).await
+                                <T as Indexer>::sync_mempool(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -785,7 +920,7 @@ pub mod indexer_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = MempoolChangeSvc(inner);
+                        let method = SyncMempoolSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

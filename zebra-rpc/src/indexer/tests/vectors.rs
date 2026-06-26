@@ -1,6 +1,10 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -12,7 +16,9 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
 };
-use zebra_node_services::mempool::{MempoolBatch, MempoolChange, MempoolTxSubscriber};
+use zebra_node_services::mempool::{
+    self, replica_digest, MempoolBatch, MempoolChange, MempoolTxSubscriber, QueuedStage,
+};
 use zebra_state::{
     HashOrHeight, NonFinalizedBlocksListener, NonFinalizedState, ReadRequest, ReadResponse,
     WatchReceiver,
@@ -23,9 +29,12 @@ use zebra_test::{
 };
 
 use crate::indexer::{
-    self, chain_state_change_message::Change, indexer_client::IndexerClient, BlockRequest,
-    ChainStateChangeRequest, Empty, StateInfoProvider,
+    self, chain_state_change_message::Change, indexer_client::IndexerClient, mempool_event,
+    mempool_removed, BlockRequest, ChainStateChangeRequest, Empty, StateInfoProvider,
 };
+
+/// A mock mempool tower service used to drive the `SyncMempool` handler in tests.
+type MockMempool = MockService<mempool::Request, mempool::Response, PanicAssertion, BoxError>;
 
 // The generic indexer server requires its read-state service to implement `StateInfoProvider`
 // (used by `GetStateInfo`). The mock read service stands in for `ReadStateService` here, so it
@@ -49,6 +58,7 @@ async fn rpc_server_spawn() -> Result<()> {
         client,
         mock_read_service,
         mock_chain_tip_sender,
+        mock_mempool,
         mempool_transaction_sender,
     ) = start_server_and_get_client().await?;
 
@@ -59,8 +69,234 @@ async fn rpc_server_spawn() -> Result<()> {
     )
     .await?;
     test_chain_tip_change(client.clone(), &mock_chain_tip_sender).await?;
-    test_mempool_change(client.clone(), mempool_transaction_sender).await?;
+    test_sync_mempool_bootstrap(client.clone(), mock_mempool.clone()).await?;
+    test_sync_mempool_live_cycle(
+        client.clone(),
+        mock_mempool.clone(),
+        mempool_transaction_sender.clone(),
+    )
+    .await?;
+    test_sync_mempool_reorg(
+        client.clone(),
+        mock_mempool.clone(),
+        mempool_transaction_sender.clone(),
+    )
+    .await?;
+    test_sync_mempool_lagged_connection(
+        client.clone(),
+        mock_mempool.clone(),
+        mempool_transaction_sender,
+    )
+    .await?;
     test_get_block(client.clone(), mock_read_service).await?;
+
+    Ok(())
+}
+
+/// A test [`UnminedTxId`] derived from a single byte.
+fn txid(byte: u8) -> UnminedTxId {
+    UnminedTxId::Legacy(transaction::Hash::from([byte; 32]))
+}
+
+/// An empty bootstrap-state response, for tests that start from an empty mempool.
+fn empty_bootstrap_state() -> mempool::Response {
+    mempool::Response::MempoolBootstrapState {
+        queued: HashMap::new(),
+        verified: Vec::new(),
+        rejected: Vec::new(),
+    }
+}
+
+/// Tests that `SyncMempool` replays the current state as a bootstrap burst terminated by a batch
+/// with `initial_sync_complete=true` and the projection checksum.
+async fn test_sync_mempool_bootstrap(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_mempool: MockMempool,
+) -> Result<()> {
+    let mut response = client.sync_mempool(Empty {}).await?.into_inner();
+
+    // The server reads a consistent point-in-time bootstrap snapshot. Respond with a single queued
+    // transaction so the burst is non-empty.
+    let mut queued = HashMap::new();
+    queued.insert(txid(1), QueuedStage::AwaitingDownload);
+    let expected_checksum = replica_digest(&HashSet::new(), &queued);
+
+    mock_mempool
+        .expect_request(mempool::Request::MempoolBootstrapState)
+        .await
+        .respond(mempool::Response::MempoolBootstrapState {
+            queued,
+            verified: Vec::new(),
+            rejected: Vec::new(),
+        });
+
+    let batch = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a bootstrap batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("bootstrap batch should not be an error message");
+
+    assert!(
+        batch.initial_sync_complete,
+        "the terminal bootstrap batch sets initial_sync_complete"
+    );
+    assert_eq!(
+        batch.checksum,
+        Some(expected_checksum.to_vec()),
+        "the terminal bootstrap batch carries the projection checksum"
+    );
+    assert!(
+        batch
+            .events
+            .iter()
+            .any(|event| matches!(&event.event, Some(mempool_event::Event::Queued(_)))),
+        "the bootstrap burst replays the queued set as a Queued event"
+    );
+
+    Ok(())
+}
+
+/// Tests that after bootstrap, each live change cycle is forwarded as one batch carrying its
+/// post-cycle checksum.
+async fn test_sync_mempool_live_cycle(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_mempool: MockMempool,
+    mempool_transaction_sender: broadcast::Sender<MempoolBatch>,
+) -> Result<()> {
+    let mut response = client.sync_mempool(Empty {}).await?.into_inner();
+    mock_mempool
+        .expect_request(mempool::Request::MempoolBootstrapState)
+        .await
+        .respond(empty_bootstrap_state());
+
+    // Consume the terminal bootstrap batch.
+    let bootstrap = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a bootstrap batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("bootstrap batch should not be an error message");
+    assert!(bootstrap.initial_sync_complete);
+
+    // A live change cycle: a queued transaction, with the source's post-cycle checksum.
+    let mut queued = HashMap::new();
+    queued.insert(txid(2), QueuedStage::AwaitingVerification);
+    let checksum = replica_digest(&HashSet::new(), &queued);
+    mempool_transaction_sender
+        .send(MempoolBatch::new(
+            vec![MempoolChange::queued_awaiting_verification(
+                [txid(2)].into_iter().collect(),
+            )],
+            Some(checksum),
+        ))
+        .expect("rpc server should have a receiver");
+
+    let batch = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a live batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("live batch should not be an error message");
+
+    assert!(
+        !batch.initial_sync_complete,
+        "live batches are not bootstrap batches"
+    );
+    assert_eq!(
+        batch.checksum,
+        Some(checksum.to_vec()),
+        "each live batch carries its source-computed post-cycle checksum"
+    );
+
+    Ok(())
+}
+
+/// Tests that a reorg (tip reset) is forwarded as a `Removed{Reorged}` marker event (design §5a).
+async fn test_sync_mempool_reorg(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_mempool: MockMempool,
+    mempool_transaction_sender: broadcast::Sender<MempoolBatch>,
+) -> Result<()> {
+    let mut response = client.sync_mempool(Empty {}).await?.into_inner();
+    mock_mempool
+        .expect_request(mempool::Request::MempoolBootstrapState)
+        .await
+        .respond(empty_bootstrap_state());
+
+    let bootstrap = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a bootstrap batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("bootstrap batch should not be an error message");
+    assert!(bootstrap.initial_sync_complete);
+
+    // A reorg re-queues verified txs for re-verification, signalled by a Reorged removal.
+    mempool_transaction_sender
+        .send(MempoolBatch::event(MempoolChange::removed_reorged(
+            [txid(3)].into_iter().collect(),
+        )))
+        .expect("rpc server should have a receiver");
+
+    let batch = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a reorg batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("reorg batch should not be an error message");
+
+    let removed = batch
+        .events
+        .iter()
+        .find_map(|event| match &event.event {
+            Some(mempool_event::Event::Removed(removed)) => Some(removed),
+            _ => None,
+        })
+        .expect("the reorg batch carries a Removed event");
+    assert!(
+        matches!(removed.reason, Some(mempool_removed::Reason::Reorged(_))),
+        "the reorg marker is a Reorged removal, got {:?}",
+        removed.reason
+    );
+
+    Ok(())
+}
+
+/// Tests that when the server's own broadcast subscription lags (it missed events), the connection
+/// is dropped so the follower re-bootstraps (design §5 "drop-and-resync").
+async fn test_sync_mempool_lagged_connection(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_mempool: MockMempool,
+    mempool_transaction_sender: broadcast::Sender<MempoolBatch>,
+) -> Result<()> {
+    let mut response = client.sync_mempool(Empty {}).await?.into_inner();
+
+    // The handler subscribes to the broadcast before it reads the bootstrap snapshot, so its
+    // receiver exists now. Overflow the capacity-1 channel before responding to the bootstrap read,
+    // so the server's first live `recv` returns `Lagged`.
+    for byte in 0..4u8 {
+        let _ = mempool_transaction_sender.send(MempoolBatch::event(
+            MempoolChange::removed_expired([txid(byte)].into_iter().collect()),
+        ));
+    }
+
+    mock_mempool
+        .expect_request(mempool::Request::MempoolBootstrapState)
+        .await
+        .respond(empty_bootstrap_state());
+
+    // The terminal bootstrap batch still arrives.
+    let bootstrap = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a bootstrap batch before timeout")
+        .expect("response stream should not be empty")
+        .expect("bootstrap batch should not be an error message");
+    assert!(bootstrap.initial_sync_complete);
+
+    // Then the server detects its lagged subscription and drops the connection, ending the stream.
+    let next = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("the stream should end promptly after the server drops the connection");
+    assert!(
+        next.is_none(),
+        "the server drops the connection on Lagged, ending the stream, got {next:?}"
+    );
 
     Ok(())
 }
@@ -189,35 +425,12 @@ async fn test_chain_tip_change(
     Ok(())
 }
 
-async fn test_mempool_change(
-    mut client: IndexerClient<tonic::transport::Channel>,
-    mempool_transaction_sender: tokio::sync::broadcast::Sender<MempoolBatch>,
-) -> Result<()> {
-    let request = tonic::Request::new(Empty {});
-    let mut response = client.mempool_change(request).await?.into_inner();
-
-    let change_tx_ids = [UnminedTxId::Legacy(transaction::Hash::from([0; 32]))]
-        .into_iter()
-        .collect();
-
-    mempool_transaction_sender
-        .send(MempoolBatch::event(MempoolChange::added(change_tx_ids)))
-        .expect("rpc server should have a receiver");
-
-    tokio::time::timeout(Duration::from_secs(3), response.next())
-        .await
-        .expect("should receive chain tip change notification before timeout")
-        .expect("response stream should not be empty")
-        .expect("chain tip change response should not be an error message");
-
-    Ok(())
-}
-
 async fn start_server_and_get_client() -> Result<(
     JoinHandle<Result<(), BoxError>>,
     IndexerClient<tonic::transport::Channel>,
     MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
     MockChainTipSender,
+    MockMempool,
     broadcast::Sender<MempoolBatch>,
 )> {
     let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
@@ -228,6 +441,10 @@ async fn start_server_and_get_client() -> Result<(
         .with_max_request_delay(Duration::from_secs(2))
         .for_unit_tests();
 
+    let mock_mempool: MockMempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
+
     let (mock_chain_tip_change, mock_chain_tip_change_sender) = MockChainTip::new();
     let (mempool_transaction_sender, _) = tokio::sync::broadcast::channel(1);
     let mempool_tx_subscriber = MempoolTxSubscriber::new(mempool_transaction_sender.clone());
@@ -235,6 +452,7 @@ async fn start_server_and_get_client() -> Result<(
         listen_addr,
         mock_read_service.clone(),
         mock_chain_tip_change,
+        mock_mempool.clone(),
         mempool_tx_subscriber.clone(),
     )
     .await
@@ -257,6 +475,7 @@ async fn start_server_and_get_client() -> Result<(
         client,
         mock_read_service,
         mock_chain_tip_change_sender,
+        mock_mempool,
         mempool_transaction_sender,
     ))
 }

@@ -4,9 +4,9 @@ use std::net::SocketAddr;
 
 use tokio::task::JoinHandle;
 use tonic::transport::{server::TcpIncoming, Server};
-use tower::BoxError;
+use tower::{BoxError, Service};
 use zebra_chain::chain_tip::ChainTip;
-use zebra_node_services::mempool::MempoolTxSubscriber;
+use zebra_node_services::mempool::{self, MempoolTxSubscriber};
 use zebra_state::ReadState;
 
 use crate::{
@@ -17,31 +17,51 @@ use crate::{
 type ServerTask = JoinHandle<Result<(), BoxError>>;
 
 /// Indexer RPC service.
-pub struct IndexerRPC<ReadStateService, Tip>
+pub struct IndexerRPC<ReadStateService, Tip, Mempool>
 where
     ReadStateService: ReadState + StateInfoProvider,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
 {
     pub(super) read_state: ReadStateService,
     pub(super) chain_tip_change: Tip,
+    /// A handle to the local mempool tower service, used to read a consistent
+    /// point-in-time snapshot for the `SyncMempool` bootstrap and to fetch added
+    /// transaction content in-process (design §6).
+    pub(super) mempool: Mempool,
+    /// A subscriber to the mempool change broadcast, used to forward live
+    /// [`mempool::MempoolBatch`]es to `SyncMempool` followers.
     pub(super) mempool_change: MempoolTxSubscriber,
 }
 
 /// Initializes the indexer RPC server
 #[tracing::instrument(skip_all)]
-pub async fn init<ReadStateService, Tip>(
+pub async fn init<ReadStateService, Tip, Mempool>(
     listen_addr: SocketAddr,
     read_state: ReadStateService,
     chain_tip_change: Tip,
+    mempool: Mempool,
     mempool_change: MempoolTxSubscriber,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
 where
     ReadStateService: ReadState + StateInfoProvider,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
 {
     let indexer_service = IndexerRPC {
         read_state,
         chain_tip_change,
+        mempool,
         mempool_change,
     };
 

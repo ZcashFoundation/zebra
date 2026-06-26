@@ -320,6 +320,7 @@ impl StartCmd {
                     indexer_listen_addr,
                     read_only_state_service.clone(),
                     latest_chain_tip.clone(),
+                    mempool.clone(),
                     mempool_transaction_subscriber.clone(),
                 )
                 .await

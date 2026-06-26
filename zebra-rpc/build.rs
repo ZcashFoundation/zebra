@@ -43,13 +43,23 @@ fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
                 "#[doc = \"A change in the chain state: a new non-finalized block, or a \
                  finalized-tip-change signal.\"]",
             )
+            .type_attribute(
+                "zebra.indexer.rpc.MempoolEvent.event",
+                "#[doc = \"A transaction-lifecycle event: queued, added, or removed.\"]",
+            )
+            .type_attribute(
+                "zebra.indexer.rpc.MempoolRemoved.reason",
+                "#[doc = \"Why a set of transactions was removed from the mempool pipeline.\"]",
+            )
             .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
             .compile_protos(&[PROTO_FILE_PATH], &[""])?;
 
         for file_name in file_names {
             let out_path = out_dir.join(file_name);
             let generated_path = format!("proto/__generated__/{file_name}");
-            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+            // Compare bytes, not text: the file descriptor set is binary, so a `read_to_string`
+            // comparison silently returns `None` for it and would never refresh the committed copy.
+            if fs::read(&out_path).ok() != fs::read(&generated_path).ok() {
                 fs::copy(out_path, generated_path)?;
             }
         }

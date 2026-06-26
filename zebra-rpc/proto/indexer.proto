@@ -73,27 +73,134 @@ message ChainStateChangeMessage {
   }
 };
 
-// Represents a change in the mempool.
-message MempoolChangeMessage {
-  // The type of change that occurred.
-  enum ChangeType {
-    // Represents a transaction being added to the mempool.
-    ADDED = 0;
-    // Represents a transaction being invalidated and rejected from the mempool.
-    INVALIDATED  = 1;
-    // Represents a transaction being mined into a block on the best chain and 
-    // removed from the mempool.
-    MINED = 2;
+// A transaction's unmined identifier.
+//
+// `mined_id` is the 32-byte mined transaction id in display order. `auth_digest`
+// is the 32-byte authorizing-data digest in display order for v5+ (witnessed)
+// transactions, and empty for legacy (v1-v4) transactions, mirroring Zebra's
+// `UnminedTxId::Legacy` vs `UnminedTxId::Witnessed`.
+message UnminedTxId {
+  // The mined transaction id, 32 bytes in display order.
+  bytes mined_id = 1;
+
+  // The authorizing-data digest, 32 bytes in display order, or empty for a
+  // legacy (v1-v4) transaction.
+  bytes auth_digest = 2;
+};
+
+// The stage a queued transaction has reached in the download/verify pipeline.
+enum QueuedStage {
+  // The transaction is queued and awaiting download of its content.
+  AWAITING_DOWNLOAD = 0;
+
+  // The transaction has been downloaded and is awaiting verification.
+  AWAITING_VERIFICATION = 1;
+};
+
+// Transactions entered the download/verify pipeline at the given stage.
+message MempoolQueued {
+  // The transactions that were queued.
+  repeated UnminedTxId tx_ids = 1;
+
+  // The pipeline stage the transactions reached.
+  QueuedStage stage = 2;
+};
+
+// A transaction added to the verified mempool, carrying its content and the
+// fee/sigop/ZIP-317 metadata a follower needs without a network round-trip.
+//
+// The content is fetched from the source's local mempool (in-process), not
+// streamed from a peer, so a follower never has to re-download an added tx.
+message MempoolAdded {
+  // The serialized transaction. A follower reconstructs the unmined tx (and its
+  // id and size) from these bytes.
+  bytes transaction = 1;
+
+  // The miner fee in zatoshi.
+  uint64 miner_fee = 2;
+
+  // The legacy transparent sigop count (`GetLegacySigOpCount`).
+  uint32 legacy_sigop_count = 3;
+
+  // The P2SH redeem-script sigop count (`GetP2SHSigOpCount`).
+  uint32 p2sh_sigop_count = 4;
+
+  // The number of conventional actions, as defined by ZIP-317.
+  uint32 conventional_actions = 5;
+
+  // The number of unpaid actions, as defined by ZIP-317 for block production.
+  uint32 unpaid_actions = 6;
+
+  // The fee weight ratio, as defined by ZIP-317 for block production.
+  float fee_weight_ratio = 7;
+};
+
+// Transactions removed from the mempool pipeline, all for the same reason.
+message MempoolRemoved {
+  // The transactions that were removed.
+  repeated UnminedTxId tx_ids = 1;
+
+  // Why the transactions were removed. "Mined" is not represented here: a mined
+  // tx leaves as a reason-less removal because the chain replica shows the
+  // block (design doc §5d), except where the source explicitly reports it.
+  oneof reason {
+    // The transaction's content could not be downloaded.
+    Empty failed_download = 2;
+
+    // The transaction did not pass verification. Carries a stable error code.
+    string failed_verification = 3;
+
+    // The transaction was mined onto the best chain.
+    BlockHashAndHeight mined = 4;
+
+    // The transaction expired before it could be mined.
+    Empty expired = 5;
+
+    // The transaction was evicted (e.g. ZIP-401 cost-limit eviction).
+    Empty evicted = 6;
+
+    // The transaction was re-queued for re-verification after a chain tip reset
+    // (design doc §5a). This doubles as the reorg marker for the batch.
+    Empty reorged = 7;
   }
+};
 
-  // The type of change that occurred.
-  ChangeType change_type = 1;
+// A single transaction-lifecycle event observed in a mempool change cycle.
+message MempoolEvent {
+  // The lifecycle event that occurred.
+  oneof event {
+    // Transactions entered the download/verify pipeline.
+    MempoolQueued queued = 1;
 
-  // The hash of the transaction that changed.
-  bytes tx_hash = 2;
+    // A transaction was added to the verified mempool.
+    MempoolAdded added = 2;
 
-  // The transaction auth digest.
-  bytes auth_digest = 3;
+    // Transactions were removed from the mempool pipeline.
+    MempoolRemoved removed = 3;
+  }
+};
+
+// A per-cycle batch of mempool lifecycle events (design doc §5).
+//
+// The wire unit is a batch, not an individual event: the source coalesces every
+// change observed in one mempool change cycle into a single batch, then stamps
+// it with the post-cycle checksum once the cycle's changes have settled. A
+// follower applies the events atomically, then recomputes and compares the
+// checksum; a mismatch is the divergence detector.
+message MempoolBatch {
+  // Every lifecycle event observed in this change cycle, in order. Includes a
+  // `reorged` removal marker for tip resets (design doc §5a).
+  repeated MempoolEvent events = 1;
+
+  // A hash of the source's full replica projection (verified + queued sets,
+  // design doc §3a-1) after this batch settles. The follower recomputes and
+  // compares; a mismatch triggers a re-bootstrap. Omitted on intermediate
+  // bootstrap chunks.
+  optional bytes checksum = 2;
+
+  // True on the final bootstrap batch: the preceding batches replayed current
+  // state; live cycles follow (the k8s SendInitialEvents bookmark).
+  bool initial_sync_complete = 3;
 };
 
 // Metadata describing the node's finalized state, so a co-located read-only
@@ -142,8 +249,15 @@ service Indexer {
     option deprecated = true;
   }
 
-  // Notifies listeners of mempool changes
-  rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);
+  // Streams the source mempool's transaction-lifecycle changes to a trusting
+  // follower (design doc §5).
+  //
+  // The server first replays the current mempool state as bootstrap batch(es) of
+  // `Queued`/`Added` events (the last carries `initial_sync_complete=true` and a
+  // checksum), then forwards one `MempoolBatch` per source change cycle, each
+  // carrying its post-cycle checksum. A checksum mismatch on the follower side is
+  // the divergence detector and triggers a reconnect/re-bootstrap.
+  rpc SyncMempool(Empty) returns (stream MempoolBatch);
 
   // Returns metadata about the node's finalized state (live database path,
   // database format version, and network) so a co-located read-only follower
