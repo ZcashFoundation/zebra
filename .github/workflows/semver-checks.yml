@@ -25,6 +25,8 @@ concurrency:
 
 permissions:
   contents: read
+  # dorny/paths-filter reads the changed-file list from the pull request API.
+  pull-requests: read
 
 env:
   CLICOLOR: 1
