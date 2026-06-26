@@ -302,6 +302,22 @@ impl TrustedChainSync {
                 continue;
             }
 
+            // Skip blocks that are already finalized on the secondary. The server streams its
+            // entire non-finalized chain on initial subscription, which can start below our
+            // secondary's finalized tip when the secondary has caught up past the server's
+            // non-finalized root. Trying to commit those blocks fails with NotReadyToBeCommitted
+            // and triggers an endless re-subscribe loop.
+            if let Some(height) = block.coinbase_height() {
+                if self
+                    .db
+                    .finalized_tip_height()
+                    .is_some_and(|tip| height <= tip)
+                {
+                    tracing::debug!(?height, "skipping block already finalized on secondary");
+                    continue;
+                }
+            }
+
             let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
             match self.try_commit(block.clone()).await {
                 Ok(()) => {
@@ -440,8 +456,6 @@ impl TrustedChainSync {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<(Block, block::Hash), Status> {
-        // Encode the request as a single `hash_or_height` byte string: a 32-byte hash in display
-        // order, or a 4-byte big-endian height. The server tells them apart by length.
         let hash_or_height = match hash_or_height {
             HashOrHeight::Hash(hash) => hash.bytes_in_display_order().to_vec(),
             HashOrHeight::Height(height) => height.0.to_be_bytes().to_vec(),
