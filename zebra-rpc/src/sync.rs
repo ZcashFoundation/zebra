@@ -46,6 +46,14 @@ const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 /// and retrying. The subscription handshake should complete promptly.
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// An actionable update decoded from the `ChainStateChange` stream.
+enum ChainStateUpdate {
+    /// A new non-finalized block to commit.
+    Block(SemanticallyVerifiedBlock),
+    /// The finalized tip advanced; catch up to it and publish it.
+    FinalizedTip,
+}
+
 /// Syncs the best chain from a trusted Zebra node's indexer gRPC, maintaining a non-finalized state
 /// and publishing chain tip changes.
 #[derive(Debug)]
@@ -60,6 +68,12 @@ pub struct TrustedChainSync {
     chain_tip_sender: ChainTipSender,
     /// The non-finalized state sender, for updating the [`ReadStateService`] when the non-finalized best chain changes.
     non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
+    /// Streamed blocks that can't attach yet because our finalized (secondary) state hasn't caught
+    /// up to their parent. Held in ascending height order and drained once a catch-up exposes the
+    /// lowest one's parent; from there the rest chain off the non-finalized state.
+    pending_blocks: VecDeque<SemanticallyVerifiedBlock>,
+    /// The hash of the block that most recently failed to commit, to avoid re-logging while it waits.
+    last_failed_commit_hash: Option<block::Hash>,
 }
 
 /// Reads the finalized tip block from the secondary db instance and converts it to a
@@ -96,14 +110,15 @@ impl TrustedChainSync {
                 .keep_alive_timeout(KEEPALIVE_TIMEOUT)
                 .connect()
                 .await?;
-        let indexer_rpc_client = IndexerClient::new(channel);
 
         let mut syncer = Self {
-            indexer_rpc_client,
+            indexer_rpc_client: IndexerClient::new(channel),
             db,
             non_finalized_state,
             chain_tip_sender,
             non_finalized_state_sender,
+            pending_blocks: VecDeque::new(),
+            last_failed_commit_hash: None,
         };
 
         let sync_task = tokio::spawn(async move {
@@ -113,161 +128,134 @@ impl TrustedChainSync {
         Ok((latest_chain_tip, chain_tip_change, sync_task))
     }
 
-    /// Syncs the best chain from the node's indexer gRPC `ChainStateChange` stream.
+    /// Syncs the best chain from the node's indexer gRPC `ChainStateChange` stream, which interleaves
+    /// new non-finalized blocks with finalized-tip-change signals.
     ///
-    /// The stream interleaves two kinds of message:
-    ///
-    /// - a new non-finalized block, which is committed to the local non-finalized state, and
-    /// - a finalized-tip-change signal, on which the syncer catches its own finalized (secondary)
-    ///   state up to the primary and, until it has a non-finalized chain of its own, publishes its
-    ///   finalized tip.
-    ///
-    /// A single task owns all of this, so it is the only caller of `try_catch_up_with_primary` on
-    /// the secondary db: its finalized view can't advance between a check and a commit.
+    /// A single task owns the whole sync, so it is the only caller of `try_catch_up_with_primary` on
+    /// the secondary db: the finalized view can't advance between a check and a commit.
     #[tracing::instrument(skip_all)]
     async fn sync(&mut self) {
-        let mut chain_state_change = None;
-        // Non-finalized blocks received from the stream that can't attach yet because the secondary
-        // finalized state hasn't caught up to their parent. Held in ascending height order and
-        // drained once a catch-up makes the lowest one's parent available; from there the rest chain
-        // off the non-finalized state and commit too.
-        let mut pending: VecDeque<SemanticallyVerifiedBlock> = VecDeque::new();
-        // The hash of the block that most recently failed to commit, used to avoid re-logging the
-        // same warning at full rate while a block waits for the secondary to catch up.
-        let mut last_failed_commit_hash = None;
+        let mut stream = None;
 
-        self.try_catch_up_with_primary().await;
-        if let Some(finalized_tip_block) = finalized_chain_tip_block(&self.db).await {
-            self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
-        }
+        // Publish the finalized tip once up front; from here it advances via the stream's signals.
+        let _ = self.db.spawn_try_catch_up_with_primary().await;
+        self.publish_finalized_tip().await;
 
         loop {
-            let Some(ref mut stream) = chain_state_change else {
-                chain_state_change = match self.subscribe_to_chain_state_change().await {
-                    Ok(stream) => Some(stream),
-                    Err(err) => {
-                        tracing::warn!(?err, "failed to subscribe to chain state changes");
-                        tokio::time::sleep(POLL_DELAY).await;
-                        None
-                    }
-                };
-
-                continue;
-            };
-
-            let message = match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, stream.message()).await
-            {
-                Ok(Ok(Some(message))) => message,
-                Ok(Ok(None)) => {
-                    tracing::warn!("chain state change stream ended unexpectedly");
-                    chain_state_change = None;
-                    continue;
-                }
-                Ok(Err(err)) => {
-                    tracing::warn!(?err, "error receiving chain state change");
-                    chain_state_change = None;
-                    continue;
-                }
-                Err(_) => {
-                    tracing::debug!("chain state change stream timed out, re-subscribing");
-                    chain_state_change = None;
-                    continue;
-                }
-            };
-
-            match message.change {
-                Some(Change::NonFinalizedBlock(block_and_hash)) => {
-                    let Some((block, hash)) = block_and_hash.decode() else {
-                        tracing::warn!("received malformed non-finalized block message");
-                        chain_state_change = None;
-                        continue;
-                    };
-
-                    if self.non_finalized_state.any_chain_contains(&hash) {
-                        // Expected and harmless: on a resumed or multi-chain stream the server can
-                        // re-send a block the syncer already has (e.g. a fork's shared ancestors),
-                        // so this is logged at debug rather than warn to avoid noise.
-                        tracing::debug!(
-                            ?hash,
-                            "non-finalized state already contains block, skipping"
-                        );
-                        continue;
-                    }
-
-                    pending.push_back(SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash));
-                    self.flush_pending(&mut pending, &mut last_failed_commit_hash)
-                        .await;
-                }
-
-                Some(Change::FinalizedTipChange(_)) => {
-                    // The primary's best chain advanced. Catch our finalized state up to it and,
-                    // until we have a non-finalized chain of our own, publish our finalized tip.
-                    // (Once we do, `set_finalized_tip` is a no-op, so the guard just avoids the read.)
-                    self.try_catch_up_with_primary().await;
-                    if self.non_finalized_state.best_chain().is_none() {
-                        if let Some(tip_block) = finalized_chain_tip_block(&self.db).await {
-                            self.chain_tip_sender.set_finalized_tip(tip_block);
-                        }
-                    }
-
-                    self.flush_pending(&mut pending, &mut last_failed_commit_hash)
-                        .await;
-                }
-
-                None => {
-                    tracing::warn!("received empty chain state change message");
+            match self.next_update(&mut stream).await {
+                ChainStateUpdate::Block(block) => self.commit_or_hold(block).await,
+                ChainStateUpdate::FinalizedTip => {
+                    let _ = self.db.spawn_try_catch_up_with_primary().await;
+                    self.publish_finalized_tip().await;
+                    self.flush_pending().await;
                 }
             }
         }
     }
 
-    /// Catches up to the primary, then commits as many held `pending` blocks as can attach, in
-    /// ascending height order.
-    ///
-    /// Stops at the first block whose parent isn't available yet (the secondary is still catching
-    /// up); it stays at the front of the queue and is retried on the next finalized-tip change. A
-    /// block that the secondary has since finalized is dropped rather than committed, which avoids a
-    /// duplicate-effects validation error.
-    async fn flush_pending(
+    /// Returns the next actionable update, (re)subscribing and skipping malformed/empty messages.
+    async fn next_update(
         &mut self,
-        pending: &mut VecDeque<SemanticallyVerifiedBlock>,
-        last_failed_commit_hash: &mut Option<block::Hash>,
-    ) {
-        if pending.is_empty() {
+        stream: &mut Option<Streaming<ChainStateChangeMessage>>,
+    ) -> ChainStateUpdate {
+        loop {
+            let Some(active) = stream.as_mut() else {
+                *stream = self.resubscribe().await;
+                continue;
+            };
+
+            let message = match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, active.message()).await
+            {
+                Ok(Ok(Some(message))) => message,
+                Ok(Ok(None)) => {
+                    tracing::warn!("chain state change stream ended unexpectedly");
+                    *stream = None;
+                    continue;
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(?err, "error receiving chain state change");
+                    *stream = None;
+                    continue;
+                }
+                Err(_) => {
+                    tracing::debug!("chain state change stream timed out, re-subscribing");
+                    *stream = None;
+                    continue;
+                }
+            };
+
+            match message.change {
+                Some(Change::NonFinalizedBlock(block)) => {
+                    let Some((block, hash)) = block.decode() else {
+                        tracing::warn!("received malformed non-finalized block message");
+                        *stream = None;
+                        continue;
+                    };
+                    let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+                    return ChainStateUpdate::Block(block);
+                }
+                Some(Change::FinalizedTipChange(_)) => return ChainStateUpdate::FinalizedTip,
+                None => tracing::warn!("received empty chain state change message"),
+            }
+        }
+    }
+
+    /// Subscribes to the `ChainStateChange` stream, backing off on error.
+    async fn resubscribe(&mut self) -> Option<Streaming<ChainStateChangeMessage>> {
+        match self.subscribe_to_chain_state_change().await {
+            Ok(stream) => Some(stream),
+            Err(err) => {
+                tracing::warn!(?err, "failed to subscribe to chain state changes");
+                tokio::time::sleep(POLL_DELAY).await;
+                None
+            }
+        }
+    }
+
+    /// Queues a streamed block (skipping one we already have), then drains what it can.
+    async fn commit_or_hold(&mut self, block: SemanticallyVerifiedBlock) {
+        if self.non_finalized_state.any_chain_contains(&block.hash) {
+            // Expected on a resumed or multi-chain stream (e.g. a fork's shared ancestors).
+            tracing::debug!(hash = ?block.hash, "non-finalized state already contains block, skipping");
             return;
         }
 
-        // Catch up once for the whole drain: this task is the only caller, so the finalized view is
-        // stable from here until we return, making the `finalized_tip_height` check below reliable.
-        self.try_catch_up_with_primary().await;
+        self.pending_blocks.push_back(block);
+        self.flush_pending().await;
+    }
 
-        while let Some(block) = pending.front() {
-            // The secondary finalized this block (e.g. the primary committed it directly via
-            // checkpoint sync), so it's no longer a non-finalized block for us: drop it.
+    /// Catches up to the primary, then commits as many queued blocks as can attach, in height order.
+    ///
+    /// Stops at the first block whose parent isn't finalized yet, keeping it for the next
+    /// finalized-tip signal instead of tearing the subscription down. A block the secondary has
+    /// since finalized is dropped rather than committed (which would fail as a duplicate-effects
+    /// error) — reliable here because this task is the sole catch-up caller, so the finalized view
+    /// is stable across the drain.
+    async fn flush_pending(&mut self) {
+        if self.pending_blocks.is_empty() {
+            return;
+        }
+
+        let _ = self.db.spawn_try_catch_up_with_primary().await;
+
+        while let Some(block) = self.pending_blocks.front().cloned() {
             if Some(block.height) <= self.db.finalized_tip_height() {
-                pending.pop_front();
+                self.pending_blocks.pop_front();
                 continue;
             }
 
             let hash = block.hash;
-            match self.commit(block.clone()) {
+            match self.commit(block) {
                 Ok(()) => {
-                    pending.pop_front();
-                    *last_failed_commit_hash = None;
+                    self.pending_blocks.pop_front();
+                    self.last_failed_commit_hash = None;
                 }
                 Err(error) => {
-                    // The block's parent isn't in the finalized state yet (the secondary is still
-                    // catching up). Keep it and retry on the next finalized-tip change. Log only on
-                    // transitions to avoid saturating the logs while the same block waits.
-                    if *last_failed_commit_hash != Some(hash) {
-                        tracing::warn!(
-                            ?error,
-                            ?hash,
-                            "block can't be committed to the non-finalized state yet, will retry"
-                        );
-                        *last_failed_commit_hash = Some(hash);
+                    // Log only on transitions so a block waiting for catch-up doesn't saturate logs.
+                    if self.last_failed_commit_hash != Some(hash) {
+                        tracing::warn!(?error, ?hash, "block can't attach yet, will retry");
+                        self.last_failed_commit_hash = Some(hash);
                     }
-
                     break;
                 }
             }
@@ -291,13 +279,26 @@ impl TrustedChainSync {
         Ok(())
     }
 
-    /// Calls the `chain_state_change()` method on the indexer gRPC client to subscribe to chain
-    /// state changes, and returns the response stream.
+    /// Publishes the secondary's finalized tip, unless we already track a non-finalized chain.
     ///
-    /// Passes the tip hashes of every chain currently in this syncer's non-finalized state so the
-    /// server only streams blocks after the tips we already have, instead of re-sending the whole
-    /// non-finalized state on every (re)subscription. When the non-finalized state is empty, the
-    /// request carries no tips and the server streams every non-finalized block.
+    /// Once we do, the published tip is the (higher) non-finalized tip and `set_finalized_tip` is a
+    /// no-op, so this skips the db read and never drags the reported tip backwards.
+    async fn publish_finalized_tip(&mut self) {
+        if self.non_finalized_state.best_chain().is_some() {
+            return;
+        }
+
+        if let Some(tip_block) = finalized_chain_tip_block(&self.db).await {
+            self.chain_tip_sender.set_finalized_tip(tip_block);
+        }
+    }
+
+    /// Subscribes to the indexer's `ChainStateChange` stream, resuming from the tips we already have.
+    ///
+    /// Passing the tip hashes of every chain in our non-finalized state tells the server to stream
+    /// only the blocks after them, instead of re-sending the whole non-finalized state on every
+    /// (re)subscription. When the non-finalized state is empty, no tips are sent and the server
+    /// streams every non-finalized block.
     async fn subscribe_to_chain_state_change(
         &mut self,
     ) -> Result<Streaming<ChainStateChangeMessage>, Status> {
@@ -315,12 +316,7 @@ impl TrustedChainSync {
         )
         .await
         .map_err(|_| Status::deadline_exceeded("chain_state_change subscription timed out"))?
-        .map(|a| a.into_inner())
-    }
-
-    /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
-    async fn try_catch_up_with_primary(&self) {
-        let _ = self.db.spawn_try_catch_up_with_primary().await;
+        .map(|response| response.into_inner())
     }
 
     /// Finalizes any non-finalized blocks that are at or below the finalized tip height.
