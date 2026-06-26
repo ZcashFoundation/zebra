@@ -29,5 +29,5 @@ delete_disks() {
 
 # Disks from PR jobs and other jobs that use a commit hash.
 delete_disks 'name~-[0-9a-f]{7,}$'
-# Disks from managed instance groups and other jobs prefixed with "zebrad-".
-delete_disks 'name~^zebrad-'
+# Disks prefixed with "zebrad-", but never the persistent "zebrad-cache-*" chain-state disks.
+delete_disks 'name~^zebrad- AND NOT name~^zebrad-cache'
