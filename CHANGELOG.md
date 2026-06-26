@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
   locator that is on the best chain — the fork point — for clients tracking chain
   reorganizations through a read-only state service.
+- New `zebra-state` read requests `ReadRequest::AnyChainSaplingTree` and
+  `ReadRequest::AnyChainOrchardTree` that resolve a note commitment treestate by hash
+  against any non-finalized chain (not just the best chain) before falling back to the
+  finalized state, symmetric to `ReadRequest::AnyChainBlock`. This lets a read-only
+  consumer pin a consistent, reorg-immune view by reading treestates by hash.
 
 ### Changed
 

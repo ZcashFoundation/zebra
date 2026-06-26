@@ -48,6 +48,28 @@ where
         .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
 }
 
+/// Returns the Sapling
+/// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+///
+/// Unlike [`sapling_tree`], this checks every non-finalized chain (best chain first,
+/// then side chains), so a lookup by hash is immune to reorgs that move a block from
+/// the best chain onto a still-retained side chain.
+pub fn any_sapling_tree<'a, C: AsRef<Chain> + 'a>(
+    mut chains: impl Iterator<Item = &'a C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
+    // # Correctness
+    //
+    // Since sapling treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chains` are always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chains
+        .find_map(|chain| chain.as_ref().sapling_tree(hash_or_height))
+        .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
+}
+
 /// Returns a list of Sapling [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.
@@ -88,6 +110,28 @@ where
     // in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
         .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height))
+        .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
+}
+
+/// Returns the Orchard
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+///
+/// Unlike [`orchard_tree`], this checks every non-finalized chain (best chain first,
+/// then side chains), so a lookup by hash is immune to reorgs that move a block from
+/// the best chain onto a still-retained side chain.
+pub fn any_orchard_tree<'a, C: AsRef<Chain> + 'a>(
+    mut chains: impl Iterator<Item = &'a C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+    // # Correctness
+    //
+    // Since orchard treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chains` are always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chains
+        .find_map(|chain| chain.as_ref().orchard_tree(hash_or_height))
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
