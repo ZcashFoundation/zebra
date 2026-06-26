@@ -7,16 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-### Security
-
-- Use `subtle::ConstantTimeEq` for the RPC cookie authentication comparison
-  in `zebra-rpc/src/server/cookie.rs`. The previous `String == String`
-  comparison lowered to a `memcmp`-style block-wise compare with early-exit
-  on the first mismatching word, providing a timing oracle a network-side
-  adversary could use to recover the 44-character base64 cookie. Mirrors
-  `zcashd`'s `TimingResistantEqual` in `src/httprpc.cpp` (originally Bitcoin
-  Core PR #6390, 2015). CWE-208.
-
 ### Added
 
 - Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
@@ -57,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
+- Use constant-time comparison for RPC cookie authentication ([#10567](https://github.com/ZcashFoundation/zebra/pull/10567))
 - Zebra's release Docker images are now reproducible: an independent rebuild of a
   published `zebrad` from the same commit produces the same binary. The Rust
   toolchain and the Rust and Debian base images are pinned by exact version and
