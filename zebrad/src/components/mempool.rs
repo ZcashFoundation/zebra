@@ -19,7 +19,7 @@
 //!      to peers
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     iter,
     pin::{pin, Pin},
@@ -84,6 +84,21 @@ type TxVerifier = Buffer<
     transaction::Request,
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+
+/// Maps a transaction download/verification error to a stable string code for the
+/// mempool change broadcast (`zebra-node-services` depends only on `zebra-chain`,
+/// so it can't carry the `zebra-consensus` error type, design §9.2). Consensus
+/// validation failures carry the specific inner error message that Zaino wants;
+/// pipeline failures use a short stable code.
+fn tx_error_code(error: &TransactionDownloadVerifyError) -> String {
+    match error {
+        TransactionDownloadVerifyError::InState => "in_state".to_string(),
+        TransactionDownloadVerifyError::StateError(_) => "state_error".to_string(),
+        TransactionDownloadVerifyError::DownloadFailed(_) => "download_failed".to_string(),
+        TransactionDownloadVerifyError::Cancelled => "cancelled".to_string(),
+        TransactionDownloadVerifyError::Invalid { error, .. } => error.to_string(),
+    }
+}
 
 /// The state of the mempool.
 ///
@@ -593,8 +608,16 @@ impl Service<Request> for Mempool {
         {
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
-            let mut invalidated_ids = HashSet::<_>::new();
+            // Transactions removed from the pipeline, grouped by lifecycle reason.
+            let mut evicted_ids = HashSet::<_>::new();
+            let mut expired_ids = HashSet::<_>::new();
             let mut mined_mempool_ids = HashSet::<_>::new();
+            // Verification failures grouped by their stable error code, so each
+            // distinct reason is broadcast as its own `Removed{FailedVerification}`.
+            let mut failed_verification_ids = HashMap::<String, HashSet<_>>::new();
+            // The block that mined transactions out of the mempool, if any.
+            let mut mined_block: Option<(zebra_chain::block::Hash, zebra_chain::block::Height)> =
+                None;
 
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
@@ -622,7 +645,10 @@ impl Service<Request> for Mempool {
                                 // Save transaction ids that we will send to peers
                                 send_to_peers_ids.insert(inserted_id);
                             } else {
-                                invalidated_ids.insert(tx_id);
+                                // The transaction passed verification but storage
+                                // rejected it (e.g. cost-limit eviction or a cached
+                                // rejection), so report it as evicted.
+                                evicted_ids.insert(tx_id);
                             }
 
                             // Send the result to responder channel if one was provided.
@@ -660,7 +686,13 @@ impl Service<Request> for Mempool {
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
 
-                        invalidated_ids.insert(tx_id);
+                        // Map the error to a stable code before `error` is moved
+                        // into `reject_if_needed` below.
+                        let code = tx_error_code(&error);
+                        failed_verification_ids
+                            .entry(code)
+                            .or_default()
+                            .insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
                     }
                     Err((tx_id, _elapsed)) => {
@@ -669,9 +701,12 @@ impl Service<Request> for Mempool {
                             "mempool transaction failed to verify due to timeout"
                         );
 
-                        invalidated_ids.insert(tx_id);
-
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
+
+                        failed_verification_ids
+                            .entry("timeout".to_string())
+                            .or_default()
+                            .insert(tx_id);
                     }
                 };
             }
@@ -694,8 +729,13 @@ impl Service<Request> for Mempool {
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
 
+                if !mined.is_empty() {
+                    mined_block = Some((block.hash, block.height));
+                }
                 mined_mempool_ids.extend(mined);
-                invalidated_ids.extend(invalidated);
+                // Transactions invalidated by a conflicting mined transaction are
+                // reported as evicted.
+                evicted_ids.extend(invalidated);
             }
 
             // Remove expired transactions from the mempool.
@@ -714,7 +754,7 @@ impl Service<Request> for Mempool {
                         "removed expired transactions from the mempool",
                     );
 
-                    invalidated_ids.extend(expired_transactions);
+                    expired_ids.extend(expired_transactions);
                 }
             }
 
@@ -729,15 +769,39 @@ impl Service<Request> for Mempool {
                     .send(MempoolChange::added(send_to_peers_ids))?;
             }
 
-            // Send transactions that were rejected to RPC listeners.
-            if !invalidated_ids.is_empty() {
+            // Send transactions that failed verification to RPC listeners,
+            // grouped by their stable error code.
+            for (code, tx_ids) in failed_verification_ids {
                 tracing::trace!(
-                    ?invalidated_ids,
-                    "sending invalidated transactions to RPC listeners"
+                    ?tx_ids,
+                    ?code,
+                    "sending failed-verification transactions to RPC listeners"
                 );
 
                 self.transaction_sender
-                    .send(MempoolChange::invalidated(invalidated_ids))?;
+                    .send(MempoolChange::removed_failed_verification(tx_ids, code))?;
+            }
+
+            // Send transactions that were evicted to RPC listeners.
+            if !evicted_ids.is_empty() {
+                tracing::trace!(
+                    ?evicted_ids,
+                    "sending evicted transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::removed_evicted(evicted_ids))?;
+            }
+
+            // Send transactions that expired to RPC listeners.
+            if !expired_ids.is_empty() {
+                tracing::trace!(
+                    ?expired_ids,
+                    "sending expired transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::removed_expired(expired_ids))?;
             }
 
             // Send transactions that were mined onto the best chain to RPC listeners.
@@ -747,8 +811,15 @@ impl Service<Request> for Mempool {
                     "sending mined transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::mined(mined_mempool_ids))?;
+                let (block_hash, block_height) = mined_block.expect(
+                    "mined transaction ids are only collected from a TipAction::Grow block",
+                );
+
+                self.transaction_sender.send(MempoolChange::removed_mined(
+                    mined_mempool_ids,
+                    block_hash,
+                    block_height,
+                ))?;
             }
         }
 

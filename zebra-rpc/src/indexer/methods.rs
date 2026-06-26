@@ -9,7 +9,7 @@ use tower::util::ServiceExt;
 
 use tracing::Span;
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
-use zebra_node_services::mempool::MempoolChangeKind;
+use zebra_node_services::mempool::{MempoolChangeKind, RemovedReason};
 use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
 
 use super::{
@@ -313,13 +313,20 @@ where
                     tracing::debug!("mempool change: {:?}", change);
                 });
 
+                // Bridge the new lifecycle events back to the existing proto
+                // `ChangeType`: queued events are skipped (the old RPC never
+                // emitted them), mined removals map to MINED, and every other
+                // removal reason collapses to INVALIDATED.
+                let change_type = match change.kind() {
+                    MempoolChangeKind::Added => 0,
+                    MempoolChangeKind::Removed(RemovedReason::Mined { .. }) => 2,
+                    MempoolChangeKind::Removed(_) => 1,
+                    MempoolChangeKind::Queued(_) => continue,
+                };
+
                 for tx_id in change.tx_ids() {
                     let msg = Ok(MempoolChangeMessage {
-                        change_type: match change.kind() {
-                            MempoolChangeKind::Added => 0,
-                            MempoolChangeKind::Invalidated => 1,
-                            MempoolChangeKind::Mined => 2,
-                        },
+                        change_type,
                         tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
                         auth_digest: tx_id
                             .auth_digest()

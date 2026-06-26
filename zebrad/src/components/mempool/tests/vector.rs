@@ -608,7 +608,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
     assert_eq!(
         mempool_change,
-        MempoolChange::invalidated([txid].into_iter().collect())
+        MempoolChange::removed_failed_verification([txid].into_iter().collect(), "cancelled")
     );
 
     Ok(())
@@ -836,7 +836,10 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
 
     assert_eq!(
         mempool_change,
-        MempoolChange::invalidated([rejected_tx.transaction.id].into_iter().collect())
+        MempoolChange::removed_failed_verification(
+            [rejected_tx.transaction.id].into_iter().collect(),
+            TransactionError::BadBalance.to_string(),
+        )
     );
 
     Ok(())
@@ -922,7 +925,10 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
 
     assert_eq!(
         mempool_change,
-        MempoolChange::invalidated([rejected_valid_tx.transaction.id].into_iter().collect())
+        MempoolChange::removed_failed_verification(
+            [rejected_valid_tx.transaction.id].into_iter().collect(),
+            "download_failed",
+        )
     );
 
     Ok(())

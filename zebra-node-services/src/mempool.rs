@@ -20,7 +20,9 @@ mod transaction_dependencies;
 
 pub use self::{
     gossip::Gossip,
-    mempool_change::{MempoolChange, MempoolChangeKind, MempoolTxSubscriber},
+    mempool_change::{
+        MempoolChange, MempoolChangeKind, MempoolTxSubscriber, QueuedStage, RemovedReason,
+    },
     service_trait::MempoolService,
     transaction_dependencies::TransactionDependencies,
 };
