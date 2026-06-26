@@ -565,3 +565,44 @@ async fn e2e_reorg_requeues_without_rebootstrap() {
     .await;
     assert_eq!(replica.digest(), verification_checksum);
 }
+
+/// End-to-end: the source folds recent rejections into the bootstrap snapshot, and the follower
+/// surfaces them on the observation feed as `Removed{FailedVerification}` even though the rejected
+/// transactions are not in the replica's verified or queued sets (design §3b partial recovery).
+#[tokio::test]
+async fn e2e_bootstrap_surfaces_rejections() {
+    let _init_guard = zebra_test::init();
+
+    let (listen_addr, mut mock_mempool, _sender, _server_task, _chain_tip_sender) =
+        start_indexer_server(16).await;
+
+    let (mut replica_receiver, mut observation_receiver, _task) =
+        TrustedMempoolSync::spawn(listen_addr);
+
+    // Bootstrap from an empty pool that carries one recent rejection with its stable error code.
+    mock_mempool
+        .expect_request(mempool::Request::MempoolBootstrapState)
+        .await
+        .respond(mempool::Response::MempoolBootstrapState {
+            queued: HashMap::new(),
+            verified: Vec::new(),
+            rejected: vec![(txid(9), "bad_balance".to_string())],
+        });
+
+    // The rejection reason surfaces on the feed, even though the rejected tx is not tracked.
+    wait_for_observation(&mut observation_receiver, |observation| {
+        matches!(
+            observation,
+            MempoolObservation::Removed {
+                tx_id,
+                reason: RemovedReason::FailedVerification(code),
+            } if *tx_id == txid(9) && code == "bad_balance"
+        )
+    })
+    .await;
+
+    // The rejected tx is not part of the replica's tracked state.
+    let replica = wait_for_replica(&mut replica_receiver, |_| true).await;
+    assert!(!replica.contains_verified(&txid(9)));
+    assert_eq!(replica.queued_stage(&txid(9)), None);
+}

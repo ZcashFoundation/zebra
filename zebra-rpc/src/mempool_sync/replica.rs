@@ -139,7 +139,7 @@ impl MempoolReplica {
     }
 
     /// Applies a `Removed{reason}` event, dropping the transaction from the
-    /// replica entirely.
+    /// replica entirely and returning the resulting transition.
     ///
     /// Every reason — including [`RemovedReason::Reorged`] — removes the
     /// transaction, starting a new generation (design §10). A reorg is a real
@@ -149,15 +149,19 @@ impl MempoolReplica {
     /// subsequent `Queued{AwaitingDownload}` → … → `Added` events rather than
     /// retaining stale content (design §5a, §10).
     ///
-    /// Returns the transition, or `None` if the transaction was not being tracked
-    /// (an idempotent remove-absent no-op).
+    /// The transition is returned even for a transaction the replica was not
+    /// tracking: the removal reason is itself the information the observation feed
+    /// exists to carry, so a recent rejection the source folds into the bootstrap
+    /// (design §3b) or an at-least-once duplicate still surfaces. The state
+    /// mutation stays idempotent — removing an absent transaction is a no-op.
     pub fn apply_removed(
         &mut self,
         id: UnminedTxId,
         reason: RemovedReason,
     ) -> Option<MempoolObservation> {
-        let removed = self.verified.remove(&id).is_some() || self.queued.remove(&id).is_some();
-        removed.then_some(MempoolObservation::Removed { tx_id: id, reason })
+        self.verified.remove(&id);
+        self.queued.remove(&id);
+        Some(MempoolObservation::Removed { tx_id: id, reason })
     }
 
     /// Computes the [`replica_digest`] over this replica's verified set, using the

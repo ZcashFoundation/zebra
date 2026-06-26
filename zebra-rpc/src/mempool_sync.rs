@@ -180,22 +180,38 @@ impl TrustedMempoolSync {
         let mut replica = MempoolReplica::default();
 
         // (1) Bootstrap phase: apply replayed current-state events until the `initial_sync_complete`
-        // bookmark, then verify the bootstrap checksum and publish (design §3a, §5).
+        // bookmark, then verify the bootstrap checksum, publish the replica, and surface any recent
+        // rejection reasons the source folded into the bootstrap (design §3a, §3b, §5).
+        let mut rejections = Vec::new();
         loop {
             let batch = tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, stream.message())
                 .await
                 .map_err(|_| "timed out waiting for a mempool stream message during bootstrap")??
                 .ok_or("mempool stream closed during bootstrap")?;
 
+            let mut observations = Vec::new();
             for event in batch.events {
-                // Bootstrap events replay current state, not live transitions, so they are not
-                // published on the observation feed; the watch replica conveys the snapshot.
-                apply_event(&mut replica, event, &mut Vec::new())?;
+                apply_event(&mut replica, event, &mut observations)?;
             }
+
+            // The bootstrap replays the current verified/queued state as `Added`/`Queued` events,
+            // which the watch replica conveys, not the feed. Only the recent-rejection `Removed`
+            // events are transient observations to forward (design §3b partial recovery), so keep
+            // just those.
+            rejections.extend(
+                observations.into_iter().filter(|observation| {
+                    matches!(observation, MempoolObservation::Removed { .. })
+                }),
+            );
 
             if batch.initial_sync_complete {
                 verify_checksum(&replica, batch.checksum.as_deref())?;
+                // Publish the bootstrapped replica before surfacing the rejection observations, so a
+                // consumer reacting to one never reads a pre-bootstrap (empty) watch (design §6).
                 self.publish_replica(&replica);
+                for rejection in rejections {
+                    let _ = self.observation_sender.send(rejection);
+                }
                 break;
             }
         }
