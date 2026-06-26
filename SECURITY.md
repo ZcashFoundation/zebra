@@ -18,9 +18,29 @@ Specifically, we will:
 
 ## Receiving Disclosures
 
-The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
+The Zcash Foundation is committed to working with researchers who submit
+security vulnerability notifications to us to resolve those issues on an
+appropriate timeline and perform a coordinated release, giving credit to the
+reporter if they would like. We align our reporting channels with the broader
+Zcash ecosystem disclosure process.
 
-Please submit issues to <security@zfnd.org>, using the following PGP Key:
+For critical vulnerabilities, notify us on Signal. Create a new Signal group
+(do not reuse a previous group for a separate issue) that includes:
+
+- `@pilizcash.01`
+
+Treat a vulnerability as critical if it could cause consensus divergence or a
+chain split, loss or counterfeiting of funds, a persistent node halt, state
+corruption, or remote compromise of a node.
+
+For all other vulnerabilities, use the GitHub "Report a Vulnerability" feature
+for Zebra at <https://github.com/ZcashFoundation/zebra/security/advisories>.
+
+If you cannot reach us by Signal or GitHub, fall back to email at
+<security@zfnd.org> using the following PGP key. We no longer treat email as a
+primary or fully reliable reporting channel, so use it only when the channels
+above are unavailable. The key may also be used to encrypt follow-up material
+once contact is established.
 
 ```
 -----BEGIN PGP PUBLIC KEY BLOCK-----
@@ -52,7 +72,7 @@ AQC1Wmyb9ul/2QNi//8sKNDfaYbn3h6OU45BTAWggp+ACQ==
 
 ## Sending Disclosures
 
-In the case where we become aware of security issues affecting other projects that has never affected Zebra or Zcash, our intention is to inform those projects of security issues on a best effort basis.
+In the case where we become aware of security issues affecting other projects that have never affected Zebra or Zcash, our intention is to inform those projects of security issues on a best effort basis.
 
 In the case where we fix a security issue in Zebra or Zcash that also affects the following neighboring projects, our intention is to engage in responsible disclosures with them as described in <https://github.com/RD-Crypto-Spec/Responsible-Disclosure>, subject to the deviations described in the section at the bottom of this document.
 
@@ -62,7 +82,9 @@ We have set up agreements with the following neighboring projects to share vulne
 
 Specifically, we have agreed to engage in responsible disclosures for security issues affecting Zebra or Zcash technology with the following contacts:
 
-- The Electric Coin Company - <security@z.cash> via PGP
+- Zcash Open Development Lab (ZODL), which maintains the `zcash/zcash` core
+  node, `librustzcash`, `zallet`, and related software, via its security
+  disclosure process at <https://github.com/zcash/.github/blob/main/SECURITY.md>
 
 ## Deviations from the Standard
 
