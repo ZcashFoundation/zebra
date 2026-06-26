@@ -85,9 +85,10 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
-          # zebrad is a binary with no consumer-facing library API; its build script also needs
-          # test-only proto files absent from the baseline checkout.
-          exclude: zebrad
+          # Gate the consumer-facing library crates only. zebrad is a binary whose build script
+          # needs test-only protos absent from the baseline; zebra-test and zebra-utils are test
+          # and tooling crates whose feature-gated APIs are not stability surfaces.
+          exclude: zebrad, zebra-test, zebra-utils
           feature-group: default-features
           baseline-rev: ${{ steps.baseline.outputs.rev }}
 
