@@ -1,17 +1,18 @@
 //! Tests for the Halo2 Orchard Action verifier.
 //!
 //! The key correctness property of this module is the **era split**: the Orchard Action circuit
-//! (and therefore its verifying key) changed at NU6.2 to fix a variable-base scalar-multiplication
-//! soundness bug (GHSA-jfw5-j458-pfv6). A proof produced under one circuit does not verify under
-//! the other key. These tests guard that:
+//! (and therefore its verifying key) changes across protocol eras — it was fixed at NU6.2 for a
+//! variable-base scalar-multiplication soundness bug (GHSA-jfw5-j458-pfv6) and extended again at
+//! NU6.3 with the cross-address restriction. A proof produced under one circuit does not verify
+//! under another era's key. These tests guard that:
 //!
 //!   * a real pre-NU6.2 Orchard proof verifies under the pre-NU6.2 (insecure) key, so historical
 //!     blocks still re-sync;
-//!   * the same proof is **rejected** by the post-NU6.2 (fixed) key, so the verifier is not
+//!   * the same proof is **rejected** by the NU6.2 (fixed) key, so the verifier is not
 //!     "fail-open" — it does not accept whatever it is handed regardless of era; and
 //!   * the Orchard verifier routing ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`])
-//!     selects the matching key by transaction version and upgrade — in particular a v5 Orchard
-//!     bundle at NU6.3 routes to the fixed key, not the NU6.3 cross-address key.
+//!     selects the matching key by block era — in particular a v5 Orchard bundle at NU6.3 routes
+//!     to the NU6.3 cross-address key (the same key as v6 Orchard and Ironwood), not the fixed key.
 
 use std::sync::Arc;
 
@@ -26,8 +27,8 @@ use zebra_chain::{
 };
 
 use super::{
-    orchard_v5_verifier_for, orchard_v6_verifier, Item, VERIFIER_V5_POST_NU6_2,
-    VERIFIER_V5_PRE_NU6_2, VERIFIER_V6, VERIFYING_KEY_V5_POST_NU6_2, VERIFYING_KEY_V5_PRE_NU6_2,
+    orchard_v5_verifier_for, orchard_v6_verifier, Item, VERIFIER_NU6_2, VERIFIER_NU6_3_ONWARD,
+    VERIFIER_PRE_NU6_2, VERIFYING_KEY_NU6_2, VERIFYING_KEY_PRE_NU6_2,
 };
 
 /// Returns one real pre-NU6.2 Orchard bundle and its sighash, extracted from the mainnet test
@@ -35,7 +36,7 @@ use super::{
 ///
 /// These mainnet blocks are NU5-era Orchard history, mined long before NU6.2, so their proofs
 /// were produced by the historical (insecure) circuit and only verify under
-/// [`VERIFYING_KEY_V5_PRE_NU6_2`]. Transactions with transparent inputs are skipped because their
+/// [`VERIFYING_KEY_PRE_NU6_2`]. Transactions with transparent inputs are skipped because their
 /// sighash needs the previous outputs they spend, which are not in the test vectors.
 fn pre_nu6_2_bundle_and_sighash() -> (Bundle<Authorized, ZatBalance>, SigHash) {
     for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
@@ -77,13 +78,13 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
 
     // Correct era key: the historical proof must verify, so pre-NU6.2 history still re-syncs.
     assert!(
-        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_V5_PRE_NU6_2),
+        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2),
         "a real pre-NU6.2 Orchard proof must verify under the pre-NU6.2 (insecure) key"
     );
 
     // Wrong era key: the same proof must be rejected. This is the not-fail-open guarantee.
     assert!(
-        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_V5_POST_NU6_2),
+        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_NU6_2),
         "a pre-NU6.2 Orchard proof must be REJECTED by the post-NU6.2 (fixed) key; \
          verifying it would mean the era selection is fail-open"
     );
@@ -103,9 +104,9 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
 /// which spawns a worker task and therefore needs a Tokio runtime.
 #[tokio::test(flavor = "multi_thread")]
 async fn orchard_verifier_routing_selects_the_correct_key() {
-    let pre: &'static super::VerifierService = &VERIFIER_V5_PRE_NU6_2;
-    let post: &'static super::VerifierService = &VERIFIER_V5_POST_NU6_2;
-    let post_nu6_3: &'static super::VerifierService = &VERIFIER_V6;
+    let pre: &'static super::VerifierService = &VERIFIER_PRE_NU6_2;
+    let post: &'static super::VerifierService = &VERIFIER_NU6_2;
+    let post_nu6_3: &'static super::VerifierService = &VERIFIER_NU6_3_ONWARD;
 
     // v5 Orchard bundles before NU6.2 (incl. upgrades from before Orchard existed) route to the
     // insecure key, the only key pre-NU6.2 Orchard history verifies under.

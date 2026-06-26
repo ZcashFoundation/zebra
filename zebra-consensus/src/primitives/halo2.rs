@@ -85,7 +85,7 @@ lazy_static::lazy_static! {
     /// Bundles mined before NU6.2 committed to this circuit and only verify under this key, so it
     /// MUST be retained to re-verify pre-NU6.2 history on resync. It must never be used to verify
     /// post-NU6.2 bundles.
-    pub static ref VERIFYING_KEY_V5_PRE_NU6_2: ItemVerifyingKey =
+    pub static ref VERIFYING_KEY_PRE_NU6_2: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::InsecurePreNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.2-until-NU6.3** (fixed) circuit.
@@ -93,8 +93,8 @@ lazy_static::lazy_static! {
     /// Built from the fixed variable-base scalar-multiplication Orchard Action circuit shipped in
     /// NU6.2. Orchard bundles mined from the NU6.2 activation height until NU6.3 commit to this
     /// circuit and only verify under this key. At NU6.3 the Orchard pool moves to
-    /// [`VERIFYING_KEY_V6`]. See [`VERIFYING_KEY_V5_PRE_NU6_2`] for the era split.
-    pub static ref VERIFYING_KEY_V5_POST_NU6_2: ItemVerifyingKey =
+    /// [`VERIFYING_KEY_NU6_3_ONWARD`]. See [`VERIFYING_KEY_PRE_NU6_2`] for the era split.
+    pub static ref VERIFYING_KEY_NU6_2: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.3-onward** circuit.
@@ -102,18 +102,16 @@ lazy_static::lazy_static! {
     /// Built from the NU6.3 Action circuit, which extends the fixed circuit with the
     /// `disableCrossAddress` constraint that enforces the Orchard-pool cross-address restriction.
     /// Every Orchard Action mined from NU6.3 onward commits to this circuit and only verifies under
-    /// this key: v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles. (Named
-    /// `V6` for the transaction version that introduced the Ironwood pool, but the key is selected
-    /// by block era, not transaction version.)
-    pub static ref VERIFYING_KEY_V6: ItemVerifyingKey =
+    /// this key: v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles.
+    pub static ref VERIFYING_KEY_NU6_3_ONWARD: ItemVerifyingKey =
         ItemVerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
 }
 
 /// A Halo2 verification item, used as the request type of the service.
 ///
-/// An [`Item`] is key-agnostic: it carries only the bundle and sighash. The verifying key (pre-
-/// vs post-NU6.2) is supplied by whichever [`Verifier`] processes the item, so an item is always
-/// validated against exactly one key and eras are never mixed within a batch.
+/// An [`Item`] is key-agnostic: it carries only the bundle and sighash. The circuit era's verifying
+/// key is supplied by whichever [`Verifier`] processes the item, so an item is always validated
+/// against exactly one key and eras are never mixed within a batch.
 #[derive(Clone, Debug)]
 pub struct Item {
     bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
@@ -218,8 +216,8 @@ impl Service<Item> for OrchardFallback {
 
 /// The concrete type of a global Halo2 verification service.
 ///
-/// Each Orchard circuit version gets its own instance — see [`VERIFIER_V5_PRE_NU6_2`],
-/// [`VERIFIER_V5_POST_NU6_2`], and [`VERIFIER_V6`] — so that batches, fallbacks, and verifying
+/// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
+/// [`VERIFIER_NU6_2`], and [`VERIFIER_NU6_3_ONWARD`] — so that batches, fallbacks, and verifying
 /// keys are fully separated per circuit version. The Orchard verifier routing functions
 /// ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the matching one.
 pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
@@ -245,29 +243,29 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
 
 /// Global batch verification context for **pre-NU6.2** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_V5_PRE_NU6_2`] (the insecure circuit
+/// Items routed here are verified against [`VERIFYING_KEY_PRE_NU6_2`] (the insecure circuit
 /// retained for historical blocks). This service transparently batches contemporaneous proof
 /// verifications, handling batch failures by falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_V5_PRE_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_PRE_NU6_2));
+pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2));
 
 /// Global batch verification context for **NU6.2-until-NU6.3** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_V5_POST_NU6_2`] (the fixed circuit). This
+/// Items routed here are verified against [`VERIFYING_KEY_NU6_2`] (the fixed circuit). This
 /// service transparently batches contemporaneous proof verifications, handling batch failures by
 /// falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_V5_POST_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_V5_POST_NU6_2));
+pub static VERIFIER_NU6_2: Lazy<VerifierService> =
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2));
 
 /// Global batch verification context for **NU6.3-onward** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_V6`] (the NU6.3 Action circuit, which
+/// Items routed here are verified against [`VERIFYING_KEY_NU6_3_ONWARD`] (the NU6.3 Action circuit, which
 /// adds the `disableCrossAddress` constraint). Every Orchard Action mined from NU6.3 onward routes
 /// here — v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles. This service
 /// transparently batches contemporaneous proof verifications, handling batch failures by falling
@@ -275,7 +273,8 @@ pub static VERIFIER_V5_POST_NU6_2: Lazy<VerifierService> =
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_V6: Lazy<VerifierService> = Lazy::new(|| batch_verifier(&VERIFYING_KEY_V6));
+pub static VERIFIER_NU6_3_ONWARD: Lazy<VerifierService> =
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD));
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
 /// block at `network_upgrade`.
@@ -285,10 +284,10 @@ pub static VERIFIER_V6: Lazy<VerifierService> = Lazy::new(|| batch_verifier(&VER
 /// function of the block's network upgrade, **not** the transaction version, so each v5 Orchard
 /// bundle is checked against the key for the upgrade of the block it appears in:
 ///
-///   * upgrades before NU6.2 → [`VERIFIER_V5_PRE_NU6_2`] (the historical insecure key), so
+///   * upgrades before NU6.2 → [`VERIFIER_PRE_NU6_2`] (the historical insecure key), so
 ///     pre-soft-fork Orchard history still verifies on re-sync;
-///   * NU6.2 until NU6.3 → [`VERIFIER_V5_POST_NU6_2`] (the fixed key);
-///   * NU6.3 onward → [`VERIFIER_V6`] (the NU6.3 circuit). The Orchard-pool cross-address
+///   * NU6.2 until NU6.3 → [`VERIFIER_NU6_2`] (the fixed key);
+///   * NU6.3 onward → [`VERIFIER_NU6_3_ONWARD`] (the NU6.3 circuit). The Orchard-pool cross-address
 ///     restriction is enforced for every Orchard Action from NU6.3 onward regardless of transaction
 ///     version, "so that it cannot be bypassed by using a version 5 transaction" (ZIP 229); that
 ///     restriction lives in the NU6.3 circuit, which the NU6.2 fixed key cannot verify. So a v5
@@ -308,11 +307,11 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         // are bound to the pre-NU6.2 (insecure) verifier because that is the only key under which
         // any Orchard history before NU6.2 verifies; routing them anywhere else cannot be correct.
         Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5
-        | Nu6 | Nu6_1 => &VERIFIER_V5_PRE_NU6_2,
+        | Nu6 | Nu6_1 => &VERIFIER_PRE_NU6_2,
 
         // NU6.2 ships the fixed circuit and is the only upgrade that uses it: it is active from the
         // NU6.2 activation height until NU6.3.
-        Nu6_2 => &VERIFIER_V5_POST_NU6_2,
+        Nu6_2 => &VERIFIER_NU6_2,
 
         // NU6.3 adds the `disableCrossAddress` constraint to the Orchard Action circuit. Every
         // Orchard Action from NU6.3 onward — including those in v5 transactions — commits to this
@@ -320,23 +319,23 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         // restriction applies "regardless of transaction version ... so that it cannot be bypassed
         // by using a version 5 transaction". Verifying these under the NU6.2 fixed key would both
         // reject honest proofs (different key) and fail to enforce the restriction.
-        Nu6_3 | Nu7 => &VERIFIER_V6,
+        Nu6_3 | Nu7 => &VERIFIER_NU6_3_ONWARD,
 
         // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.3
         // upgrade, so it inherits the NU6.3 circuit and is bound to the NU6.3-onward key here on
         // purpose (rather than via a wildcard) to keep this match exhaustive and fail-closed under
         // every build configuration.
         #[cfg(zcash_unstable = "zfuture")]
-        ZFuture => &VERIFIER_V6,
+        ZFuture => &VERIFIER_NU6_3_ONWARD,
     }
 }
 
 /// Returns the global Halo2 verifier for **v6** Orchard-pool and Ironwood-pool bundles.
 ///
 /// v6 Orchard and Ironwood bundles only exist from NU6.3 onward, so they always use the NU6.3
-/// circuit — the same [`VERIFIER_V6`] key that v5 Orchard bundles at NU6.3 route to.
+/// circuit — the same [`VERIFIER_NU6_3_ONWARD`] key that v5 Orchard bundles at NU6.3 route to.
 pub fn orchard_v6_verifier() -> &'static VerifierService {
-    &VERIFIER_V6
+    &VERIFIER_NU6_3_ONWARD
 }
 
 /// Halo2 proof verifier implementation
@@ -345,9 +344,9 @@ pub fn orchard_v6_verifier() -> &'static VerifierService {
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 ///
-/// Each verifier validates against a single, fixed [`ItemVerifyingKey`]; the two Orchard circuit
-/// eras are served by two independent verifiers, so a batch never mixes pre- and post-NU6.2
-/// proofs.
+/// Each verifier validates against a single, fixed [`ItemVerifyingKey`]; the three Orchard circuit
+/// eras (pre-NU6.2, NU6.2-until-NU6.3, and NU6.3-onward) are served by three independent verifiers,
+/// so a batch never mixes proofs from different eras.
 pub struct Verifier {
     /// The verifying key that every batch and fallback from this verifier uses.
     vk: &'static ItemVerifyingKey,
@@ -464,7 +463,7 @@ impl Service<BatchControl<Item>> for Verifier {
                     Ok(()) => {}
                     Err(orchard::bundle::BatchError::RestrictionUnsupportedByKey) => unreachable!(
                         "the error fires only for a bundle with cross_address_enabled = false on a \
-                         key that does not support the restriction; VERIFIER_V6's key supports it, \
+                         key that does not support the restriction; VERIFIER_NU6_3_ONWARD's key supports it, \
                          and the pre-NU6.3 verifiers only ever see v5-format bundles, which always \
                          report cross_address_enabled = true"
                     ),
