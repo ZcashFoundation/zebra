@@ -71,24 +71,25 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # Check out the PR head, not the merge commit, so the API delta is the PR's own.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
-        with:
-          toolchain: stable
-          cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
-        with:
-          tool: cargo-semver-checks
-      - uses: ./.github/actions/setup-zebra-build
-      - name: Check for undeclared public API breaks
+      - name: Compute the baseline from the PR's fork point
+        id: baseline
         env:
-          BASELINE_REV: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if ! cargo semver-checks --workspace --baseline-rev "$BASELINE_REV"; then
-            echo "::error::cargo-semver-checks did not pass. If you are intentionally making a breaking public API change, add '!' after the type and scope in the PR title (for example 'feat(zebra-chain)!: ...') so the release bumps the major version. See CONTRIBUTING.md."
-            exit 1
-          fi
+          git fetch --no-tags origin "$BASE_REF"
+          echo "rev=$(git merge-base FETCH_HEAD HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-zebra-build
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          # zebrad is a binary with no consumer-facing library API; its build script also needs
+          # test-only proto files absent from the baseline checkout.
+          exclude: zebrad
+          feature-group: default-features
+          baseline-rev: ${{ steps.baseline.outputs.rev }}
 
   semver-checks-result:
     runs-on: ubuntu-latest
