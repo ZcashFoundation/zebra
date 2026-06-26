@@ -138,19 +138,27 @@ where
         }
     }
 
+    /// Returns the sum of all value pool balances.
+    pub fn total(self) -> Result<Amount<C>, amount::Error> {
+        self.transparent + self.sprout + self.sapling + self.orchard + self.deferred
+    }
+
     /// Convert this value balance to a different ValueBalance type,
     /// if it satisfies the new constraint
     pub fn constrain<C2>(self) -> Result<ValueBalance<C2>, ValueBalanceError>
     where
-        C2: Constraint,
+        C2: Constraint + Copy,
     {
-        Ok(ValueBalance::<C2> {
+        let value_balance = ValueBalance::<C2> {
             transparent: self.transparent.constrain().map_err(Transparent)?,
             sprout: self.sprout.constrain().map_err(Sprout)?,
             sapling: self.sapling.constrain().map_err(Sapling)?,
             orchard: self.orchard.constrain().map_err(Orchard)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
-        })
+        };
+
+        value_balance.total().map_err(ValueBalanceError::Total)?;
+        Ok(value_balance)
     }
 }
 
@@ -415,6 +423,9 @@ pub enum ValueBalanceError {
     /// deferred amount error {0}
     Deferred(amount::Error),
 
+    /// total amount error {0}
+    Total(amount::Error),
+
     /// ValueBalance is unparsable
     Unparsable,
 }
@@ -427,6 +438,7 @@ impl fmt::Display for ValueBalanceError {
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
+            Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
     }
