@@ -78,3 +78,23 @@ impl BlockAndHash {
             })
     }
 }
+
+impl ChainStateChangeMessage {
+    /// Creates a `non_finalized_block` change from a [`block::Hash`] and block.
+    pub fn non_finalized_block(hash: block::Hash, block: Arc<block::Block>) -> Self {
+        ChainStateChangeMessage {
+            change: Some(chain_state_change_message::Change::NonFinalizedBlock(
+                BlockAndHash::new(hash, block),
+            )),
+        }
+    }
+
+    /// Creates a `finalized_tip_change` change from a [`block::Hash`] and [`block::Height`].
+    pub fn finalized_tip_change(hash: block::Hash, height: block::Height) -> Self {
+        ChainStateChangeMessage {
+            change: Some(chain_state_change_message::Change::FinalizedTipChange(
+                BlockHashAndHeight::new(hash, height),
+            )),
+        }
+    }
+}

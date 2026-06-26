@@ -38,6 +38,8 @@ pub struct BlockRequest {
     pub hash_or_height: ::prost::alloc::vec::Vec<u8>,
 }
 /// A request to subscribe to non-finalized state changes.
+///
+/// Deprecated: use ChainStateChangeRequest / ChainStateChange instead.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NonFinalizedStateChangeRequest {
@@ -49,6 +51,45 @@ pub struct NonFinalizedStateChangeRequest {
     /// empty request is equivalent to the previous no-argument behavior.
     #[prost(bytes = "vec", repeated, tag = "1")]
     pub chain_tip_hashes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
+/// A request to subscribe to chain state changes.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChainStateChangeRequest {
+    /// The hashes of the chain tips the caller already has, in display order.
+    ///
+    /// The server streams only the non-finalized blocks that come after these
+    /// tips, skipping any block at or below a provided tip on the same chain.
+    /// If empty, every block currently in the non-finalized state is sent.
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub chain_tip_hashes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
+/// A single change in the chain state: either a new non-finalized block, or a
+/// signal that the finalized chain tip advanced.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChainStateChangeMessage {
+    /// The change that occurred: a new non-finalized block or a finalized-tip-change signal.
+    #[prost(oneof = "chain_state_change_message::Change", tags = "1, 2")]
+    pub change: ::core::option::Option<chain_state_change_message::Change>,
+}
+/// Nested message and enum types in `ChainStateChangeMessage`.
+pub mod chain_state_change_message {
+    /// The change that occurred: a new non-finalized block or a finalized-tip-change signal.
+    #[derive(serde::Deserialize, serde::Serialize)]
+    ///A change in the chain state: a new non-finalized block, or a finalized-tip-change signal.
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Change {
+        /// A new block in the non-finalized best chain.
+        #[prost(message, tag = "1")]
+        NonFinalizedBlock(super::BlockAndHash),
+        /// The finalized chain tip advanced. A co-located follower uses this as a
+        /// signal to catch its own finalized state up to the primary and publish
+        /// its finalized tip; the block contents are obtained from the follower's
+        /// own finalized state, not streamed here.
+        #[prost(message, tag = "2")]
+        FinalizedTipChange(super::BlockHashAndHeight),
+    }
 }
 /// Represents a change in the mempool.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -203,7 +244,45 @@ pub mod indexer_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Notifies listeners of chain tip changes
+        /// Notifies listeners of chain state changes: new non-finalized blocks
+        /// interleaved with finalized-chain-tip-change signals.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams non-finalized blocks after those tips. An empty request
+        /// streams every block currently in the non-finalized state.
+        ///
+        /// This unifies (and supersedes) NonFinalizedStateChange, ChainTipChange, and
+        /// GetBlock for a co-located read-state follower.
+        pub async fn chain_state_change(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ChainStateChangeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::ChainStateChangeMessage>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/zebra.indexer.rpc.Indexer/ChainStateChange",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("zebra.indexer.rpc.Indexer", "ChainStateChange"),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Notifies listeners of chain tip changes.
+        ///
+        /// Deprecated: use ChainStateChange instead.
+        #[deprecated]
         pub async fn chain_tip_change(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
@@ -233,6 +312,9 @@ pub mod indexer_client {
         /// Callers may provide the hashes of the chain tips they already have so the
         /// server only streams blocks after those tips. An empty request streams every
         /// block currently in the non-finalized state.
+        ///
+        /// Deprecated: use ChainStateChange instead.
+        #[deprecated]
         pub async fn non_finalized_state_change(
             &mut self,
             request: impl tonic::IntoRequest<super::NonFinalizedStateChangeRequest>,
@@ -289,8 +371,9 @@ pub mod indexer_client {
         }
         /// Returns the block with the given hash or height from the best chain.
         ///
-        /// Used by a syncer to fetch finalized blocks that bridge the gap between its
-        /// local finalized tip and the start of the streamed non-finalized chain.
+        /// Deprecated: a follower obtains finalized blocks from its own finalized
+        /// state; use ChainStateChange for chain updates.
+        #[deprecated]
         pub async fn get_block(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockRequest>,
@@ -327,13 +410,37 @@ pub mod indexer_server {
     /// Generated trait containing gRPC methods that should be implemented for use with IndexerServer.
     #[async_trait]
     pub trait Indexer: std::marker::Send + std::marker::Sync + 'static {
+        /// Server streaming response type for the ChainStateChange method.
+        type ChainStateChangeStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::ChainStateChangeMessage, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Notifies listeners of chain state changes: new non-finalized blocks
+        /// interleaved with finalized-chain-tip-change signals.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams non-finalized blocks after those tips. An empty request
+        /// streams every block currently in the non-finalized state.
+        ///
+        /// This unifies (and supersedes) NonFinalizedStateChange, ChainTipChange, and
+        /// GetBlock for a co-located read-state follower.
+        async fn chain_state_change(
+            &self,
+            request: tonic::Request<super::ChainStateChangeRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::ChainStateChangeStream>,
+            tonic::Status,
+        >;
         /// Server streaming response type for the ChainTipChange method.
         type ChainTipChangeStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::BlockHashAndHeight, tonic::Status>,
             >
             + std::marker::Send
             + 'static;
-        /// Notifies listeners of chain tip changes
+        /// Notifies listeners of chain tip changes.
+        ///
+        /// Deprecated: use ChainStateChange instead.
         async fn chain_tip_change(
             &self,
             request: tonic::Request<super::Empty>,
@@ -352,6 +459,8 @@ pub mod indexer_server {
         /// Callers may provide the hashes of the chain tips they already have so the
         /// server only streams blocks after those tips. An empty request streams every
         /// block currently in the non-finalized state.
+        ///
+        /// Deprecated: use ChainStateChange instead.
         async fn non_finalized_state_change(
             &self,
             request: tonic::Request<super::NonFinalizedStateChangeRequest>,
@@ -375,8 +484,8 @@ pub mod indexer_server {
         >;
         /// Returns the block with the given hash or height from the best chain.
         ///
-        /// Used by a syncer to fetch finalized blocks that bridge the gap between its
-        /// local finalized tip and the start of the streamed non-finalized chain.
+        /// Deprecated: a follower obtains finalized blocks from its own finalized
+        /// state; use ChainStateChange for chain updates.
         async fn get_block(
             &self,
             request: tonic::Request<super::BlockRequest>,
@@ -458,6 +567,53 @@ pub mod indexer_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
+                "/zebra.indexer.rpc.Indexer/ChainStateChange" => {
+                    #[allow(non_camel_case_types)]
+                    struct ChainStateChangeSvc<T: Indexer>(pub Arc<T>);
+                    impl<
+                        T: Indexer,
+                    > tonic::server::ServerStreamingService<
+                        super::ChainStateChangeRequest,
+                    > for ChainStateChangeSvc<T> {
+                        type Response = super::ChainStateChangeMessage;
+                        type ResponseStream = T::ChainStateChangeStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ChainStateChangeRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Indexer>::chain_state_change(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ChainStateChangeSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/zebra.indexer.rpc.Indexer/ChainTipChange" => {
                     #[allow(non_camel_case_types)]
                     struct ChainTipChangeSvc<T: Indexer>(pub Arc<T>);

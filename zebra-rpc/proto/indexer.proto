@@ -33,7 +33,11 @@ message BlockRequest {
 };
 
 // A request to subscribe to non-finalized state changes.
+//
+// Deprecated: use ChainStateChangeRequest / ChainStateChange instead.
 message NonFinalizedStateChangeRequest {
+  option deprecated = true;
+
   // The hashes of the chain tips the caller already has, in display order.
   //
   // The server streams only the non-finalized blocks that come after these
@@ -41,6 +45,32 @@ message NonFinalizedStateChangeRequest {
   // If empty, every block currently in the non-finalized state is sent, so an
   // empty request is equivalent to the previous no-argument behavior.
   repeated bytes chain_tip_hashes = 1;
+};
+
+// A request to subscribe to chain state changes.
+message ChainStateChangeRequest {
+  // The hashes of the chain tips the caller already has, in display order.
+  //
+  // The server streams only the non-finalized blocks that come after these
+  // tips, skipping any block at or below a provided tip on the same chain.
+  // If empty, every block currently in the non-finalized state is sent.
+  repeated bytes chain_tip_hashes = 1;
+};
+
+// A single change in the chain state: either a new non-finalized block, or a
+// signal that the finalized chain tip advanced.
+message ChainStateChangeMessage {
+  // The change that occurred: a new non-finalized block or a finalized-tip-change signal.
+  oneof change {
+    // A new block in the non-finalized best chain.
+    BlockAndHash non_finalized_block = 1;
+
+    // The finalized chain tip advanced. A co-located follower uses this as a
+    // signal to catch its own finalized state up to the primary and publish
+    // its finalized tip; the block contents are obtained from the follower's
+    // own finalized state, not streamed here.
+    BlockHashAndHeight finalized_tip_change = 2;
+  }
 };
 
 // Represents a change in the mempool.
@@ -67,22 +97,43 @@ message MempoolChangeMessage {
 };
 
 service Indexer {
-  // Notifies listeners of chain tip changes
-  rpc ChainTipChange(Empty) returns (stream BlockHashAndHeight);
+  // Notifies listeners of chain state changes: new non-finalized blocks
+  // interleaved with finalized-chain-tip-change signals.
+  //
+  // Callers may provide the hashes of the chain tips they already have so the
+  // server only streams non-finalized blocks after those tips. An empty request
+  // streams every block currently in the non-finalized state.
+  //
+  // This unifies (and supersedes) NonFinalizedStateChange, ChainTipChange, and
+  // GetBlock for a co-located read-state follower.
+  rpc ChainStateChange(ChainStateChangeRequest) returns (stream ChainStateChangeMessage);
+
+  // Notifies listeners of chain tip changes.
+  //
+  // Deprecated: use ChainStateChange instead.
+  rpc ChainTipChange(Empty) returns (stream BlockHashAndHeight) {
+    option deprecated = true;
+  }
 
   // Notifies listeners of new blocks in the non-finalized state.
   //
   // Callers may provide the hashes of the chain tips they already have so the
   // server only streams blocks after those tips. An empty request streams every
   // block currently in the non-finalized state.
-  rpc NonFinalizedStateChange(NonFinalizedStateChangeRequest) returns (stream BlockAndHash);
+  //
+  // Deprecated: use ChainStateChange instead.
+  rpc NonFinalizedStateChange(NonFinalizedStateChangeRequest) returns (stream BlockAndHash) {
+    option deprecated = true;
+  }
 
   // Notifies listeners of mempool changes
   rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);
 
   // Returns the block with the given hash or height from the best chain.
   //
-  // Used by a syncer to fetch finalized blocks that bridge the gap between its
-  // local finalized tip and the start of the streamed non-finalized chain.
-  rpc GetBlock(BlockRequest) returns (BlockAndHash);
+  // Deprecated: a follower obtains finalized blocks from its own finalized
+  // state; use ChainStateChange for chain updates.
+  rpc GetBlock(BlockRequest) returns (BlockAndHash) {
+    option deprecated = true;
+  }
 }

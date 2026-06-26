@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The indexer gRPC service has a new `ChainStateChange` streaming method that unifies
+  non-finalized block notifications and finalized-chain-tip-change signals onto a single
+  stream, so a co-located read-state follower needs only one subscription.
 - The indexer gRPC service has a new unary `GetBlock` method that returns a block
   from the best chain by hash or height.
 - The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
@@ -17,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The read-state syncer (`TrustedChainSync`) now drives everything from the single
+  `ChainStateChange` stream in one task: it commits non-finalized blocks and, on a
+  finalized-tip-change signal, catches its own finalized state up to the primary and
+  publishes its finalized tip. This removes the separate finalized-tip task and the
+  `GetBlock`-based gap bridging, and makes the syncer the sole catch-up caller on its
+  secondary db (avoiding a commit race against concurrent catch-up). The
+  `NonFinalizedStateChange`, `ChainTipChange`, and `GetBlock` indexer methods are
+  deprecated in favor of `ChainStateChange`.
 - The read-state syncer (`TrustedChainSync`) applies backpressure to the non-finalized
   block stream instead of dropping blocks for a slow consumer, bridges the gap between
   a lagging finalized tip and the streamed non-finalized chain by fetching the missing

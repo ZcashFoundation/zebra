@@ -14,7 +14,8 @@ use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
-    Empty, MempoolChangeMessage, NonFinalizedStateChangeRequest,
+    ChainStateChangeMessage, ChainStateChangeRequest, Empty, MempoolChangeMessage,
+    NonFinalizedStateChangeRequest,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client.
@@ -34,12 +35,137 @@ where
     ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
+    type ChainStateChangeStream =
+        Pin<Box<dyn Stream<Item = Result<ChainStateChangeMessage, Status>> + Send>>;
     type ChainTipChangeStream =
         Pin<Box<dyn Stream<Item = Result<BlockHashAndHeight, Status>> + Send>>;
     type NonFinalizedStateChangeStream =
         Pin<Box<dyn Stream<Item = Result<BlockAndHash, Status>> + Send>>;
     type MempoolChangeStream =
         Pin<Box<dyn Stream<Item = Result<MempoolChangeMessage, Status>> + Send>>;
+
+    async fn chain_state_change(
+        &self,
+        request: tonic::Request<ChainStateChangeRequest>,
+    ) -> Result<Response<Self::ChainStateChangeStream>, Status> {
+        let span = Span::current();
+        let read_state = self.read_state.clone();
+        let mut chain_tip_change = self.chain_tip_change.clone();
+        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+        let response_stream = ReceiverStream::new(response_receiver);
+
+        // The caller may provide the hashes of the chain tips it already has so the server only
+        // streams non-finalized blocks after those tips. Malformed hashes (wrong length) are
+        // rejected up front.
+        let known_chain_tips = decode_known_chain_tips(request.into_inner().chain_tip_hashes)?;
+
+        tokio::spawn(async move {
+            let mut non_finalized_blocks = match read_state
+                .oneshot(ReadRequest::NonFinalizedBlocksListener { known_chain_tips })
+                .await
+            {
+                Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
+                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                Err(error) => {
+                    span.in_scope(|| {
+                        tracing::error!(?error, "failed to subscribe to chain state changes");
+                    });
+
+                    let _ = response_sender
+                        .send(Err(Status::unavailable(
+                            "failed to subscribe to chain state changes",
+                        )))
+                        .await;
+                    return;
+                }
+            };
+
+            // Interleave new non-finalized blocks with finalized-tip-change signals onto one stream.
+            loop {
+                tokio::select! {
+                    // A new non-finalized block. Like the non-finalized stream, this applies
+                    // backpressure (`send().await`) rather than dropping blocks for a slow consumer.
+                    // A send error means the client disconnected; a timeout means it's hung.
+                    block = non_finalized_blocks.recv() => {
+                        let Some((hash, block)) = block else {
+                            span.in_scope(|| {
+                                tracing::warn!("non-finalized state change channel has closed");
+                            });
+                            let _ = response_sender
+                                .send(Err(Status::unavailable(
+                                    "non-finalized state change channel has closed",
+                                )))
+                                .await;
+                            return;
+                        };
+
+                        let send = response_sender
+                            .send(Ok(ChainStateChangeMessage::non_finalized_block(hash, block)));
+                        match tokio::time::timeout(NON_FINALIZED_SEND_TIMEOUT, send).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => {
+                                span.in_scope(|| {
+                                    tracing::info!(
+                                        "client disconnected, dropping chain_state_change task"
+                                    );
+                                });
+                                return;
+                            }
+                            Err(_) => {
+                                span.in_scope(|| {
+                                    tracing::warn!(
+                                        "slow consumer, dropping chain_state_change stream after \
+                                         send timed out"
+                                    );
+                                });
+                                return;
+                            }
+                        }
+                    }
+
+                    // The primary's best chain advanced. We forward this as a finalized-tip-change
+                    // signal: a co-located follower uses it to catch its own finalized state up and
+                    // publish its finalized tip. Best-effort (`try_send`) because the signal is
+                    // idempotent — only the latest matters, so dropping one when the buffer is full
+                    // (of block messages) is harmless; the next change supersedes it.
+                    tip_changed = chain_tip_change.best_tip_changed() => {
+                        if tip_changed.is_err() {
+                            span.in_scope(|| {
+                                tracing::warn!("chain_tip_change channel has closed");
+                            });
+                            let _ = response_sender
+                                .send(Err(Status::unavailable(
+                                    "chain_tip_change channel has closed",
+                                )))
+                                .await;
+                            return;
+                        }
+
+                        let Some((height, hash)) = chain_tip_change.best_tip_height_and_hash() else {
+                            continue;
+                        };
+
+                        match response_sender
+                            .try_send(Ok(ChainStateChangeMessage::finalized_tip_change(hash, height)))
+                        {
+                            Ok(()) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                span.in_scope(|| {
+                                    tracing::info!(
+                                        "client disconnected, dropping chain_state_change task"
+                                    );
+                                });
+                                return;
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(Box::pin(response_stream)))
+    }
 
     async fn chain_tip_change(
         &self,

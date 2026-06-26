@@ -1,6 +1,6 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -8,17 +8,24 @@ use tower::BoxError;
 use zebra_chain::{
     block::{Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
+    parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse};
+use zebra_state::{
+    HashOrHeight, NonFinalizedBlocksListener, NonFinalizedState, ReadRequest, ReadResponse,
+    WatchReceiver,
+};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
 };
 
-use crate::indexer::{self, indexer_client::IndexerClient, BlockRequest, Empty};
+use crate::indexer::{
+    self, chain_state_change_message::Change, indexer_client::IndexerClient, BlockRequest,
+    ChainStateChangeRequest, Empty,
+};
 
 #[tokio::test]
 async fn rpc_server_spawn() -> Result<()> {
@@ -32,14 +39,66 @@ async fn rpc_server_spawn() -> Result<()> {
         mempool_transaction_sender,
     ) = start_server_and_get_client().await?;
 
-    test_chain_tip_change(client.clone(), mock_chain_tip_sender).await?;
+    test_chain_state_change(
+        client.clone(),
+        mock_read_service.clone(),
+        &mock_chain_tip_sender,
+    )
+    .await?;
+    test_chain_tip_change(client.clone(), &mock_chain_tip_sender).await?;
     test_mempool_change(client.clone(), mempool_transaction_sender).await?;
     test_get_block(client.clone(), mock_read_service).await?;
 
     Ok(())
 }
 
+/// Tests that the unified `ChainStateChange` method forwards finalized-tip-change signals.
+async fn test_chain_state_change(
+    mut client: IndexerClient<tonic::transport::Channel>,
+    mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
+    mock_chain_tip_sender: &MockChainTipSender,
+) -> Result<()> {
+    let mut response = client
+        .chain_state_change(tonic::Request::new(ChainStateChangeRequest {
+            chain_tip_hashes: Vec::new(),
+        }))
+        .await?
+        .into_inner();
+
+    // The server's task first subscribes to the non-finalized blocks listener. Respond with a real,
+    // empty, open listener (it emits no blocks); keep its sender alive so it stays open.
+    let (block_sender, block_receiver) =
+        tokio::sync::watch::channel(NonFinalizedState::new(&Network::Mainnet));
+    let listener =
+        NonFinalizedBlocksListener::spawn(WatchReceiver::new(block_receiver), HashSet::new());
+    mock_read_service
+        .expect_request_that(|req| matches!(req, ReadRequest::NonFinalizedBlocksListener { .. }))
+        .await
+        .respond(ReadResponse::NonFinalizedBlocksListener(listener));
+
+    // A change to the primary's best tip should produce a finalized-tip-change message.
+    mock_chain_tip_sender.send_best_tip_height(Height::MIN);
+    mock_chain_tip_sender.send_best_tip_hash(zebra_chain::block::Hash([0; 32]));
+
+    let message = tokio::time::timeout(Duration::from_secs(3), response.next())
+        .await
+        .expect("should receive a chain state change before timeout")
+        .expect("response stream should not be empty")
+        .expect("chain state change response should not be an error message");
+
+    assert!(
+        matches!(message.change, Some(Change::FinalizedTipChange(_))),
+        "expected a finalized_tip_change message, got {:?}",
+        message.change
+    );
+
+    drop(block_sender);
+
+    Ok(())
+}
+
 /// Tests that the `GetBlock` method returns the requested block and rejects an empty request.
+#[allow(deprecated)]
 async fn test_get_block(
     mut client: IndexerClient<tonic::transport::Channel>,
     mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
@@ -95,9 +154,10 @@ async fn test_get_block(
     Ok(())
 }
 
+#[allow(deprecated)]
 async fn test_chain_tip_change(
     mut client: IndexerClient<tonic::transport::Channel>,
-    mock_chain_tip_sender: MockChainTipSender,
+    mock_chain_tip_sender: &MockChainTipSender,
 ) -> Result<()> {
     let request = tonic::Request::new(Empty {});
     let mut response = client.chain_tip_change(request).await?.into_inner();

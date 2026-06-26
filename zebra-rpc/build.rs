@@ -36,6 +36,13 @@ fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
     if is_proto_file_available && is_protoc_available {
         tonic_prost_build::configure()
             .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
+            // `prost` doesn't propagate the `oneof` leading comment to the generated enum, so add a
+            // doc for it explicitly to satisfy `missing_docs`.
+            .type_attribute(
+                "zebra.indexer.rpc.ChainStateChangeMessage.change",
+                "#[doc = \"A change in the chain state: a new non-finalized block, or a \
+                 finalized-tip-change signal.\"]",
+            )
             .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
             .compile_protos(&[PROTO_FILE_PATH], &[""])?;
 
