@@ -216,8 +216,8 @@ impl TrustedMempoolSync {
             }
         }
 
-        // (2) Live phase: apply one batch per source change cycle, verify its checksum, then publish
-        // the transitions and the updated replica (design §3a, §6).
+        // (2) Live phase: apply one batch per source change cycle, verify its checksum, publish the
+        // updated replica, then publish the transitions (design §3a, §6).
         loop {
             let batch = tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, stream.message())
                 .await
@@ -235,10 +235,13 @@ impl TrustedMempoolSync {
                 verify_checksum(&replica, Some(checksum))?;
             }
 
+            // Publish the updated replica before the observations, so a consumer reacting to an
+            // observation always reads a watch that already reflects this batch, never one batch
+            // behind the feed (design §6).
+            self.publish_replica(&replica);
             for observation in observations {
                 let _ = self.observation_sender.send(observation);
             }
-            self.publish_replica(&replica);
         }
     }
 
