@@ -1,0 +1,93 @@
+# Blocks a pull request that breaks a published crate's public Rust API unless the break is
+# declared with a conventional-commit `!` in the PR title.
+#
+# Adding a field to a struct that callers construct, or a variant to an exhaustive enum, is a
+# breaking change even though it only adds to the API. cargo-semver-checks applies these SemVer
+# rules. The `!` marker is the author's acknowledgement and the signal release-plz uses to bump
+# the major version, so one declaration drives both the gate and the release.
+name: Semver Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR: 1
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      semver: ${{ steps.filter.outputs.semver }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: .github/path-filters.yml
+
+  semver-checks:
+    needs: changes
+    if: needs.changes.outputs.semver == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+        with:
+          toolchain: nightly
+          cache-on-failure: true
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
+        with:
+          tool: cargo-semver-checks
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Detect public API breaks
+        id: detect
+        continue-on-error: true
+        env:
+          BASELINE_REV: ${{ github.event.pull_request.base.sha }}
+        run: cargo semver-checks --workspace --baseline-rev "$BASELINE_REV"
+      - name: Require a breaking-change declaration
+        if: steps.detect.outcome == 'failure'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          breaking_marker='^[a-z]+(\([^)]*\))?!:'
+          if [[ "$PR_TITLE" =~ $breaking_marker ]]; then
+            echo "Public API break is declared with '!' in the PR title; release-plz will bump the major version."
+            exit 0
+          fi
+          {
+            echo "This PR breaks a published crate's public API, but the PR title declares no breaking change."
+            echo
+            echo "If the break is intentional, add '!' after the type/scope so the release bumps the major version:"
+            echo "  feat(zebra-chain)!: ..."
+            echo
+            echo "If it is not, restore the removed or changed item to keep the API backward-compatible."
+          } >&2
+          exit 1
+
+  semver-checks-result:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, semver-checks]
+    timeout-minutes: 5
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: semver-checks
