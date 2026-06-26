@@ -16,7 +16,7 @@ Comparable Zcash and Rust node projects attach far more per release: Debian pack
 ## Priorities & Constraints
 
 - `zebrad` is a validator node, run by operators and stakers, mostly on servers. It is not a desktop wallet.
-- The binary is statically linked: RocksDB and the zcash FFI are linked in, so the only runtime dependency is glibc >= 2.34, the documented floor.
+- The binary links RocksDB and the zcash FFI statically, leaving glibc (>= 2.34, the documented floor) and libstdc++ as its only dynamic dependencies.
 - One build system and one signing model. Reuse the native Ubuntu matrix and Sigstore keyless signing already established for the image path; avoid a second build system and avoid a long-lived key.
 - Every shipped artifact is both a security signal and a support surface. An artifact nobody verifies is pure cost, and one that misrepresents what it covers is worse than shipping nothing.
 - Release images already carry their own signed SLSA provenance and SBOM ([0007](0007-reproducible-builds.md)).
@@ -48,7 +48,7 @@ Additional artifacts and mechanisms observed in peer node and wallet releases:
 
 Keep the six-asset posture above. The seven options are rejected for the binary release, each with the condition that would reopen it.
 
-**1. Debian `.deb` packages: rejected.** A `.deb`'s headline value is dependency resolution. A statically linked `zebrad` depends only on glibc >= 2.34, which the archive already documents, so apt resolves nothing the operator lacks. A `.deb` merely attached to a release delivers no apt user experience: it is `dpkg -i` with extra packaging cost, no dependency resolution and no update tracking. Peer validators (Bitcoin Core, reth, Lighthouse) ship archive plus image plus source and no `.deb`. _Revisit if_ the project commits to a fleet-style channel or to APT continuity for the zcashd-to-Zebra migration; even then the package is the cheap part and the repository is the cost (see option 2).
+**1. Debian `.deb` packages: rejected.** A `.deb`'s headline value is dependency resolution. `zebrad` links statically except for glibc >= 2.34 (the documented floor) and libstdc++, both standard on any Linux host, so apt resolves nothing the operator lacks. A `.deb` merely attached to a release delivers no apt user experience: it is `dpkg -i` with extra packaging cost, no dependency resolution and no update tracking. Peer validators (Bitcoin Core, reth, Lighthouse) ship archive plus image plus source and no `.deb`. _Revisit if_ the project commits to a fleet-style channel or to APT continuity for the zcashd-to-Zebra migration; even then the package is the cheap part and the repository is the cost (see option 2).
 
 **2. Hosted APT repository: rejected.** This is the only thing that delivers a real apt experience, and it is a permanent operations commitment, not a per-release step: GPG key custody and rotation, signing `Release`/`InRelease`/`Packages` for every supported distro codename, hosting the pool, and CI to re-index and re-sign on every publish. For a consensus node it is worse than neutral. Auto-updating a validator onto a new binary mid-consensus is an anti-feature operators avoid, and the end-of-support-height halt is incompatible with Debian-stable version pinning that freezes for years. _Revisit_ only alongside an explicit decision to operate such a channel.
 
