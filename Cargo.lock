@@ -5939,6 +5939,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tokio-util",
+ "tonic",
  "tower 0.4.13",
  "tower-fallback",
  "tower-test",
