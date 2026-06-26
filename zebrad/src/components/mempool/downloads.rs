@@ -299,7 +299,8 @@ where
             };
 
             if let Some(hash) = completed_txid {
-                if let Some((_, _gossip, Some(source), _stage)) = this.cancel_handles.remove(&hash) {
+                if let Some((_, _gossip, Some(source), _stage)) = this.cancel_handles.remove(&hash)
+                {
                     Self::release_peer_slot(this.pending_per_peer, source);
                 }
             }
@@ -726,7 +727,8 @@ where
         let mut transitioned = HashSet::new();
 
         while let Ok(txid) = self.awaiting_verification_rx.try_recv() {
-            if let Some((_cancel_tx, _gossip, _source, stage)) = self.cancel_handles.get_mut(&txid) {
+            if let Some((_cancel_tx, _gossip, _source, stage)) = self.cancel_handles.get_mut(&txid)
+            {
                 *stage = QueuedStage::AwaitingVerification;
                 transitioned.insert(txid);
             }

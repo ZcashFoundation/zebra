@@ -591,10 +591,9 @@ impl Service<Request> for Mempool {
                 // Mid-cycle reorg signal: the re-verification it triggers settles
                 // over the following `poll_ready` cycles, so this batch carries no
                 // checksum (design §5a, §9.8).
-                self.transaction_sender
-                    .send(MempoolBatch::event(MempoolChange::removed_reorged(
-                        reorged_ids,
-                    )))?;
+                self.transaction_sender.send(MempoolBatch::event(
+                    MempoolChange::removed_reorged(reorged_ids),
+                ))?;
             }
 
             // Re-verify the transactions that were pending or valid at the previous tip.

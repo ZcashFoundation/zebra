@@ -7,6 +7,7 @@
 pub mod client;
 pub mod config;
 pub mod indexer;
+pub mod mempool_sync;
 pub mod methods;
 pub mod queue;
 pub mod server;
@@ -15,6 +16,7 @@ pub mod sync;
 #[cfg(test)]
 mod tests;
 
+pub use mempool_sync::{MempoolObservation, MempoolReplica, TrustedMempoolSync, VerifiedReplicaTx};
 pub use methods::types::{
     get_block_template::{fetch_chain_info, proposal::proposal_block_from_template, MinerParams},
     submit_block::SubmitBlockChannel,
