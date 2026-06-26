@@ -329,7 +329,9 @@ impl NonFinalizedState {
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.insert(side_chain);
+            if !side_chain.is_empty() {
+                self.insert(side_chain);
+            }
         }
 
         // Remove all invalidated_blocks at or below the finalized height
