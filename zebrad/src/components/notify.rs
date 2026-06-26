@@ -80,22 +80,25 @@ pub async fn run_block_notify(
     info!("initializing block notify task");
 
     loop {
-        // Wait for at least one tip change first. This blocks while in initial block download, so
-        // we don't busy-loop on `wait_until_close_to_tip()` before any blocks have arrived.
+        // Block until the tip changes. This always waits for a real change, so it paces the loop.
+        // The gate below can't pace the loop: it returns immediately when synced. It doesn't skip
+        // the initial sync (the tip changes throughout it); that's the gate's job.
         let tip_action = chain_tip_change
             .wait_for_tip_change()
             .await
             .map_err(BlockNotifyError::TipChange)?;
 
-        // Suppress notifications until we're close to the tip, like zcashd suppresses the callback
-        // during initial block download.
+        // Gate: hold until we're close to the tip (done catching up), suppressing notifications
+        // during sync. Must sit right before the spawn so close-to-tip still holds when we fire;
+        // gating earlier could fire on an intermediate block if we fall behind again first.
         sync_status
             .wait_until_close_to_tip()
             .await
             .map_err(BlockNotifyError::SyncStatus)?;
 
-        // Re-read the tip after the IBD gate: reaching the tip can take time, so `tip_action` may
-        // be stale by now. Fall back to it if no newer change is pending.
+        // Grab the freshest tip: catching up can take a while, during which newer blocks may have
+        // landed and made `tip_action` stale. This peek doesn't block; fall back to `tip_action`
+        // when nothing newer is pending.
         let (hash, height) = chain_tip_change
             .last_tip_change()
             .unwrap_or(tip_action)
@@ -139,20 +142,16 @@ fn spawn_notify_command(command: &str, hash: block::Hash, height: block::Height)
     let span = info_span!("block_notify_command", %hash, ?height);
 
     match cmd.spawn() {
-        Ok(child) => {
+        Ok(mut child) => {
             // Reap the child asynchronously to avoid zombies, and log non-zero exits like zcashd's
             // `runCommand`. The main loop never awaits this, so it returns immediately to await the
-            // next tip change.
+            // next tip change. stdout/stderr go to `/dev/null`, so we only need the exit status.
             tokio::spawn(async move {
                 let _enter = span.enter();
 
-                match child.wait_with_output().await {
-                    Ok(output) if !output.status.success() => {
-                        warn!(
-                            ?rendered,
-                            status = ?output.status,
-                            "block notify command exited non-zero"
-                        );
+                match child.wait().await {
+                    Ok(status) if !status.success() => {
+                        warn!(?rendered, ?status, "block notify command exited non-zero");
                     }
                     Ok(_) => {}
                     Err(error) => {
