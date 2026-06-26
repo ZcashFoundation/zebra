@@ -434,14 +434,21 @@ impl Service<BatchControl<Item>> for Verifier {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
-                if self.batch.queue(item).is_err() {
-                    // The bundle's cross-address restriction is not supported by this verifier's
-                    // key (wrong circuit era), so the item is invalid. Reject it on its own without
-                    // poisoning the rest of the batch.
-                    return Box::pin(async {
-                        metrics::counter!("proofs.halo2.invalid").increment(1);
-                        Err("could not validate halo2 proof: cross-address restriction unsupported by key".into())
-                    });
+                match self.batch.queue(item) {
+                    Ok(()) => {}
+                    Err(orchard::bundle::BatchError::RestrictionUnsupportedByKey) => unreachable!(
+                        "routing guarantees v6 bundles go to VERIFIER_V6, whose key supports the \
+                         cross-address restriction; the v5 verifiers only ever see v5 bundles, \
+                         which always have cross_address_enabled = true"
+                    ),
+                    // `BatchError` is `#[non_exhaustive]`; any future variant lands here. Reject the
+                    // item on its own without poisoning the rest of the batch.
+                    Err(other) => {
+                        return Box::pin(async move {
+                            metrics::counter!("proofs.halo2.invalid").increment(1);
+                            Err(format!("could not validate halo2 proof: {other}").into())
+                        });
+                    }
                 }
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
