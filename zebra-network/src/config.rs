@@ -1045,5 +1045,6 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
+        gate_test_field: None,
     }
 }
