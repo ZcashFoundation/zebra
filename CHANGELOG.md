@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Zebra now tags the coinbase input of every block it mines with a `🦓`. The
+  `mining.extra_coinbase_data` option is now limited to 86 bytes (was 94); Zebra
+  refuses to start if it is exceeded.
 - Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
   `x86_64` and `aarch64`, so operators can run a node without Docker or a source
   build, also installable with `cargo binstall zebrad`. Each `.tar.gz` carries a
