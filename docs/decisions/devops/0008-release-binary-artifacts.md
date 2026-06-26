@@ -11,7 +11,7 @@ story: Which artifacts the binary release should ship
 
 The release pipeline publishes downloadable `zebrad` binaries alongside the signed release images covered in [0007](0007-reproducible-builds.md). Each release attaches a fixed, small set of files.
 
-Comparable Zcash and Rust node projects attach far more per release: Debian packages backed by an APT repository, per-artifact PGP signatures, attached provenance bundles, and per-artifact SBOMs. That raises a recurring question at review time: which of those add value for a validator node, and which are cost without benefit. This record fixes what the binary release ships, what it deliberately omits, and the condition under which each omission would be revisited, so the question does not have to be relitigated from scratch.
+Comparable Zcash and Rust node projects attach far more per release: Debian packages backed by an APT repository, per-artifact PGP signatures, attached provenance bundles, and per-artifact SBOMs. Each adds cost in build complexity, signing-key custody, or ongoing operation. The open question for a validator node is which of them add enough value to justify that cost.
 
 ## Priorities & Constraints
 
@@ -46,7 +46,7 @@ Additional artifacts and mechanisms observed in peer node and wallet releases:
 
 ## Decision Outcome
 
-Keep the six-asset posture above. Reject options 1-7 for the binary release, each for a stated reason, and record the trigger that would reopen it.
+Keep the six-asset posture above. The seven options are rejected for the binary release, each with the condition that would reopen it.
 
 **1. Debian `.deb` packages: rejected.** A `.deb`'s headline value is dependency resolution. A statically linked `zebrad` depends only on glibc >= 2.34, which the archive already documents, so apt resolves nothing the operator lacks. A `.deb` merely attached to a release delivers no apt user experience: it is `dpkg -i` with extra packaging cost, no dependency resolution and no update tracking. Peer validators (Bitcoin Core, reth, Lighthouse) ship archive plus image plus source and no `.deb`. _Revisit if_ the project commits to a fleet-style channel or to APT continuity for the zcashd-to-Zebra migration; even then the package is the cheap part and the repository is the cost (see option 2).
 
@@ -54,9 +54,9 @@ Keep the six-asset posture above. Reject options 1-7 for the binary release, eac
 
 **3. Per-artifact PGP signatures: rejected.** The release already signs a single `SHA256SUMS` manifest with Cosign keyless, recorded in Rekor with the signer identity pinned to the workflow. PGP reintroduces a long-lived organization-held key to custody, rotate, revoke, and expose on the runner, which for a consensus-critical node is a net security regression: keyless has no secret to leak. The one niche PGP fills is a distro packager pinning a maintainer key. _Revisit if_ a concrete downstream packager requires OpenPGP, and then add an `.asc` alongside Cosign rather than switching.
 
-**4. Attached provenance files: rejected.** The release already mints the SLSA predicate with `actions/attest-build-provenance` and stores it in the attestation API; `gh attestation download` materializes the identical signed bundle on demand, and reproducible builds give a stronger source-to-binary check than any predicate. Attaching the `.intoto.jsonl` only saves one download command. The hand-rolled `.provenance.json` summary is unsigned, so trusting it standalone is a footgun and the pattern is partly anti-value. _Revisit if_ an explicit air-gapped or zero-GitHub-contact verification requirement appears, and then attach only the signed `.intoto.jsonl`, never an unsigned summary.
+**4. Attached provenance files: rejected.** The release already mints the SLSA predicate with `actions/attest-build-provenance` and stores it in the attestation API; `gh attestation download` materializes the identical signed bundle on demand, and reproducible builds give a stronger source-to-binary check than any predicate. Attaching the `.intoto.jsonl` only saves one download command. The hand-rolled `.provenance.json` summary is unsigned, so it is unsafe to trust on its own and attaching it adds a misleading file. _Revisit if_ an explicit air-gapped or zero-GitHub-contact verification requirement appears, and then attach only the signed `.intoto.jsonl`, never an unsigned summary.
 
-**5. Per-artifact SBOM files: rejected as commonly shipped.** A post-hoc SBOM of the stripped, static binary carries no dependency graph (Syft yields an empty catalogue) and merely restates a checksum, so it delivers no scanner or compliance value while adding a security signal that must be kept accurate. A crate-graph SBOM from `Cargo.lock` is a different, cheap-to-attest artifact, but on its own it does not make the bundled native libraries scannable. `zebrad` statically links five native C/C++ surfaces: RocksDB 8.10.0, lz4 1.10.0, two copies of libsecp256k1, the zcashd consensus C++ in `libzcash_script`, and the BoringSSL fork in `ring`. Their versions live inside `pkg:cargo` build-metadata strings or vendored git revisions, not in the `cpe` or `pkg:generic` components a CVE feed matches, and a default `Cargo.lock` SBOM also lists crates this binary never links. A useful SBOM is a different, native-corrected artifact (see Gated future work). _Revisit_ per that entry.
+**5. Per-artifact SBOM files: rejected as commonly shipped.** A post-hoc SBOM of the stripped, static binary carries no dependency graph (Syft yields an empty catalogue) and merely restates a checksum, so it delivers no scanner or compliance value while adding a security signal that must be kept accurate. A crate-graph SBOM from `Cargo.lock` is cheaper to produce, but on its own it misrepresents the binary: it gives the statically linked native C/C++ libraries no scanner-matchable version and lists crates the binary never links. A useful SBOM is a different, native-corrected artifact (see Gated future work). _Revisit_ per that entry.
 
 **6. Raw, un-archived binaries: rejected.** Shipping the bare executable saves one extraction step at the cost of the dual-license attribution that travels in the archive, the guaranteed executable bit, and a clean standalone-checksum story. The archive-with-licenses layout is the idiomatic Rust release convention.
 
@@ -66,14 +66,35 @@ Keep the six-asset posture above. Reject options 1-7 for the binary release, eac
 
 - The binary release stays at six assets. Its integrity and provenance posture is a superset of a per-file-signed layout: one signed manifest plus reproducibility plus a stored attestation, rather than many individually signed files with no manifest.
 - One keyless signing model across binaries and images. No long-lived key to custody.
-- The rejections carry explicit revisit triggers, so a future contributor evaluating any of these starts from the recorded rationale rather than re-deriving it.
+- Each rejection has a recorded revisit trigger, so the artifact set changes only when a trigger is met.
 
 ### Gated future work
 
-Not adopted now; each waits on a concrete trigger.
+Two items wait on a concrete trigger.
 
-- A native-corrected crate SBOM. Generate it in the matrix build job with `cargo-sbom` (SPDX 2.3 JSON, matching the image SBOM so consumers get one documented verify command) or `cargo-cyclonedx` (CycloneDX JSON), resolved for the release target (`--no-default-features --features default-release-binaries --target <triple>`), and attest it with `actions/attest-sbom` (pinned `v4.1.0`) as a second attestation beside the existing build provenance (`subject-path: dist/*.tar.gz`). The build job already grants `id-token: write` and `attestations: write`, so the plumbing is one generate step plus one attest step with no permission change. The cost is not the plumbing. A default `Cargo.lock` SBOM both over- and under-reports this binary and must be corrected before it ships. It lists `bzip2-sys`, `libz-sys`, and `aws-lc-sys` as if linked, when `bzip2` is never compiled (`zebra-state` pins `rocksdb` with `default-features = false, features = ["lz4"]`, so lz4 is the only codec), `libz-sys` is a build-time-only path through `vergen-git2`, and `ring`, not `aws-lc-sys`, is the linked TLS backend. It also gives the five real native surfaces no scanner-matchable component, so inject `pkg:generic` entries with a pinned version plus CPE for RocksDB 8.10.0 (`librocksdb-sys`), lz4 1.10.0 (`lz4-sys`), libsecp256k1 (`secp256k1-sys`, plus the second copy vendored in `libzcash_script`), the zcashd consensus C++ in `libzcash_script` 0.1.0, and the BoringSSL fork in `ring`, re-validated on every bump of those crates. That recurring augmentation is the work the gate funds. Gate on a concrete enterprise, federal, or Cyber Resilience Act consumer; `Cargo.lock` is public and builds are reproducible, so until then any consumer can regenerate the crate graph deterministically. Consumers verify with `gh attestation verify <archive> --repo ZcashFoundation/zebra --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml --predicate-type https://spdx.dev/Document/v2.3`. A cheaper, non-gated step that fixes only the over-reporting: build with `cargo-auditable` so the embedded, feature-accurate dependency list is readable by `syft`, `cargo-audit`, and `trivy` against the artifact.
-- A documented systemd unit file and service-user snippet in the install docs: the low-cost substitute for the one genuine `.deb` convenience (daemon lifecycle and a dedicated account), with none of the packaging or repository machinery. Ship if bare-metal operators ask.
+#### Native-corrected crate SBOM
+
+Generate it in the matrix build job with `cargo-sbom` (SPDX 2.3 JSON, matching the image SBOM) or `cargo-cyclonedx` (CycloneDX JSON), resolved for the release target, and attest it with `actions/attest-sbom` beside the existing build provenance. The build job already grants `id-token: write` and `attestations: write`, so the plumbing is two steps with no permission change.
+
+The plumbing is not the cost. A `Cargo.lock` SBOM both over- and under-reports this binary, so it has to be corrected first:
+
+- It lists `bzip2-sys`, `libz-sys`, and `aws-lc-sys` as if linked, when none are. `bzip2` is never compiled (`zebra-state` pins `rocksdb` with `default-features = false, features = ["lz4"]`), `libz-sys` is build-time-only through `vergen-git2`, and `ring` is the TLS backend.
+- It gives the five linked native C/C++ libraries no scanner-matchable component. Each needs a `pkg:generic` entry with a pinned version and CPE: RocksDB 8.10.0 (`librocksdb-sys`), lz4 1.10.0 (`lz4-sys`), libsecp256k1 (`secp256k1-sys`, plus a second copy vendored in `libzcash_script`), the zcashd consensus C++ in `libzcash_script` 0.1.0, and the BoringSSL fork in `ring`.
+
+That augmentation has to be re-validated on every bump of those crates, and the recurring work is the real cost. Gate it on a concrete enterprise, federal, or Cyber Resilience Act consumer. Until then `Cargo.lock` is public and builds are reproducible, so any consumer can regenerate the crate graph. Consumers verify with:
+
+```sh
+gh attestation verify <archive> \
+  --repo ZcashFoundation/zebra \
+  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+A cheaper step fixes only the over-reporting, with no gate: build with `cargo-auditable` so the embedded, feature-accurate dependency list is readable by `syft`, `cargo-audit`, and `trivy`.
+
+#### systemd unit and service user
+
+A documented systemd unit file and service-user snippet in the install docs are the low-cost substitute for the one genuine `.deb` convenience: daemon lifecycle and a dedicated account, with none of the packaging or repository machinery. Ship if bare-metal operators ask.
 
 ## More Information
 
