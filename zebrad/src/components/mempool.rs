@@ -39,7 +39,8 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::{
-    CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
+    replica_digest, CreatedOrSpent, Gossip, MempoolBatch, MempoolChange, MempoolTxSubscriber,
+    Request, Response,
 };
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
@@ -255,7 +256,7 @@ pub struct Mempool {
 
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
-    transaction_sender: broadcast::Sender<MempoolChange>,
+    transaction_sender: broadcast::Sender<MempoolBatch>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
@@ -587,8 +588,13 @@ impl Service<Request> for Mempool {
             // `Queued`/`Added`/`Removed` events that follow (design §5a).
             let reorged_ids: HashSet<_> = tx_retries.iter().map(|tx| tx.id()).collect();
             if !reorged_ids.is_empty() {
+                // Mid-cycle reorg signal: the re-verification it triggers settles
+                // over the following `poll_ready` cycles, so this batch carries no
+                // checksum (design §5a, §9.8).
                 self.transaction_sender
-                    .send(MempoolChange::removed_reorged(reorged_ids))?;
+                    .send(MempoolBatch::event(MempoolChange::removed_reorged(
+                        reorged_ids,
+                    )))?;
             }
 
             // Re-verify the transactions that were pending or valid at the previous tip.
@@ -617,6 +623,12 @@ impl Service<Request> for Mempool {
             last_seen_tip_hash,
         } = &mut self.active_state
         {
+            // Every lifecycle change observed in this cycle, coalesced into one
+            // per-cycle `MempoolBatch` and broadcast once the cycle settles
+            // (design §5, §9.8). The per-reason `HashSet`s below are intermediate
+            // collectors assembled into events at the settled boundary.
+            let mut events = Vec::<MempoolChange>::new();
+
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
             // Transactions removed from the pipeline, grouped by lifecycle reason.
@@ -631,6 +643,19 @@ impl Service<Request> for Mempool {
                 None;
 
             let best_tip_height = self.latest_chain_tip.best_tip_height();
+
+            // Apply the `AwaitingDownload → AwaitingVerification` stage
+            // transitions reported by the spawned download tasks on this (single)
+            // mempool task, and emit the matching `Queued{AwaitingVerification}`
+            // events. Doing the stage update and the event on one task keeps the
+            // stage reflected in this cycle's checksum ordered consistently with
+            // the events a follower applies before it (design §3a-1, §9.8).
+            let awaiting_verification_ids = tx_downloads.drain_awaiting_verification();
+            if !awaiting_verification_ids.is_empty() {
+                events.push(MempoolChange::queued_awaiting_verification(
+                    awaiting_verification_ids,
+                ));
+            }
 
             // Clean up completed download tasks and add to mempool if successful.
             while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
@@ -735,7 +760,13 @@ impl Service<Request> for Mempool {
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                tx_downloads.cancel(&mined_ids);
+                // Queued txs cancelled here leave the queued set synchronously, so
+                // this cycle's checksum already excludes them, but the cancelled
+                // task only emits its own `Removed` event on a later cycle. They
+                // were cancelled precisely because they were mined, so fold them
+                // into this cycle's `Removed{Mined}` event to keep the checksum
+                // and the event stream consistent (design §3a-1).
+                let cancelled_queued_ids = tx_downloads.cancel(&mined_ids);
                 storage.clear_mined_dependencies(&mined_ids);
 
                 let storage::RemovedTransactionIds { mined, invalidated } =
@@ -745,10 +776,14 @@ impl Service<Request> for Mempool {
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
 
-                if !mined.is_empty() {
+                // Set the mined block when either verified or still-queued txs
+                // were mined out, so the `removed_mined` `expect` below can't
+                // panic when only queued txs were mined.
+                if !mined.is_empty() || !cancelled_queued_ids.is_empty() {
                     mined_block = Some((block.hash, block.height));
                 }
                 mined_mempool_ids.extend(mined);
+                mined_mempool_ids.extend(cancelled_queued_ids);
                 // Transactions invalidated by a conflicting mined transaction are
                 // reported as evicted.
                 evicted_ids.extend(invalidated);
@@ -781,8 +816,7 @@ impl Service<Request> for Mempool {
                     "sending new transactions to peers and RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::added(send_to_peers_ids))?;
+                events.push(MempoolChange::added(send_to_peers_ids));
             }
 
             // Send transactions that failed verification to RPC listeners,
@@ -794,8 +828,7 @@ impl Service<Request> for Mempool {
                     "sending failed-verification transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::removed_failed_verification(tx_ids, code))?;
+                events.push(MempoolChange::removed_failed_verification(tx_ids, code));
             }
 
             // Send transactions that were evicted to RPC listeners.
@@ -805,8 +838,7 @@ impl Service<Request> for Mempool {
                     "sending evicted transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::removed_evicted(evicted_ids))?;
+                events.push(MempoolChange::removed_evicted(evicted_ids));
             }
 
             // Send transactions that expired to RPC listeners.
@@ -816,8 +848,7 @@ impl Service<Request> for Mempool {
                     "sending expired transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::removed_expired(expired_ids))?;
+                events.push(MempoolChange::removed_expired(expired_ids));
             }
 
             // Send transactions that were mined onto the best chain to RPC listeners.
@@ -831,11 +862,26 @@ impl Service<Request> for Mempool {
                     "mined transaction ids are only collected from a TipAction::Grow block",
                 );
 
-                self.transaction_sender.send(MempoolChange::removed_mined(
+                events.push(MempoolChange::removed_mined(
                     mined_mempool_ids,
                     block_hash,
                     block_height,
-                ))?;
+                ));
+            }
+
+            // Broadcast the whole cycle's changes as a single `MempoolBatch`,
+            // stamped with the post-cycle checksum over the now-settled replica
+            // projection: the verified set plus the queued set `{txid → stage}`
+            // (design §3a-1, §9.6, §9.8). The checksum lets a follower verify
+            // convergence atomically after applying the batch's events. Cycles
+            // with no changes broadcast nothing, since no replica state changed.
+            if !events.is_empty() {
+                let verified_ids: HashSet<UnminedTxId> = storage.tx_ids().collect();
+                let queued = tx_downloads.queued_stages();
+                let checksum = replica_digest(&verified_ids, &queued);
+
+                self.transaction_sender
+                    .send(MempoolBatch::new(events, Some(checksum)))?;
             }
         }
 
@@ -936,6 +982,33 @@ impl Service<Request> for Mempool {
                     };
 
                     async move { Ok(response) }.boxed()
+                }
+
+                Request::MempoolBootstrapState => {
+                    trace!(?req, "got mempool request");
+
+                    // A consistent point-in-time read of the replica projection
+                    // plus recent rejections, replayed by a follower as the
+                    // bootstrap burst (design §6, §10).
+                    let queued = tx_downloads.queued_stages();
+                    let verified: Vec<_> = storage.transactions().values().cloned().collect();
+                    let rejected = storage.recent_rejections();
+
+                    trace!(
+                        queued_count = ?queued.len(),
+                        verified_count = ?verified.len(),
+                        rejected_count = ?rejected.len(),
+                        "answered mempool request"
+                    );
+
+                    async move {
+                        Ok(Response::MempoolBootstrapState {
+                            queued,
+                            verified,
+                            rejected,
+                        })
+                    }
+                    .boxed()
                 }
 
                 Request::RejectedTransactionIds(ref ids) => {
@@ -1106,6 +1179,12 @@ impl Service<Request> for Mempool {
                         }
                         .boxed()
                     }
+
+                    Request::MempoolBootstrapState => Response::MempoolBootstrapState {
+                        queued: Default::default(),
+                        verified: Default::default(),
+                        rejected: Default::default(),
+                    },
 
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())

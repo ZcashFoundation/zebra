@@ -33,6 +33,7 @@ rpc-client = [
 [dependencies]
 zebra-chain = { path = "../zebra-chain" , version = "10.1.0" }
 tower = { workspace = true }
+sha2 = { workspace = true }
 
 # Optional dependencies
 

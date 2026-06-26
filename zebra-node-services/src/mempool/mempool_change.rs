@@ -1,25 +1,141 @@
 //! Defines the [`MempoolChange`] and [`MempoolChangeKind`] types used by the mempool change broadcast channel.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use zebra_chain::{block, transaction::UnminedTxId};
 
-/// A newtype around [`broadcast::Sender<MempoolChange>`] used to
+/// A newtype around [`broadcast::Sender<MempoolBatch>`] used to
 /// subscribe to the channel without an active receiver.
 #[derive(Clone, Debug)]
-pub struct MempoolTxSubscriber(broadcast::Sender<MempoolChange>);
+pub struct MempoolTxSubscriber(broadcast::Sender<MempoolBatch>);
 
 impl MempoolTxSubscriber {
     /// Creates a new [`MempoolTxSubscriber`].
-    pub fn new(sender: broadcast::Sender<MempoolChange>) -> Self {
+    pub fn new(sender: broadcast::Sender<MempoolBatch>) -> Self {
         Self(sender)
     }
 
     /// Subscribes to the channel, returning a [`broadcast::Receiver`].
-    pub fn subscribe(&self) -> broadcast::Receiver<MempoolChange> {
+    pub fn subscribe(&self) -> broadcast::Receiver<MempoolBatch> {
         self.0.subscribe()
     }
+}
+
+/// The length in bytes of a [`replica_digest`] output.
+pub const REPLICA_DIGEST_LEN: usize = 32;
+
+/// A per-cycle batch of mempool lifecycle [`MempoolChange`]s, optionally carrying
+/// an anti-entropy [`replica_digest`] over the source's full replica projection
+/// (design §5, §9.8).
+///
+/// The wire unit of mempool synchronization is a batch, not an individual event:
+/// the mempool source coalesces every change observed in a single
+/// `Mempool::poll_ready` cycle into one [`MempoolBatch`], then stamps it with the
+/// post-cycle `checksum` once the cycle's changes have settled. A follower
+/// applies the batch's `events` atomically, then recomputes and compares the
+/// `checksum`; a mismatch is the divergence detector (design §3a).
+///
+/// Mid-cycle observations emitted outside the settled `poll_ready` boundary (the
+/// download/verify pipeline's `Queued`/`Removed{FailedDownload}` events) carry no
+/// `checksum`, because the replica projection is not at a settled point when they
+/// are produced.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MempoolBatch {
+    /// Every lifecycle event observed in this change cycle, in order.
+    pub events: Vec<MempoolChange>,
+    /// A [`replica_digest`] over the source's full replica projection after this
+    /// batch settles, or `None` for mid-cycle batches (design §3a-1, §9.8).
+    pub checksum: Option<[u8; REPLICA_DIGEST_LEN]>,
+}
+
+impl MempoolBatch {
+    /// Creates a new [`MempoolBatch`] from the given events and optional checksum.
+    pub fn new(events: Vec<MempoolChange>, checksum: Option<[u8; REPLICA_DIGEST_LEN]>) -> Self {
+        Self { events, checksum }
+    }
+
+    /// Creates a single-event mid-cycle batch with no settled checksum.
+    pub fn event(change: MempoolChange) -> Self {
+        Self {
+            events: vec![change],
+            checksum: None,
+        }
+    }
+
+    /// Returns the lifecycle events carried by this batch.
+    pub fn events(&self) -> &[MempoolChange] {
+        &self.events
+    }
+
+    /// Consumes self and returns the lifecycle events carried by this batch.
+    pub fn into_events(self) -> Vec<MempoolChange> {
+        self.events
+    }
+
+    /// Returns the post-cycle checksum, if this batch carries one.
+    pub fn checksum(&self) -> Option<[u8; REPLICA_DIGEST_LEN]> {
+        self.checksum
+    }
+}
+
+/// Encodes one replica-projection entry as a fixed-width, order-independent
+/// record for [`replica_digest`].
+///
+/// The record is `[variant_tag, mined_id (32), auth_digest (32), stage_tag]`,
+/// where `variant_tag` distinguishes [`UnminedTxId::Legacy`] (no auth digest)
+/// from [`UnminedTxId::Witnessed`], so transactions with the same mined id but
+/// different lifecycle keys never collide.
+fn digest_record(id: &UnminedTxId, stage_tag: u8) -> [u8; 66] {
+    let mut record = [0u8; 66];
+    if let Some(auth) = id.auth_digest() {
+        record[0] = 1;
+        record[33..65].copy_from_slice(&auth.0);
+    }
+    record[1..33].copy_from_slice(&id.mined_id().0);
+    record[65] = stage_tag;
+    record
+}
+
+/// Computes an order-independent, deterministic digest over the full replica
+/// projection: the `verified_ids` set and the `queued` set (`{txid → stage}`),
+/// per design §3a-1 and §9.6.
+///
+/// Both the mempool source and a follower compute this digest over their own
+/// projections and compare; a mismatch signals divergence (design §3a). It does
+/// **not** cover source-internal machinery (download timers, retry counts) nor
+/// the transient observation layer (removal reasons), which are not retained
+/// replica state.
+///
+/// The digest is a SHA-256 over the sorted per-entry records (§9.6's sorted-ids
+/// hash), so it is independent of iteration order and cheap to recompute on a
+/// small set.
+pub fn replica_digest(
+    verified_ids: &HashSet<UnminedTxId>,
+    queued: &HashMap<UnminedTxId, QueuedStage>,
+) -> [u8; REPLICA_DIGEST_LEN] {
+    // Stage tags rank the projection entries: 0/1 for the queued stages, 2 for
+    // the verified set, matching the lifecycle ranks in [`MempoolChange::stage_rank`].
+    let mut records: Vec<[u8; 66]> = Vec::with_capacity(verified_ids.len() + queued.len());
+    for id in verified_ids {
+        records.push(digest_record(id, 2));
+    }
+    for (id, stage) in queued {
+        let stage_tag = match stage {
+            QueuedStage::AwaitingDownload => 0,
+            QueuedStage::AwaitingVerification => 1,
+        };
+        records.push(digest_record(id, stage_tag));
+    }
+
+    records.sort_unstable();
+
+    let mut hasher = Sha256::new();
+    for record in &records {
+        hasher.update(record);
+    }
+    hasher.finalize().into()
 }
 
 /// The stage a transaction has reached in the download/verify pipeline before
@@ -275,6 +391,96 @@ mod tests {
         assert!(!MempoolChange::queued_awaiting_download(ids(&[1])).is_added());
         assert!(!MempoolChange::queued_awaiting_verification(ids(&[1])).is_added());
         assert!(!MempoolChange::removed_expired(ids(&[1])).is_added());
+    }
+
+    fn wtxid(byte: u8) -> UnminedTxId {
+        UnminedTxId::Witnessed(zebra_chain::transaction::WtxId {
+            id: transaction::Hash::from([byte; 32]),
+            auth_digest: transaction::AuthDigest([byte ^ 0xff; 32]),
+        })
+    }
+
+    #[test]
+    fn replica_digest_is_order_independent() {
+        use std::collections::HashMap;
+
+        let verified: HashSet<_> = [txid(1), wtxid(2), txid(3)].into_iter().collect();
+        let mut queued = HashMap::new();
+        queued.insert(txid(4), QueuedStage::AwaitingDownload);
+        queued.insert(wtxid(5), QueuedStage::AwaitingVerification);
+
+        // The same logical projection inserted in a different order hashes equally,
+        // because the records are sorted before hashing (§9.6).
+        let verified_reordered: HashSet<_> = [txid(3), txid(1), wtxid(2)].into_iter().collect();
+        let mut queued_reordered = HashMap::new();
+        queued_reordered.insert(wtxid(5), QueuedStage::AwaitingVerification);
+        queued_reordered.insert(txid(4), QueuedStage::AwaitingDownload);
+
+        assert_eq!(
+            replica_digest(&verified, &queued),
+            replica_digest(&verified_reordered, &queued_reordered)
+        );
+    }
+
+    #[test]
+    fn replica_digest_distinguishes_stage_and_set() {
+        use std::collections::HashMap;
+
+        let verified: HashSet<_> = [txid(1)].into_iter().collect();
+        let empty_verified: HashSet<_> = HashSet::new();
+
+        let mut queued_download = HashMap::new();
+        queued_download.insert(txid(1), QueuedStage::AwaitingDownload);
+        let mut queued_verification = HashMap::new();
+        queued_verification.insert(txid(1), QueuedStage::AwaitingVerification);
+
+        // The same txid in a different stage yields a different digest.
+        assert_ne!(
+            replica_digest(&empty_verified, &queued_download),
+            replica_digest(&empty_verified, &queued_verification)
+        );
+
+        // A verified txid differs from the same txid queued.
+        assert_ne!(
+            replica_digest(&verified, &HashMap::new()),
+            replica_digest(&empty_verified, &queued_download)
+        );
+
+        // The empty projection is deterministic.
+        assert_eq!(
+            replica_digest(&empty_verified, &HashMap::new()),
+            replica_digest(&HashSet::new(), &HashMap::new())
+        );
+    }
+
+    #[test]
+    fn replica_digest_format_snapshot() {
+        // A stable, documented digest for a fixed projection, so wire-format
+        // changes are caught (the follower in a separate process recomputes this).
+        let verified: HashSet<_> = [txid(1)].into_iter().collect();
+        let queued = std::collections::HashMap::from([(wtxid(2), QueuedStage::AwaitingDownload)]);
+
+        let digest = replica_digest(&verified, &queued);
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+
+        assert_eq!(
+            hex,
+            "252b4d185dd31b6bcf68167e703d2c9fa0fd8595dc3208e88fc47d7ddf6d5032"
+        );
+    }
+
+    #[test]
+    fn mempool_batch_round_trips() {
+        let change = MempoolChange::added(ids(&[1, 2]));
+        let batch = MempoolBatch::event(change.clone());
+
+        assert_eq!(batch.events(), std::slice::from_ref(&change));
+        assert_eq!(batch.checksum(), None);
+
+        let checksum = replica_digest(&ids(&[1]), &std::collections::HashMap::new());
+        let batch = MempoolBatch::new(vec![change.clone()], Some(checksum));
+        assert_eq!(batch.checksum(), Some(checksum));
+        assert_eq!(batch.into_events(), vec![change]);
     }
 
     #[test]

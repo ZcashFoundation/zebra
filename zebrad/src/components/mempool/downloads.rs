@@ -42,7 +42,7 @@ use futures::{
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{
-    sync::{broadcast, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt};
@@ -55,7 +55,7 @@ use zebra_chain::{
 };
 use zebra_consensus::transaction as tx;
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::{Gossip, MempoolChange};
+use zebra_node_services::mempool::{Gossip, MempoolBatch, MempoolChange, QueuedStage};
 use zebra_state::{self as zs, CloneError};
 
 use crate::components::{
@@ -192,12 +192,20 @@ where
     /// download and verify tasks. Each entry also stores the corresponding
     /// gossip request and the announcing peer (when known), so completion can
     /// release the per-peer slot by `UnminedTxId` lookup.
+    ///
+    /// The final tuple element tracks the transaction's current [`QueuedStage`].
+    /// It is owned and mutated **only** by the single mempool task (via
+    /// [`Downloads::drain_awaiting_verification`]), never by the spawned download
+    /// tasks, so [`Downloads::queued_stages`] reads a consistent point-in-time
+    /// value ordered with the `Queued` events the same task emits (design
+    /// §3a-1, §6, §9.8).
     cancel_handles: HashMap<
         UnminedTxId,
         (
             oneshot::Sender<CancelDownloadAndVerify>,
             Gossip,
             Option<SocketAddr>,
+            QueuedStage,
         ),
     >,
 
@@ -211,7 +219,26 @@ where
     /// Broadcasts transaction lifecycle changes observed in the download/verify
     /// pipeline (`Queued{AwaitingDownload}`, `Queued{AwaitingVerification}`, and
     /// `Removed{FailedDownload}`) to mempool change subscribers.
-    change_sender: broadcast::Sender<MempoolChange>,
+    ///
+    /// These are mid-cycle observations, so they are broadcast as checksum-less
+    /// [`MempoolBatch`]es (design §9.8); the settled per-cycle checksum is
+    /// emitted by `Mempool::poll_ready`.
+    change_sender: broadcast::Sender<MempoolBatch>,
+
+    /// Signals from spawned download tasks that a transaction has finished
+    /// downloading and is awaiting verification.
+    ///
+    /// The download task only *reports* the transition over this channel; the
+    /// authoritative `AwaitingVerification` stage update and its
+    /// `Queued{AwaitingVerification}` event are both applied by the single
+    /// mempool task in [`Downloads::drain_awaiting_verification`], keeping the
+    /// stage reflected in the digest consistent with the events ordered before
+    /// the settled batch (design §3a-1, §9.8). At most one message per in-flight
+    /// task, so the channel depth is bounded by [`MAX_INBOUND_CONCURRENCY`].
+    awaiting_verification_tx: mpsc::UnboundedSender<UnminedTxId>,
+
+    /// The receiver drained by [`Downloads::drain_awaiting_verification`].
+    awaiting_verification_rx: mpsc::UnboundedReceiver<UnminedTxId>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -272,7 +299,7 @@ where
             };
 
             if let Some(hash) = completed_txid {
-                if let Some((_, _gossip, Some(source))) = this.cancel_handles.remove(&hash) {
+                if let Some((_, _gossip, Some(source), _stage)) = this.cancel_handles.remove(&hash) {
                     Self::release_peer_slot(this.pending_per_peer, source);
                 }
             }
@@ -313,8 +340,10 @@ where
         network: ZN,
         verifier: ZV,
         state: ZS,
-        change_sender: broadcast::Sender<MempoolChange>,
+        change_sender: broadcast::Sender<MempoolBatch>,
     ) -> Self {
+        let (awaiting_verification_tx, awaiting_verification_rx) = mpsc::unbounded_channel();
+
         Self {
             network,
             verifier,
@@ -323,6 +352,8 @@ where
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
             change_sender,
+            awaiting_verification_tx,
+            awaiting_verification_rx,
         }
     }
 
@@ -392,6 +423,7 @@ where
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
         let change_sender = self.change_sender.clone();
+        let awaiting_verification_tx = self.awaiting_verification_tx.clone();
 
         let gossiped_tx_req = gossiped_tx.clone();
 
@@ -424,8 +456,10 @@ where
                         .map_err(CloneError::from)
                         .map_err(TransactionDownloadVerifyError::DownloadFailed)
                         .inspect_err(|_| {
-                            let _ = change_sender.send(MempoolChange::removed_failed_download(
-                                std::iter::once(txid).collect(),
+                            let _ = change_sender.send(MempoolBatch::event(
+                                MempoolChange::removed_failed_download(
+                                    std::iter::once(txid).collect(),
+                                ),
                             ));
                         })?
                     {
@@ -437,8 +471,10 @@ where
                                 )
                             })
                             .inspect_err(|_| {
-                                let _ = change_sender.send(MempoolChange::removed_failed_download(
-                                    std::iter::once(txid).collect(),
+                                let _ = change_sender.send(MempoolBatch::event(
+                                    MempoolChange::removed_failed_download(
+                                        std::iter::once(txid).collect(),
+                                    ),
                                 ));
                             })?,
                         _ => unreachable!("wrong response to transaction request"),
@@ -465,11 +501,13 @@ where
 
             trace!(?txid, "got tx");
 
-            // Both gossip paths converge here with the tx content in hand, so
-            // emit `Queued{AwaitingVerification}` uniformly before verifying.
-            let _ = change_sender.send(MempoolChange::queued_awaiting_verification(
-                std::iter::once(txid).collect(),
-            ));
+            // Both gossip paths converge here with the tx content in hand. Report
+            // the download→verification transition to the single mempool task,
+            // which applies the authoritative stage update and emits the matching
+            // `Queued{AwaitingVerification}` event in order. Doing both on one
+            // task keeps the stage reflected in the per-cycle digest consistent
+            // with the events ordered before the settled batch (design §9.8).
+            let _ = awaiting_verification_tx.send(txid);
 
             let result = verifier
                 .oneshot(tx::Request::Mempool {
@@ -555,7 +593,15 @@ where
         self.pending.push(task);
         assert!(
             self.cancel_handles
-                .insert(txid, (cancel_tx, gossiped_tx_req, source))
+                .insert(
+                    txid,
+                    (
+                        cancel_tx,
+                        gossiped_tx_req,
+                        source,
+                        QueuedStage::AwaitingDownload,
+                    ),
+                )
                 .is_none(),
             "transactions are only queued once"
         );
@@ -576,8 +622,8 @@ where
 
         // The transaction is now newly queued (not a duplicate or queue-full
         // rejection, which returned early above), so emit the entry event.
-        let _ = self.change_sender.send(MempoolChange::queued_awaiting_download(
-            std::iter::once(txid).collect(),
+        let _ = self.change_sender.send(MempoolBatch::event(
+            MempoolChange::queued_awaiting_download(std::iter::once(txid).collect()),
         ));
 
         Ok(())
@@ -585,7 +631,13 @@ where
 
     /// Cancel download/verification tasks of transactions with the
     /// given transaction hash (see [`UnminedTxId::mined_id`]).
-    pub fn cancel(&mut self, mined_ids: &HashSet<transaction::Hash>) {
+    ///
+    /// Returns the [`UnminedTxId`]s that were still queued and are now removed.
+    /// They leave the queued set synchronously (so the next digest excludes
+    /// them), but the spawned task only emits its `Removed` event on a later
+    /// cycle, so the caller must emit a matching `Removed` event in the *same*
+    /// cycle to keep the digest and event stream consistent (design §3a-1).
+    pub fn cancel(&mut self, mined_ids: &HashSet<transaction::Hash>) -> Vec<UnminedTxId> {
         // TODO: this can be simplified with [`HashMap::drain_filter`] which
         // is currently nightly-only experimental API.
         let removed_txids: Vec<UnminedTxId> = self
@@ -595,14 +647,16 @@ where
             .cloned()
             .collect();
 
-        for txid in removed_txids {
-            if let Some((cancel_tx, _gossip, source)) = self.cancel_handles.remove(&txid) {
+        for txid in &removed_txids {
+            if let Some((cancel_tx, _gossip, source, _stage)) = self.cancel_handles.remove(txid) {
                 let _ = cancel_tx.send(CancelDownloadAndVerify);
                 if let Some(source) = source {
                     Self::release_peer_slot(&mut self.pending_per_peer, source);
                 }
             }
         }
+
+        removed_txids
     }
 
     /// Cancel all running tasks and reset the downloader state.
@@ -613,7 +667,7 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, (cancel_tx, _gossip, _source)) in self.cancel_handles.drain() {
+        for (_hash, (cancel_tx, _gossip, _source, _stage)) in self.cancel_handles.drain() {
             let _ = cancel_tx.send(CancelDownloadAndVerify);
         }
         self.pending_per_peer.clear();
@@ -643,7 +697,42 @@ where
     pub fn transaction_requests(&self) -> impl Iterator<Item = &Gossip> {
         self.cancel_handles
             .iter()
-            .map(|(_tx_id, (_handle, tx, _source))| tx)
+            .map(|(_tx_id, (_handle, tx, _source, _stage))| tx)
+    }
+
+    /// Returns the currently queued set, mapping each transaction's
+    /// [`UnminedTxId`] to its [`QueuedStage`] (design §3a-1, §6).
+    ///
+    /// The stage is owned by the single mempool task and only advanced by
+    /// [`Downloads::drain_awaiting_verification`], so it matches the stage a
+    /// follower derives from the `Queued` lifecycle event stream.
+    pub fn queued_stages(&self) -> HashMap<UnminedTxId, QueuedStage> {
+        self.cancel_handles
+            .iter()
+            .map(|(txid, (_handle, _tx, _source, stage))| (*txid, *stage))
+            .collect()
+    }
+
+    /// Applies the `AwaitingDownload → AwaitingVerification` stage transitions
+    /// reported by the spawned download tasks, and returns the [`UnminedTxId`]s
+    /// that transitioned and are still queued.
+    ///
+    /// The caller (the single mempool task) emits a `Queued{AwaitingVerification}`
+    /// event for the returned ids in the same change cycle, so the stage update
+    /// reflected in that cycle's digest is ordered consistently with the event
+    /// the follower applies (design §3a-1, §9.8). Signals for transactions that
+    /// have already left the queue (mined, cancelled, completed) are dropped.
+    pub fn drain_awaiting_verification(&mut self) -> HashSet<UnminedTxId> {
+        let mut transitioned = HashSet::new();
+
+        while let Ok(txid) = self.awaiting_verification_rx.try_recv() {
+            if let Some((_cancel_tx, _gossip, _source, stage)) = self.cancel_handles.get_mut(&txid) {
+                *stage = QueuedStage::AwaitingVerification;
+                transitioned.insert(txid);
+            }
+        }
+
+        transitioned
     }
 
     /// Check if transaction is already in the best chain.

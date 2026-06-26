@@ -307,46 +307,51 @@ where
         let mut mempool_change = self.mempool_change.subscribe();
 
         tokio::spawn(async move {
-            // Notify the client of chain tip changes until the channel is closed
-            while let Ok(change) = mempool_change.recv().await {
+            // Notify the client of mempool changes until the channel is closed
+            while let Ok(batch) = mempool_change.recv().await {
                 span.in_scope(|| {
-                    tracing::debug!("mempool change: {:?}", change);
+                    tracing::debug!("mempool batch: {:?}", batch);
                 });
 
-                // Bridge the new lifecycle events back to the existing proto
-                // `ChangeType`: queued events are skipped (the old RPC never
-                // emitted them), mined removals map to MINED, and every other
-                // removal reason collapses to INVALIDATED.
-                let change_type = match change.kind() {
-                    MempoolChangeKind::Added => 0,
-                    MempoolChangeKind::Removed(RemovedReason::Mined { .. }) => 2,
-                    MempoolChangeKind::Removed(_) => 1,
-                    MempoolChangeKind::Queued(_) => continue,
-                };
+                // The wire unit is now a per-cycle `MempoolBatch`, so bridge each
+                // of its lifecycle events to the existing proto `ChangeType`:
+                // queued events are skipped (the old RPC never emitted them),
+                // mined removals map to MINED, and every other removal reason
+                // collapses to INVALIDATED.
+                for change in batch.events() {
+                    let change_type = match change.kind() {
+                        MempoolChangeKind::Added => 0,
+                        MempoolChangeKind::Removed(RemovedReason::Mined { .. }) => 2,
+                        MempoolChangeKind::Removed(_) => 1,
+                        MempoolChangeKind::Queued(_) => continue,
+                    };
 
-                for tx_id in change.tx_ids() {
-                    let msg = Ok(MempoolChangeMessage {
-                        change_type,
-                        tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
-                        auth_digest: tx_id
-                            .auth_digest()
-                            .map(|d| d.bytes_in_display_order().to_vec())
-                            .unwrap_or_default(),
-                    });
+                    for tx_id in change.tx_ids() {
+                        let msg = Ok(MempoolChangeMessage {
+                            change_type,
+                            tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
+                            auth_digest: tx_id
+                                .auth_digest()
+                                .map(|d| d.bytes_in_display_order().to_vec())
+                                .unwrap_or_default(),
+                        });
 
-                    match response_sender.try_send(msg) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            span.in_scope(|| {
-                                tracing::info!("client disconnected, dropping mempool_change task");
-                            });
-                            return;
-                        }
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            span.in_scope(|| {
-                                tracing::warn!("slow consumer, dropping mempool_change stream");
-                            });
-                            return;
+                        match response_sender.try_send(msg) {
+                            Ok(()) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                span.in_scope(|| {
+                                    tracing::info!(
+                                        "client disconnected, dropping mempool_change task"
+                                    );
+                                });
+                                return;
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                span.in_scope(|| {
+                                    tracing::warn!("slow consumer, dropping mempool_change stream");
+                                });
+                                return;
+                            }
                         }
                     }
                 }

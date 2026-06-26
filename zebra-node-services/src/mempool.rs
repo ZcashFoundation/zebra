@@ -2,7 +2,10 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+};
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -21,7 +24,8 @@ mod transaction_dependencies;
 pub use self::{
     gossip::Gossip,
     mempool_change::{
-        MempoolChange, MempoolChangeKind, MempoolTxSubscriber, QueuedStage, RemovedReason,
+        replica_digest, MempoolBatch, MempoolChange, MempoolChangeKind, MempoolTxSubscriber,
+        QueuedStage, RemovedReason, REPLICA_DIGEST_LEN,
     },
     service_trait::MempoolService,
     transaction_dependencies::TransactionDependencies,
@@ -76,6 +80,14 @@ pub enum Request {
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
     FullTransactions,
+
+    /// Get the state needed to bootstrap a mempool replica (design §6):
+    /// the queued set (with each transaction's [`QueuedStage`]), the verified
+    /// set, and the recent rejection-cache entries (with stable error codes).
+    ///
+    /// A trusting follower replays this as the bootstrap burst of lifecycle
+    /// events, rather than as a snapshot blob (design §3a, §5).
+    MempoolBootstrapState,
 
     /// Query matching cached rejected transaction IDs in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
@@ -167,6 +179,20 @@ pub enum Response {
 
         /// Last seen chain tip hash by mempool service
         last_seen_tip_hash: zebra_chain::block::Hash,
+    },
+
+    /// Returns the state needed to bootstrap a mempool replica (design §6).
+    ///
+    /// Carries the queued set keyed by [`UnminedTxId`] with each transaction's
+    /// [`QueuedStage`], the verified set as [`VerifiedUnminedTx`]s, and the
+    /// recent rejection-cache entries as `(txid, stable_code)` pairs.
+    MempoolBootstrapState {
+        /// The download/verify queued set, with each transaction's stage.
+        queued: HashMap<UnminedTxId, QueuedStage>,
+        /// The verified mempool set.
+        verified: Vec<VerifiedUnminedTx>,
+        /// Recent rejection-cache entries, with stable error codes (design §3b).
+        rejected: Vec<(UnminedTxId, String)>,
     },
 
     /// Returns matching cached rejected [`UnminedTxId`]s from the mempool,

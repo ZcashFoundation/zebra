@@ -79,6 +79,16 @@ impl EvictionList {
         false
     }
 
+    /// Returns an iterator over the TXIDs currently in the list.
+    ///
+    /// May include entries that are past their eviction time but not yet pruned;
+    /// callers that need a pruned view should call [`EvictionList::prune_old`]
+    /// first. Used to enumerate recent rejections for a mempool-replica
+    /// bootstrap, where a slightly-stale entry is harmless (design §3b).
+    pub fn keys(&self) -> impl Iterator<Item = &transaction::Hash> {
+        self.unique_entries.keys()
+    }
+
     /// Get the size of the list.
     //
     // Note: if this method being mutable becomes an issue, it's possible

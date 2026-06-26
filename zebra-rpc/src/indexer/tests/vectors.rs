@@ -12,7 +12,7 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
 };
-use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
+use zebra_node_services::mempool::{MempoolBatch, MempoolChange, MempoolTxSubscriber};
 use zebra_state::{
     HashOrHeight, NonFinalizedBlocksListener, NonFinalizedState, ReadRequest, ReadResponse,
     WatchReceiver,
@@ -191,7 +191,7 @@ async fn test_chain_tip_change(
 
 async fn test_mempool_change(
     mut client: IndexerClient<tonic::transport::Channel>,
-    mempool_transaction_sender: tokio::sync::broadcast::Sender<MempoolChange>,
+    mempool_transaction_sender: tokio::sync::broadcast::Sender<MempoolBatch>,
 ) -> Result<()> {
     let request = tonic::Request::new(Empty {});
     let mut response = client.mempool_change(request).await?.into_inner();
@@ -201,7 +201,7 @@ async fn test_mempool_change(
         .collect();
 
     mempool_transaction_sender
-        .send(MempoolChange::added(change_tx_ids))
+        .send(MempoolBatch::event(MempoolChange::added(change_tx_ids)))
         .expect("rpc server should have a receiver");
 
     tokio::time::timeout(Duration::from_secs(3), response.next())
@@ -218,7 +218,7 @@ async fn start_server_and_get_client() -> Result<(
     IndexerClient<tonic::transport::Channel>,
     MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
     MockChainTipSender,
-    broadcast::Sender<MempoolChange>,
+    broadcast::Sender<MempoolBatch>,
 )> {
     let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
         .parse()

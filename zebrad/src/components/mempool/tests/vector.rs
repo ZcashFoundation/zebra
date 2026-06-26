@@ -22,7 +22,7 @@ use zebra_chain::{
     transparent::{self, OutPoint},
 };
 use zebra_consensus::transaction as tx;
-use zebra_node_services::mempool::MempoolChangeKind;
+use zebra_node_services::mempool::{MempoolBatch, MempoolChangeKind, QueuedStage};
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -40,30 +40,49 @@ type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, 
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, TransactionError>;
 
-/// Receives the next [`MempoolChange`] from `receiver`, failing the test if none
-/// arrives within a few seconds.
-async fn next_change(
-    receiver: &mut tokio::sync::broadcast::Receiver<MempoolChange>,
-) -> MempoolChange {
-    timeout(Duration::from_secs(3), receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok")
+/// Buffers a [`MempoolBatch`] broadcast receiver, flattening each batch into its
+/// individual [`MempoolChange`] events so tests can assert on them one at a time.
+struct ChangeReceiver {
+    receiver: tokio::sync::broadcast::Receiver<MempoolBatch>,
+    buffer: std::collections::VecDeque<MempoolChange>,
 }
 
-/// Receives [`MempoolChange`]s from `receiver` until one is not a
-/// [`MempoolChangeKind::Queued`] lifecycle event, returning that change.
-///
-/// Used by tests that assert on a terminal (`Added`/`Removed`) change after the
-/// `Queued{AwaitingDownload}`/`Queued{AwaitingVerification}` events that now
-/// precede it.
-async fn next_terminal_change(
-    receiver: &mut tokio::sync::broadcast::Receiver<MempoolChange>,
-) -> MempoolChange {
-    loop {
-        let change = next_change(receiver).await;
-        if !matches!(change.kind(), MempoolChangeKind::Queued(_)) {
-            return change;
+impl ChangeReceiver {
+    fn new(receiver: tokio::sync::broadcast::Receiver<MempoolBatch>) -> Self {
+        Self {
+            receiver,
+            buffer: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// Returns the next [`MempoolChange`] event, failing the test if no batch
+    /// arrives within a few seconds.
+    async fn next_change(&mut self) -> MempoolChange {
+        loop {
+            if let Some(change) = self.buffer.pop_front() {
+                return change;
+            }
+
+            let batch = timeout(Duration::from_secs(3), self.receiver.recv())
+                .await
+                .expect("should not timeout")
+                .expect("recv should return Ok");
+            self.buffer.extend(batch.into_events());
+        }
+    }
+
+    /// Returns the next event that is not a [`MempoolChangeKind::Queued`]
+    /// lifecycle event.
+    ///
+    /// Used by tests that assert on a terminal (`Added`/`Removed`) change after
+    /// the `Queued{AwaitingDownload}`/`Queued{AwaitingVerification}` events that
+    /// now precede it.
+    async fn next_terminal_change(&mut self) -> MempoolChange {
+        loop {
+            let change = self.next_change().await;
+            if !matches!(change.kind(), MempoolChangeKind::Queued(_)) {
+                return change;
+            }
         }
     }
 }
@@ -630,11 +649,21 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         "queued tx should fail to download and verify due to chain tip change"
     );
 
-    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
+    // The still-queued download is cancelled because its transaction was mined
+    // into block 2, so it is reported as `Removed{Mined}` in the same change
+    // cycle whose digest already excludes it (design §3a-1). The task's later
+    // `Removed{FailedVerification("cancelled")}` is a harmless idempotent no-op.
+    let mempool_change = mempool_transaction_receiver.next_terminal_change().await;
 
     assert_eq!(
         mempool_change,
-        MempoolChange::removed_failed_verification([txid].into_iter().collect(), "cancelled")
+        MempoolChange::removed_mined(
+            [txid].into_iter().collect(),
+            block2.hash(),
+            block2
+                .coinbase_height()
+                .expect("block 2 has a coinbase height"),
+        )
     );
 
     Ok(())
@@ -855,7 +884,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
 
-    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
+    let mempool_change = mempool_transaction_receiver.next_terminal_change().await;
 
     assert_eq!(
         mempool_change,
@@ -943,7 +972,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
 
     // A download failure is reported as `Removed{FailedDownload}` (emitted by
     // the downloader), not as a verification failure.
-    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
+    let mempool_change = mempool_transaction_receiver.next_terminal_change().await;
 
     assert_eq!(
         mempool_change,
@@ -1010,11 +1039,11 @@ async fn mempool_failed_download_lifecycle() -> Result<(), Report> {
     let ids = || [txid].into_iter().collect();
 
     assert_eq!(
-        next_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_change().await,
         MempoolChange::queued_awaiting_download(ids())
     );
     assert_eq!(
-        next_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_change().await,
         MempoolChange::removed_failed_download(ids())
     );
 
@@ -1142,7 +1171,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     // The tip reset re-queues the in-flight transaction for re-verification,
     // which is observable as `Removed{Reorged}` (design §5a).
     assert_eq!(
-        next_terminal_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_terminal_change().await,
         MempoolChange::removed_reorged([txid].into_iter().collect())
     );
 
@@ -1339,15 +1368,15 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     let ids = || [unmined_tx_id].into_iter().collect();
 
     assert_eq!(
-        next_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_change().await,
         MempoolChange::queued_awaiting_download(ids())
     );
     assert_eq!(
-        next_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_change().await,
         MempoolChange::queued_awaiting_verification(ids())
     );
     assert_eq!(
-        next_change(&mut mempool_transaction_receiver).await,
+        mempool_transaction_receiver.next_change().await,
         MempoolChange::added(ids())
     );
 
@@ -1962,6 +1991,93 @@ fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
         .expect("missing non-coinbase transaction")
 }
 
+/// Tests that `Request::MempoolBootstrapState` returns the queued set with
+/// stages, the verified set, and recent rejections with stable codes (design §6).
+#[tokio::test]
+async fn mempool_bootstrap_state_request() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
+    let verified_tx = unmined_transactions
+        .next()
+        .expect("missing verified transaction");
+    let rejected_tx = unmined_transactions
+        .next()
+        .expect("missing rejected transaction");
+    let queued_tx = unmined_transactions
+        .next()
+        .expect("missing queued transaction");
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    // Populate the verified set.
+    service
+        .storage()
+        .insert(verified_tx.clone(), Vec::new(), None)?;
+
+    // Populate the rejection cache with a stable-coded reason.
+    service.storage().reject(
+        rejected_tx.transaction.id,
+        SameEffectsChainRejectionError::Mined.into(),
+    );
+
+    // Populate the queued set. The mock peer set never responds to the download,
+    // so the stage stays at `AwaitingDownload`.
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![queued_tx.transaction.id.into()]))
+        .await
+        .unwrap();
+    assert!(matches!(response, Response::Queued(results) if results.len() == 1));
+
+    // The bootstrap-state request enumerates all three.
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::MempoolBootstrapState)
+        .await
+        .unwrap();
+
+    let (queued, verified, rejected) = match response {
+        Response::MempoolBootstrapState {
+            queued,
+            verified,
+            rejected,
+        } => (queued, verified, rejected),
+        _ => unreachable!("unexpected response to MempoolBootstrapState"),
+    };
+
+    // The verified set contains the inserted transaction.
+    assert_eq!(verified.len(), 1);
+    assert_eq!(verified[0].transaction.id, verified_tx.transaction.id);
+
+    // The queued set contains the queued transaction with its stage.
+    assert_eq!(
+        queued.get(&queued_tx.transaction.id),
+        Some(&QueuedStage::AwaitingDownload)
+    );
+
+    // Recent rejections include the rejected transaction with a stable code.
+    assert!(rejected.iter().any(|(txid, code)| {
+        txid.mined_id() == rejected_tx.transaction.id.mined_id() && code == "mined"
+    }));
+
+    Ok(())
+}
+
 /// Create a new [`Mempool`] instance using mocked services.
 async fn setup(
     network: &Network,
@@ -1974,7 +2090,7 @@ async fn setup(
     ChainTipChange,
     MockTxVerifier,
     RecentSyncLengths,
-    tokio::sync::broadcast::Receiver<MempoolChange>,
+    ChangeReceiver,
 ) {
     let mempool_config = mempool::Config {
         tx_cost_limit,
@@ -1995,7 +2111,7 @@ async fn setup_with_mempool_config(
     ChainTipChange,
     MockTxVerifier,
     RecentSyncLengths,
-    tokio::sync::broadcast::Receiver<MempoolChange>,
+    ChangeReceiver,
 ) {
     let peer_set = MockService::build().for_unit_tests();
 
@@ -2053,7 +2169,7 @@ async fn setup_with_mempool_config(
         chain_tip_change,
         tx_verifier,
         recent_syncs,
-        mempool_transaction_subscriber.subscribe(),
+        ChangeReceiver::new(mempool_transaction_subscriber.subscribe()),
     )
 }
 

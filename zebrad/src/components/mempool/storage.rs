@@ -156,6 +156,35 @@ pub enum NonStandardTransactionError {
     NonStandardInputs,
 }
 
+/// Maps an [`ExactTipRejectionError`] to a stable error code for the mempool
+/// replica bootstrap (design §3b, §9.2).
+///
+/// Consensus and standardness failures carry the specific inner error message
+/// (the detail Zaino wants), matching the `FailedVerification` code emitted on
+/// the live lifecycle stream.
+fn exact_tip_rejection_code(error: &ExactTipRejectionError) -> String {
+    error.to_string()
+}
+
+/// Maps a [`SameEffectsTipRejectionError`] to a short stable error code.
+fn same_effects_tip_rejection_code(error: &SameEffectsTipRejectionError) -> String {
+    match error {
+        SameEffectsTipRejectionError::SpendConflict => "spend_conflict",
+        SameEffectsTipRejectionError::MissingOutput => "missing_output",
+    }
+    .to_string()
+}
+
+/// Maps a [`SameEffectsChainRejectionError`] to a short stable error code.
+fn same_effects_chain_rejection_code(error: &SameEffectsChainRejectionError) -> &'static str {
+    match error {
+        SameEffectsChainRejectionError::Expired => "expired",
+        SameEffectsChainRejectionError::DuplicateSpend => "duplicate_spend",
+        SameEffectsChainRejectionError::Mined => "mined",
+        SameEffectsChainRejectionError::RandomlyEvicted => "randomly_evicted",
+    }
+}
+
 /// Represents a set of transactions that have been removed from the mempool, either because
 /// they were mined, or because they were invalidated by another transaction that was mined.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -841,6 +870,36 @@ impl Storage {
     /// This matches transactions based on each rejection list's matching rule.
     pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
         self.rejection_error(txid).is_some()
+    }
+
+    /// Returns the recent rejection-cache entries as `(txid, stable_code)` pairs,
+    /// for a mempool-replica bootstrap (design §3b, §6).
+    ///
+    /// Folding these recent failures into the bootstrap makes "why it failed"
+    /// partially recoverable. The same-effects caches are keyed only by mined id,
+    /// so their [`UnminedTxId`] is normalized to [`UnminedTxId::Legacy`]. Codes
+    /// are stable strings, decoupled from the `zebra-consensus` error shapes
+    /// (design §9.2).
+    pub fn recent_rejections(&self) -> Vec<(UnminedTxId, String)> {
+        let mut rejections = Vec::new();
+
+        for (txid, error) in &self.tip_rejected_exact {
+            rejections.push((*txid, exact_tip_rejection_code(error)));
+        }
+        for (mined_id, error) in &self.tip_rejected_same_effects {
+            rejections.push((
+                UnminedTxId::Legacy(*mined_id),
+                same_effects_tip_rejection_code(error),
+            ));
+        }
+        for (error, list) in &self.chain_rejected_same_effects {
+            let code = same_effects_chain_rejection_code(error);
+            for mined_id in list.keys() {
+                rejections.push((UnminedTxId::Legacy(*mined_id), code.to_string()));
+            }
+        }
+
+        rejections
     }
 
     /// Add a transaction that failed download and verification to the rejected list
