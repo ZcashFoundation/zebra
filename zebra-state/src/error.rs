@@ -1,6 +1,6 @@
 //! Error types for Zebra's state.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use derive_new::new;
@@ -41,6 +41,60 @@ impl From<BoxError> for CloneError {
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// An error describing why opening the finalized state database failed.
+///
+/// These errors are recoverable open-time failures that the caller can report,
+/// as opposed to invariant violations that indicate a bug.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum StateInitError {
+    /// A read-only state was requested, but the configured cache directory is
+    /// missing or unreadable.
+    ///
+    /// A read-only secondary instance must never create the primary's cache
+    /// directory, so a missing or unreadable directory is a fatal configuration
+    /// error rather than something to be created.
+    #[error(
+        "cannot open read-only state: cache directory {path:?} is missing or unreadable. \
+         Hint: a read-only state requires an existing Zebra cache directory; check that the \
+         state cache_dir in the Zebra config points at a running Zebra node's cache directory"
+    )]
+    ReadOnlyCacheDirUnreadable {
+        /// The configured cache directory that could not be read.
+        path: PathBuf,
+        /// The underlying I/O error returned while reading the directory.
+        source: std::io::Error,
+    },
+
+    /// A read-only state was requested, but no database exists at the expected
+    /// path.
+    ///
+    /// A read-only secondary instance cannot create a database, so the absence
+    /// of an existing database is a fatal configuration error.
+    #[error(
+        "cannot open read-only state: no database found at {path:?}. \
+         Hint: a read-only state requires an existing finalized database created by a running \
+         Zebra node; check that the state cache_dir in the Zebra config points at that node's \
+         cache directory"
+    )]
+    ReadOnlyDatabaseNotFound {
+        /// The database path at which no database was found.
+        path: PathBuf,
+    },
+
+    /// A read-only state was requested together with an ephemeral database.
+    ///
+    /// A read-only secondary follows another process's primary database and must
+    /// never delete it, whereas an ephemeral database deletes its files on drop. The
+    /// two are mutually exclusive, so requesting both is a fatal configuration error.
+    #[error(
+        "cannot open read-only state: an ephemeral database was also requested. \
+         Hint: a read-only state follows an existing Zebra node's database and must not \
+         delete it; set `ephemeral = false`, or do not request a read-only state"
+    )]
+    ReadOnlyEphemeralConflict,
+}
 
 /// An error describing why a block could not be queued to be committed to the state.
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
@@ -164,6 +218,11 @@ pub enum ReconsiderError {
     /// The reconsider request was dropped before processing.
     #[error("reconsider block request was unexpectedly dropped")]
     ReconsiderResponseDropped,
+
+    /// Replaying an invalidated block into the restored chain failed contextual
+    /// validation.
+    #[error("replaying a previously invalidated block failed contextual validation: {0}")]
+    ReplayFailed(#[source] ValidateContextError),
 }
 
 /// An error describing why a block failed contextual validation.

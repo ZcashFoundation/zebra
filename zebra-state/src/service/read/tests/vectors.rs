@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tower::ServiceExt;
 use zebra_chain::{
-    block::{Block, Height},
+    block::{Block, Hash, Height, MAX_BLOCK_LOCATOR_LENGTH},
     orchard,
     parameters::Network::*,
     serialization::ZcashDeserializeInto,
@@ -45,6 +45,32 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
     Ok(())
 }
 
+/// Test that the ReadStateService rejects a `FindForkPoint` locator longer than
+/// `MAX_BLOCK_LOCATOR_LENGTH`, rather than performing an unbounded number of lookups.
+#[tokio::test]
+async fn find_fork_point_rejects_over_long_locator() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        init_test_services(&network).await;
+
+    // One hash over the cap. The contents are irrelevant: the length is checked
+    // before any block is looked up.
+    let over_long = vec![Hash([0; 32]); MAX_BLOCK_LOCATOR_LENGTH as usize + 1];
+
+    let transcript = Transcript::from(vec![(
+        ReadRequest::FindForkPoint {
+            known_blocks: over_long,
+        },
+        Err(ExpectedTranscriptError::Any),
+    )]);
+
+    transcript.check(read_state).await?;
+
+    Ok(())
+}
+
 /// Test that ReadStateService responds correctly when the state contains blocks.
 #[tokio::test(flavor = "multi_thread")]
 async fn populated_read_state_responds_correctly() -> Result<()> {
@@ -78,6 +104,18 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
         let block_cases = Transcript::from(block_cases);
         block_cases.check(read_state.clone()).await?;
+
+        let fork_point_cases = vec![(
+            ReadRequest::FindForkPoint {
+                known_blocks: vec![block.hash()],
+            },
+            Ok(ReadResponse::ForkPoint(Some((
+                block.coinbase_height().unwrap(),
+                block.hash(),
+            )))),
+        )];
+        let fork_point_cases = Transcript::from(fork_point_cases);
+        fork_point_cases.check(read_state.clone()).await?;
 
         // Spec: transactions in the genesis block are ignored.
         if block.coinbase_height().unwrap().0 == 0 {
@@ -353,6 +391,12 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
             ReadRequest::Block(block.coinbase_height().unwrap().into()),
             Ok(ReadResponse::Block(None)),
         ),
+        (
+            ReadRequest::FindForkPoint {
+                known_blocks: vec![block.hash()],
+            },
+            Ok(ReadResponse::ForkPoint(None)),
+        ),
     ]
 }
 
@@ -381,6 +425,7 @@ fn new_ephemeral_db() -> ZebraDb {
             .map(ToString::to_string),
         false,
     )
+    .expect("opening an ephemeral database should succeed")
 }
 
 /// Test that AnyChainBlock can find blocks by hash and height.
@@ -489,7 +534,8 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);

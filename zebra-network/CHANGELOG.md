@@ -5,11 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added the Regtest-only network config option `should_allow_unshielded_coinbase_spends`,
+  controlling whether coinbase outputs may be spent into transparent outputs. Setting it
+  on a configured Testnet is rejected with an error
+  ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698)).
+
+## [9.0.0] - 2026-06-10
+
+### Breaking Changes
+
+- `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` bumped from `Nu6` (170120) to `Nu6_2` (170150)
+  on Mainnet, Testnet, and Regtest. Peers running protocol version 170120 are no longer
+  accepted ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692)).
+- Removed `Copy` derive from `types::MetaAddr` (now only `Clone`) to support `String` fields.
+- Changed `types::MetaAddr::new_connected()` to take additional `user_agent` and
+  `negotiated_version` parameters.
+
+### Added
+
+- `MetaAddr::user_agent()` accessor returning `Option<&str>`.
+- `MetaAddr::negotiated_version()` accessor returning `Option<Version>`.
+- `MetaAddr::last_connection_state()` accessor returning `PeerAddrState`.
+- `MetaAddr::services()` accessor returning `Option<PeerServices>`.
+- `Display` impl for `PeerAddrState`.
+- Made `types::Version` type public with `Display` impl.
+
+### Fixed
+
+- Fixed genesis-to-tip sync stall where the peer crawler could stop receiving
+  ready peers after an extended crawl period
+  ([#5709](https://github.com/ZcashFoundation/zebra/issues/5709)).
+
 ## [8.0.0] - 2026-06-02
 
 ### Changed
 
-- Require network protocol version 170150 for NU6.2 on Mainnet, Testnet, and Regtest.
 - Bump `CURRENT_NETWORK_PROTOCOL_VERSION` to 170150.
 
 ## [7.0.0] - 2026-05-28
@@ -84,19 +118,6 @@ This release fixes an important security issue:
 The impact of the issue for crate users will depend on the particular usage; if
 your application allows deserializing arbitrary `addr` and/or `addrv2` messages,
 you should update.
-
-### Breaking Changes
-
-- Removed `Copy` derive from `types::MetaAddr` (now only `Clone`) to support `String` fields
-- Changed `types::MetaAddr::new_connected()` to take additional `user_agent` and `negotiated_version` parameters
-
-### Added
-
-- Added `types::MetaAddr::user_agent()` accessor returning `Option<&str>`
-- Added `types::MetaAddr::negotiated_version()` accessor returning `Option<Version>`
-- Added `types::MetaAddr::services()` accessor returning `Option<PeerServices>`
-- Added `types::MetaAddr::last_connection_state()` accessor returning `PeerAddrState`
-- Made `types::Version` type public with `Display` impl
 
 ## [5.0.0] - 2026-03-12
 

@@ -185,7 +185,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    if: ${{ github.event_name != 'pull_request' }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
+      }}
     steps:
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
@@ -247,13 +251,20 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     # Build for:
     # - Pull requests
     # - Manual workflow_dispatch
     # - Push to main branch
     # - Releases
-    if: ${{ (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' }}
+    if: >-
+      ${{
+        (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && github.ref_name == 'main') ||
+        (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+      }}
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
@@ -301,7 +312,17 @@ jobs:
     # - Running in ZcashFoundation repo (not a fork)
     # - Event is one of: push to main, release, or workflow_dispatch
     # - Workflow not cancelled or failed
-    if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    if: >-
+      ${{
+        !cancelled() && !failure() &&
+        needs.build.result == 'success' &&
+        github.repository_owner == 'ZcashFoundation' &&
+        (
+          (github.event_name == 'push' && github.ref_name == 'main') ||
+          (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -523,6 +544,7 @@ jobs:
         !cancelled() && !failure() &&
         needs.deploy-nodes.result == 'success' &&
         github.event_name != 'workflow_dispatch' &&
+        (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')) &&
         github.repository_owner == 'ZcashFoundation'
       }}
     steps:
