@@ -274,15 +274,14 @@ fn test_digest_matches_source_projection() {
     let id = unmined.id;
 
     let mut replica = MempoolReplica::default();
+    // A queued tx is excluded from the digest; only the verified set is hashed.
     replica.apply_queued(txid(1), QueuedStage::AwaitingDownload);
     replica.apply_added(id, replica_tx(unmined));
 
-    // The follower's recomputed digest equals the source's digest over the equivalent projection.
+    // The follower's recomputed digest equals the source's digest over the same verified set.
     let verified: HashSet<UnminedTxId> = [id].into_iter().collect();
-    let mut queued = HashMap::new();
-    queued.insert(txid(1), QueuedStage::AwaitingDownload);
 
-    assert_eq!(replica.digest(), replica_digest(&verified, &queued));
+    assert_eq!(replica.digest(), replica_digest(&verified));
 }
 
 /// An empty bootstrap-state response.
@@ -417,11 +416,9 @@ async fn e2e_bootstrap_and_live_cycle() {
     .await;
 
     // A live change cycle queues a second transaction for verification. The checksum is over the
-    // follower's full projection after applying the batch ({txid(1): AD, txid(2): AV}).
-    let mut projection = HashMap::new();
-    projection.insert(txid(1), QueuedStage::AwaitingDownload);
-    projection.insert(txid(2), QueuedStage::AwaitingVerification);
-    let checksum = replica_digest(&HashSet::new(), &projection);
+    // follower's verified set, which is still empty (both txs are queued), so it is the empty-set
+    // digest.
+    let checksum = replica_digest(&HashSet::new());
 
     sender
         .send(MempoolBatch::new(
@@ -530,10 +527,9 @@ async fn e2e_reorg_requeues_without_rebootstrap() {
     .await;
 
     // A reorg re-queues the tx: the source emits `Removed{Reorged}` then re-enters it at
-    // `AwaitingDownload`. The settled checksum is over the re-queued projection ({txid(3): AD}).
-    let mut at_download = HashMap::new();
-    at_download.insert(txid(3), QueuedStage::AwaitingDownload);
-    let download_checksum = replica_digest(&HashSet::new(), &at_download);
+    // `AwaitingDownload`. The settled checksum is over the verified set, which is empty (the tx is
+    // queued), so it is the empty-set digest.
+    let download_checksum = replica_digest(&HashSet::new());
 
     sender
         .send(MempoolBatch::new(
@@ -552,10 +548,8 @@ async fn e2e_reorg_requeues_without_rebootstrap() {
     assert_eq!(replica.digest(), download_checksum);
 
     // The source then advances the re-verified tx to `AwaitingVerification`; the follower advances
-    // in lock-step and its digest still matches the source checksum.
-    let mut at_verification = HashMap::new();
-    at_verification.insert(txid(3), QueuedStage::AwaitingVerification);
-    let verification_checksum = replica_digest(&HashSet::new(), &at_verification);
+    // in lock-step and its digest (over the empty verified set) still matches the source checksum.
+    let verification_checksum = replica_digest(&HashSet::new());
 
     sender
         .send(MempoolBatch::new(

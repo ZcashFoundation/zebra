@@ -190,12 +190,12 @@ impl MempoolReplica {
         removed.then_some(MempoolObservation::Removed { tx_id: id, reason })
     }
 
-    /// Computes the [`replica_digest`] over this replica's full projection (the
-    /// verified set and the queued set), using the same shared function the source
-    /// uses so the two agree bit-for-bit (design §3a-1, §6).
+    /// Computes the [`replica_digest`] over this replica's verified set, using the
+    /// same shared function the source uses so the two agree bit-for-bit (design
+    /// §3a-1, §6).
     pub fn digest(&self) -> [u8; REPLICA_DIGEST_LEN] {
         let verified_ids: HashSet<UnminedTxId> = self.verified.keys().copied().collect();
-        replica_digest(&verified_ids, &self.queued)
+        replica_digest(&verified_ids)
     }
 
     /// Returns the verified mempool transaction with the given id, if present.

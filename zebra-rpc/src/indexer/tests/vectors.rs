@@ -116,10 +116,10 @@ async fn test_sync_mempool_bootstrap(
     let mut response = client.sync_mempool(Empty {}).await?.into_inner();
 
     // The server reads a consistent point-in-time bootstrap snapshot. Respond with a single queued
-    // transaction so the burst is non-empty.
+    // transaction so the burst is non-empty; the checksum is over the (empty) verified set.
     let mut queued = HashMap::new();
     queued.insert(txid(1), QueuedStage::AwaitingDownload);
-    let expected_checksum = replica_digest(&HashSet::new(), &queued);
+    let expected_checksum = replica_digest(&HashSet::new());
 
     mock_mempool
         .expect_request(mempool::Request::MempoolBootstrapState)
@@ -177,10 +177,9 @@ async fn test_sync_mempool_live_cycle(
         .expect("bootstrap batch should not be an error message");
     assert!(bootstrap.initial_sync_complete);
 
-    // A live change cycle: a queued transaction, with the source's post-cycle checksum.
-    let mut queued = HashMap::new();
-    queued.insert(txid(2), QueuedStage::AwaitingVerification);
-    let checksum = replica_digest(&HashSet::new(), &queued);
+    // A live change cycle: a queued transaction, with the source's post-cycle checksum over the
+    // (still empty) verified set. The server forwards this checksum verbatim.
+    let checksum = replica_digest(&HashSet::new());
     mempool_transaction_sender
         .send(MempoolBatch::new(
             vec![MempoolChange::queued_awaiting_verification(

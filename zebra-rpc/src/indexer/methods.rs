@@ -371,12 +371,12 @@ where
                 }
             };
 
-            // The bootstrap checksum is over the full replica projection: the verified set plus the
-            // queued set (design §3a-1). The rejection cache is a transient observation (design §3b)
-            // and is *not* part of the projection, so it is excluded from the checksum.
+            // The bootstrap checksum is over the verified set (design §3a-1). The queued set, the
+            // rejection cache (a transient observation, design §3b), and source-internal machinery
+            // are not checksummed state, so they are excluded from the checksum.
             let verified_ids: HashSet<UnminedTxId> =
                 verified.iter().map(|tx| tx.transaction.id).collect();
-            let checksum = replica_digest(&verified_ids, &queued);
+            let checksum = replica_digest(&verified_ids);
 
             // (2) Replay the snapshot as ordinary lifecycle events (design §3a "bootstrap is still
             // incremental"): queued txs as `Queued{stage}`, verified txs as `Added{content}`, and

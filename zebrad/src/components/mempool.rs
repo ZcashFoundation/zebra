@@ -869,15 +869,13 @@ impl Service<Request> for Mempool {
             }
 
             // Broadcast the whole cycle's changes as a single `MempoolBatch`,
-            // stamped with the post-cycle checksum over the now-settled replica
-            // projection: the verified set plus the queued set `{txid → stage}`
-            // (design §3a-1, §9.6, §9.8). The checksum lets a follower verify
+            // stamped with the post-cycle checksum over the now-settled verified
+            // set (design §3a-1, §9.6, §9.8). The checksum lets a follower verify
             // convergence atomically after applying the batch's events. Cycles
             // with no changes broadcast nothing, since no replica state changed.
             if !events.is_empty() {
                 let verified_ids: HashSet<UnminedTxId> = storage.tx_ids().collect();
-                let queued = tx_downloads.queued_stages();
-                let checksum = replica_digest(&verified_ids, &queued);
+                let checksum = replica_digest(&verified_ids);
 
                 self.transaction_sender
                     .send(MempoolBatch::new(events, Some(checksum)))?;
