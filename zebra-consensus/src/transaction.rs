@@ -579,6 +579,9 @@ where
         // [NU6.3 onward] valueBalanceOrchard must be non-negative (Orchard pool frozen against new
         // inflows; see `orchard_value_balance_non_negative`).
         check::orchard_value_balance_non_negative(tx, height, network)?;
+        // [NU6.3 onward] Coinbase transactions must have an empty Orchard component (new shielded
+        // coinbase value is routed to the Ironwood pool instead).
+        check::coinbase_orchard_component_empty(tx, height, network)?;
         check::consensus_branch_id(tx, height, network)?;
 
         // Soft fork: temporarily require transactions to not contain Orchard actions.

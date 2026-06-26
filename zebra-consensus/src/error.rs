@@ -53,8 +53,8 @@ pub enum TransactionError {
     #[error("coinbase transaction MUST NOT have the EnableSpendsIronwood flag set")]
     CoinbaseHasEnableSpendsIronwood,
 
-    #[error("v6 coinbase transaction MUST NOT have any Orchard flags set")]
-    CoinbaseHasOrchardFlags,
+    #[error("coinbase transaction MUST have an empty Orchard component (no Orchard actions) from NU6.3 onward")]
+    CoinbaseHasOrchardActions,
 
     #[error("Orchard transaction MUST NOT have the EnableCrossAddress flag set")]
     OrchardHasEnableCrossAddress,
@@ -361,7 +361,7 @@ impl TransactionError {
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
             | CoinbaseHasEnableSpendsIronwood
-            | CoinbaseHasOrchardFlags
+            | CoinbaseHasOrchardActions
             | OrchardHasEnableCrossAddress
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool

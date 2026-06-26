@@ -11,16 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `error::TransactionError`:
   - `CoinbaseHasEnableSpendsIronwood`
-  - `CoinbaseHasOrchardFlags`
+  - `CoinbaseHasOrchardActions`
   - `DuplicateIronwoodNullifier`
   - `IronwoodProofSize`
   - `NegativeOrchardValueBalance`
   - `NotEnoughIronwoodFlags`
   - `OrchardHasEnableCrossAddress`
 - `transaction::check`:
+  - `coinbase_orchard_component_empty`
   - `has_enough_ironwood_flags`
   - `orchard_cross_address_disabled`
   - `orchard_value_balance_non_negative`
+
+### Changed
+
+- `error::TransactionError::NotEnoughFlags` renamed to `NotEnoughOrchardFlags`, for symmetry with
+  the new `NotEnoughIronwoodFlags` variant.
 - Halo2 verifiers split for the NU6.3 Orchard-pool freeze:
   - `halo2::VERIFYING_KEY_V5_PRE_NU6_2`
   - `halo2::VERIFYING_KEY_V5_POST_NU6_2`

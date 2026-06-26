@@ -219,6 +219,36 @@ pub fn orchard_value_balance_non_negative(
     Ok(())
 }
 
+/// Checks that a coinbase transaction has an empty Orchard component from NU6.3 onward.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] Coinbase transactions MUST have an empty Orchard component.
+///
+/// <https://zips.z.cash/zip-0229>
+///
+/// From NU6.3, newly shielded coinbase value is routed to the Ironwood pool instead, so coinbase
+/// transactions can no longer create Orchard notes. This is stronger than the pre-NU6.3 rule (which
+/// only forbids `enableSpendsOrchard`) and applies regardless of transaction version: a v5 coinbase
+/// mined at NU6.3 is constrained too, so the rule cannot be bypassed by using an older format.
+///
+/// (No-op for non-coinbase transactions, transactions without an Orchard component, and before
+/// NU6.3.)
+pub fn coinbase_orchard_component_empty(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3
+        && tx.is_coinbase()
+        && tx.orchard_shielded_data().is_some()
+    {
+        return Err(TransactionError::CoinbaseHasOrchardActions);
+    }
+
+    Ok(())
+}
+
 /// Check that a coinbase transaction has no PrevOut inputs, JoinSplits, or spends.
 ///
 /// # Consensus
@@ -250,20 +280,9 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             }
         }
 
-        // > [NU6.3 onward] For coinbase transactions, flagsOrchard MUST be 0.
-        //
-        // This is stronger than the pre-NU6.3 rule above (which only forbids enableSpends), and only
-        // applies to v6 transactions. A v5 coinbase Orchard bundle may still set enableOutputs, but
-        // `orchard_value_balance_non_negative` independently stops any coinbase from shielding new
-        // value into the Orchard pool at NU6.3 (new shielded value is routed to Ironwood instead).
-        #[cfg(zcash_unstable = "nu6.3")]
-        if matches!(tx, Transaction::V6 { .. }) {
-            if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-                if !orchard_shielded_data.flags.is_empty() {
-                    return Err(TransactionError::CoinbaseHasOrchardFlags);
-                }
-            }
-        }
+        // The stronger NU6.3 rule that a coinbase transaction must have an *empty* Orchard component
+        // is height-gated and applies to every transaction version, so it lives in
+        // `coinbase_orchard_component_empty` (called from `check_structure_and_network_rules`).
 
         // > [NU6.3 onward] In a version 6 coinbase transaction, the enableSpendsIronwood flag MUST
         // > be 0.

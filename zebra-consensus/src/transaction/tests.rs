@@ -303,6 +303,63 @@ fn v6_orchard_bundle_must_not_enable_cross_address() {
     assert!(check::orchard_cross_address_disabled(&tx).is_ok());
 }
 
+/// Tests the `[NU6.3 onward] coinbase transactions MUST have an empty Orchard component` rule
+/// (ZIP-229). The rule applies to every transaction version, so a v5 coinbase carrying Orchard
+/// actions is rejected from NU6.3 onward, even though the v5 format itself is unchanged.
+#[test]
+fn coinbase_orchard_component_empty_at_nu6_3() {
+    let _init_guard = zebra_test::init();
+
+    // NU6.3 is unscheduled on Mainnet/Testnet, so use a network that schedules it.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(10),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let nu6_3_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 activation height is configured");
+    let pre_nu6_3_height = NetworkUpgrade::Nu6_2
+        .activation_height(&network)
+        .expect("NU6.2 activation height is configured");
+
+    // A real V5 coinbase transaction; its Orchard component is inserted below.
+    let mut tx = v5_transactions(Network::Mainnet.block_iter())
+        .find(|transaction| transaction.is_coinbase())
+        .expect("a V5 coinbase transaction");
+
+    // A coinbase with no Orchard component is always accepted.
+    assert!(check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network).is_ok());
+
+    // Give the coinbase a (non-empty) Orchard component.
+    insert_fake_orchard_shielded_data(&mut tx);
+    assert!(tx.is_coinbase() && tx.orchard_shielded_data().is_some());
+
+    // Rejected from NU6.3 onward,
+    assert_eq!(
+        check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network),
+        Err(TransactionError::CoinbaseHasOrchardActions),
+    );
+    // but allowed before NU6.3, where coinbase Orchard outputs are still permitted.
+    assert!(check::coinbase_orchard_component_empty(&tx, pre_nu6_3_height, &network).is_ok());
+
+    // The rule only constrains coinbase transactions: a non-coinbase tx with an Orchard component
+    // is unaffected at NU6.3.
+    let mut non_coinbase = v5_transactions(Network::Mainnet.block_iter())
+        .find(|transaction| !transaction.is_coinbase())
+        .expect("a non-coinbase V5 transaction");
+    insert_fake_orchard_shielded_data(&mut non_coinbase);
+    assert!(check::coinbase_orchard_component_empty(&non_coinbase, nu6_3_height, &network).is_ok());
+}
+
 /// Tests that a transaction revealing the same Ironwood nullifier twice is rejected as a
 /// double-spend, and that the Ironwood and Orchard nullifier sets are checked separately.
 #[test]
