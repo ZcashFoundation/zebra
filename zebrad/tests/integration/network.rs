@@ -230,6 +230,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     let is_finished = Arc::new(AtomicBool::new(false));
     let _finish_guard = FinishOnDrop::new(Arc::clone(&is_finished));
 
+    let node1_listen_addr = config.network.listen_addr;
+    let (node1_listening_tx, node1_listening_rx) = tokio::sync::oneshot::channel::<()>();
+
     {
         let is_finished = Arc::clone(&is_finished);
         let config = config.clone();
@@ -242,6 +245,14 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_timeout(test_type.zebrad_timeout())
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
+            // Signal once node 1 is listening. A dial that lands before the listener
+            // is open marks node 1 unreachable in node 2's address book, which then
+            // never retries it, so node 2 never peers and the test times out.
+            zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
+                "Opened Zcash protocol endpoint at {node1_listen_addr}"
+            )))?;
+            let _ = node1_listening_tx.send(());
+
             while !is_finished.load(Ordering::SeqCst) {
                 zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
             }
@@ -249,6 +260,12 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
             Ok(())
         });
     }
+
+    // Only let node 2 dial once node 1 is listening.
+    tokio::time::timeout(Duration::from_secs(60), node1_listening_rx)
+        .await
+        .wrap_err("timed out waiting for node 1 to open its network listener")?
+        .wrap_err("node 1 exited before opening its network listener")?;
 
     let network2 = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
