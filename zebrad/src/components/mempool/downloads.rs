@@ -41,7 +41,10 @@ use futures::{
 };
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, oneshot},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -52,7 +55,7 @@ use zebra_chain::{
 };
 use zebra_consensus::transaction as tx;
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::Gossip;
+use zebra_node_services::mempool::{Gossip, MempoolChange};
 use zebra_state::{self as zs, CloneError};
 
 use crate::components::{
@@ -204,6 +207,11 @@ where
     /// has it as the third tuple element. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<SocketAddr, usize>,
+
+    /// Broadcasts transaction lifecycle changes observed in the download/verify
+    /// pipeline (`Queued{AwaitingDownload}`, `Queued{AwaitingVerification}`, and
+    /// `Removed{FailedDownload}`) to mempool change subscribers.
+    change_sender: broadcast::Sender<MempoolChange>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -296,11 +304,17 @@ where
     /// `network` is used to download transactions.
     /// `verifier` is used to verify transactions.
     /// `state` is used to check if transactions are already in the state.
+    /// `change_sender` broadcasts transaction lifecycle changes to subscribers.
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    pub fn new(
+        network: ZN,
+        verifier: ZV,
+        state: ZS,
+        change_sender: broadcast::Sender<MempoolChange>,
+    ) -> Self {
         Self {
             network,
             verifier,
@@ -308,6 +322,7 @@ where
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
+            change_sender,
         }
     }
 
@@ -376,6 +391,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+        let change_sender = self.change_sender.clone();
 
         let gossiped_tx_req = gossiped_tx.clone();
 
@@ -406,13 +422,25 @@ where
                         .oneshot(req)
                         .await
                         .map_err(CloneError::from)
-                        .map_err(TransactionDownloadVerifyError::DownloadFailed)?
+                        .map_err(TransactionDownloadVerifyError::DownloadFailed)
+                        .inspect_err(|_| {
+                            let _ = change_sender.send(MempoolChange::removed_failed_download(
+                                std::iter::once(txid).collect(),
+                            ));
+                        })?
                     {
-                        zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
-                            TransactionDownloadVerifyError::DownloadFailed(
-                                BoxError::from("no transactions returned").into(),
-                            )
-                        })?,
+                        zn::Response::Transactions(mut txs) => txs
+                            .pop()
+                            .ok_or_else(|| {
+                                TransactionDownloadVerifyError::DownloadFailed(
+                                    BoxError::from("no transactions returned").into(),
+                                )
+                            })
+                            .inspect_err(|_| {
+                                let _ = change_sender.send(MempoolChange::removed_failed_download(
+                                    std::iter::once(txid).collect(),
+                                ));
+                            })?,
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
@@ -436,6 +464,12 @@ where
             };
 
             trace!(?txid, "got tx");
+
+            // Both gossip paths converge here with the tx content in hand, so
+            // emit `Queued{AwaitingVerification}` uniformly before verifying.
+            let _ = change_sender.send(MempoolChange::queued_awaiting_verification(
+                std::iter::once(txid).collect(),
+            ));
 
             let result = verifier
                 .oneshot(tx::Request::Mempool {
@@ -539,6 +573,12 @@ where
         );
         metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
         metrics::counter!("mempool.queued.transactions.total").increment(1);
+
+        // The transaction is now newly queued (not a duplicate or queue-full
+        // rejection, which returned early above), so emit the entry event.
+        let _ = self.change_sender.send(MempoolChange::queued_awaiting_download(
+            std::iter::once(txid).collect(),
+        ));
 
         Ok(())
     }

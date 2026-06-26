@@ -22,6 +22,7 @@ use zebra_chain::{
     transparent::{self, OutPoint},
 };
 use zebra_consensus::transaction as tx;
+use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -38,6 +39,34 @@ type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, 
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, TransactionError>;
+
+/// Receives the next [`MempoolChange`] from `receiver`, failing the test if none
+/// arrives within a few seconds.
+async fn next_change(
+    receiver: &mut tokio::sync::broadcast::Receiver<MempoolChange>,
+) -> MempoolChange {
+    timeout(Duration::from_secs(3), receiver.recv())
+        .await
+        .expect("should not timeout")
+        .expect("recv should return Ok")
+}
+
+/// Receives [`MempoolChange`]s from `receiver` until one is not a
+/// [`MempoolChangeKind::Queued`] lifecycle event, returning that change.
+///
+/// Used by tests that assert on a terminal (`Added`/`Removed`) change after the
+/// `Queued{AwaitingDownload}`/`Queued{AwaitingVerification}` events that now
+/// precede it.
+async fn next_terminal_change(
+    receiver: &mut tokio::sync::broadcast::Receiver<MempoolChange>,
+) -> MempoolChange {
+    loop {
+        let change = next_change(receiver).await;
+        if !matches!(change.kind(), MempoolChangeKind::Queued(_)) {
+            return change;
+        }
+    }
+}
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
@@ -601,10 +630,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         "queued tx should fail to download and verify due to chain tip change"
     );
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
 
     assert_eq!(
         mempool_change,
@@ -829,10 +855,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
 
     assert_eq!(
         mempool_change,
@@ -918,17 +941,81 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    // A download failure is reported as `Removed{FailedDownload}` (emitted by
+    // the downloader), not as a verification failure.
+    let mempool_change = next_terminal_change(&mut mempool_transaction_receiver).await;
 
     assert_eq!(
         mempool_change,
-        MempoolChange::removed_failed_verification(
+        MempoolChange::removed_failed_download(
             [rejected_valid_tx.transaction.id].into_iter().collect(),
-            "download_failed",
         )
+    );
+
+    Ok(())
+}
+
+/// Check that a transaction whose content fails to download emits the
+/// `Queued{AwaitingDownload}` → `Removed{FailedDownload}` lifecycle, and never
+/// `Queued{AwaitingVerification}` (the download never completes).
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_failed_download_lifecycle() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let (
+        mut mempool,
+        mut peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        mut mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+
+    let tx = network
+        .unmined_transactions_in_blocks(1..=2)
+        .next()
+        .expect("should have at least 1 tx");
+    let txid = tx.transaction.id;
+
+    // Enable the mempool.
+    mempool.enable(&mut recent_syncs).await;
+
+    // Queue the transaction by its id and make the peer set report a failed
+    // download (an empty response).
+    let request = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![txid.into()]));
+    let download = peer_set
+        .expect_request_that(|r| matches!(r, zn::Request::TransactionsById(_)))
+        .map(|responder| responder.respond(zn::Response::Transactions(vec![])));
+    let (response, _) = futures::join!(request, download);
+    let queued_responses = match response.unwrap() {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+
+    // Poll the mempool so the failed download is picked up.
+    for _ in 0..2 {
+        mempool.dummy_call().await;
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
+
+    // The lifecycle is `Queued{AwaitingDownload}` then `Removed{FailedDownload}`,
+    // with no `Queued{AwaitingVerification}` in between.
+    let ids = || [txid].into_iter().collect();
+
+    assert_eq!(
+        next_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::queued_awaiting_download(ids())
+    );
+    assert_eq!(
+        next_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::removed_failed_download(ids())
     );
 
     Ok(())
@@ -960,7 +1047,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         mut chain_tip_change,
         mut tx_verifier,
         mut recent_syncs,
-        _mempool_transaction_receiver,
+        mut mempool_transaction_receiver,
     ) = setup(&network, u64::MAX, true).await;
 
     // Enable the mempool
@@ -1051,6 +1138,13 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     // no transactions were inserted in the mempool.
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
     assert_eq!(mempool.storage().transaction_count(), 0);
+
+    // The tip reset re-queues the in-flight transaction for re-verification,
+    // which is observable as `Removed{Reorged}` (design §5a).
+    assert_eq!(
+        next_terminal_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::removed_reorged([txid].into_iter().collect())
+    );
 
     // Verify the transaction again
 
@@ -1240,14 +1334,21 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         "AwaitOutput response should match expected output"
     );
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    // The full lifecycle is observable: `Queued{AwaitingDownload}` →
+    // `Queued{AwaitingVerification}` → `Added`.
+    let ids = || [unmined_tx_id].into_iter().collect();
 
     assert_eq!(
-        mempool_change,
-        MempoolChange::added([unmined_tx_id].into_iter().collect())
+        next_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::queued_awaiting_download(ids())
+    );
+    assert_eq!(
+        next_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::queued_awaiting_verification(ids())
+    );
+    assert_eq!(
+        next_change(&mut mempool_transaction_receiver).await,
+        MempoolChange::added(ids())
     );
 
     Ok(())
@@ -1982,10 +2083,12 @@ async fn cancel_handles_drained_after_verification_timeout() {
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
+    let (change_sender, _change_receiver) = tokio::sync::broadcast::channel(16);
     let mut downloads = Box::pin(Downloads::new(
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        change_sender,
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);

@@ -380,6 +380,7 @@ impl Mempool {
                     Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                     Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
                     self.state.clone(),
+                    self.transaction_sender.clone(),
                 ));
                 self.active_state = ActiveState::Enabled {
                     storage: storage::Storage::new(&self.config),
@@ -580,6 +581,16 @@ impl Service<Request> for Mempool {
             // Re-initialise an empty state.
             self.update_state(tip_action.as_ref());
 
+            // Report the verified txs being moved back to re-verification as
+            // `Removed{Reorged}` before re-queuing them, so the reorg signal
+            // starts the new lifecycle generation ahead of the re-verification
+            // `Queued`/`Added`/`Removed` events that follow (design §5a).
+            let reorged_ids: HashSet<_> = tx_retries.iter().map(|tx| tx.id()).collect();
+            if !reorged_ids.is_empty() {
+                self.transaction_sender
+                    .send(MempoolChange::removed_reorged(reorged_ids))?;
+            }
+
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
             if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
@@ -686,13 +697,18 @@ impl Service<Request> for Mempool {
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
 
-                        // Map the error to a stable code before `error` is moved
-                        // into `reject_if_needed` below.
-                        let code = tx_error_code(&error);
-                        failed_verification_ids
-                            .entry(code)
-                            .or_default()
-                            .insert(tx_id);
+                        // Download failures are broadcast as `Removed{FailedDownload}`
+                        // by the downloader itself, so don't also report them here as
+                        // a verification failure.
+                        if !matches!(error, TransactionDownloadVerifyError::DownloadFailed(_)) {
+                            // Map the error to a stable code before `error` is moved
+                            // into `reject_if_needed` below.
+                            let code = tx_error_code(&error);
+                            failed_verification_ids
+                                .entry(code)
+                                .or_default()
+                                .insert(tx_id);
+                        }
                         storage.reject_if_needed(tx_id, error);
                     }
                     Err((tx_id, _elapsed)) => {
