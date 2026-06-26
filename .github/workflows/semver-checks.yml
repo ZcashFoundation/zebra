@@ -8,9 +8,17 @@
 name: Semver Checks
 
 on:
+  # `edited` re-runs the gate when a title gains or loses the `!` marker without a new commit.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
+  push:
+    branches: [main]
+  merge_group:
 
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -26,19 +34,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      semver: ${{ steps.filter.outputs.semver }}
+      semver: ${{ steps.filter.outputs.semver || 'true' }}
+      breaking: ${{ steps.title.outputs.breaking }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
+        if: github.event_name == 'pull_request'
         with:
           filters: .github/path-filters.yml
+      - name: Read the breaking-change marker from the PR title
+        id: title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          breaking_marker='^[a-z]+(\([^)]*\))?!:'
+          if [[ "$PR_TITLE" =~ $breaking_marker ]]; then
+            echo "breaking=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "breaking=false" >> "$GITHUB_OUTPUT"
+          fi
 
   semver-checks:
     needs: changes
-    if: needs.changes.outputs.semver == 'true'
+    # Real work runs only on pull requests that change Rust and do not already declare a break
+    # with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # On push/merge_group the job is skipped and semver-checks-result skip-passes, so the merge
+    # queue is not stalled.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.semver == 'true' && needs.changes.outputs.breaking == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -48,37 +75,20 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
-          toolchain: nightly
+          toolchain: stable
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
         with:
           tool: cargo-semver-checks
       - uses: ./.github/actions/setup-zebra-build
-      - name: Detect public API breaks
-        id: detect
-        continue-on-error: true
+      - name: Check for undeclared public API breaks
         env:
           BASELINE_REV: ${{ github.event.pull_request.base.sha }}
-        run: cargo semver-checks --workspace --baseline-rev "$BASELINE_REV"
-      - name: Require a breaking-change declaration
-        if: steps.detect.outcome == 'failure'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          breaking_marker='^[a-z]+(\([^)]*\))?!:'
-          if [[ "$PR_TITLE" =~ $breaking_marker ]]; then
-            echo "Public API break is declared with '!' in the PR title; release-plz will bump the major version."
-            exit 0
+          if ! cargo semver-checks --workspace --baseline-rev "$BASELINE_REV"; then
+            echo "::error::cargo-semver-checks did not pass. If you are intentionally making a breaking public API change, add '!' after the type and scope in the PR title (for example 'feat(zebra-chain)!: ...') so the release bumps the major version. See CONTRIBUTING.md."
+            exit 1
           fi
-          {
-            echo "This PR breaks a published crate's public API, but the PR title declares no breaking change."
-            echo
-            echo "If the break is intentional, add '!' after the type/scope so the release bumps the major version:"
-            echo "  feat(zebra-chain)!: ..."
-            echo
-            echo "If it is not, restore the removed or changed item to keep the API backward-compatible."
-          } >&2
-          exit 1
 
   semver-checks-result:
     runs-on: ubuntu-latest

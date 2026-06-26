@@ -46,9 +46,11 @@ interpolation in a `run:` line.
 ## Enforcement
 
 The `semver-checks-result` job is the required status check. It reports success when the
-gate passes and when it is skipped (a PR with no Rust changes), matching the pattern in
-`lint.yml`. Making it required is a branch-protection and Mergify queue change, applied
-once the gate has run green on a few PRs.
+gate passes and when the real check is skipped: a PR with no Rust changes, or a `push` or
+`merge_group` event, where the base SHA and PR title are absent. This mirrors `lint.yml`,
+so the merge queue is never stalled by a check that produced no run. This change adds
+`semver-checks-result` to the Mergify queue conditions; adding it to branch protection is
+the remaining step.
 
 ## Sequencing
 
