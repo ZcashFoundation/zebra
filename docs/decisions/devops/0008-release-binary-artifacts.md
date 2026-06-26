@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-06-26
-builds-on: [Reproducible and signed release images](0007-reproducible-builds.md)
+builds-on: "[Reproducible and signed release images](0007-reproducible-builds.md)"
 story: Which artifacts the binary release should ship
 ---
 
