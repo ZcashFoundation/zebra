@@ -38,7 +38,7 @@ pub struct VerifiedReplicaTx {
 /// §3a). Apply is idempotent and lifecycle-monotonic (design §10): a transaction
 /// never regresses to an earlier stage within its current generation, and a
 /// removal starts a new generation. The replica recomputes a [`replica_digest`]
-/// over its projection ([`Self::digest`]) to compare against each batch's
+/// over its verified set ([`Self::digest`]) to compare against each batch's
 /// source-computed checksum.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MempoolReplica {
@@ -47,11 +47,6 @@ pub struct MempoolReplica {
     /// The queued set (transactions in the download/verify pipeline), keyed by
     /// full [`UnminedTxId`].
     queued: HashMap<UnminedTxId, QueuedStage>,
-    /// Content retained for transactions a reorg moved back to the queued set for
-    /// re-verification, so the replica can still serve them while they are
-    /// re-verified (design §5a "content is retained"). Its keys are always a
-    /// subset of [`Self::queued`], so it never affects [`Self::digest`].
-    retained: HashMap<UnminedTxId, VerifiedReplicaTx>,
 }
 
 /// A single transaction-lifecycle transition observed by a [`MempoolReplica`],
@@ -139,27 +134,20 @@ impl MempoolReplica {
         tx: VerifiedReplicaTx,
     ) -> Option<MempoolObservation> {
         self.queued.remove(&id);
-        self.retained.remove(&id);
         let is_new = self.verified.insert(id, tx).is_none();
         is_new.then_some(MempoolObservation::Added { tx_id: id })
     }
 
-    /// Applies a `Removed{reason}` event.
+    /// Applies a `Removed{reason}` event, dropping the transaction from the
+    /// replica entirely.
     ///
-    /// A [`RemovedReason::Reorged`] removal is the reorg marker (design §5a): it
-    /// re-queues a transaction at `AwaitingDownload` rather than dropping it,
-    /// retaining a verified transaction's content. A removal starts a new
-    /// generation (design §10), so this re-queue is allowed to regress an
-    /// already-queued transaction's stage. `AwaitingDownload` is the source's
-    /// actual re-queue entry stage: a reorg re-enters each retried tx through
-    /// `download_if_needed_and_verify`, emitting `Queued{AwaitingDownload}` and
-    /// only later advancing to `Queued{AwaitingVerification}`. Mirroring that
-    /// entry stage keeps the follower's queued projection equal to the source's
-    /// throughout recovery, so the source's following `Queued{AwaitingDownload}`
-    /// is an idempotent no-op and `Queued{AwaitingVerification}` advances in
-    /// lock-step, and the post-cycle digests match without a re-bootstrap.
-    ///
-    /// Any other reason removes the transaction from the replica.
+    /// Every reason — including [`RemovedReason::Reorged`] — removes the
+    /// transaction, starting a new generation (design §10). A reorg is a real
+    /// generation reset: the source re-queues the tx through
+    /// `download_if_needed_and_verify` and re-sends its content on the
+    /// re-verification `Added`, so the follower re-establishes it cleanly from the
+    /// subsequent `Queued{AwaitingDownload}` → … → `Added` events rather than
+    /// retaining stale content (design §5a, §10).
     ///
     /// Returns the transition, or `None` if the transaction was not being tracked
     /// (an idempotent remove-absent no-op).
@@ -168,25 +156,7 @@ impl MempoolReplica {
         id: UnminedTxId,
         reason: RemovedReason,
     ) -> Option<MempoolObservation> {
-        if matches!(reason, RemovedReason::Reorged) {
-            // Re-queue verified → queued{AwaitingDownload}, retaining content so
-            // the replica keeps serving the tx while the source re-verifies it.
-            if let Some(content) = self.verified.remove(&id) {
-                self.queued.insert(id, QueuedStage::AwaitingDownload);
-                self.retained.insert(id, content);
-                return Some(MempoolObservation::Removed { tx_id: id, reason });
-            }
-            // Already queued: the new generation permits regressing it back to the
-            // re-queue entry stage so it tracks the source's re-verification.
-            if let Some(stage) = self.queued.get_mut(&id) {
-                *stage = QueuedStage::AwaitingDownload;
-                return Some(MempoolObservation::Removed { tx_id: id, reason });
-            }
-            return None;
-        }
-
         let removed = self.verified.remove(&id).is_some() || self.queued.remove(&id).is_some();
-        self.retained.remove(&id);
         removed.then_some(MempoolObservation::Removed { tx_id: id, reason })
     }
 
@@ -201,12 +171,6 @@ impl MempoolReplica {
     /// Returns the verified mempool transaction with the given id, if present.
     pub fn verified_tx(&self, id: &UnminedTxId) -> Option<&VerifiedReplicaTx> {
         self.verified.get(id)
-    }
-
-    /// Returns the content of `id` if the replica is holding it, whether currently
-    /// verified or retained while being re-verified after a reorg (design §5a).
-    pub fn transaction(&self, id: &UnminedTxId) -> Option<&VerifiedReplicaTx> {
-        self.verified.get(id).or_else(|| self.retained.get(id))
     }
 
     /// Returns the queued stage of `id`, if it is in the queued set.

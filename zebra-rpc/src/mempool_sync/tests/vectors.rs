@@ -222,16 +222,18 @@ fn test_added_event_reconstructs_content() {
 }
 
 #[test]
-fn test_reorg_retains_content() {
+fn test_reorg_removes_then_readds() {
     let (_, unmined) = sample_tx();
     let id = unmined.id;
 
     let mut replica = MempoolReplica::default();
-    replica.apply_added(id, replica_tx(unmined));
+    replica.apply_added(id, replica_tx(unmined.clone()));
     assert!(replica.contains_verified(&id));
+    let verified_digest = replica.digest();
 
-    // A reorg re-queues the verified tx at the source's re-queue entry stage
-    // (AwaitingDownload), starting a new generation and retaining content.
+    // A reorg starts a new generation by removing the tx entirely (design §10); its
+    // content is re-sent on the wire by the source's re-verification `Added`, so
+    // nothing is retained.
     let observation = replica.apply_removed(id, RemovedReason::Reorged);
     assert!(matches!(
         observation,
@@ -240,32 +242,29 @@ fn test_reorg_retains_content() {
             ..
         })
     ));
-
     assert!(!replica.contains_verified(&id));
-    assert_eq!(
-        replica.queued_stage(&id),
-        Some(QueuedStage::AwaitingDownload)
-    );
-    // The content is still available while the tx is being re-verified (§5a).
-    assert!(replica.transaction(&id).is_some());
+    assert_eq!(replica.queued_stage(&id), None);
+    assert!(replica.verified_tx(&id).is_none());
+    // The verified-set digest reflects the removal with no spurious mismatch: it is
+    // now the empty-set digest, distinct from the pre-reorg digest.
+    assert_ne!(replica.digest(), verified_digest);
+    assert_eq!(replica.digest(), MempoolReplica::default().digest());
 
-    // The source's following re-verification events apply in lock-step: the
-    // Queued{AwaitingDownload} re-queue is an idempotent no-op, and
-    // Queued{AwaitingVerification} advances the tx within the new generation.
+    // The source re-establishes the tx cleanly: Queued{AwaitingDownload} →
+    // Queued{AwaitingVerification} → Added, with no stage dropped by the monotonic
+    // guard, and the verified-set digest converges back.
     assert!(replica
         .apply_queued(id, QueuedStage::AwaitingDownload)
-        .is_none());
-    assert_eq!(
-        replica.queued_stage(&id),
-        Some(QueuedStage::AwaitingDownload)
-    );
+        .is_some());
     assert!(replica
         .apply_queued(id, QueuedStage::AwaitingVerification)
         .is_some());
-    assert_eq!(
-        replica.queued_stage(&id),
-        Some(QueuedStage::AwaitingVerification)
-    );
+    assert!(matches!(
+        replica.apply_added(id, replica_tx(unmined)),
+        Some(MempoolObservation::Added { tx_id }) if tx_id == id
+    ));
+    assert!(replica.contains_verified(&id));
+    assert_eq!(replica.digest(), verified_digest);
 }
 
 #[test]
@@ -497,14 +496,14 @@ async fn e2e_checksum_mismatch_triggers_rebootstrap_and_gap() {
     .await;
 }
 
-/// End-to-end: a reorg re-queues a transaction through `Removed{Reorged}` followed by the source's
-/// `Queued{AwaitingDownload}` / `Queued{AwaitingVerification}` re-verification events, and the
-/// follower converges in lock-step with the source's checksums without a re-bootstrap (§5a, §10).
+/// End-to-end: a reorg removes a transaction via `Removed{Reorged}`, then the source re-establishes
+/// it through `Queued{AwaitingDownload}` / `Queued{AwaitingVerification}` re-verification events, and
+/// the follower converges in lock-step with the source's checksums without a re-bootstrap (§5a, §10).
 ///
-/// This regression-guards the divergence where the follower kept a reorged tx ahead of the source's
-/// re-queue stage, then silently dropped the source's corrective `Queued{AwaitingDownload}` via the
-/// monotonic guard, forcing a spurious checksum-mismatch re-bootstrap. Only a single bootstrap is
-/// served, so any re-bootstrap would stall and time out this test.
+/// A `Removed{Reorged}` starts a new generation by dropping the tx entirely, so the subsequent
+/// re-queue events re-add it cleanly with no stage dropped by the monotonic guard and no spurious
+/// checksum mismatch. Only a single bootstrap is served, so any re-bootstrap would stall and time
+/// out this test.
 #[tokio::test]
 async fn e2e_reorg_requeues_without_rebootstrap() {
     let _init_guard = zebra_test::init();
@@ -526,9 +525,9 @@ async fn e2e_reorg_requeues_without_rebootstrap() {
     })
     .await;
 
-    // A reorg re-queues the tx: the source emits `Removed{Reorged}` then re-enters it at
-    // `AwaitingDownload`. The settled checksum is over the verified set, which is empty (the tx is
-    // queued), so it is the empty-set digest.
+    // A reorg removes the tx then re-adds it: the source emits `Removed{Reorged}` then re-enters it
+    // at `AwaitingDownload`. The settled checksum is over the verified set, which is empty (the tx
+    // is queued), so it is the empty-set digest.
     let download_checksum = replica_digest(&HashSet::new());
 
     sender
