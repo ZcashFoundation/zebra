@@ -71,11 +71,19 @@ const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// stream gap (design §3b).
 const OBSERVATION_CHANNEL_CAPACITY: usize = 1024;
 
-/// The initial reconnect backoff, doubled after each failed session up to [`MAX_BACKOFF`].
+/// The reconnect backoff a healthy session resets to, doubled after each reconnect up to
+/// [`MAX_BACKOFF`].
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 
 /// The maximum reconnect backoff.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// How long a session must last to be treated as healthy. A session that ran at least this long
+/// before failing resets the reconnect backoff to [`INITIAL_BACKOFF`]; a shorter one (e.g. a session
+/// that bootstraps then almost immediately hits a checksum mismatch in the live phase) leaves the
+/// backoff growing, so repeated fast failures back off instead of hot-looping reconnects every
+/// [`INITIAL_BACKOFF`] (design §3a, §7).
+const HEALTHY_SESSION_THRESHOLD: Duration = Duration::from_secs(60);
 
 /// Syncs a primary Zebra node's mempool over its `SyncMempool` indexer gRPC, maintaining a local
 /// [`MempoolReplica`] and a lifecycle observation feed (design §6).
@@ -136,8 +144,17 @@ impl TrustedMempoolSync {
                 let _ = self.observation_sender.send(MempoolObservation::Gap);
             }
 
-            if let Err(error) = self.run_session(&mut backoff).await {
+            let session_start = tokio::time::Instant::now();
+            if let Err(error) = self.run_session().await {
                 tracing::warn!(?error, "mempool sync session ended, will reconnect");
+            }
+
+            // Reset the backoff only after a genuinely healthy session (one that ran past
+            // HEALTHY_SESSION_THRESHOLD). A session that bootstraps then fails almost immediately
+            // (e.g. a persistent live-phase checksum mismatch) is not healthy, so the backoff keeps
+            // growing instead of hot-looping reconnects every INITIAL_BACKOFF (design §3a, §7).
+            if session_start.elapsed() >= HEALTHY_SESSION_THRESHOLD {
+                backoff = INITIAL_BACKOFF;
             }
 
             is_reconnect = true;
@@ -148,10 +165,10 @@ impl TrustedMempoolSync {
 
     /// Connects, bootstraps a fresh replica, then applies live batches until the session fails.
     ///
-    /// Resets `backoff` once the bootstrap completes, so a long-lived session that later drops
-    /// reconnects promptly. Returns an error on any connection, stream, decode, or checksum failure;
-    /// the caller backs off and reconnects, which re-bootstraps from scratch.
-    async fn run_session(&self, backoff: &mut Duration) -> Result<(), BoxError> {
+    /// Returns an error on any connection, stream, decode, or checksum failure; the caller backs off
+    /// and reconnects (which re-bootstraps from scratch), growing the backoff unless this session
+    /// was healthy (design §3a, §7).
+    async fn run_session(&self) -> Result<(), BoxError> {
         let mut client = Self::connect(self.indexer_rpc_address).await?;
         let mut stream = tokio::time::timeout(SUBSCRIBE_TIMEOUT, client.sync_mempool(Empty {}))
             .await
@@ -179,7 +196,6 @@ impl TrustedMempoolSync {
             if batch.initial_sync_complete {
                 verify_checksum(&replica, batch.checksum.as_deref())?;
                 self.publish_replica(&replica);
-                *backoff = INITIAL_BACKOFF;
                 break;
             }
         }
