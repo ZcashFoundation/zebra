@@ -448,9 +448,13 @@ where
 
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
-            let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
-            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
+            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = if req.is_mempool() {
+                Self::mempool_spent_utxos(tx.clone(), req.height(), state.clone(), mempool.clone()).await?
+            } else {
+                let (spent_utxos, spent_outputs) =
+                    Self::block_spent_utxos(tx.clone(), req.known_utxos(), state.clone()).await?;
+                    (spent_utxos, spent_outputs, vec![])
+            };
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
@@ -686,18 +690,68 @@ where
         }
     }
 
-    /// Wait for the UTXOs that are being spent by the given transaction.
+    /// Looks up UTXOs spent by `tx` from the best chain state, also checking
+    /// `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
-    /// Looks up UTXOs that are being spent by the given transaction in the state or waits
-    /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
-    ///
-    /// Returns a triple containing:
-    /// - `OutPoint` -> `Utxo` map,
-    /// - vec of `Output`s in the same order as the matching inputs in the `tx`,
-    /// - vec of `Outpoint`s spent by a mempool `tx` that were not found in the best chain's utxo set.
-    async fn spent_utxos(
+    /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
+    /// order as the matching inputs in `tx`.
+    async fn block_spent_utxos(
         tx: Arc<Transaction>,
-        req: Request,
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
+        state: Timeout<ZS>,
+    ) -> Result<
+        (
+            HashMap<transparent::OutPoint, transparent::Utxo>,
+            Vec<transparent::Output>,
+        ),
+        TransactionError,
+    > {
+        let inputs = tx.inputs();
+        let mut spent_utxos = HashMap::new();
+        // Pre-allocate with None so we can fill each slot by input index, preserving input order.
+        let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+
+        for (input_idx, input) in inputs.iter().enumerate() {
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
+                tracing::trace!("awaiting outpoint lookup");
+
+                let utxo = if let Some(output) = known_utxos.get(outpoint) {
+                    tracing::trace!("UXTO in known_utxos, discarding query");
+                    output.utxo.clone()
+                } else {
+                    let query = state
+                        .clone()
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
+
+                    if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        utxo
+                    } else {
+                        unreachable!("AwaitUtxo always responds with Utxo")
+                    }
+                };
+                tracing::trace!(?utxo, "got UTXO");
+                spent_outputs[input_idx] = Some(utxo.output.clone());
+                spent_utxos.insert(*outpoint, utxo);
+            }
+        }
+
+        let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
+
+        Ok((spent_utxos, spent_outputs))
+    }
+
+    /// Looks up UTXOs spent by a mempool `tx`, first querying the best chain state
+    /// and then the mempool for inputs whose outputs are not present in the best chain.
+    ///
+    /// `height` is the next block height, used to construct `Utxo` values for
+    /// outputs sourced from the mempool.
+    ///
+    /// Returns an `OutPoint -> Utxo` map, a vec of `Output`s in the same order
+    /// as the matching inputs in `tx`, and a vec of `OutPoint`s that were
+    /// sourced from the mempool rather than the best chain.
+    async fn mempool_spent_utxos(
+        tx: Arc<Transaction>,
+        height: block::Height,
         state: Timeout<ZS>,
         mempool: Option<Timeout<Mempool>>,
     ) -> Result<
@@ -708,11 +762,6 @@ where
         ),
         TransactionError,
     > {
-        let is_mempool = req.is_mempool();
-        // Additional UTXOs known at the time of validation,
-        // i.e., from previous transactions in the block.
-        let known_utxos = req.known_utxos();
-
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order
@@ -724,48 +773,26 @@ where
         for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
-                let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UXTO in known_utxos, discarding query");
-                    output.utxo.clone()
-                } else if is_mempool {
-                    let query = state
-                        .clone()
-                        .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                        .await
-                        .map_err(|_| TransactionError::TransparentInputNotFound)?
-                    else {
-                        unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
-                    };
+                let query = state
+                    .clone()
+                    .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                    let Some(utxo) = utxo else {
-                        spent_mempool_outpoints.push((input_idx, *outpoint));
-                        continue;
-                    };
-
-                    utxo
-                } else {
-                    let response = state
-                        .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
-                        .await
-                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
-                            Ok(_) => TransactionError::TransparentInputNotFound,
-                            Err(boxed_error) => TransactionError::from(boxed_error),
-                        })?;
-
-                    if let zebra_state::Response::Utxo(utxo) = response {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
-                    }
+                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
+                    .await
+                    .map_err(|_| TransactionError::TransparentInputNotFound)?
+                else {
+                    unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                 };
+
+                let Some(utxo) = utxo else {
+                    spent_mempool_outpoints.push((input_idx, *outpoint));
+                    continue;
+                };
+
                 tracing::trace!(?utxo, "got UTXO");
                 spent_outputs[input_idx] = Some(utxo.output.clone());
                 spent_utxos.insert(*outpoint, utxo);
-            } else {
-                continue;
             }
         }
 
@@ -795,7 +822,7 @@ where
                     //
                     // If the tip height changes while an umined transaction is being verified,
                     // the transaction must be re-verified before being added to the mempool.
-                    transparent::Utxo::new(output, req.height(), false),
+                    transparent::Utxo::new(output, height, false),
                 );
             }
         } else if !spent_mempool_outpoints.is_empty() {
