@@ -567,9 +567,9 @@ where
             let (spent_utxos, spent_outputs, spent_mempool_outpoints) =
                 Self::mempool_spent_utxos(tx.clone(), height, state.clone(), mempool.clone()).await?;
 
-            // WONTFIX: Return an error for Request::Block as well to replace this check in
-            //       the state once #2336 has been implemented?
-            Self::check_maturity_height(&network, &req, &spent_utxos)?;
+            // Mempool transactions have no block context, so there are no outputs from
+            // earlier transactions in the same block to consider.
+            Self::check_maturity_height(tx.clone(), height, &network, &spent_utxos)?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
@@ -917,26 +917,26 @@ where
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
 
-    /// Accepts `request`, a transaction verifier [`&Request`](Request),
-    /// and `spent_utxos`, a HashMap of UTXOs in the chain that are spent by this transaction.
+    /// Checks that every transparent coinbase output spent by `tx` has matured
+    /// by `height`.
     ///
-    /// Gets the `transaction`, `height`, and `known_utxos` for the request and checks calls
-    /// [`check::tx_transparent_coinbase_spends_maturity`] to verify that every transparent
-    /// coinbase output spent by the transaction will have matured by `height`.
+    /// This check applies only to mempool transactions. Block transactions are
+    /// checked during contextual validation in the state (see #2336).
     ///
     /// Returns `Ok(())` if every transparent coinbase output spent by the transaction is
     /// mature and valid for the request height, or a [`TransactionError`] if the transaction
     /// spends transparent coinbase outputs that are immature and invalid for the request height.
     pub fn check_maturity_height(
+        tx: Arc<Transaction>,
+        height: block::Height,
         network: &Network,
-        request: &Request,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<(), TransactionError> {
         check::tx_transparent_coinbase_spends_maturity(
             network,
-            request.transaction(),
-            request.height(),
-            request.known_utxos(),
+            tx,
+            height,
+            Arc::new(HashMap::new()),
             spent_utxos,
         )
     }
