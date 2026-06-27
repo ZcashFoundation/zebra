@@ -23,7 +23,7 @@ use zebra_network::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
     },
     types::{MetaAddr, PeerServices},
-    AddressBook, InventoryResponse, Request, Response,
+    AddressBook, InventoryResponse, PeerSocketAddr, Request, Response,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -154,9 +154,10 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     ) = setup(false).await;
 
     // Test `Request::PushTransaction`
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         let transaction = responder
@@ -367,9 +368,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     ) = setup(false).await;
 
     // Push test transaction
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx1.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx1.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx1_id = responder.request().tx_id();
@@ -508,9 +510,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .respond(Response::Nil);
 
     // Push a second transaction to trigger `remove_expired_transactions()`
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx2.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx2.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx2_id = responder.request().tx_id();

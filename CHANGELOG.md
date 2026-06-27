@@ -82,6 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   attestation, and a signed SBOM, so anyone can confirm an image came from Zebra's CI
   with `cosign verify` or `gh attestation verify`
   ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Route directly pushed transactions (`tx` messages) through the same per-peer
+  mempool admission accounting as advertised transaction IDs, so a single inbound
+  peer cannot bypass the per-peer download cap by pushing full transactions
+  instead of advertising them
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+  This is the direct-push counterpart of the advertisement-path fix in
+  GHSA-4fc2-h7jh-287c. Thanks to @SuplabsYi for reporting the issue.
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 

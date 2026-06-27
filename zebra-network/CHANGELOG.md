@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `Request::PushTransaction` now carries the sending peer's address as a second field
+  (`Option<PeerSocketAddr>`), so directly pushed transactions are attributed to the
+  sending peer and subject to the same per-peer mempool admission cap as advertised
+  transaction IDs
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+
 ### Added
 
 - Added the Regtest-only network config option `should_allow_unshielded_coinbase_spends`,
