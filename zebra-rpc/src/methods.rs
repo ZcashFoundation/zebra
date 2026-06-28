@@ -2508,6 +2508,7 @@ where
         let height = chain_info.tip_height.next().map_misc_error()?;
 
         // Randomly select some mempool transactions.
+        let coinbase_cache = self.gbt.coinbase_cache();
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
@@ -2516,6 +2517,7 @@ where
             mempool_tx_deps,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
+            Some(&coinbase_cache),
         );
 
         tracing::debug!(
