@@ -2464,6 +2464,7 @@ where
                     return Ok(BlockTemplateResponse::new_internal(
                         &self.network,
                         precomputed_coinbase,
+                        None,
                         miner_params,
                         &chain_info,
                         server_long_poll_id,
@@ -2530,6 +2531,7 @@ where
         Ok(BlockTemplateResponse::new_internal(
             &self.network,
             None,
+            Some(self.gbt.coinbase_cache()),
             miner_params,
             &chain_info,
             server_long_poll_id,
