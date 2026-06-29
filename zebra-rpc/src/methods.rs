@@ -1328,25 +1328,24 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-                    let transactions =
-                        block
-                            .transactions
-                            .iter()
-                            .map(|tx| {
-                                GetBlockTransaction::Object(Box::new(
-                                    TransactionObject::from_transaction(
-                                        tx.clone(),
-                                        Some(height),
-                                        Some(confirmations),
-                                        &network,
-                                        Some(block_time),
-                                        Some(hash),
-                                        Some(true),
-                                        tx.hash(),
-                                    ),
-                                ))
-                            })
-                            .collect();
+                    let transactions = block
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            GetBlockTransaction::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    Some(confirmations),
+                                    &network,
+                                    Some(block_time),
+                                    Some(hash),
+                                    Some(true),
+                                    tx.hash(),
+                                ),
+                            ))
+                        })
+                        .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),

@@ -853,12 +853,11 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_header = block.header.clone();
     let block_size = block.zcash_serialized_size();
 
-    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> =
-        MockService::build()
-            .with_max_request_delay(std::time::Duration::from_secs(5))
-            .for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _rpc_tx_queue) = RpcImpl::new(
@@ -880,8 +879,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
 
     let rpc_clone = rpc.clone();
     let hash_str = block_hash.to_string();
-    let block_future =
-        tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
+    let block_future = tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
 
     // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
     read_state
