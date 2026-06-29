@@ -32,9 +32,10 @@ impl RpcRequestClient {
     /// Use [`RpcRequestClient::new()`] for the default timeout.
     pub fn new_with_timeout(rpc_address: SocketAddr, timeout: Duration) -> Self {
         Self {
-            client: Client::builder().timeout(timeout).build().expect(
-                "reqwest::Client build only fails for invalid TLS config, not a plain timeout",
-            ),
+            client: Client::builder()
+                .timeout(timeout)
+                .build()
+                .expect("reqwest::Client build should not fail when only setting timeout"),
             rpc_address,
         }
     }
