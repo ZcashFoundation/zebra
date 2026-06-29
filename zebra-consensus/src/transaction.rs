@@ -487,16 +487,16 @@ where
             let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
 
             Ok(Response::Block {
-                    tx_id,
-                    miner_fee,
-                    // In block validation, the consensus sigop total must include P2SH
-                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
-                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
-                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
-                    // sigops. See
-                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
-                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
-                })
+                tx_id,
+                miner_fee,
+                // In block validation, the consensus sigop total must include P2SH
+                // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
+                // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
+                // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
+                // sigops. See
+                // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
+                sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
+            })
         }
             .inspect(move |result| {
                 // Hide the transaction data to avoid filling the logs
@@ -615,7 +615,7 @@ where
 
             // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
             // spends both chain and mempool UTXOs (mempool outputs are appended last by
-            // `spent_utxos()`), causing policy checks to pair the wrong input with
+            // `mempool_spent_utxos()`), causing policy checks to pair the wrong input with
             // the wrong spent output.
             // https://github.com/ZcashFoundation/zebra/issues/10346
             let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
