@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
+- Use constant-time comparison for RPC cookie authentication ([#10567](https://github.com/ZcashFoundation/zebra/pull/10567))
 - Zebra's release Docker images are now reproducible: an independent rebuild of a
   published `zebrad` from the same commit produces the same binary. The Rust
   toolchain and the Rust and Debian base images are pinned by exact version and
