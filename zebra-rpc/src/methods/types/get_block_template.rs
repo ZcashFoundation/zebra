@@ -586,7 +586,10 @@ impl CoinbaseCache {
         height: block::Height,
         fee: Amount<NonNegative>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
-        let cache = self.0.lock().expect("coinbase cache mutex is not poisoned");
+        let cache = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         match &*cache {
             Some((cached_height, cached_fee, coinbase))
                 if *cached_height == height && *cached_fee == fee =>
@@ -604,13 +607,18 @@ impl CoinbaseCache {
         fee: Amount<NonNegative>,
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
-        *self.0.lock().expect("coinbase cache mutex is not poisoned") =
-            Some((height, fee, coinbase));
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((height, fee, coinbase));
     }
 
     /// Discards the cached coinbase, forcing the next request to rebuild it.
     fn clear(&self) {
-        *self.0.lock().expect("coinbase cache mutex is not poisoned") = None;
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }
 
