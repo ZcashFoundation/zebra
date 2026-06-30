@@ -41,9 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Released `zebrad` binaries report their source commit in `zebrad version`
   ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
+  same-height sibling-tip invalidation, repeated reconsideration) without panicking
+  ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
 
 ### Security
 
+- Use constant-time comparison for RPC cookie authentication ([#10567](https://github.com/ZcashFoundation/zebra/pull/10567))
 - Zebra's release Docker images are now reproducible: an independent rebuild of a
   published `zebrad` from the same commit produces the same binary. The Rust
   toolchain and the Rust and Debian base images are pinned by exact version and

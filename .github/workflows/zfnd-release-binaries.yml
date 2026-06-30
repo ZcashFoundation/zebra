@@ -137,6 +137,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: read
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
       REPOSITORY: ${{ github.repository }}
@@ -173,12 +174,12 @@ jobs:
           set -euo pipefail
           cosign verify-blob SHA256SUMS \
             --bundle SHA256SUMS.sigstore.json \
-            --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-release-binaries\.yml@' \
+            --certificate-identity-regexp="^https://github\\.com/${REPOSITORY}/\\.github/workflows/zfnd-release-binaries\\.yml@" \
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
           for archive in *.tar.gz; do
             gh attestation verify "${archive}" \
               --repo "${REPOSITORY}" \
-              --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml
+              --signer-workflow "${REPOSITORY}/.github/workflows/zfnd-release-binaries.yml"
           done
 
       - name: Upload binaries to the release

@@ -746,10 +746,16 @@ where
 
                     utxo
                 } else {
-                    let query = state
+                    let response = state
                         .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                    if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
+                        .await
+                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                            Ok(_) => TransactionError::TransparentInputNotFound,
+                            Err(boxed_error) => TransactionError::from(boxed_error),
+                        })?;
+
+                    if let zebra_state::Response::Utxo(utxo) = response {
                         utxo
                     } else {
                         unreachable!("AwaitUtxo always responds with Utxo")
