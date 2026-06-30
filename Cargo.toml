@@ -34,15 +34,15 @@ orchard = "0.14"
 zcash_tachyon = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="5d6977cbb690a5946aaf97163428b8473dd192d2"}
 ragu = {git = "https://github.com/tachyon-zcash/ragu", rev = "2f926fdcb5f1d402ca06aad4230b16540367e850", default-features = false, features = ["mock"]}
 sapling-crypto = "0.7"
-zcash_address = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_encoding = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_history = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_keys = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_primitives = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_proofs = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_transparent = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-zcash_protocol = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
-equihash = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_address = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_encoding = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_history = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_keys = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_primitives = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_proofs = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_transparent = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+zcash_protocol = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
+equihash = {git = "https://github.com/S1nus/librustzcash", rev = "fd8342d1442c5ba4e5fb0cead0f8d692d5fde5bf"}
 zip32 = "0.2"
 abscissa_core = "0.7"
 base64 = "0.22.1"
