@@ -342,7 +342,7 @@ impl Application for ZebradApp {
         let mut metadata_section = "Diagnostic metadata:".to_string();
         for (k, v) in panic_metadata {
             builder = builder.add_issue_metadata(k, v.clone());
-            write!(&mut metadata_section, "\n{k}: {}", &v)
+            write!(&mut metadata_section, "\n{k}: {v}")
                 .expect("unexpected failure writing to string");
         }
 

@@ -141,7 +141,7 @@ pub(crate) async fn run() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")
 }
 
 /// Accepts an [`RpcRequestClient`], calls getblocktemplate in template mode,
@@ -258,6 +258,8 @@ async fn try_validate_block_template(client: &RpcRequestClient, net: &Network) -
                         .expect("response should be success output with a serialized `BlockProposalResponse`");
 
                     if let BlockProposalResponse::Rejected(reject_reason) = proposal_result {
+                        if reject_reason.contains("best-chain-tip") { continue; }
+
                         tracing::info!(
                             ?reject_reason,
                             ?template,

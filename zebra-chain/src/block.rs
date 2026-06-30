@@ -11,7 +11,7 @@ use crate::{
     orchard,
     parameters::{Network, NetworkUpgrade},
     sapling,
-    serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    serialization::TrustedPreallocate,
     sprout,
     transaction::Transaction,
     transparent,
@@ -228,19 +228,21 @@ impl Block {
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        Ok(*self
+        // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
+        // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
+        // to propagate the first error instead.
+        let tx_pool_sum = self
             .transactions
             .iter()
-            .flat_map(|t| t.value_balance(utxos))
-            .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?
+            .try_fold(ValueBalance::<NegativeAllowed>::zero(), |acc, tx| {
+                acc + tx.value_balance(utxos)?
+            })?;
+
+        Ok(*tx_pool_sum
             .neg()
-            .set_deferred_amount(
-                deferred_pool_balance_change
-                    .map(DeferredPoolBalanceChange::value)
-                    .unwrap_or_default(),
-            ))
+            .set_deferred_amount(deferred_pool_balance_change.value()))
     }
 
     /// Compute the root of the authorizing data Merkle tree,
@@ -258,14 +260,30 @@ impl<'a> From<&'a Block> for Hash {
     }
 }
 
-/// A serialized Block hash takes 32 bytes
-const BLOCK_HASH_SIZE: u64 = 32;
+/// The maximum number of `block::Hash` entries Zebra will preallocate for in
+/// a single peer-deserialized vector.
+///
+/// In the P2P protocol, `Vec<block::Hash>` appears as the `known_blocks` block
+/// locator in `getblocks` and `getheaders` messages. The Bitcoin/Zcash
+/// convention encodes locators with exponentially-spaced heights (1, 2, 3, …,
+/// 10, 20, 40, …, genesis), giving `~log2(N) + 10` entries for chain length N.
+/// For current Zcash chain heights (~3M blocks) a legitimate locator has ~32
+/// entries.
+///
+/// We cap at 101 to match Bitcoin Core's `MAX_LOCATOR_SZ` constant
+/// (`net_processing.cpp`), which zcashd inherits. This avoids any risk of
+/// rejecting legitimate locators sent by compatible nodes that follow the
+/// existing Bitcoin/Zcash protocol convention.
+///
+/// Without this cap, `Hash::max_allocation` was previously derived from
+/// `MAX_PROTOCOL_MESSAGE_LEN / 32 = 65,535`, which allowed a remote peer to
+/// force ~2 MiB heap preallocation per crafted `getblocks`/`getheaders` message
+/// before any payload was read. This is the same class as
+/// GHSA-xr93-pcq3-pxf8 (`addr_limit`), fixed for AddrV1/V2 in PR #10494.
+pub const MAX_BLOCK_LOCATOR_LENGTH: u64 = 101;
 
-/// The maximum number of hashes in a valid Zcash protocol message.
 impl TrustedPreallocate for Hash {
     fn max_allocation() -> u64 {
-        // Every vector type requires a length field of at least one byte for de/serialization.
-        // Since a block::Hash takes 32 bytes, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / 32 hashes in a single message
-        ((MAX_PROTOCOL_MESSAGE_LEN - 1) as u64) / BLOCK_HASH_SIZE
+        MAX_BLOCK_LOCATOR_LENGTH
     }
 }

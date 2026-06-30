@@ -6,7 +6,11 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex as _;
 
-use zebra_chain::{amount::NonNegative, block::Height, transaction::VerifiedUnminedTx};
+use zebra_chain::{
+    amount::NonNegative,
+    block::Height,
+    transaction::{Hash, VerifiedUnminedTx},
+};
 use zebra_node_services::mempool::TransactionDependencies;
 
 use super::zec::Zec;
@@ -58,15 +62,9 @@ pub struct MempoolObject {
 impl MempoolObject {
     pub(crate) fn from_verified_unmined_tx(
         unmined_tx: &VerifiedUnminedTx,
-        transactions: &[VerifiedUnminedTx],
+        transactions_by_id: &HashMap<Hash, &VerifiedUnminedTx>,
         transaction_dependencies: &TransactionDependencies,
     ) -> Self {
-        // Map transactions by their txids to make lookups easier
-        let transactions_by_id = transactions
-            .iter()
-            .map(|unmined_tx| (unmined_tx.transaction.id.mined_id(), unmined_tx))
-            .collect::<HashMap<_, _>>();
-
         // Get txids of this transaction's descendants (dependents)
         let empty_set = HashSet::new();
         let deps = transaction_dependencies

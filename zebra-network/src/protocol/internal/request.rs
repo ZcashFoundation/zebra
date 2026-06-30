@@ -165,10 +165,16 @@ pub enum Request {
     /// The peer set routes this request specially, sending it to *half of*
     /// the available peers.
     ///
+    /// The second field is the address of the peer that sent us this `inv`:
+    /// `Some(addr)` when the advertisement was relayed from a remote peer,
+    /// and `None` when Zebra originates the advertisement itself (e.g. the
+    /// mempool gossip task). Used by the mempool downloader to enforce a
+    /// per-peer queue cap. See `GHSA-4fc2-h7jh-287c`.
+    ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseTransactionIds(HashSet<UnminedTxId>),
+    AdvertiseTransactionIds(HashSet<UnminedTxId>, Option<PeerSocketAddr>),
 
     /// Advertise a block to all peers.
     ///
@@ -230,7 +236,7 @@ impl fmt::Display for Request {
             ),
 
             Request::PushTransaction(_) => "PushTransaction".to_string(),
-            Request::AdvertiseTransactionIds(ids) => {
+            Request::AdvertiseTransactionIds(ids, _) => {
                 format!("AdvertiseTransactionIds({})", ids.len())
             }
 
@@ -255,7 +261,7 @@ impl Request {
             Request::FindHeaders { .. } => "FindHeaders",
 
             Request::PushTransaction(_) => "PushTransaction",
-            Request::AdvertiseTransactionIds(_) => "AdvertiseTransactionIds",
+            Request::AdvertiseTransactionIds(_, _) => "AdvertiseTransactionIds",
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",

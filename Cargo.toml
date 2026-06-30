@@ -30,22 +30,21 @@ edition = "2021"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.13"
-zcash_tachyon = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="b537e18b52c54dd2abf426585a22653b6ae3e14e"}
-mock_ragu = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="b537e18b52c54dd2abf426585a22653b6ae3e14e"}
+orchard = "0.14"
+zcash_tachyon = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="5d6977cbb690a5946aaf97163428b8473dd192d2"}
+ragu = {git = "https://github.com/tachyon-zcash/ragu", rev = "2f926fdcb5f1d402ca06aad4230b16540367e850", default-features = false, features = ["mock"]}
 sapling-crypto = "0.7"
-zcash_address = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_encoding = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_history = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_keys = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_primitives = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_proofs = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_transparent = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-zcash_protocol = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
-equihash = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_address = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_encoding = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_history = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_keys = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_primitives = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_proofs = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_transparent = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+zcash_protocol = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
+equihash = {git = "https://github.com/S1nus/librustzcash", rev = "9eaf4d9867753af3a2ee8b2ada522f92c021b176"}
 zip32 = "0.2"
 abscissa_core = "0.7"
-atty = "0.2.14"
 base64 = "0.22.1"
 bech32 = "0.11.0"
 bellman = "0.14"
@@ -56,19 +55,20 @@ bitvec = "1.0"
 blake2b_simd = "1.0"
 blake2s_simd = "1.0"
 bls12_381 = "0.8"
+bounded-vec = "0.9.0"
 bs58 = "0.5"
 byteorder = "1.5"
 bytes = "1.10"
 chrono = { version = "0.4.40", default-features = false }
 clap = "4.5"
 color-eyre = { version = "0.6.3", default-features = false }
-console-subscriber = "0.4"
+console-subscriber = "0.5"
 criterion = "0.5"
 crossbeam-channel = "0.5.14"
 derive-getters = "0.5"
 derive-new = "0.5"
 dirs = "6.0"
-ed25519-zebra = "4.0.3"
+ed25519-zebra = "4.2"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
 ff = "0.13"
 futures = "0.3.31"
@@ -136,10 +136,13 @@ serde_json = "1.0.140"
 serde_with = "3.12"
 serde_yml = "0.0"
 sha2 = "0.10"
+sinsemilla = "0.1"
 schemars = "1"
 spandoc = "0.2"
 static_assertions = "1.1"
-structopt = "0.3"
+anyhow = "1.0"
+strum = "0.27"
+strum_macros = "0.27"
 syn = "2.0.100"
 tempfile = "3.20"
 thiserror = "2.0"
@@ -149,7 +152,7 @@ tokio = "1.44"
 tokio-stream = "0.1.17"
 tokio-test = "0.4"
 tokio-util = "0.7.14"
-toml = "0.9.5"
+toml = "1.0"
 tonic = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
@@ -164,15 +167,15 @@ tracing-futures = "0.2.5"
 tracing-journald = "0.3"
 tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
-tracing-opentelemetry = "0.29"
-opentelemetry = "0.28"
-opentelemetry_sdk = "0.28"
-opentelemetry-otlp = "0.28"
+tracing-opentelemetry = "0.32"
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = "0.31"
 uint = "0.10"
 vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.4.4"
+zcash_script = "0.4.5"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 

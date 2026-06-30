@@ -584,6 +584,34 @@ where
     collect_chain_hashes(chain, db, intersection, stop, max_len)
 }
 
+/// Finds the fork point between the locator `known_blocks` and the best chain.
+///
+/// `known_blocks` is a block locator: hashes ordered from highest height to lowest
+/// height. Returns the height and hash of the highest locator entry that is on the best
+/// chain (in `chain` or the finalized `db`) — the most recent common ancestor — or
+/// `None` if no locator entry is on the best chain.
+///
+/// Returns `None` if the state is empty.
+pub fn find_fork_point<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    known_blocks: Vec<block::Hash>,
+) -> Option<(Height, block::Hash)>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // See the note in `block_locator()`.
+
+    let chain = chain.as_ref();
+
+    let fork_hash = find_chain_intersection(chain, db, known_blocks)?;
+    let fork_height = height_by_hash(chain, db, fork_hash)?;
+
+    Some((fork_height, fork_hash))
+}
+
 /// Finds the first hash that's in the peer's `known_blocks` and the chain.
 /// Returns a list of headers that follow that intersection, from the chain.
 ///

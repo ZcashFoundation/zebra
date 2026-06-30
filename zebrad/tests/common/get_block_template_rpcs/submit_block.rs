@@ -15,7 +15,7 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 
 use crate::common::{
     cached_state::raw_future_blocks,
-    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc_with_opts},
     test_type::TestType,
 };
 
@@ -48,9 +48,18 @@ pub(crate) async fn run() -> Result<()> {
 
     // Start zebrad with no peers, we run the rest of the submitblock test without syncing.
     let should_sync = false;
-    let (mut zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
-            .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
+    // Disable the non-finalized state backup so the node loads at the finalized tip: the blocks
+    // fetched above it are then genuinely new and `submitblock` accepts them instead of reporting
+    // duplicates.
+    let use_non_finalized_backup = false;
+    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_with_opts(
+        network,
+        test_name,
+        test_type,
+        should_sync,
+        use_non_finalized_backup,
+    )?
+    .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 
     let rpc_address = zebra_rpc_address.expect("submitblock test must have RPC port");
 
@@ -89,7 +98,7 @@ pub(crate) async fn run() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
 
     Ok(())
 }

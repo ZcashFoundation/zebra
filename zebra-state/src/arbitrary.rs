@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, DeferredPoolBalanceChange},
     block::{self, Block},
     transaction::Transaction,
     transparent,
@@ -82,8 +82,12 @@ impl ContextuallyVerifiedBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
-            .expect("all UTXOs are provided with zero values")
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block,
+            zero_spent_utxos,
+            DeferredPoolBalanceChange::zero(),
+        )
+        .expect("all UTXOs are provided with zero values")
     }
 
     /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
@@ -97,7 +101,6 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change: _,
         } = block.into();
 
         Self {

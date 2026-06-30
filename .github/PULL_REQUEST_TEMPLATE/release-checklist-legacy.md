@@ -1,6 +1,6 @@
 ---
-name: "Release Checklist Template"
-about: "Checklist to create and publish a Zebra release"
+name: "Legacy Release Checklist Template"
+about: "Manual fallback checklist to create and publish a Zebra release"
 title: "Release Zebra (version)"
 labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
 assignees: ""
@@ -37,16 +37,17 @@ These steps can be done a few days before the release, in the same PR:
 
 ## Change Log
 
-**Important**: Any merge into `main` deletes any edits to the draft changelog.
-Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
+**Important**: This legacy checklist is for manual fallback releases when the
+automated release-plz workflow is not usable. Keep all changelog edits in the
+release branch until the release PR is merged.
 
-We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+Write the final changelog directly in `CHANGELOG.md`. We follow the
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 To create the final change log:
 
-- [ ] Copy the [**latest** draft
-      changelog](https://github.com/ZcashFoundation/zebra/releases) into
-      `CHANGELOG.md` (there can be multiple draft releases)
+- [ ] Move the current release entries from `[Unreleased]` into a new
+      `## [Zebra <version>](https://github.com/ZcashFoundation/zebra/releases/tag/v<version>) - <date>` section
 - [ ] Delete any trivial changes
   - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
 - [ ] Combine duplicate changes
@@ -75,7 +76,7 @@ fastmod --fixed-strings '1.58' '1.65'
 
 - [ ] Push the updated changelog and README into a new branch
       for example: `bump-v1.0.0` - this needs to be different to the tag name
-- [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
+- [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
@@ -120,7 +121,10 @@ Check that the release will work:
         type of release manually.
   - [ ] Update the crate `CHANGELOG.md` listing the API changes or other
         relevant information for a crate consumer. Use `public-api` to list all
-        API changes: `cargo public-api diff latest -p <crate> -sss`. You can use
+        API changes: `cargo public-api diff latest -p <crate> -sss`, or run
+        [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once
+        to get the full per-crate diff plus dependency and (with `--with-values`)
+        const/static value and doc changes in one pass. You can use
         e.g. copilot to turn it into a human-readable list, e.g. (write the output
         to `api.txt` beforehand):
         ```
@@ -136,6 +140,12 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 ```
 
 - [ ] Commit and push the above version changes to the release branch.
+
+## Update Initial Minimum Network Protocol Version
+
+- [ ] If this release should stop connecting to older peers, update
+      `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in
+      `zebra-network/src/constants.rs`.
 
 ## Update End of Support
 
@@ -163,18 +173,17 @@ The end of support height is calculated from the current blockchain height:
 ## Create the GitHub Pre-Release
 
 - [ ] Wait for all the release PRs to be merged
-- [ ] Create a new release using the draft release as a base, by clicking the Edit icon in the [draft release](https://github.com/ZcashFoundation/zebra/releases)
+- [ ] Create a new GitHub release from the [releases page](https://github.com/ZcashFoundation/zebra/releases/new)
 - [ ] Set the tag name to the version tag,
       for example: `v1.0.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Set the release title to `Zebra ` followed by the version tag,
       for example: `Zebra 1.0.0`
-- [ ] Replace the prepopulated draft changelog in the release description with the final changelog you created;
+- [ ] Copy the final changelog you created into the release description;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
       and ending just _before_ the title of the previous release.
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
-- [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
 ## Test the Pre-Release
 

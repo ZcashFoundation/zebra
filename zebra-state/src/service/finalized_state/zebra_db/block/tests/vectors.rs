@@ -13,6 +13,7 @@
 use std::{iter, sync::Arc};
 
 use zebra_chain::{
+    amount::DeferredPoolBalanceChange,
     block::{
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
@@ -91,7 +92,8 @@ fn test_block_db_round_trip_with(
             .iter()
             .map(ToString::to_string),
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     // Check that each block round-trips to the database
     for original_block in block_test_cases.into_iter() {
@@ -136,13 +138,15 @@ fn test_block_db_round_trip_with(
                 height: Height(0),
                 new_outputs,
                 transaction_hashes,
-                deferred_pool_balance_change: None,
             })
         };
 
         let dummy_treestate = Treestate::default();
-        let finalized =
-            FinalizedBlock::from_checkpoint_verified(checkpoint_verified, dummy_treestate);
+        let finalized = FinalizedBlock::from_checkpoint_verified(
+            checkpoint_verified,
+            dummy_treestate,
+            DeferredPoolBalanceChange::zero(),
+        );
 
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();

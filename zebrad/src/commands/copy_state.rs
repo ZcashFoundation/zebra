@@ -124,7 +124,7 @@ impl CopyStateCmd {
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
         let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
-            old_zs::spawn_init_read_only(source_config.clone(), network).await?;
+            old_zs::spawn_init_read_only(source_config.clone(), network).await??;
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");

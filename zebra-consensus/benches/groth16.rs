@@ -40,7 +40,7 @@ struct JoinSplitSource {
 fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
     let mut sources = Vec::new();
 
-    for (_height, bytes) in zebra_test::vectors::MAINNET_BLOCKS.iter() {
+    for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
 
         for tx in &block.transactions {

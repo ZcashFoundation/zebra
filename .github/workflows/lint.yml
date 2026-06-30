@@ -3,25 +3,9 @@ name: Lint
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - clippy.toml
-      - .cargo/config.toml
-      - .github/workflows/lint.yml
-      - supply-chain/**
-
   push:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - clippy.toml
-      - .cargo/config.toml
-      - .github/workflows/lint.yml
-      - supply-chain/**
+  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -38,9 +22,30 @@ env:
   CLICOLOR: 1
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lint: ${{ steps.filter.outputs.lint || 'true' }}
+      hadolint: ${{ steps.filter.outputs.hadolint || 'true' }}
+      shellcheck: ${{ steps.filter.outputs.shellcheck || 'true' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: .github/path-filters.yml
+
   clippy:
     name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -62,7 +67,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           components: clippy
           toolchain: ${{ matrix.rust-version }}
@@ -72,7 +77,10 @@ jobs:
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
 
   crate-checks:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -80,10 +88,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -91,7 +99,10 @@ jobs:
 
   msrv:
     name: MSRV
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -104,7 +115,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: 1.91 # MSRV
           cache-on-failure: true
@@ -113,7 +124,10 @@ jobs:
 
   docs:
     name: docs
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -121,7 +135,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
@@ -135,7 +149,10 @@ jobs:
 
   fmt:
     name: fmt
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -143,7 +160,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           components: rustfmt
@@ -152,7 +169,10 @@ jobs:
 
   unused-deps:
     name: unused-deps
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -161,17 +181,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-udeps
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo udeps --workspace --all-targets --all-features --locked
 
   no-test-deps:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -179,7 +201,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
@@ -189,7 +211,10 @@ jobs:
   # Checks that selected rates can compile with power set of features
   features:
     name: features
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -198,12 +223,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
       - name: cargo install cargo-hack
-        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -213,7 +238,10 @@ jobs:
 
   check-cargo-lock:
     name: check-cargo-lock
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -221,7 +249,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
@@ -230,7 +258,10 @@ jobs:
 
   deny:
     name: Check deny ${{ matrix.checks }} ${{ matrix.features }}
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     strategy:
@@ -256,11 +287,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
-        uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 #v2.0.15
+        uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 #v2.0.18
         with:
           # --all-features spuriously activates openssl, but we want to ban that dependency in
           # all of zebrad's production features for security reasons. But the --all-features job is
@@ -271,7 +302,10 @@ jobs:
 
   vet:
     name: cargo-vet check
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -279,23 +313,61 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
       - name: Install cargo-vet
-        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-vet
       - name: Run cargo-vet check
         run: cargo vet check
 
-  lint-success:
-    name: lint success
+  hadolint:
+    name: hadolint
+    needs: changes
+    if: needs.changes.outputs.hadolint == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: docker/Dockerfile
+          failure-threshold: warning
+
+  shellcheck:
+    name: shellcheck
+    needs: changes
+    if: needs.changes.outputs.shellcheck == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # shellcheck is preinstalled on the ubuntu-latest runner image.
+      - name: Run shellcheck
+        run: |
+          find . -type f -name '*.sh' \
+            -not -path './target/*' \
+            -print0 | xargs -0 -r shellcheck --color=always
+
+  lint:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - changes
       - clippy
       - crate-checks
+      - msrv
       - docs
       - fmt
       - unused-deps
@@ -304,9 +376,12 @@ jobs:
       - features
       - deny
       - vet
+      - hadolint
+      - shellcheck
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, vet, hadolint, shellcheck

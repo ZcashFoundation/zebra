@@ -147,7 +147,12 @@ fn filterload_message_round_trip() {
     let v_bytes = rt.block_on(async {
         let mut bytes = Vec::new();
         {
-            let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+            let mut fw = FramedWrite::new(
+                &mut bytes,
+                Codec::builder()
+                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .finish(),
+            );
             fw.send(v.clone())
                 .await
                 .expect("message should be serialized");
@@ -156,7 +161,12 @@ fn filterload_message_round_trip() {
     });
 
     let v_parsed = rt.block_on(async {
-        let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+        let mut fr = FramedRead::new(
+            Cursor::new(&v_bytes),
+            Codec::builder()
+                .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                .finish(),
+        );
         fr.next()
             .await
             .expect("a next message should be available")
@@ -249,7 +259,12 @@ fn filterload_message_too_large_round_trip() {
     let v_bytes = rt.block_on(async {
         let mut bytes = Vec::new();
         {
-            let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+            let mut fw = FramedWrite::new(
+                &mut bytes,
+                Codec::builder()
+                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .finish(),
+            );
             fw.send(v.clone())
                 .await
                 .expect("message should be serialized");
@@ -258,7 +273,12 @@ fn filterload_message_too_large_round_trip() {
     });
 
     rt.block_on(async {
-        let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+        let mut fr = FramedRead::new(
+            Cursor::new(&v_bytes),
+            Codec::builder()
+                .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                .finish(),
+        );
         fr.next()
             .await
             .expect("a next message should be available")
@@ -606,7 +626,9 @@ fn headers_message_exceeding_protocol_cap_is_rejected() {
     // 161 headers — one more than the protocol limit of 160.
     let msg = Message::Headers(vec![counted.clone(); 161]);
 
-    let mut codec = Codec::builder().finish();
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
     let mut bytes = BytesMut::new();
     codec
         .encode(msg, &mut bytes)
@@ -633,7 +655,9 @@ fn headers_message_at_protocol_cap_is_accepted() {
 
     let msg = Message::Headers(vec![counted; 160]);
 
-    let mut codec = Codec::builder().finish();
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
     let mut bytes = BytesMut::new();
     codec
         .encode(msg, &mut bytes)
