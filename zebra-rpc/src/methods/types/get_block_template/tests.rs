@@ -96,3 +96,63 @@ fn coinbase() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Tests that the coinbase cache reuses a previously built coinbase for the same height and fees,
+/// so a short-polling miner doesn't re-run the shielded-coinbase proof on every request.
+#[test]
+fn coinbase_cache_reuses_built_coinbase() {
+    use super::CoinbaseCache;
+
+    let net = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("Nu5 is active on Mainnet");
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Sapling),
+        )
+        .expect("hard-coded Sapling address is valid"),
+    );
+    let fee = Amount::zero();
+
+    let build = || {
+        TransactionTemplate::new_coinbase(
+            &net,
+            height,
+            &miner_params,
+            fee,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
+        )
+        .expect("valid coinbase tx")
+    };
+
+    // A shielded coinbase carries a randomized proof, so two fresh builds differ. Identical bytes
+    // therefore prove the cache returned a reused transaction rather than rebuilding it.
+    let coinbase = build();
+    assert_ne!(
+        build(),
+        coinbase,
+        "fresh shielded coinbases differ (randomized proof)"
+    );
+
+    let cache = CoinbaseCache::default();
+    assert!(cache.get(height, fee).is_none(), "an empty cache misses");
+
+    cache.store(height, fee, coinbase.clone());
+    assert_eq!(
+        cache.get(height, fee),
+        Some(coinbase.clone()),
+        "a cache hit reuses the stored coinbase",
+    );
+
+    // A different height key or a cleared cache misses, so the next request rebuilds.
+    let next_height = height.next().expect("height is below Height::MAX");
+    assert!(
+        cache.get(next_height, fee).is_none(),
+        "a different height misses"
+    );
+    cache.clear();
+    assert!(cache.get(height, fee).is_none(), "a cleared cache misses");
+}
