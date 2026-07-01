@@ -1158,7 +1158,7 @@ impl Transaction {
         self.ironwood_shielded_data()
             .into_iter()
             .flat_map(orchard::ShieldedData::nullifiers)
-            .map(|nullifier| ironwood::Nullifier(*nullifier))
+            .map(|nullifier| ironwood::Nullifier::from(*nullifier))
     }
 
     /// Access the Ironwood note commitments in this transaction, if there are any,

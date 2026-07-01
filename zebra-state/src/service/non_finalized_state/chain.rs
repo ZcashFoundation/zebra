@@ -2484,7 +2484,7 @@ impl UpdateWith<(Option<&ironwood::ShieldedData>, &SpendingTransactionId)> for C
                 ironwood_shielded_data
                     .data()
                     .nullifiers()
-                    .map(|nullifier| ironwood::Nullifier(*nullifier)),
+                    .map(|nullifier| ironwood::Nullifier::from(*nullifier)),
                 *revealing_tx_id,
             )?;
         }
@@ -2511,7 +2511,7 @@ impl UpdateWith<(Option<&ironwood::ShieldedData>, &SpendingTransactionId)> for C
                 ironwood_shielded_data
                     .data()
                     .nullifiers()
-                    .map(|nullifier| ironwood::Nullifier(*nullifier)),
+                    .map(|nullifier| ironwood::Nullifier::from(*nullifier)),
             );
         }
     }

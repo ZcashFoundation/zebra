@@ -48,7 +48,7 @@ impl IntoDisk for ironwood::Nullifier {
     fn as_bytes(&self) -> Self::Bytes {
         // The Ironwood nullifier set is stored under its own column family, disjoint from Orchard's,
         // so it is safe to reuse the Orchard nullifier byte encoding.
-        self.0.as_bytes()
+        (*self).into()
     }
 }
 

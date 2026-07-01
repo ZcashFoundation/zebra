@@ -22,7 +22,13 @@ mod arbitrary;
 /// separate column families and are checked separately. Keeping Ironwood nullifiers in their own
 /// type lets the duplicate-nullifier detection distinguish the two pools at the type level.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
-pub struct Nullifier(pub orchard::Nullifier);
+pub struct Nullifier(orchard::Nullifier);
+
+impl From<Nullifier> for [u8; 32] {
+    fn from(nullifier: Nullifier) -> Self {
+        nullifier.0.into()
+    }
+}
 
 impl From<orchard::Nullifier> for Nullifier {
     fn from(nullifier: orchard::Nullifier) -> Self {
