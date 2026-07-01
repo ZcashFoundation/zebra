@@ -9,7 +9,13 @@ V5(
   inputs: [
     Coinbase(
       height: Height(1842421),
-      data: [],
+      data: [
+        4,
+        240,
+        159,
+        166,
+        147,
+      ],
       sequence: 4294967295,
     ),
   ],

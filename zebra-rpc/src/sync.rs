@@ -71,17 +71,31 @@ pub struct TrustedChainSync {
     chain_tip_sender: ChainTipSender,
     /// The non-finalized state sender, for updating the [`ReadStateService`] when the non-finalized best chain changes.
     non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
+    /// Flipped to `true` once `sync()` receives its first parseable block from the
+    /// `non_finalized_state_change` stream, which stops [`update_finalized_chain_tip`] so `sync()`
+    /// becomes the sole caller of `try_catch_up_with_primary` on the shared secondary db.
+    started_sync_sender: tokio::sync::watch::Sender<bool>,
 }
 
 async fn update_finalized_chain_tip(
     db: ZebraDb,
     mut indexer_rpc_client: IndexerClient<tonic::transport::Channel>,
     mut finalized_chain_tip_sender: ChainTipSender,
-    non_finalized_state_receiver: tokio::sync::watch::Receiver<NonFinalizedState>,
+    mut started_sync_receiver: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut chain_tip_change_stream = None;
 
     loop {
+        // Stop as soon as `sync()` has received its first parseable non-finalized block. From then
+        // on `sync()` is the sole caller of `try_catch_up_with_primary` on the shared secondary, so
+        // this task must not advance the secondary's view concurrently (which would let a block be
+        // finalized between `sync()`'s check and its commit, failing as a duplicate-effects error).
+        // `sync()` also owns the published chain tip from then on, via its (higher) non-finalized
+        // tip, so publishing our lagging finalized tip would drag the reported tip backwards.
+        if *started_sync_receiver.borrow() {
+            return;
+        }
+
         let Some(ref mut chain_tip_change) = chain_tip_change_stream else {
             chain_tip_change_stream = match tokio::time::timeout(
                 SUBSCRIBE_TIMEOUT,
@@ -107,7 +121,16 @@ async fn update_finalized_chain_tip(
 
         // The message is only a signal that the primary's best chain advanced. We publish our own
         // finalized tip below, not the primary's (non-finalized) best tip, so the hash is unused.
-        match tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()).await {
+        //
+        // Stop immediately if `sync()` takes over while we're parked here, rather than waiting for
+        // the next chain-tip change, so we never catch up concurrently with `sync()`'s commits.
+        let message = tokio::select! {
+            biased;
+            _ = started_sync_receiver.changed() => return,
+            message = tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()) => message,
+        };
+
+        match message {
             Ok(Ok(Some(_block_hash_and_height))) => {}
             Ok(Ok(None)) => {
                 tracing::warn!("chain_tip_change stream ended unexpectedly");
@@ -126,10 +149,21 @@ async fn update_finalized_chain_tip(
             }
         }
 
+        // Don't advance the secondary or publish once `sync()` has taken over (it may have done so
+        // while we waited above), so we never catch up concurrently with `sync()`'s commits.
+        if *started_sync_receiver.borrow() {
+            return;
+        }
+
         // Catch the secondary's finalized state up to the primary, then publish its finalized tip.
         //
         // This keeps the finalized tip current while the secondary is still catching up, before
         // `TrustedChainSync::sync()` has any non-finalized blocks of its own to publish.
+        //
+        // # Correctness
+        //
+        // Catching up with the primary db instance concurrent with commits to the non-finalized state
+        // when the underlying Zebra node is syncing blocks rapidly could cause repeated commit failures.
         if let Err(error) = db.spawn_try_catch_up_with_primary().await {
             tracing::debug!(
                 ?error,
@@ -139,20 +173,16 @@ async fn update_finalized_chain_tip(
         }
 
         if let Some(tip_block) = finalized_chain_tip_block(&db).await {
-            // Stop once the syncer has committed its first non-finalized block. From then on
-            // `sync()` owns the published chain tip via the (higher) non-finalized tip, and
-            // publishing our lagging finalized tip here would drag the reported tip backwards.
+            // Re-check immediately before publishing, after the awaits above: `sync()` can take over
+            // while we wait on `spawn_try_catch_up_with_primary` or `finalized_chain_tip_block`, so
+            // checking any earlier would leave a window where we still publish the stale tip.
             //
             // `sync()`'s `ChainTipSender` latches onto the non-finalized tip, but this task holds a
             // separate `finalized_sender()` handle that doesn't, so `set_finalized_tip` would keep
             // overwriting the non-finalized tip rather than becoming a no-op. The task therefore
             // stops itself. The non-finalized state only grows once populated, so this handover is
             // permanent.
-            //
-            // Check this immediately before publishing, after the awaits above: the syncer can take
-            // over while we wait on `spawn_try_catch_up_with_primary` or `finalized_chain_tip_block`,
-            // so checking any earlier would leave a window where we still publish the stale tip.
-            if non_finalized_state_receiver.borrow().best_chain().is_some() {
+            if *started_sync_receiver.borrow() {
                 return;
             }
 
@@ -198,9 +228,10 @@ impl TrustedChainSync {
         let indexer_rpc_client = IndexerClient::new(channel);
         let finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
 
-        // Subscribe to the non-finalized state before moving the sender into the syncer, so the
-        // finalized-tip task can tell when `sync()` has taken over the chain tip.
-        let non_finalized_state_receiver = non_finalized_state_sender.subscribe();
+        // `sync()` flips this to `true` as soon as it receives its first parseable non-finalized
+        // block, which stops `update_finalized_chain_tip` so `sync()` becomes the sole caller of
+        // `try_catch_up_with_primary` on the shared secondary db.
+        let (started_sync_sender, started_sync_receiver) = tokio::sync::watch::channel(false);
 
         let mut syncer = Self {
             indexer_rpc_client: indexer_rpc_client.clone(),
@@ -208,6 +239,7 @@ impl TrustedChainSync {
             non_finalized_state,
             chain_tip_sender,
             non_finalized_state_sender,
+            started_sync_sender,
         };
 
         // Spawn a task to send finalized chain tip changes to the chain tip change and latest chain tip channels.
@@ -216,7 +248,7 @@ impl TrustedChainSync {
                 db,
                 indexer_rpc_client,
                 finalized_chain_tip_sender,
-                non_finalized_state_receiver,
+                started_sync_receiver,
             )
             .await
         });
@@ -239,6 +271,8 @@ impl TrustedChainSync {
         // The hash of the block that most recently failed to commit, used to avoid re-logging the
         // same warning at full rate while a block persistently fails to commit.
         let mut last_failed_commit_hash = None;
+        // Whether we've signalled `update_finalized_chain_tip` to stop, so we only send once.
+        let mut signalled_started = false;
         self.try_catch_up_with_primary().await;
         if let Some(finalized_tip_block) = finalized_chain_tip_block(&self.db).await {
             self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
@@ -290,6 +324,14 @@ impl TrustedChainSync {
                 non_finalized_blocks_listener = None;
                 continue;
             };
+
+            // We have a parseable block from the stream, so take over the finalized tip: stop
+            // `update_finalized_chain_tip` so it no longer catches up the shared secondary db
+            // concurrently with our commits below.
+            if !signalled_started {
+                self.started_sync_sender.send_replace(true);
+                signalled_started = true;
+            }
 
             if self.non_finalized_state.any_chain_contains(&hash) {
                 // Expected and harmless: on a resumed or multi-chain stream the server can re-send a
@@ -394,7 +436,7 @@ impl TrustedChainSync {
                 .non_finalized_state
                 .best_tip()
                 .map(|(height, _hash)| height)
-                .or_else(|| self.db.finalized_tip_height())
+                .max(self.db.finalized_tip_height())
             else {
                 return;
             };

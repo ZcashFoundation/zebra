@@ -1,13 +1,33 @@
 //! Mining config
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 
 use strum_macros::EnumIter;
 use zcash_address::ZcashAddress;
+use zcash_transparent::coinbase::{MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN};
 use zebra_chain::parameters::NetworkKind;
+
+/// The maximum length of the optional, arbitrary data in the script sig field of a coinbase tx.
+pub(crate) const MAX_MINER_DATA_LEN: usize = MAX_COINBASE_SCRIPT_LEN - MAX_COINBASE_HEIGHT_LEN;
+
+/// The marker Zebra prepends to the coinbase input of every block it builds.
+///
+/// The zebra emoji (`U+1F993`), 4 UTF-8 bytes.
+pub(crate) const ZEBRA_COINBASE_MARKER: &str = "🦓";
+
+/// Separates [`ZEBRA_COINBASE_MARKER`] from `extra_coinbase_data`. Present only when that is set.
+pub(crate) const ZEBRA_COINBASE_SEPARATOR: &str = ": ";
+
+/// The maximum length of the user-configurable `extra_coinbase_data`.
+///
+/// The coinbase data is the marker, separator, and user data in a single push, so the user
+/// portion is [`MAX_MINER_DATA_LEN`] minus the marker, separator, and the 2-byte `OP_PUSHDATA1`
+/// opcode (for pushes over 75 bytes).
+pub(crate) const MAX_USER_COINBASE_DATA_LEN: usize =
+    MAX_MINER_DATA_LEN - ZEBRA_COINBASE_MARKER.len() - ZEBRA_COINBASE_SEPARATOR.len() - 2;
 
 /// Mining configuration section.
 #[serde_as]
@@ -20,12 +40,11 @@ pub struct Config {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub miner_address: Option<ZcashAddress>,
 
-    /// Optional data that Zebra will include in the transparent input of a coinbase transaction.
+    /// Optional tag that Zebra appends to the coinbase input of every block it builds, after the
+    /// Zebra `🦓` marker and a `: ` separator.
     ///
-    /// The string is always encoded as raw UTF-8 bytes; it is not hex-decoded, even if it looks
-    /// like a valid hex string. The encoded value, including Zebra's script push overhead, is
-    /// limited to 94 bytes.
-    pub extra_coinbase_data: Option<String>,
+    /// Limited to `MAX_USER_COINBASE_DATA_LEN` bytes.
+    pub extra_coinbase_data: Option<ExtraCoinbaseData>,
 
     /// Optional shielded memo that Zebra will include in the output of a shielded coinbase
     /// transaction. Limited to 512 bytes.
@@ -51,6 +70,58 @@ impl Config {
         // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
         // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
         self.internal_miner
+    }
+}
+
+/// Operator-configured data appended to the coinbase input of every block Zebra builds, after
+/// Zebra's `🦓` marker and `: ` separator.
+///
+/// Validated on construction to fit within the coinbase data budget, so an oversized value can't
+/// be represented — and an oversized `mining.extra_coinbase_data` in the config makes Zebra fail
+/// to start.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtraCoinbaseData(String);
+
+impl Deref for ExtraCoinbaseData {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// The error returned when [`ExtraCoinbaseData`] is constructed from too many bytes.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("extra_coinbase_data is {0} bytes, but the maximum is {MAX_USER_COINBASE_DATA_LEN}")]
+pub struct ExtraCoinbaseDataTooLong(usize);
+
+impl TryFrom<String> for ExtraCoinbaseData {
+    type Error = ExtraCoinbaseDataTooLong;
+
+    fn try_from(data: String) -> Result<Self, Self::Error> {
+        if data.len() > MAX_USER_COINBASE_DATA_LEN {
+            Err(ExtraCoinbaseDataTooLong(data.len()))
+        } else {
+            Ok(Self(data))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ExtraCoinbaseData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::try_from(String::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for ExtraCoinbaseData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 

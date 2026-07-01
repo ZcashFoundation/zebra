@@ -16,12 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
   tip hashes and streams only the blocks above them, so a re-subscribing consumer
   resumes instead of being sent the entire non-finalized state again.
+- `config::mining::ExtraCoinbaseData` and `config::mining::ExtraCoinbaseDataTooLong`.
 
 ### Changed
 
 - `methods::BlockchainValuePoolBalances` is now `[GetBlockchainInfoBalance; 6]`
   (was `; 5`), and `GetBlockchainInfoBalance::{value_pools, zero_pools}` were
   updated for the added Ironwood pool.
+- Zebra now prepends a `🦓` marker to the coinbase input of every block it builds.
+- `config::mining::Config::extra_coinbase_data` is now `Option<ExtraCoinbaseData>` (was
+  `Option<String>`), limited to 86 bytes (was 94) and validated on construction.
 - The read-state syncer (`TrustedChainSync`) applies backpressure to the non-finalized
   block stream instead of dropping blocks for a slow consumer, bridges the gap between
   a lagging finalized tip and the streamed non-finalized chain by fetching the missing

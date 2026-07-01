@@ -184,7 +184,7 @@ toml = { workspace = true }
 
 futures = { workspace = true }
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process"] }
 tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }

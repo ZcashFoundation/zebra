@@ -95,6 +95,59 @@ fn coinbase() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The Zebra marker is always prepended, and `extra_coinbase_data` can't exceed the limit.
+#[test]
+fn coinbase_tag_and_limit() {
+    use zcash_address::ZcashAddress;
+
+    use crate::config::mining::{
+        Config, ExtraCoinbaseData, MAX_USER_COINBASE_DATA_LEN, ZEBRA_COINBASE_MARKER,
+        ZEBRA_COINBASE_SEPARATOR,
+    };
+
+    // `ExtraCoinbaseData` accepts data up to the limit and rejects one byte over. Its `Deserialize`
+    // impl delegates here, so an oversized `mining.extra_coinbase_data` makes the config fail to
+    // load and the node refuse to start.
+    assert!(ExtraCoinbaseData::try_from("x".repeat(MAX_USER_COINBASE_DATA_LEN)).is_ok());
+    assert!(ExtraCoinbaseData::try_from("x".repeat(MAX_USER_COINBASE_DATA_LEN + 1)).is_err());
+
+    let net = Network::Mainnet;
+    let addr: ZcashAddress = default_miner_address(net.kind(), &MinerAddressType::Transparent)
+        .parse()
+        .expect("default miner address parses");
+
+    let params = |extra: Option<ExtraCoinbaseData>| {
+        MinerParams::new(
+            &net,
+            Config {
+                miner_address: Some(addr.clone()),
+                extra_coinbase_data: extra,
+                ..Default::default()
+            },
+        )
+    };
+
+    // The marker is prepended whether or not `extra_coinbase_data` is set, so every block Zebra
+    // builds is tagged. Without extra data, the coinbase data is exactly the marker.
+    let untagged = params(None).expect("valid config");
+    let untagged = untagged.data().as_ref().expect("marker is always present");
+    assert_eq!(
+        untagged.value().as_slice(),
+        ZEBRA_COINBASE_MARKER.as_bytes()
+    );
+
+    // With extra data, the marker and separator precede it.
+    let tag = ExtraCoinbaseData::try_from("/pool/".to_string()).expect("within the limit");
+    let tagged = params(Some(tag)).expect("valid config");
+    let tagged = tagged.data().as_ref().expect("marker is always present");
+    assert_eq!(
+        tagged.value().as_slice(),
+        [ZEBRA_COINBASE_MARKER, ZEBRA_COINBASE_SEPARATOR, "/pool/"]
+            .concat()
+            .as_bytes()
+    );
+}
+
 /// Tests that the coinbase cache reuses a previously built coinbase for the same height and fees,
 /// so a short-polling miner doesn't re-run the shielded-coinbase proof on every request.
 #[test]
