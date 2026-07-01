@@ -29,6 +29,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that track only a single chain tip at a time.
   ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764)).
 
+### Added
+
+- `request::Spend::Ironwood`
+- `impl From<ironwood::Nullifier> for Spend`
+- `ValidateContextError::{DuplicateIronwoodNullifier, UnknownIronwoodAnchor}`
+- `DiskWriteBatch::{create_ironwood_tree, insert_ironwood_subtree}`
+- `ZebraDb`:
+  - `contains_ironwood_anchor`
+  - `contains_ironwood_nullifier`
+  - `ironwood_revealing_tx_loc`
+  - `ironwood_subtree_list_by_index_range`
+  - `ironwood_tree_by_height`
+  - `ironwood_tree_by_height_range`
+  - `ironwood_tree_for_tip`
+- `impl IntoDisk for ironwood::Nullifier`
+- `impl DuplicateNullifierError for ironwood::Nullifier`
+
+### Changed
+
+- Bumped the on-disk database format version (27 → 28) for the Ironwood note
+  commitment tree, anchors, subtrees, and nullifier set.
+- `IntoDisk for ValueBalance<NonNegative>` now serializes to `[u8; 48]`
+  (was `[u8; 40]`), for the added Ironwood pool balance.
+
 ## [9.0.1] - 2026-06-18
 
 ### Changed

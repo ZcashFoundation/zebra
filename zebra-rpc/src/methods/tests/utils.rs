@@ -21,6 +21,7 @@ pub fn fake_history_tree(network: &Network) -> Arc<HistoryTree> {
         block,
         &first_sapling_root,
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
 

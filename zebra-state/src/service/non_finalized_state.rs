@@ -468,6 +468,7 @@ impl NonFinalizedState {
                 finalized_state.sprout_tree_for_tip(),
                 finalized_state.sapling_tree_for_tip(),
                 finalized_state.orchard_tree_for_tip(),
+                finalized_state.ironwood_tree_for_tip(),
                 finalized_state.history_tree(),
                 finalized_state.finalized_value_pool(),
             );
@@ -532,6 +533,7 @@ impl NonFinalizedState {
             finalized_state.sprout_tree_for_tip(),
             finalized_state.sapling_tree_for_tip(),
             finalized_state.orchard_tree_for_tip(),
+            finalized_state.ironwood_tree_for_tip(),
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );

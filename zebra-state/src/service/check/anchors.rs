@@ -121,6 +121,52 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
         );
     }
 
+    // Ironwood Actions
+    //
+    // MUST refer to some earlier block’s final Ironwood treestate.
+    //
+    // # Consensus
+    //
+    // > The anchorIronwood field of the transaction, whenever it exists
+    // > (i.e. when there are any Ironwood Action descriptions), MUST refer to some
+    // > earlier block’s final Ironwood treestate.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#actions>
+    //
+    // Ironwood reuses the Orchard tree root type, in a separate anchor set.
+    if let Some(ironwood_shielded_data) = transaction.ironwood_shielded_data() {
+        tracing::debug!(
+            ?ironwood_shielded_data.shared_anchor,
+            ?tx_index_in_block,
+            ?height,
+            "observed ironwood anchor",
+        );
+
+        if !parent_chain
+            .map(|chain| {
+                chain
+                    .ironwood_anchors
+                    .contains(&ironwood_shielded_data.shared_anchor)
+            })
+            .unwrap_or(false)
+            && !finalized_state.contains_ironwood_anchor(&ironwood_shielded_data.shared_anchor)
+        {
+            return Err(ValidateContextError::UnknownIronwoodAnchor {
+                anchor: ironwood_shielded_data.shared_anchor,
+                height,
+                tx_index_in_block,
+                transaction_hash,
+            });
+        }
+
+        tracing::debug!(
+            ?ironwood_shielded_data.shared_anchor,
+            ?tx_index_in_block,
+            ?height,
+            "validated ironwood anchor",
+        );
+    }
+
     Ok(())
 }
 

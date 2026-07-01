@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `error::TransactionError`:
+  - `CoinbaseHasEnableSpendsIronwood`
+  - `CoinbaseHasOrchardActions`
+  - `DuplicateIronwoodNullifier`
+  - `IronwoodProofSize`
+  - `NegativeOrchardValueBalance`
+  - `NotEnoughIronwoodFlags`
+  - `OrchardHasEnableCrossAddress`
+- `transaction::check`:
+  - `coinbase_orchard_component_empty`
+  - `has_enough_ironwood_flags`
+  - `orchard_cross_address_disabled`
+  - `orchard_value_balance_non_negative`
+- A third Orchard Action verifier era for the NU6.3 cross-address circuit:
+  - `halo2::VERIFYING_KEY_NU6_3_ONWARD` and `halo2::VERIFIER_NU6_3_ONWARD`
+  - `halo2::orchard_v6_verifier` (for v6 Orchard and Ironwood bundles) and `halo2::VerifierService`
+
+### Changed
+
+- `error::TransactionError::NotEnoughFlags` renamed to `NotEnoughOrchardFlags`, for symmetry with
+  the new `NotEnoughIronwoodFlags` variant.
+- The Orchard Action verifying keys are now named by circuit era rather than transaction version,
+  because a bundle's key is selected by block era, not transaction version:
+  - `halo2::VERIFYING_KEY_POST_NU6_2` renamed to `halo2::VERIFYING_KEY_NU6_2`, and
+    `halo2::VERIFIER_POST_NU6_2` to `halo2::VERIFIER_NU6_2`.
+  - `halo2::verifier_for` renamed to `halo2::orchard_v5_verifier_for`; from NU6.3 it routes v5
+    Orchard bundles to the NU6.3 key (the same key as v6 Orchard and Ironwood).
+
 ## [9.0.1] - 2026-06-18
 
 ### Changed

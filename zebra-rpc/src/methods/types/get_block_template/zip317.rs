@@ -25,12 +25,6 @@ use zebra_node_services::mempool::TransactionDependencies;
 use super::CoinbaseCache;
 use crate::methods::types::transaction::TransactionTemplate;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use crate::methods::Amount;
-
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::amount::NonNegative;
-
 #[cfg(test)]
 mod tests;
 
@@ -64,28 +58,19 @@ pub fn select_mempool_transactions(
     miner_params: &MinerParams,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-        Amount<NonNegative>,
-    >,
     coinbase_cache: Option<&CoinbaseCache>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
+    //
     // The fake coinbase only depends on the height and miner parameters (its fee is always zero),
     // so it's constant per block. Reuse the same per-block cache as the real coinbase to avoid
     // re-proving a shielded coinbase on every `getblocktemplate` call just to read its size.
     let fake_coinbase_tx = coinbase_cache
         .and_then(|cache| cache.get(height, Amount::zero()))
         .unwrap_or_else(|| {
-            let cb = TransactionTemplate::new_coinbase(
-                net,
-                height,
-                miner_params,
-                Amount::zero(),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                zip233_amount,
-            )
-            .expect("valid coinbase transaction template");
+            let cb = TransactionTemplate::new_coinbase(net, height, miner_params, Amount::zero())
+                .expect("valid coinbase transaction template");
             if let Some(cache) = coinbase_cache {
                 cache.store(height, Amount::zero(), cb.clone());
             }

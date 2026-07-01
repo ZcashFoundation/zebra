@@ -800,6 +800,7 @@ impl Arbitrary for Transaction {
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3
             | NetworkUpgrade::Nu7 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
@@ -957,7 +958,6 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         v6 @ V6 { .. } => v6.clone(),
     }
 }
@@ -1043,7 +1043,6 @@ pub fn v5_transactions<'b>(
         | Transaction::V3 { .. }
         | Transaction::V4 { .. } => None,
         ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         ref tx @ Transaction::V6 { .. } => Some(tx.clone()),
     })
 }
@@ -1115,5 +1114,62 @@ pub fn insert_fake_orchard_shielded_data(
                 .expect("shielded data was just inserted")
         }
         _ => panic!("Fake V5 transaction is not V5"),
+    }
+}
+
+/// Builds a cryptographically-INVALID v6 Orchard-protocol [`orchard::ShieldedData`] for structural
+/// NU6.3 consensus-rule tests.
+///
+/// The bundle has the given `flags` and `value_balance`, and `action_count` copies of a single
+/// dummy action — so all actions share one nullifier, which is convenient for duplicate-nullifier
+/// tests. The proof is empty (not canonically sized) and the signatures are not valid, so this MUST
+/// NOT be used where proof verification or a canonical proof size is required.
+pub fn fake_v6_orchard_shielded_data(
+    flags: orchard::Flags,
+    value_balance: Amount<NegativeAllowed>,
+    action_count: usize,
+) -> orchard::ShieldedData {
+    let mut runner = TestRunner::default();
+    let dummy_action = orchard::Action::arbitrary()
+        .new_tree(&mut runner)
+        .unwrap()
+        .current();
+
+    let dummy_authorized_action = orchard::AuthorizedAction {
+        action: dummy_action,
+        spend_auth_sig: Signature::from([0u8; 64]),
+    };
+
+    let actions = vec![dummy_authorized_action; action_count.max(1)];
+
+    orchard::ShieldedData {
+        flags,
+        value_balance,
+        shared_anchor: orchard::tree::Root::default(),
+        proof: Halo2Proof(vec![]),
+        actions: actions.try_into().expect("action_count is at least one"),
+        binding_sig: Signature::from([0u8; 64]),
+    }
+}
+
+/// Builds a minimal NU6.3 v6 [`Transaction`] carrying the given optional Orchard-v6 and Ironwood
+/// bundles, for structural consensus-rule tests.
+///
+/// The transaction is non-coinbase (no inputs) and otherwise empty. The bundles are not
+/// cryptographically valid (see [`fake_v6_orchard_shielded_data`]).
+pub fn fake_v6_transaction(
+    network_upgrade: NetworkUpgrade,
+    orchard_shielded_data: Option<orchard::ShieldedDataV6>,
+    ironwood_shielded_data: Option<crate::ironwood::ShieldedData>,
+) -> Transaction {
+    Transaction::V6 {
+        network_upgrade,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data,
+        ironwood_shielded_data,
     }
 }

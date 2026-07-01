@@ -24,8 +24,6 @@ use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 
 use zcash_script::{opcode::PushValue, pv::push_value};
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::{
@@ -281,9 +279,6 @@ impl BlockTemplateResponse {
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-            Amount<NonNegative>,
-        >,
     ) -> Self {
         // Determine the next block height.
         let height = chain_info
@@ -343,15 +338,9 @@ impl BlockTemplateResponse {
                     .and_then(|cache| cache.get(height, txs_fee))
             })
             .unwrap_or_else(|| {
-                let coinbase_txn = TransactionTemplate::new_coinbase(
-                    net,
-                    height,
-                    miner_params,
-                    txs_fee,
-                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                    zip233_amount,
-                )
-                .expect("valid coinbase tx");
+                let coinbase_txn =
+                    TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
+                        .expect("valid coinbase tx");
 
                 if let Some(cache) = &coinbase_cache {
                     cache.store(height, txs_fee, coinbase_txn.clone());

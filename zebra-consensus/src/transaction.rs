@@ -572,6 +572,15 @@ where
     ) -> Result<(), TransactionError> {
         check::has_inputs_and_outputs(tx)?;
         check::has_enough_orchard_flags(tx)?;
+        // NU6.3 / Ironwood flag rules (no-ops for pre-v6 transactions).
+        check::has_enough_ironwood_flags(tx)?;
+        check::orchard_cross_address_disabled(tx)?;
+        // [NU6.3 onward] valueBalanceOrchard must be non-negative (Orchard pool frozen against new
+        // inflows; see `orchard_value_balance_non_negative`).
+        check::orchard_value_balance_non_negative(tx, height, network)?;
+        // [NU6.3 onward] Coinbase transactions must have an empty Orchard component (new shielded
+        // coinbase value is routed to the Ironwood pool instead).
+        check::coinbase_orchard_component_empty(tx, height, network)?;
         check::consensus_branch_id(tx, height, network)?;
 
         // Soft fork: temporarily require transactions to not contain Orchard actions.
@@ -610,6 +619,17 @@ where
                 if !orchard_shielded_data.proof_size_is_canonical() {
                     return Err(TransactionError::OrchardProofSize);
                 }
+            }
+        }
+
+        // The Ironwood bundle's Halo2 proof must also have a canonical size. Ironwood only exists
+        // from NU6.3 onward (there is no legacy lenient period as there was for Orchard), so this is
+        // enforced unconditionally whenever an Ironwood bundle is present. Like the Orchard bundle,
+        // Ironwood bundles are deserialized leniently, so the size is checked here rather than during
+        // parsing.
+        if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
+            if !ironwood_shielded_data.proof_size_is_canonical() {
+                return Err(TransactionError::IronwoodProofSize);
             }
         }
 
@@ -864,7 +884,6 @@ where
             Transaction::V5 { .. } => {
                 Self::verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 { .. } => {
                 Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
@@ -940,7 +959,8 @@ where
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2 => Ok(()),
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -1019,6 +1039,7 @@ where
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3
             | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -1038,15 +1059,68 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Verifies a V6 (NU6.3 / Ironwood) transaction's shielded data.
+    ///
+    /// Differs from [`Self::verify_v5_transaction`] in the Orchard verifier: a v6 Orchard bundle
+    /// commits to the NU6.3 cross-address circuit, so it (and the Ironwood bundle) verify under the
+    /// NU6.3 key, not the v5 fixed key.
     fn verify_v6_transaction(
         tx: &Transaction,
         nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
+        Self::verify_v6_transaction_network_upgrade(tx, nu)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+        let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
+
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
+        // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            tx,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(ironwood_bundle, &sighash)))
+    }
+
+    /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
+    ///
+    /// V6 transactions are only valid from NU6.3 onward.
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // V6 transactions are not valid before NU6.3.
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1212,16 +1286,15 @@ where
         async_checks
     }
 
-    /// Verifies a transaction's Orchard shielded data.
+    /// Verifies a **v5** transaction's Orchard bundle.
     ///
-    /// `network_upgrade` is the network upgrade active at the verified transaction's block
-    /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
-    /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
-    /// (GHSA-jfw5-j458-pfv6), so pre-NU6.2 bundles must be verified against the historical
-    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
-    /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
-    /// the verifier holding the matching key; the two verifiers keep separate batches, so eras
-    /// are never mixed.
+    /// A v5 Orchard bundle commits to the Orchard Action circuit of the block's era, so the
+    /// verifying key is selected by `network_upgrade` via
+    /// [`primitives::halo2::orchard_v5_verifier_for`]: the historical insecure key before NU6.2, the
+    /// fixed key from NU6.2 until NU6.3, and the NU6.3 key from NU6.3 onward. The Orchard-pool
+    /// cross-address restriction applies to every Orchard Action from NU6.3 onward regardless of
+    /// transaction version (ZIP 229), so a v5 bundle at NU6.3 uses the NU6.3 circuit — the same key
+    /// as v6 Orchard and Ironwood bundles — not the fixed one.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
@@ -1241,11 +1314,32 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            //
-            // Route the bundle to the verifier for its circuit era: pre-NU6.2 bundles only
-            // verify under the insecure key, NU6.2+ bundles only under the fixed key.
             async_checks.push(
-                primitives::halo2::verifier_for(network_upgrade)
+                primitives::halo2::orchard_v5_verifier_for(network_upgrade)
+                    .clone()
+                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
+            );
+        }
+
+        async_checks
+    }
+
+    /// Verifies a **v6** transaction's Orchard bundle.
+    ///
+    /// A v6 Orchard bundle commits to the NU6.3 cross-address circuit, so it always verifies under
+    /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
+    /// network upgrade (v6 transactions only exist from NU6.3 onward).
+    fn verify_orchard_v6_bundle(
+        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
+        let mut async_checks = AsyncChecks::new();
+
+        if let Some(bundle) = bundle {
+            // The v6 Orchard bundle has a single aggregated Halo2 proof, queued once for batch
+            // verification against the NU6.3 key.
+            async_checks.push(
+                primitives::halo2::orchard_v6_verifier()
                     .clone()
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
@@ -1264,22 +1358,13 @@ where
         // Get the `value_balance` to calculate the transaction fee.
         let value_balance = tx.value_balance(spent_utxos);
 
-        let zip233_amount = match *tx {
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => tx.zip233_amount(),
-            _ => Amount::zero(),
-        };
-
         // Calculate the fee only for non-coinbase transactions.
         let mut miner_fee = None;
         if !tx.is_coinbase() {
             // TODO: deduplicate this code with remaining_transaction_value()?
             miner_fee = match value_balance {
                 Ok(vb) => match vb.remaining_transaction_value() {
-                    Ok(tx_rtv) => match tx_rtv - zip233_amount {
-                        Ok(fee) => Some(fee),
-                        Err(_) => return Err(TransactionError::IncorrectFee),
-                    },
+                    Ok(tx_rtv) => Some(tx_rtv),
                     Err(_) => return Err(TransactionError::IncorrectFee),
                 },
                 Err(_) => return Err(TransactionError::IncorrectFee),

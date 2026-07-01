@@ -429,6 +429,10 @@ impl Block {
             let mut chain_value_pools = ValueBalance::zero();
             let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
             let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
+            // Ironwood reuses the Orchard note commitment tree type. Generated blocks have no
+            // Ironwood data, so this stays empty, but it must be threaded through the V3 history
+            // node (NU6.3+) using its real empty-tree root so commitments match validation.
+            let mut ironwood_tree = orchard::tree::NoteCommitmentTree::default();
             // The history tree usually takes care of "creating itself". But this
             // only works when blocks are pushed into it starting from genesis
             // (or at least pre-Heartwood, where the tree is not required).
@@ -467,6 +471,10 @@ impl Block {
                             }
                             for orchard_note_commitment in transaction.orchard_note_commitments() {
                                 orchard_tree.append(*orchard_note_commitment).unwrap();
+                            }
+                            for ironwood_note_commitment in transaction.ironwood_note_commitments()
+                            {
+                                ironwood_tree.append(*ironwood_note_commitment).unwrap();
                             }
                         }
                         new_transactions.push(Arc::new(transaction));
@@ -531,6 +539,7 @@ impl Block {
                                 Arc::new(block.clone()),
                                 &sapling_tree.root(),
                                 &orchard_tree.root(),
+                                &ironwood_tree.root(),
                             )
                             .unwrap();
                     } else {
@@ -540,6 +549,7 @@ impl Block {
                                 Arc::new(block.clone()),
                                 &sapling_tree.root(),
                                 &orchard_tree.root(),
+                                &ironwood_tree.root(),
                             )
                             .unwrap(),
                         );
@@ -598,7 +608,6 @@ where
                 sapling_shielded_data,
                 ..
             } => *sapling_shielded_data = None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 {
                 sapling_shielded_data,
                 ..

@@ -286,6 +286,16 @@ impl PrecomputedTxData {
         self.tx_data.orchard_bundle().cloned()
     }
 
+    /// Returns the Ironwood bundle in `tx_data` (NU6.3 onward).
+    ///
+    /// The Ironwood bundle reuses the Orchard bundle type; it differs only by pool (separate tree,
+    /// nullifier set, and value balance) and is verified under the NU6.3 Action circuit key.
+    pub fn ironwood_bundle(
+        &self,
+    ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        self.tx_data.ironwood_bundle().cloned()
+    }
+
     /// Returns the Sapling bundle in `tx_data`.
     pub fn sapling_bundle(
         &self,

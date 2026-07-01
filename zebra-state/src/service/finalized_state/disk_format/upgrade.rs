@@ -22,6 +22,7 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
+pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
@@ -102,7 +103,14 @@ fn format_upgrades(
             Version::new(26, 0, 0),
         )),
         Box::new(block_info_and_address_received::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 5])
+        // The NU6.3 Ironwood shielded pool adds new column families and widens the chain value pool
+        // serialization. New column families and the wider records are created/read in place when
+        // the database is opened, but the genesis Ironwood tree and anchor must be backfilled so an
+        // upgraded database matches a genesis-synced one (otherwise ironwood_tree_for_tip() panics
+        // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
+        // major-version upgrade that is restorable from the previous major database format version.
+        Box::new(add_ironwood_tree::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 6])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

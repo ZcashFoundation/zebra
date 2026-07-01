@@ -36,10 +36,15 @@ use crate::{
     CommitSemanticallyVerifiedError,
 };
 
+/// The Ironwood-pool nullifier type, used by [`Spend::Ironwood`] (imported here rather than in the
+/// shared import block because it is only referenced by the indexer-only `Spend` enum).
+#[cfg(feature = "indexer")]
+use zebra_chain::ironwood;
+
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
-/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+/// [`sapling::Nullifier`], [`orchard::Nullifier`], and [`ironwood::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg(feature = "indexer")]
 pub enum Spend {
@@ -51,6 +56,8 @@ pub enum Spend {
     Sapling(sapling::Nullifier),
     /// A spend identified by a [`orchard::Nullifier`].
     Orchard(orchard::Nullifier),
+    /// A spend identified by an [`ironwood::Nullifier`].
+    Ironwood(ironwood::Nullifier),
 }
 
 #[cfg(feature = "indexer")]
@@ -78,6 +85,13 @@ impl From<sapling::Nullifier> for Spend {
 impl From<orchard::Nullifier> for Spend {
     fn from(orchard_nullifier: orchard::Nullifier) -> Self {
         Self::Orchard(orchard_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<ironwood::Nullifier> for Spend {
+    fn from(ironwood_nullifier: ironwood::Nullifier) -> Self {
+        Self::Ironwood(ironwood_nullifier)
     }
 }
 
@@ -333,12 +347,15 @@ pub struct Treestate {
 
 impl Treestate {
     #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
+        ironwood: Arc<orchard::tree::NoteCommitmentTree>,
         sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
         orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+        ironwood_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
         Self {
@@ -348,6 +365,8 @@ impl Treestate {
                 sapling_subtree,
                 orchard,
                 orchard_subtree,
+                ironwood,
+                ironwood_subtree,
             },
             history_tree,
         }

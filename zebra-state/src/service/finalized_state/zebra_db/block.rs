@@ -376,6 +376,7 @@ impl ZebraDb {
             Spend::Sprout(nullifier) => self.sprout_revealing_tx_loc(nullifier)?,
             Spend::Sapling(nullifier) => self.sapling_revealing_tx_loc(nullifier)?,
             Spend::Orchard(nullifier) => self.orchard_revealing_tx_loc(nullifier)?,
+            Spend::Ironwood(nullifier) => self.ironwood_revealing_tx_loc(nullifier)?,
         };
 
         self.transaction_hash(tx_loc)

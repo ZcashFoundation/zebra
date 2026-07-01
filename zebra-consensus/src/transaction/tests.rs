@@ -145,7 +145,7 @@ fn v5_transaction_with_orchard_actions_has_flags() {
         // The check will fail if the transaction has no flags
         assert_eq!(
             check::has_enough_orchard_flags(&tx),
-            Err(TransactionError::NotEnoughFlags)
+            Err(TransactionError::NotEnoughOrchardFlags)
         );
 
         // If we add ENABLE_SPENDS flag it will pass.
@@ -165,6 +165,229 @@ fn v5_transaction_with_orchard_actions_has_flags() {
             Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
         assert!(check::has_enough_orchard_flags(&tx).is_ok());
     }
+}
+
+/// Tests the `[NU6.3 onward] valueBalanceOrchard MUST be nonnegative` rule: from NU6.3 the Orchard
+/// pool is frozen against new inflows (newly shielded value is routed to Ironwood).
+#[test]
+fn orchard_value_balance_frozen_at_nu6_3() {
+    let _init_guard = zebra_test::init();
+
+    // NU6.3 is unscheduled on Mainnet/Testnet, so the rule is unreachable there; use a network
+    // that schedules it.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(10),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let nu6_3_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 activation height is configured");
+    let pre_nu6_3_height = NetworkUpgrade::Nu6_2
+        .activation_height(&network)
+        .expect("NU6.2 activation height is configured");
+
+    // A real V5 transaction carrying an Orchard bundle; its value balance is overridden below.
+    let mut tx = v5_transactions(Network::Mainnet.block_iter())
+        .find(|tx| tx.orchard_shielded_data().is_some())
+        .expect("a V5 transaction with an Orchard bundle");
+
+    // A net-negative `valueBalanceOrchard` shields new value into the Orchard pool. The check has
+    // no coinbase exemption, so it applies to coinbase transactions too.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(-1).expect("-1 is a valid signed amount");
+
+    // Rejected from NU6.3 onward,
+    assert_eq!(
+        check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network),
+        Err(TransactionError::NegativeOrchardValueBalance),
+    );
+    // but allowed before NU6.3, where the Orchard pool is not yet frozen.
+    assert!(check::orchard_value_balance_non_negative(&tx, pre_nu6_3_height, &network).is_ok());
+
+    // A zero balance (Orchard-to-Orchard note management) is allowed at NU6.3.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(0).expect("0 is a valid amount");
+    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+
+    // A positive balance (Orchard-to-transparent unshielding) is allowed at NU6.3.
+    tx.orchard_shielded_data_mut().unwrap().value_balance =
+        Amount::try_from(1).expect("1 is a valid amount");
+    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+
+    // A transaction with no Orchard bundle is unaffected at NU6.3.
+    let no_orchard_tx = Transaction::V5 {
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        lock_time: LockTime::Height(Height(0)),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+    assert!(
+        check::orchard_value_balance_non_negative(&no_orchard_tx, nu6_3_height, &network).is_ok()
+    );
+}
+
+/// Tests the `[NU6.3 onward] if there are Ironwood actions, at least one of enableSpendsIronwood
+/// and enableOutputsIronwood MUST be 1` rule.
+#[test]
+fn v6_transaction_with_ironwood_actions_must_have_flags() {
+    use zebra_chain::ironwood;
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // An Ironwood bundle with no flags set is rejected.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::empty(),
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert_eq!(
+        check::has_enough_ironwood_flags(&tx),
+        Err(TransactionError::NotEnoughIronwoodFlags),
+    );
+
+    // With enableSpends set, it passes.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(check::has_enough_ironwood_flags(&tx).is_ok());
+
+    // A transaction with no Ironwood bundle is a no-op.
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, None);
+    assert!(check::has_enough_ironwood_flags(&tx).is_ok());
+}
+
+/// Tests the `[NU6.3 onward] the enableCrossAddress flag of flagsOrchard MUST be 0` rule, which only
+/// a v6 Orchard bundle can violate (a v5 Orchard bundle rejects the flag bit at deserialization).
+#[test]
+fn v6_orchard_bundle_must_not_enable_cross_address() {
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // A v6 Orchard bundle with enableCrossAddress set is rejected.
+    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
+        zero,
+        1,
+    ));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    assert_eq!(
+        check::orchard_cross_address_disabled(&tx),
+        Err(TransactionError::OrchardHasEnableCrossAddress),
+    );
+
+    // Without the flag, it passes.
+    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(Flags::ENABLE_SPENDS, zero, 1));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    assert!(check::orchard_cross_address_disabled(&tx).is_ok());
+}
+
+/// Tests the `[NU6.3 onward] coinbase transactions MUST have an empty Orchard component` rule
+/// (ZIP-229). The rule applies to every transaction version, so a v5 coinbase carrying Orchard
+/// actions is rejected from NU6.3 onward, even though the v5 format itself is unchanged.
+#[test]
+fn coinbase_orchard_component_empty_at_nu6_3() {
+    let _init_guard = zebra_test::init();
+
+    // NU6.3 is unscheduled on Mainnet/Testnet, so use a network that schedules it.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(10),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let nu6_3_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 activation height is configured");
+    let pre_nu6_3_height = NetworkUpgrade::Nu6_2
+        .activation_height(&network)
+        .expect("NU6.2 activation height is configured");
+
+    // A real V5 coinbase transaction; its Orchard component is inserted below.
+    let mut tx = v5_transactions(Network::Mainnet.block_iter())
+        .find(|transaction| transaction.is_coinbase())
+        .expect("a V5 coinbase transaction");
+
+    // A coinbase with no Orchard component is always accepted.
+    assert!(check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network).is_ok());
+
+    // Give the coinbase a (non-empty) Orchard component.
+    insert_fake_orchard_shielded_data(&mut tx);
+    assert!(tx.is_coinbase() && tx.orchard_shielded_data().is_some());
+
+    // Rejected from NU6.3 onward,
+    assert_eq!(
+        check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network),
+        Err(TransactionError::CoinbaseHasOrchardActions),
+    );
+    // but allowed before NU6.3, where coinbase Orchard outputs are still permitted.
+    assert!(check::coinbase_orchard_component_empty(&tx, pre_nu6_3_height, &network).is_ok());
+
+    // The rule only constrains coinbase transactions: a non-coinbase tx with an Orchard component
+    // is unaffected at NU6.3.
+    let mut non_coinbase = v5_transactions(Network::Mainnet.block_iter())
+        .find(|transaction| !transaction.is_coinbase())
+        .expect("a non-coinbase V5 transaction");
+    insert_fake_orchard_shielded_data(&mut non_coinbase);
+    assert!(check::coinbase_orchard_component_empty(&non_coinbase, nu6_3_height, &network).is_ok());
+}
+
+/// Tests that a transaction revealing the same Ironwood nullifier twice is rejected as a
+/// double-spend, and that the Ironwood and Orchard nullifier sets are checked separately.
+#[test]
+fn v6_transaction_with_duplicate_ironwood_nullifier_is_rejected() {
+    use zebra_chain::ironwood;
+    use zebra_chain::orchard::ShieldedDataV6;
+    use zebra_chain::transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction};
+
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // Two Ironwood actions sharing a nullifier are a double-spend.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        2,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(matches!(
+        check::spend_conflicts(&tx),
+        Err(TransactionError::DuplicateIronwoodNullifier(_)),
+    ));
+
+    // A single Ironwood action has no conflict.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        1,
+    )));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(check::spend_conflicts(&tx).is_ok());
 }
 
 #[test]

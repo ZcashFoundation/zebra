@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Support for the NU6.3 "Ironwood" shielded pool and v6 transaction format,
+  activating on Testnet at height 4,134,000. The consensus parameters (v6 version
+  group ID, consensus branch ID, and Testnet activation height) match
+  `zcash_protocol`. No Mainnet activation height is set yet.
 - Zebra now tags the coinbase input of every block it mines with a `🦓`. The
   `mining.extra_coinbase_data` option is now limited to 86 bytes (was 94); Zebra
   refuses to start if it is exceeded.
@@ -36,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+- The state database format is bumped to 28.0.0 for the NU6.3 "Ironwood" shielded
+  pool. This is a major-version bump that is restorable in place from the previous
+  major format version (no resync): an in-place migration backfills the genesis
+  Ironwood note commitment tree and anchor, four new (initially empty) `ironwood_*`
+  column families are created, and the chain value pool record is widened to include
+  the Ironwood pool. The `getblockchaininfo` and `getblock` `valuePools` now include
+  the (zero, until NU6.3 activates) `ironwood` pool.
 - Opening a Zebra state read-only (for example, as a secondary instance over a
   running node's database) now fails with a clear error instead of panicking when
   the cache directory is missing or unreadable, when no database exists at the

@@ -589,7 +589,6 @@ impl SpendConflictTestInput {
 
                 // No JoinSplits
                 Transaction::V1 { .. } | Transaction::V5 { .. } => {}
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 { .. } => {}
             }
         }
@@ -661,7 +660,6 @@ impl SpendConflictTestInput {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     sapling_shielded_data,
                     ..
@@ -740,11 +738,18 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     orchard_shielded_data,
                     ..
-                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+                } => {
+                    // `ShieldedDataV6` newtypes the v5-shaped `ShieldedData`; unwrap it, reuse the
+                    // shared filter, then rewrap whatever actions remain.
+                    let mut inner = orchard_shielded_data
+                        .take()
+                        .map(orchard::ShieldedDataV6::into_inner);
+                    Self::remove_orchard_actions_with_conflicts(&mut inner, &conflicts);
+                    *orchard_shielded_data = inner.map(orchard::ShieldedDataV6::new);
+                }
 
                 // No Spends
                 Transaction::V1 { .. }

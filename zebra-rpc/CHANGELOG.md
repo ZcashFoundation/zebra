@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `client::GetBlockchainInfoBalance::ironwood`, exposing the Ironwood value pool
+  in `getblockchaininfo`.
 - The indexer gRPC service has a new unary `GetBlock` method that returns a block
   from the best chain by hash or height.
 - The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
@@ -18,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `methods::BlockchainValuePoolBalances` is now `[GetBlockchainInfoBalance; 6]`
+  (was `; 5`), and `GetBlockchainInfoBalance::{value_pools, zero_pools}` were
+  updated for the added Ironwood pool.
 - Zebra now prepends a `🦓` marker to the coinbase input of every block it builds.
 - `config::mining::Config::extra_coinbase_data` is now `Option<ExtraCoinbaseData>` (was
   `Option<String>`), limited to 86 bytes (was 94) and validated on construction.
