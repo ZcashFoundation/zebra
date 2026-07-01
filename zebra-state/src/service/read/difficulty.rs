@@ -336,10 +336,13 @@ fn adjust_difficulty_and_time_for_testnet(
     // `6 * PoWTargetSpacing` still yields a minimum-difficulty block that reduces the difficulty.
     // It only stops Zebra from proactively generating such blocks by future-dating timestamps.
     //
-    // We don't need to undo the clamping here:
-    // - if cur_time is clamped to min_time, then we're more likely to have a minimum
-    //    difficulty block, which makes mining easier;
-    // - if cur_time gets clamped to max_time, this is almost always a minimum difficulty block.
+    // `cur_time` was already clamped into `[min_time, max_time]` by the caller
+    // (`difficulty_time_and_history_tree`); we don't restore the un-clamped `now` before
+    // choosing standard vs. minimum difficulty below, because whichever way that clamp
+    // moved `cur_time`, the outcome is benign:
+    // - clamped up to `min_time`: more likely a minimum-difficulty block, which makes
+    //   mining easier;
+    // - clamped down to `max_time`: almost always a minimum-difficulty block.
     if result.cur_time <= std_difficulty_max_time {
         // Standard difficulty: the cur and max time need to exclude min difficulty blocks
 
