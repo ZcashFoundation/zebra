@@ -75,6 +75,9 @@ pub struct ZebradConfig {
     /// Mempool configuration
     pub mempool: crate::components::mempool::Config,
 
+    /// Block notify configuration
+    pub notify: crate::components::notify::Config,
+
     /// RPC configuration
     pub rpc: zebra_rpc::config::rpc::Config,
 
