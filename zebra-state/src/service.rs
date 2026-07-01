@@ -1556,6 +1556,28 @@ impl Service<ReadRequest> for ReadStateService {
                 .collect(),
             )),
 
+            ReadRequest::FindForkPoint { known_blocks } => {
+                // Reject over-long locators before doing any work, so an untrusted
+                // caller can't force unbounded lookups.
+                let locator_len: u64 = known_blocks
+                    .len()
+                    .try_into()
+                    .expect("usize always fits in u64 on supported (<=64-bit) platforms");
+                if locator_len > block::MAX_BLOCK_LOCATOR_LENGTH {
+                    return Err(BoxError::from(format!(
+                        "FindForkPoint locator length {locator_len} exceeds \
+                         MAX_BLOCK_LOCATOR_LENGTH ({})",
+                        block::MAX_BLOCK_LOCATOR_LENGTH,
+                    )));
+                }
+
+                Ok(ReadResponse::ForkPoint(read::find_fork_point(
+                    state.latest_best_chain(),
+                    &state.db,
+                    known_blocks,
+                )))
+            }
+
             ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
                 read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),

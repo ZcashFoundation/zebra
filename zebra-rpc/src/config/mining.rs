@@ -21,10 +21,10 @@ pub struct Config {
     pub miner_address: Option<ZcashAddress>,
 
     /// Optional data that Zebra will include in the transparent input of a coinbase transaction.
-    /// Limited to 94 bytes.
     ///
-    /// If this string is hex-encoded, it will be hex-decoded into bytes. Otherwise, it will be
-    /// UTF-8 encoded into bytes.
+    /// The string is always encoded as raw UTF-8 bytes; it is not hex-decoded, even if it looks
+    /// like a valid hex string. The encoded value, including Zebra's script push overhead, is
+    /// limited to 94 bytes.
     pub extra_coinbase_data: Option<String>,
 
     /// Optional shielded memo that Zebra will include in the output of a shielded coinbase

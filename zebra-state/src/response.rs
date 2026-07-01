@@ -426,6 +426,11 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
+    /// The response to a `FindForkPoint` request.
+    /// Returns the height and hash of the fork point, or `None` if no locator entry is
+    /// on the best chain.
+    ForkPoint(Option<(block::Height, block::Hash)>),
+
     /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
     /// _best_ non-finalized chain, or the finalized chain.
     UnspentBestChainUtxo(Option<transparent::Utxo>),
@@ -596,7 +601,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
-            | ReadResponse::IsTransparentOutputSpent(_) => {
+            | ReadResponse::IsTransparentOutputSpent(_)
+            | ReadResponse::ForkPoint(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

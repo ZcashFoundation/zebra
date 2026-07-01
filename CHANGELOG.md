@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   activating on Testnet at height 4,134,000. The consensus parameters (v6 version
   group ID, consensus branch ID, and Testnet activation height) match
   `zcash_protocol`. No Mainnet activation height is set yet.
+- Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
+  `x86_64` and `aarch64`, so operators can run a node without Docker or a source
+  build, also installable with `cargo binstall zebrad`. Each `.tar.gz` carries a
+  SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature
+  over the checksum manifest ([#10799](https://github.com/ZcashFoundation/zebra/pull/10799))
 - Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
   to forbid spending coinbase outputs into transparent outputs (the inverse of
   zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
@@ -22,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   consumer's known chain tips instead of re-streaming the whole non-finalized state,
   and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
   while its finalized state catches up.
+- New `zebra-state` read request `ReadRequest::FindForkPoint` (with response
+  `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
+  locator that is on the best chain — the fork point — for clients tracking chain
+  reorganizations through a read-only state service.
 
 ### Changed
 
@@ -38,6 +47,35 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   configured path, or when an ephemeral database is also configured (a read-only
   secondary must not delete the primary's files). The read-write open path is
   unchanged.
+
+### Fixed
+
+- `getblocktemplate` now caches the built coinbase transaction per block, so repeated short-poll
+  requests within the same block no longer rebuild it. This prevents CPU saturation and multi-second
+  template latency when mining to a shielded (Sapling or Orchard) address
+  ([#10847](https://github.com/ZcashFoundation/zebra/pull/10847))
+- Released `zebrad` binaries report their source commit in `zebrad version`
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
+  same-height sibling-tip invalidation, repeated reconsideration) without panicking
+  ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+
+### Security
+
+- Use constant-time comparison for RPC cookie authentication ([#10567](https://github.com/ZcashFoundation/zebra/pull/10567))
+- Zebra's release Docker images are now reproducible: an independent rebuild of a
+  published `zebrad` from the same commit produces the same binary. The Rust
+  toolchain and the Rust and Debian base images are pinned by exact version and
+  digest, and build paths and file timestamps are normalized, so two independent
+  builds of the same commit produce the same binary. Release images are also built
+  without the shared build cache, so a published image cannot inherit a layer from
+  a lower-trust build
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Release Docker images are signed and carry build provenance and a signed SBOM.
+  Each production release gets a Cosign keyless signature, a signed SLSA provenance
+  attestation, and a signed SBOM, so anyone can confirm an image came from Zebra's CI
+  with `cosign verify` or `gh attestation verify`
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 

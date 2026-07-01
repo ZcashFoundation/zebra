@@ -102,7 +102,20 @@ export CXXFLAGS="$CXXFLAGS -include cstdint"
 
 </details>
 
-Once you have the dependencies in place, you can install Zebra with:
+On `x86_64` or `aarch64` Linux (glibc 2.34+), you can skip the build dependencies
+and download a signed, pre-built binary with
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+
+```sh
+cargo binstall zebrad
+```
+
+The same binaries are attached to each
+[GitHub release](https://github.com/ZcashFoundation/zebra/releases), with a
+SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature.
+
+Otherwise, once you have the dependencies in place, you can build and install
+Zebra from source with:
 
 ```sh
 cargo install --locked zebrad

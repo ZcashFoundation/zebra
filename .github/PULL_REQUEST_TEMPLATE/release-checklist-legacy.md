@@ -41,19 +41,17 @@ These steps can be done a few days before the release, in the same PR:
 automated release-plz workflow is not usable. Keep all changelog edits in the
 release branch until the release PR is merged.
 
-Write the final changelog directly in `CHANGELOG.md`. We follow the
-[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+Changelog entries are authored and curated per PR in the `[Unreleased]` section
+of `CHANGELOG.md`, so the entries for this release are already written. We follow
+the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
-To create the final change log:
+To finalize the change log:
 
-- [ ] Move the current release entries from `[Unreleased]` into a new
-      `## [Zebra <version>](https://github.com/ZcashFoundation/zebra/releases/tag/v<version>) - <date>` section
-- [ ] Delete any trivial changes
-  - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
-- [ ] Combine duplicate changes
-- [ ] Edit change descriptions so they will make sense to Zebra users
-- [ ] Check the category for each change
-  - Prefer the "Fix" category if you're not sure
+- [ ] Rename the `[Unreleased]` heading to
+      `## [Zebra <version>](https://github.com/ZcashFoundation/zebra/releases/tag/v<version>) - <date>`
+- [ ] Read through the finalized entries and confirm each one reads well for
+      Zebra users and sits in the right category, fixing anything that slipped
+      past per-PR review
 
 ## README
 
@@ -105,33 +103,19 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.
 
-Check that the release will work:
+Crate changelog entries are authored per PR in each crate's `CHANGELOG.md`
+`[Unreleased]` section, and breaking changes are declared per PR with a
+conventional-commit `!`. The release level for each crate follows those markers:
+a `!` since the previous release means a major release, a new API means a minor
+release, otherwise a patch release.
 
 - [ ] Determine which crates require release. Run `git diff --stat <previous_tag>`
       and enumerate the crates that had changes.
-- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
-- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
 - [ ] For each crate that requires a release:
-  - [ ] Determine which type of release to make. Run `semver-checks` to list API
-        changes: `cargo semver-checks -p <crate> --default-features`. If there are
-        breaking API changes, do a major release, or try to revert the API change
-        if it was accidental. Otherwise do a minor or patch release depending on
-        whether a new API was added. Note that `semver-checks` won't work
-        if the previous realase was yanked; you will have to determine the
-        type of release manually.
-  - [ ] Update the crate `CHANGELOG.md` listing the API changes or other
-        relevant information for a crate consumer. Use `public-api` to list all
-        API changes: `cargo public-api diff latest -p <crate> -sss`, or run
-        `zebra-utils/check-api <previous_tag>` once to get the full per-crate
-        diff plus dependency and (with `--with-values`) const/static value and
-        doc changes in one pass. You can use
-        e.g. copilot to turn it into a human-readable list, e.g. (write the output
-        to `api.txt` beforehand):
-        ```
-        copilot -p "Transform @api.txt which is a API diff into a human-readable description of the API changes. Be terse. Write output api-readable.txt. Use backtick quotes for identifiers. Use '### Breaking Changes' header for changes and removals, and '### Added' for additions. Make each item start with a verb e.g, Added, Changed" --allow-tool write
-        ```
-        It might also make sense to copy entries from the `zebrad` changelog.
-  - [ ] Update crate versions:
+  - [ ] Rename the `[Unreleased]` heading in the crate `CHANGELOG.md` to the new
+        version, and confirm the already-authored entries read correctly for a
+        crate consumer.
+  - [ ] Bump the crate version:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
@@ -140,6 +124,22 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 ```
 
 - [ ] Commit and push the above version changes to the release branch.
+
+### Verify the API bump (backstop)
+
+The per-PR cargo-semver-checks CI gate already enforces that breaking API changes
+carry a conventional-commit `!`. Run the manual checks below as a backstop, or
+when the gate could not run (for example, the previous release was yanked, which
+`semver-checks` cannot diff against):
+
+- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
+- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
+- [ ] For each crate, confirm the chosen release level matches the API surface:
+      `cargo semver-checks -p <crate> --default-features`. List the full API diff
+      with `cargo public-api diff latest -p <crate> -sss`, or run
+      [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once to
+      get the per-crate diff plus dependency and (with `--with-values`)
+      const/static value and doc changes in one pass.
 
 ## Update Initial Minimum Network Protocol Version
 

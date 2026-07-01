@@ -28,6 +28,13 @@ shellcheck:
   - ".github/workflows/lint.yml"
   - ".github/path-filters.yml"
 
+semver:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".github/workflows/semver-checks.yml"
+  - ".github/path-filters.yml"
+
 unit_tests:
   - "**/*.rs"
   - "**/Cargo.toml"

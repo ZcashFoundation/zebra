@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
   blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
   is now re-exported from the crate root.
+- Added `ReadRequest::FindForkPoint { known_blocks }` request and the corresponding
+  `ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)` response. The
+  server returns the most recent block in the caller-supplied locator that is
+  on the best chain (the fork point) to assist in reorg handling for clients
+  that track only a single chain tip at a time.
+  ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764)).
 
 ### Added
 

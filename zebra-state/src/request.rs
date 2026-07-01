@@ -1288,6 +1288,33 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Finds the fork point between the locator `known_blocks` and the best chain.
+    ///
+    /// `known_blocks` is a block locator. Returns the most recent locator entry that is
+    /// on the best chain (the fork point), or `None` if no entry is on the best chain.
+    /// Returns `None` if the state is empty.
+    ///
+    /// This is intentionally a narrow, best-chain-only query: it reports a single
+    /// locator intersection against the best chain. It does not enumerate side-chain
+    /// tips, branch lengths, or per-tip statuses, so it is not a general
+    /// fork-monitoring API in the style of `getchaintips`. Callers that need to
+    /// observe side chains should use a dedicated request rather than building on this
+    /// one.
+    ///
+    /// The read state service rejects this request with an error if `known_blocks`
+    /// is longer than [`MAX_BLOCK_LOCATOR_LENGTH`](zebra_chain::block::MAX_BLOCK_LOCATOR_LENGTH),
+    /// so an untrusted caller cannot force an unbounded number of lookups. A locator
+    /// built the usual way (one hash per standard block-locator height) is always
+    /// within that bound.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)`](ReadResponse::ForkPoint).
+    FindForkPoint {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1459,6 +1486,7 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
