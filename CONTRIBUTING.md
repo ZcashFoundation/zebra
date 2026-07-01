@@ -67,4 +67,4 @@ Zebra enforces code quality through review. For the full list of architecture ru
 - **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
 - **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
 - **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [Changelog Guidelines](book/src/dev/changelog-guidelines.md))
+- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
