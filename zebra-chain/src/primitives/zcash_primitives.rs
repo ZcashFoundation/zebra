@@ -290,7 +290,6 @@ impl PrecomputedTxData {
     ///
     /// The Ironwood bundle reuses the Orchard bundle type; it differs only by pool (separate tree,
     /// nullifier set, and value balance) and is verified under the NU6.3 Action circuit key.
-    #[cfg(zcash_unstable = "nu6.3")]
     pub fn ironwood_bundle(
         &self,
     ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {

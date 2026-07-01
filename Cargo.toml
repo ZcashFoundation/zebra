@@ -30,16 +30,16 @@ edition = "2021"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.14"
+orchard = "0.15.0-pre.1"
 sapling-crypto = "0.7"
-zcash_address = "0.12"
+zcash_address = "0.13.0-pre.0"
 zcash_encoding = "0.4"
-zcash_history = "0.4"
-zcash_keys = "0.14"
-zcash_primitives = "0.28"
-zcash_proofs = "0.28"
-zcash_transparent = "0.8"
-zcash_protocol = "0.9"
+zcash_history = "0.5.0-pre.0"
+zcash_keys = "0.15.0-pre.0"
+zcash_primitives = "0.29.0-pre.0"
+zcash_proofs = "0.29.0-pre.0"
+zcash_transparent = "0.9.0-pre.0"
+zcash_protocol = "0.10.0-pre.0"
 zip32 = "0.2"
 abscissa_core = "0.7"
 base64 = "0.22.1"
@@ -329,7 +329,7 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu6.3", "nu7", "zip235"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
 ] }
 
 # High-risk code
@@ -379,19 +379,15 @@ unwrap_in_result = "warn"
 # TODOs: fix this lint eventually
 result_large_err = "allow"
 
-# EXPERIMENTAL (NU6.3 / Ironwood spike): pin the librustzcash family to the
-# valargroup fork that adds v6 Ironwood txid/sighash support, and orchard to the
-# matching qr_orchard fork it depends on. Versions match our crates.io pins
-# (zcash_primitives 0.28, zcash_protocol 0.9, orchard 0.14), so this is a
-# source-only patch. Revert this block to return to the released crates.
-# Fork branch is force-pushed; pin to a rev before relying on this.
 [patch.crates-io]
-zcash_primitives = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_protocol = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_proofs = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_keys = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_address = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_encoding = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_transparent = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-zcash_history = { git = "https://github.com/valargroup/librustzcash", branch = "adam/ironwood-split-2-v6-txid" }
-orchard = { git = "https://github.com/valargroup/qr_orchard", rev = "6f1a5eaddcf0e016101c0c62a477d48f31e7a83f" }
+# TEMPORARY: Pin librustzcash crates to https://github.com/zcash/librustzcash/pull/2509
+equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+f4jumble = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "703fe3e6608fab8be0dedbbcbf684f030a1ea451" }
