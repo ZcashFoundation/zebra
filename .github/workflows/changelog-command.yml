@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Acknowledge the command
@@ -38,6 +39,12 @@ jobs:
         run: |
           set -euo pipefail
           gh api --method POST "repos/${REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" -f content=+1 >/dev/null || true
+
+      # issue_comment checks out the default branch (never PR head), giving the Claude action
+      # a git repo to operate in. The PR content is supplied as the diff below, not from here.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Collect the PR diff
         id: diff
