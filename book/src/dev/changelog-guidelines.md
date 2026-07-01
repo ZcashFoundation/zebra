@@ -39,7 +39,7 @@ These apply to all Zebra changelogs regardless of audience.
 
 ### One entry per distinct change
 
-Each distinct user-visible change gets **one entry on one line**. A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, and do not group multiple PRs on one line.
+Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, and do not group multiple PRs in one entry.
 
 Good:
 
