@@ -23,7 +23,7 @@ use zebra_chain::{
     orchard,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
-        Network,
+        Network, NetworkUpgrade,
     },
     primitives::ed25519,
     sapling::ValueCommitment,
@@ -157,16 +157,26 @@ impl TransactionTemplate<NegativeOrZero> {
             };
         }
 
-        let add_orchard_reward = |builder: &mut Builder<_, _>, addr: &_| {
-            trace_err!(
-                builder.add_orchard_output::<String>(
-                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
-                    *addr,
-                    miner_reward,
-                    memo.clone(),
-                ),
-                "Orchard"
-            )
+        // On NU6.3 onward the coinbase MUST have an empty Orchard component, and newly shielded
+        // coinbase value is routed to the Ironwood pool instead (see the Ironwood pool spec and
+        // `coinbase_orchard_component_empty` in zebra-consensus). Ironwood outputs use the same
+        // Orchard-shaped `orchard::Address` as their recipient, so a unified miner address with an
+        // Orchard receiver just gets routed to the Ironwood output builder from NU6.3 onward.
+        let use_ironwood = NetworkUpgrade::current(net, height) >= NetworkUpgrade::Nu6_3;
+
+        let add_shielded_reward = |builder: &mut Builder<_, _>, addr: &_| {
+            let ovk = Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32]));
+            if use_ironwood {
+                trace_err!(
+                    builder.add_ironwood_output::<String>(ovk, *addr, miner_reward, memo.clone()),
+                    "Ironwood"
+                )
+            } else {
+                trace_err!(
+                    builder.add_orchard_output::<String>(ovk, *addr, miner_reward, memo.clone()),
+                    "Orchard"
+                )
+            }
         };
 
         let add_sapling_reward = |builder: &mut Builder<_, _>, addr: &_| {
@@ -191,7 +201,7 @@ impl TransactionTemplate<NegativeOrZero> {
         match miner_params.addr() {
             Address::Unified(addr) => addr
                 .orchard()
-                .and_then(|addr| add_orchard_reward(&mut builder, addr))
+                .and_then(|addr| add_shielded_reward(&mut builder, addr))
                 .or_else(|| {
                     addr.sapling()
                         .and_then(|addr| add_sapling_reward(&mut builder, addr))
