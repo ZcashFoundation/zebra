@@ -10,7 +10,7 @@ mod tests;
 
 use std::{
     fmt::{self},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use derive_getters::Getters;
@@ -275,6 +275,7 @@ impl BlockTemplateResponse {
     pub(crate) fn new_internal(
         net: &Network,
         precomputed_coinbase: Option<TransactionTemplate<amount::NegativeOrZero>>,
+        coinbase_cache: Option<CoinbaseCache>,
         miner_params: &MinerParams,
         chain_info: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
@@ -333,17 +334,32 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        let coinbase_txn = precomputed_coinbase.unwrap_or_else(|| {
-            TransactionTemplate::new_coinbase(
-                net,
-                height,
-                miner_params,
-                txs_fee,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                zip233_amount,
-            )
-            .expect("valid coinbase tx")
-        });
+        // Prefer the long-poll precomputed coinbase, then the per-block cache, and only build (and
+        // re-prove, for a shielded address) as a last resort — caching the result so subsequent
+        // short-poll requests for the same height and fees reuse it.
+        let coinbase_txn = precomputed_coinbase
+            .or_else(|| {
+                coinbase_cache
+                    .as_ref()
+                    .and_then(|cache| cache.get(height, txs_fee))
+            })
+            .unwrap_or_else(|| {
+                let coinbase_txn = TransactionTemplate::new_coinbase(
+                    net,
+                    height,
+                    miner_params,
+                    txs_fee,
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    zip233_amount,
+                )
+                .expect("valid coinbase tx");
+
+                if let Some(cache) = &coinbase_cache {
+                    cache.store(height, txs_fee, coinbase_txn.clone());
+                }
+
+                coinbase_txn
+            });
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
@@ -543,6 +559,69 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     }
 }
 
+/// Caches the most recently built coinbase transaction for the next block, keyed on its height and
+/// total transaction fees.
+///
+/// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
+/// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
+/// depends on `(height, fees)` for a given miner configuration, so repeated requests within the
+/// same block can reuse the cached transaction instead of re-proving it on every call.
+#[derive(Clone, Default)]
+pub(crate) struct CoinbaseCache(
+    Arc<
+        Mutex<
+            Option<(
+                block::Height,
+                Amount<NonNegative>,
+                TransactionTemplate<amount::NegativeOrZero>,
+            )>,
+        >,
+    >,
+);
+
+impl CoinbaseCache {
+    /// Returns the cached coinbase transaction if it was built for `height` and `fee`.
+    fn get(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+    ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
+        let cache = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match &*cache {
+            Some((cached_height, cached_fee, coinbase))
+                if *cached_height == height && *cached_fee == fee =>
+            {
+                Some(coinbase.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Stores `coinbase` as the cached transaction for `height` and `fee`.
+    fn store(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+        coinbase: TransactionTemplate<amount::NegativeOrZero>,
+    ) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((height, fee, coinbase));
+    }
+
+    /// Discards the cached coinbase, forcing the next request to rebuild it.
+    fn clear(&self) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
+
 /// Handler for the `getblocktemplate` RPC.
 #[derive(Clone)]
 pub struct GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -562,6 +641,10 @@ where
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+
+    /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
+    /// the shielded-coinbase proof on every request within a block.
+    coinbase_cache: CoinbaseCache,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -583,12 +666,18 @@ where
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(SubmitBlockChannel::default().sender()),
+            coinbase_cache: CoinbaseCache::default(),
         }
     }
 
     /// Returns the miner parameters, including the address, data, and memo.
     pub fn miner_params(&self) -> Option<&MinerParams> {
         self.miner_params.as_ref()
+    }
+
+    /// Returns a handle to the coinbase transaction cache.
+    pub(crate) fn coinbase_cache(&self) -> CoinbaseCache {
+        self.coinbase_cache.clone()
     }
 
     /// Returns the sync status.
@@ -615,6 +704,8 @@ where
         if let Some(miner_params) = &mut self.miner_params {
             miner_params.randomize_data();
             miner_params.randomize_memo();
+            // The cached coinbase was built with the previous data, so it's now stale.
+            self.coinbase_cache.clear();
         }
     }
 }

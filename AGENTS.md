@@ -106,7 +106,7 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 - Do not add `Co-Authored-By` tags for AI tools
 - Do not add "Generated with [tool]" footers
 - Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
-- For user-visible changes, update `CHANGELOG.md` per `CHANGELOG_GUIDELINES.md`.
+- For user-visible changes, update `CHANGELOG.md` per the [Changelog Guidelines](book/src/dev/changelog-guidelines.md).
 
 ## Project Overview
 
@@ -235,7 +235,7 @@ cargo nextest run
 - Update `CHANGELOG.md` under `[Unreleased]` for user-visible changes
 - Update crate `CHANGELOG.md` for library-consumer-visible changes
 - Apply the appropriate PR label (`C-feature`, `C-bug`, `C-security`, etc.)
-- See `CHANGELOG_GUIDELINES.md` for detailed formatting rules
+- See the [Changelog Guidelines](book/src/dev/changelog-guidelines.md) for detailed formatting rules
 
 ## Configuration
 

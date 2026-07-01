@@ -27,7 +27,6 @@ use tower::{service_fn, Layer, Service, ServiceExt};
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 
-#[cfg(not(target_os = "windows"))]
 use zebra_test::net::random_known_port;
 
 use crate::{
@@ -147,7 +146,6 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn local_listener_fixed_port_localhost_addr_v4() {
     let _init_guard = zebra_test::init();
 
@@ -164,7 +162,6 @@ async fn local_listener_fixed_port_localhost_addr_v4() {
 
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn local_listener_fixed_port_localhost_addr_v6() {
     let _init_guard = zebra_test::init();
 
@@ -946,10 +943,6 @@ async fn listener_peer_limit_default_handshake_error() {
 
 /// Test the listener with the default inbound peer limit,
 /// and a handshaker that returns success then disconnects the peer.
-///
-/// TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit on macOS
-///       (currently, getting over the limit can take 30 seconds or more)
-#[cfg(not(target_os = "macos"))]
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_ok_then_drop() {
     let _init_guard = zebra_test::init();

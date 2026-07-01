@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- `getblocktemplate` now caches the built coinbase transaction per block, so repeated short-poll
+  requests within the same block no longer rebuild it. This prevents CPU saturation and multi-second
+  template latency when mining to a shielded (Sapling or Orchard) address
+  ([#10847](https://github.com/ZcashFoundation/zebra/pull/10847))
 - Released `zebrad` binaries report their source commit in `zebrad version`
   ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
 - Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
