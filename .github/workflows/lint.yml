@@ -183,7 +183,9 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: nightly
+          # Pinned to dodge a nightly rustc ICE in `cargo udeps`; see #10870.
+          # Restore `nightly` once the upstream ICE is fixed.
+          toolchain: nightly-2026-06-29
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
