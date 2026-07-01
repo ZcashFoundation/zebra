@@ -37,9 +37,9 @@ See [Part 4: GitHub Release Format](#part-4-github-release-format) for templates
 
 These apply to all Zebra changelogs regardless of audience.
 
-### One entry per PR
+### One entry per distinct change
 
-Each PR gets **one changelog entry on one line**. Do not split a PR across multiple entries, and do not group multiple PRs on one line.
+Each distinct user-visible change gets **one entry on one line**. A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, and do not group multiple PRs on one line.
 
 Good:
 
@@ -48,7 +48,7 @@ Good:
 - Prometheus metrics for RocksDB I/O latency and compaction ([#10181](link))
 ```
 
-Bad, same PR multiple times:
+Bad, one change split across entries:
 
 ```text
 - Added mempool standardness checks ([#10224](link))
@@ -83,7 +83,7 @@ Only include sections that have entries.
 
 ### Section priority
 
-When a PR touches multiple categories, place it in **one section only** based on the most impactful aspect. Priority order:
+When a single change touches multiple categories, place it in **one section only** based on the most impactful aspect. Priority order:
 
 1. Breaking Changes
 2. Security
