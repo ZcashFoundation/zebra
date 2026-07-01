@@ -367,6 +367,141 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for #10715: a node that has synced to the shared chain tip must not
+/// disconnect its upstream peer due to empty `FindBlocks` responses.
+///
+/// Before the fix, the stall tracker ran unconditionally and disconnected peers after 3
+/// consecutive empty-response `FindBlocks` cycles, even when both nodes were already at
+/// the same tip. The fix gates stall tracking on `is_at_or_near_network_tip`, so the
+/// peer is only tracked during genuine catch-up, not once the node is fully synced.
+///
+/// Sets up two regtest nodes:
+/// - Node A (upstream): mines a small chain and listens for P2P connections
+/// - Node B (internal): connects exclusively to Node A and syncs to its tip
+///
+/// After both nodes share the same tip, the test polls `getpeerinfo` on Node B for
+/// 30 seconds and asserts that Node A is always connected. If the stall tracker fires
+/// incorrectly, Node A is dropped within ~6 seconds (3 cycles × 2-second regtest restart
+/// delay) and the assertion fails.
+#[tokio::test]
+async fn synced_node_keeps_upstream_peer_connected() -> Result<()> {
+    tokio::time::timeout(
+        Duration::from_secs(5 * 60),
+        synced_node_keeps_upstream_peer_connected_impl(),
+    )
+    .await
+    .wrap_err("synced_node_keeps_upstream_peer_connected timed out")?
+}
+
+async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
+    use zebra_chain::parameters::Network;
+    use zebra_rpc::{client::PeerInfo, server::OPENED_RPC_ENDPOINT_MSG};
+
+    use crate::common::{
+        config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
+        launch::LAUNCH_DELAY,
+        regtest::MiningRpcMethods,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let net = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    // Use a preselected port for Node A's P2P listener so Node B's config can
+    // reference it without having to parse Node A's logs.
+    let upstream_p2p_addr = format!("127.0.0.1:{}", random_known_port());
+
+    let mut upstream_config = os_assigned_rpc_port_config(false, &net)?;
+    upstream_config.network.listen_addr = upstream_p2p_addr.parse()?;
+    upstream_config.network.initial_testnet_peers = [].into();
+    upstream_config.mempool.debug_enable_at_height = Some(0);
+
+    let mut upstream = testdir()?
+        .with_config(&mut upstream_config)?
+        .spawn_child(args!["start"])?;
+
+    let upstream_rpc_addr = read_listen_addr_from_logs(&mut upstream, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let upstream_client = RpcRequestClient::new(upstream_rpc_addr);
+
+    const BLOCKS_TO_MINE: u32 = 100;
+    for _ in 0..BLOCKS_TO_MINE {
+        let (block, _height) = upstream_client.block_from_template(&net).await?;
+        upstream_client.submit_block(block).await?;
+    }
+
+    // Node B connects only to Node A; limit target size to 1 to avoid crawling.
+    let mut internal_config = os_assigned_rpc_port_config(false, &net)?;
+    internal_config.network.initial_testnet_peers = [upstream_p2p_addr].into();
+    internal_config.network.peerset_initial_target_size = 1;
+
+    let mut internal = testdir()?
+        .with_config(&mut internal_config)?
+        .spawn_child(args!["start"])?;
+
+    let internal_rpc_addr = read_listen_addr_from_logs(&mut internal, OPENED_RPC_ENDPOINT_MSG)?;
+
+    let internal_client = RpcRequestClient::new(internal_rpc_addr);
+
+    // Wait for Node B to connect to Node A.
+    wait_for_outbound_peer(&internal_client).await?;
+
+    // Wait for Node B to sync to Node A's tip.
+    tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let info = internal_client.blockchain_info().await?;
+            if info.blocks() >= Height(BLOCKS_TO_MINE) {
+                return Ok::<_, color_eyre::eyre::Report>(());
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for Node B to sync to Node A's tip")??;
+
+    tracing::info!("Node B has synced to Node A's tip; verifying Node A stays connected");
+
+    // The regtest sync loop restarts every 2 seconds. With the bug, 3 consecutive
+    // empty-response cycles (~6 seconds) would disconnect Node A. Poll for 30 seconds
+    // to give the stall tracker ample time to fire if the fix is not in effect.
+    for i in 0..30_u32 {
+        let peer_info: Vec<PeerInfo> = internal_client
+            .json_result_from_call("getpeerinfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+
+        assert!(
+            !peer_info.is_empty(),
+            "upstream peer was disconnected {i} seconds after reaching the shared tip; \
+             the stall tracker must not fire when the node is at or near the network tip"
+        );
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    upstream.kill(false)?;
+    internal.kill(false)?;
+
+    upstream
+        .wait_with_output()?
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    internal
+        .wait_with_output()?
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
 async fn wait_for_outbound_peer(rpc_client: &RpcRequestClient) -> Result<Vec<PeerInfo>> {
     tokio::time::timeout(Duration::from_secs(2 * 60), async {
         loop {

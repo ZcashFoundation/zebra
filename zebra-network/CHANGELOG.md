@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a configured Testnet is rejected with an error
   ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698)).
 
+### Breaking Changes
+
+- `MinimumPeerVersion::chain_tip_height()` is replaced by `chain_tip()`, which returns a
+  reference to the underlying chain tip instead of a `Height`
+  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+
 ## [9.0.0] - 2026-06-10
 
 ### Breaking Changes

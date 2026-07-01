@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
   same-height sibling-tip invalidation, repeated reconsideration) without panicking
   ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+- Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
+  responses when the local node is at or near the chain tip
+  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
 
 ### Security
 

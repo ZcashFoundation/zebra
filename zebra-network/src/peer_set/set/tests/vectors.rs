@@ -2,6 +2,7 @@
 
 use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
 
+use futures::FutureExt as _;
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
@@ -13,9 +14,9 @@ use zebra_chain::{
 use crate::{
     constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientRequest, MinimumPeerVersion},
-    peer_set::inventory_registry::InventoryStatus,
+    peer_set::{inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD},
     protocol::external::{types::Version, InventoryHash},
-    PeerSocketAddr, Request, SharedPeerError,
+    PeerSocketAddr, Request, Response, SharedPeerError,
 };
 use indexmap::IndexMap;
 use tokio::sync::watch;
@@ -692,6 +693,292 @@ fn peer_set_route_inv_all_missing_fail() {
                 .expect("peer set should return a boxed SharedPeerError")
                 .inner_debug(),
             "NotFoundRegistry([Block(block::Hash(\"0000000000000000000000000000000000000000000000000000000000000000\"))])"
+        );
+    });
+}
+
+/// Check that empty `FindBlocks` responses do not trigger stall tracking when the node is at the
+/// chain tip, so peers that correctly return no hashes are not disconnected.
+#[test]
+fn find_blocks_stall_not_tracked_when_at_tip() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Simulate being at the chain tip.
+    best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        // Send more FindBlocks requests than FIND_RESPONSE_STALL_THRESHOLD, each
+        // returning an empty response. If stall events were tracked, the peer would be
+        // disconnected after the third response.
+        let request_count = FIND_RESPONSE_STALL_THRESHOLD + 1;
+
+        for _ in 0..request_count {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            // Reply with an empty BlockHashes response — protocol-correct at tip.
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // The peer must still be connected: no stall events were emitted.
+        assert!(
+            handle.wants_connection_heartbeats(),
+            "peer should not be disconnected when at tip"
+        );
+    });
+}
+
+/// Check that empty `FindBlocks` responses DO trigger stall tracking when the node is syncing,
+/// and that the peer is disconnected after exceeding the stall threshold.
+///
+/// This verifies the security property from GHSA-h9hm-m2xj-4rq9 is preserved: peers that
+/// return only empty responses during initial sync are still detected and disconnected.
+#[test]
+fn find_blocks_stall_tracked_when_syncing() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Simulate being far behind the chain tip, as during initial sync.
+    best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        // Send exactly FIND_RESPONSE_STALL_THRESHOLD empty FindBlocks responses.
+        // Each response emits a stall event; the third one triggers disconnect.
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // One extra poll_ready to drain the final stall event and process the disconnect.
+        // Since there are no remaining ready peers, the future does not resolve.
+        let _ = peer_set.ready().now_or_never();
+
+        // The peer must be disconnected: stall threshold was reached while syncing.
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected after stall threshold is reached while syncing"
+        );
+    });
+}
+
+/// Check that stall tracking is active when the chain tip state is unknown (empty node state),
+/// so that stalling peers are still disconnected even before the first block is synced.
+#[test]
+fn find_blocks_stall_tracked_when_tip_unknown() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Leave the chain tip in its default state (None height, None distance).
+    // is_at_or_near_network_tip returns false when the tip is unknown, so stall
+    // tracking is active.
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        let _ = peer_set.ready().now_or_never();
+
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected when tip is unknown and stall threshold is reached"
+        );
+    });
+}
+
+/// Check that stall counts accumulated while syncing are preserved across a tip transition,
+/// so a peer cannot avoid detection by temporarily becoming useful as the node reaches the tip.
+///
+/// This verifies that returning an empty response at tip does not reset a peer's accumulated
+/// stall count. When the node falls back behind tip, one more empty response reaches the
+/// threshold and the peer is disconnected.
+#[test]
+fn find_blocks_stall_count_preserved_across_tip_transition() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Start syncing: FIND_RESPONSE_STALL_THRESHOLD - 1 stalls away from disconnect.
+    best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        // Accumulate THRESHOLD - 1 stalls while syncing.
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // Transition to at-tip: stall count is now THRESHOLD - 1 (one below disconnect).
+        best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
+        best_tip.send_estimated_distance_to_network_chain_tip(Some(0));
+
+        // Send one empty response at tip. Since track_stalls is false, no stall event is
+        // emitted and the peer's accumulated count is unchanged.
+        {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // Transition back to syncing: count is still THRESHOLD - 1.
+        best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+        // One more syncing response reaches the threshold.
+        {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+
+            response_fut.await.expect("response received");
+        }
+
+        // One final poll_ready to drain the last stall event and process the disconnect.
+        let _ = peer_set.ready().now_or_never();
+
+        // The peer must be disconnected: the accumulated stall count was not reset at tip.
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected: stall count accumulated during sync was preserved"
         );
     });
 }
