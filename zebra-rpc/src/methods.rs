@@ -2464,6 +2464,7 @@ where
                     return Ok(BlockTemplateResponse::new_internal(
                         &self.network,
                         precomputed_coinbase,
+                        None,
                         miner_params,
                         &chain_info,
                         server_long_poll_id,
@@ -2507,6 +2508,7 @@ where
         let height = chain_info.tip_height.next().map_misc_error()?;
 
         // Randomly select some mempool transactions.
+        let coinbase_cache = self.gbt.coinbase_cache();
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
@@ -2515,6 +2517,7 @@ where
             mempool_tx_deps,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
+            Some(&coinbase_cache),
         );
 
         tracing::debug!(
@@ -2530,6 +2533,7 @@ where
         Ok(BlockTemplateResponse::new_internal(
             &self.network,
             None,
+            Some(self.gbt.coinbase_cache()),
             miner_params,
             &chain_info,
             server_long_poll_id,

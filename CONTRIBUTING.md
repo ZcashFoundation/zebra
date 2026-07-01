@@ -25,6 +25,7 @@ PRs are welcome, but every PR requires human review time. To make that time coun
 2. **Coordinate large changes.** For anything beyond a small bug fix, discuss your approach with us via [issue tracker](https://github.com/ZcashFoundation/zebra/issues) or [Discord](https://discord.gg/yVNhQwQE68) before opening a PR.
 3. **Keep PRs focused.** One logical change per PR. If you're planning multiple related PRs, discuss the overall plan with the team first.
 4. **Follow conventional commits.** PRs are squash-merged to main, so the PR title becomes the commit message. Follow the [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) standard.
+5. **Declare breaking changes.** If your change breaks a published crate's public Rust API, add `!` after the type and scope in the PR title (`feat(zebra-chain)!: ...`). The semver-checks gate requires it, and the same marker tells the release to bump the major version.
 
 Zebra is a validator node — it excludes features not strictly needed for block validation and chain sync. Features like wallets, block explorers, and mining pools belong in [Zaino](https://github.com/zingolabs/zaino), [Zallet](https://github.com/zcash/wallet), or [librustzcash](https://github.com/zcash/librustzcash).
 
@@ -66,4 +67,4 @@ Zebra enforces code quality through review. For the full list of architecture ru
 - **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
 - **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
 - **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [`CHANGELOG_GUIDELINES.md`](CHANGELOG_GUIDELINES.md))
+- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))

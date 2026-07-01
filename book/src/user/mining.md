@@ -7,6 +7,8 @@ Contents:
 - [Download Zebra](#download-and-build-zebra)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
+  - [Extra coinbase data](#extra-coinbase-data)
+  - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
@@ -40,7 +42,11 @@ Tweak the following options in order to prepare for mining.
 
 [#miner-address]: #miner-address
 
-Node miner address is required. At the moment zebra only allows `p2pkh` or `p2sh` transparent addresses.
+A miner address is required. Zebra accepts:
+
+- a transparent `p2pkh` or `p2sh` address,
+- a Sapling shielded address, or
+- a Unified Address.
 
 ```toml
 [mining]
@@ -48,6 +54,43 @@ miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 ```
 
 The above address is the ZF Mainnet funding stream address. It is used here purely as an example.
+
+If `miner_address` is a Unified Address with more than one receiver, Zebra sends the block reward (and the [miner memo](#miner-memo), if set) to a single receiver, preferring Orchard, then Sapling, then transparent — whichever is the first of those present in the address.
+
+### Extra coinbase data
+
+[#extra-coinbase-data]: #extra-coinbase-data
+
+Zebra prepends a `🦓` marker to the coinbase input of every block it builds. Setting `extra_coinbase_data` adds your own tag (such as a pool name) after it, separated by `": "`:
+
+```toml
+[mining]
+miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
+extra_coinbase_data = "/MyPoolName/"
+```
+
+How it's used:
+
+- Inserted into the coinbase input script, after the block height, `🦓` marker, and `": "` separator.
+- Limited to 86 bytes. If exceeded, Zebra refuses to start.
+- Optional. If unset, the block still carries the `🦓` marker, just no extra data.
+
+You can confirm the marker is applied by calling `getblocktemplate` and checking the `coinbasetxn.data` field (see [Testing the setup](#testing-the-setup)): after the height bytes you'll see the `🦓` marker (`f0 9f a6 93`), then — if `extra_coinbase_data` is set — the `": "` separator (`3a 20`) and your text.
+
+### Miner memo
+
+[#miner-memo]: #miner-memo
+
+`miner_memo` sets the shielded memo field attached to the miner's reward output, for pools or solo miners who want to leave a message that's only visible to whoever can view the shielded output (rather than in plaintext on-chain, like `extra_coinbase_data`).
+
+```toml
+[mining]
+miner_address = 'u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a'
+miner_memo = "Mined by MyPoolName"
+```
+
+- Like `extra_coinbase_data`, the value is always encoded as raw UTF-8 bytes (no hex-decoding), and is limited to 512 bytes.
+- It only takes effect if the block reward is actually paid to a shielded receiver. That means `miner_address` must be a Sapling address, or a Unified Address whose preferred receiver (per the [miner address](#miner-address) rules above) is Orchard or Sapling. If `miner_address` resolves to a transparent receiver, `miner_memo` is configured but silently has no effect, since there is no shielded output to attach it to.
 
 ### RPC section
 

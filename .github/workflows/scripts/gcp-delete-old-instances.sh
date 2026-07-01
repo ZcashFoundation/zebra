@@ -19,24 +19,15 @@ if ! command -v gcloud &> /dev/null; then
 fi
 
 # Fetch the list of instances to delete
-if ! INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < ${DELETE_BEFORE_DATE}" --format='value(NAME,ZONE)' | sed 's/\(.*\)\t\(.*\)/\1 --zone=\2/'); then
+if ! INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < ${DELETE_BEFORE_DATE}" --format='value(NAME,ZONE)'); then
     echo "Error fetching instances."
     exit 1
 fi
 
-# Delete instances if any are found
-if [[ -n "${INSTANCES}" ]]; then
-    IFS=$'\n'
-    for INSTANCE_AND_ZONE in ${INSTANCES}; do
-        IFS=$' '
-        echo "Deleting instance: ${INSTANCE_AND_ZONE}"
-        gcloud compute instances delete --verbosity=info "${INSTANCE_AND_ZONE}" --delete-disks=all || {
-            echo "Failed to delete instance: ${INSTANCE_AND_ZONE}"
-            continue
-        }
-        IFS=$'\n'
-    done
-    IFS=$' \t\n' # Reset IFS to its default value
-else
-    echo "No instances to delete."
-fi
+# Delete each instance
+while IFS=$'\t' read -r NAME ZONE; do
+    [[ -z "${NAME}" ]] && continue
+    echo "Deleting instance: ${NAME} (--zone=${ZONE})"
+    gcloud compute instances delete "${NAME}" --zone="${ZONE}" --delete-disks=all --quiet --verbosity=info \
+        || echo "Failed to delete instance: ${NAME}"
+done <<< "${INSTANCES}"

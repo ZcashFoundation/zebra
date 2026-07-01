@@ -33,6 +33,12 @@ pre-release-replacements = [
   {file="../README.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
 ]
 
+# `cargo binstall zebrad` fetches the release archives built by release-binaries.yml.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "{ bin }{ binary-ext }"
+
 [package.metadata.docs.rs]
 
 # Publish Zebra's supported production and developer features on docs.rs.
@@ -180,7 +186,7 @@ toml = { workspace = true }
 
 futures = { workspace = true }
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process"] }
 tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }

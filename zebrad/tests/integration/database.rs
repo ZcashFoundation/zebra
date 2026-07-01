@@ -174,7 +174,6 @@ where
 }
 
 #[test]
-#[cfg(not(target_os = "windows"))]
 fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 

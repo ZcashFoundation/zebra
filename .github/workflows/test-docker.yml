@@ -56,30 +56,24 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
-        with:
-          short-length: 7
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
       - name: Build & push
         id: docker_build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
-          target: tests
+          target: runtime
           context: .
           file: docker/Dockerfile
-          tags: zebrad-test:${{ github.sha }}
-          build-args: |
-            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            CARGO_INCREMENTAL=1
-          outputs: type=docker,dest=${{ runner.temp }}/zebrad-test.tar
+          tags: zebrad-runtime:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/zebrad-runtime.tar
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
         with:
-          name: zebrad-test
-          path: ${{ runner.temp }}/zebrad-test.tar
+          name: zebrad-runtime
+          path: ${{ runner.temp }}/zebrad-runtime.tar
+          retention-days: 7
 
   test-configurations:
     name: Test ${{ matrix.name }}
@@ -113,12 +107,11 @@ jobs:
             env_vars: -e ZEBRA_NETWORK__NETWORK=Testnet
             grep_patterns: -e "resolved seed peer IP addresses.*testnet"
 
-          # Only runs when using the image is built with the `tests` target, because the `runtime` target
-          # doesn't have the custom config file available in the tests/common/configs directory
+          # Bind-mounts the repo's config file into the runtime image, which does not bake it in.
           - id: custom-conf
             name: Custom config
-            env_vars: -e CONFIG_FILE_PATH=/home/zebra/zebrad/tests/common/configs/custom-conf.toml
-            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"Do you even shield\\?\\\"\\)"
+            env_vars: -v $GITHUB_WORKSPACE/zebrad/tests/common/configs/custom-conf.toml:/tmp/custom-conf.toml:ro -e CONFIG_FILE_PATH=/tmp/custom-conf.toml
+            grep_patterns: -e "extra_coinbase_data:\\sSome\\(ExtraCoinbaseData\\(\\\"Do you even shield\\?\\\"\\)\\)"
 
           # RPC configuration tests
           - id: rpc-conf
@@ -146,7 +139,7 @@ jobs:
           # Feature-based configurations
           - id: prometheus-feature
             name: Prometheus metrics
-            env_vars: -e FEATURES=prometheus -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+            env_vars: -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
             grep_patterns: -e "0.0.0.0:9999"
 
     steps:
@@ -157,23 +150,21 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
-          name: zebrad-test
+          name: zebrad-runtime
           path: ${{ runner.temp }}
 
       - name: Load image
         run: |
-          docker load --input ${{ runner.temp }}/zebrad-test.tar
+          docker load --input ${{ runner.temp }}/zebrad-runtime.tar
           docker image ls -a
 
       - name: Run ${{ matrix.name }} test
-        # Only run custom-conf test if the config file exists in the built image
-        if: ${{ matrix.id != 'custom-conf' || hashFiles('zebrad/tests/common/configs/custom-conf.toml') != '' }}
         env:
           TEST_CMD: ${{ matrix.test_cmd }}
         run: |
           # For one-shot commands (like 'id'), run directly and check output
           if [ -n "$TEST_CMD" ]; then
-            OUTPUT=$(docker run --rm ${{ matrix.env_vars }} zebrad-test:${{ github.sha }} $TEST_CMD)
+            OUTPUT=$(docker run --rm ${{ matrix.env_vars }} zebrad-runtime:${{ github.sha }} $TEST_CMD)
             echo "Output: $OUTPUT"
             if echo "$OUTPUT" | grep --extended-regexp ${{ matrix.grep_patterns }}; then
               echo "SUCCESS: Found expected pattern in output"
@@ -185,7 +176,7 @@ jobs:
           fi
 
           # For long-running commands (zebrad start), run detached and follow logs
-          docker run ${{ matrix.env_vars }} --detach --name ${{ matrix.id }} -t zebrad-test:${{ github.sha }} zebrad start
+          docker run ${{ matrix.env_vars }} --detach --name ${{ matrix.id }} -t zebrad-runtime:${{ github.sha }} zebrad start
           # Use a subshell to handle the broken pipe error gracefully
           (
             trap "" PIPE;

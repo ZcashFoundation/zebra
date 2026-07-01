@@ -25,18 +25,24 @@ ARG CARGO_HOME="${HOME}/.cargo"
 ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
-FROM rust:${RUST_VERSION}-trixie AS deps
+# rust:1.91.0-trixie
+FROM rust:${RUST_VERSION}-trixie@sha256:a0dba1c1b2c90585fc44421b55ddf8063323760dc644ba1d35f5b389ad3e8e14 AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 # Make the build platform available as a variable
 ARG BUILDPLATFORM
+
+# Forwarded from the caller workflow so rustc, dpkg, and other tools honour it.
+# A non-empty default is required: an empty value makes clang and usermod error.
+ARG SOURCE_DATE_EPOCH=0
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     libclang-dev=1:19.0-63 \
     protobuf-compiler=3.21.12-11 \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 # Build arguments and variables
 ARG CARGO_INCREMENTAL
@@ -96,7 +102,7 @@ RUN apt-get -qq update && \
     curl -LsSf "https://get.nexte.st/latest/${ARCH}" | tar zxf - -C "${CARGO_HOME}/bin" && \
     apt-get -qq remove --purge -y curl && \
     apt-get -qq autoremove -y && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 # Link RocksDB dynamically for faster test builds.
 ENV ROCKSDB_LIB_DIR="/usr/lib/"
@@ -143,6 +149,9 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
+# Strip absolute build paths from the binary so it doesn't depend on the build layout.
+ENV RUSTFLAGS="--remap-path-prefix=${HOME}=/zebra --remap-path-prefix=${CARGO_HOME}=/cargo"
+
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
@@ -165,10 +174,14 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
 # from the `release` stage along with other binaries and files.
-FROM debian:trixie-slim AS runtime
+# debian:trixie-slim
+FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
+
+ARG SOURCE_DATE_EPOCH=0
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 # Create a non-privileged user for running `zebrad`.
 #
@@ -198,7 +211,7 @@ RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
     adduser=3.152 \
     curl=8.14.1-2+deb13u3 \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""

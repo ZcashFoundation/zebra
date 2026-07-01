@@ -26,14 +26,22 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      # Required so the called workflow's attest-build-provenance and
+      # attest-sbom steps can write attestations on the release image.
+      # Reusable workflows cannot grant themselves permissions the caller
+      # has not granted.
+      attestations: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
-      short_sha: ''
+      # Embed the release commit (the only source of git_commit(), since `.git` is excluded).
+      short_sha: auto
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
+      # Build releases without the shared (poisonable) Docker Build Cloud cache.
+      no_cache: true
       # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
       publish_to_dockerhub: true
@@ -41,6 +49,18 @@ jobs:
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # Build and attach downloadable zebrad binaries to the GitHub release.
+  binaries:
+    name: Attach release binaries
+    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      release_tag: ${{ github.event.release.tag_name }}
 
   dockerhub-description:
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
@@ -75,6 +95,7 @@ jobs:
       }}
     needs:
       - build
+      - binaries
     timeout-minutes: 1
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -85,7 +106,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build ]
+    needs: [ build, binaries ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest

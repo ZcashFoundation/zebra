@@ -251,6 +251,7 @@ jobs:
       contents: read
       id-token: write
       pull-requests: write
+      attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     # Build for:
     # - Pull requests
