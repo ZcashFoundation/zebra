@@ -141,6 +141,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU6, Nu6),
         (NU6_1, Nu6_1),
         (NU6_2, Nu6_2),
+        (NU6_3, Nu6_3),
     ]
 };
 
@@ -235,16 +236,13 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
     (Nu6_2, ConsensusBranchId(0x5437f330)),
-    // TODO: set the real NU6.3 (Ironwood) branch id once it is published. This placeholder matches
-    // the placeholder `BranchId::Nu6_3 = 0xffff_ffff` in the librustzcash Ironwood fork, so that
-    // `Transaction::to_librustzcash` resolves v6 transactions to the fork's NU6.3 branch id.
-    #[cfg(any(test, feature = "zebra-test"))]
-    (Nu6_3, ConsensusBranchId(0xffffffff)),
+    // The NU6.3 (Ironwood) consensus branch id, matching zcash_protocol's `BranchId::Nu6_3`.
+    (Nu6_3, ConsensusBranchId(0x37a5165b)),
     // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
     #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0xfffffffe)),
-    // Distinct test placeholder so it never collides with the `Nu6_3`/`Nu7` placeholders above
-    // (which are gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
+    // Distinct test placeholder so it never collides with the `Nu7` placeholder above
+    // (which is gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
     // the `branch_id_bijective` test under `--cfg zcash_unstable="zfuture"`.
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xfffffffd)),
