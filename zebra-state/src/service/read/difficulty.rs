@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
+    parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -31,11 +31,6 @@ use crate::{
     },
     BoxError, GetBlockTemplateChainInfo,
 };
-
-/// The amount of extra time we allow for a miner to mine a standard difficulty block on testnet.
-///
-/// This is a Zebra-specific standard rule.
-pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
@@ -321,21 +316,34 @@ fn adjust_difficulty_and_time_for_testnet(
         .checked_add(Duration32::from_seconds(1))
         .expect("a valid block time plus a small constant is in-range");
 
-    // If a miner is likely to find a block with the cur_time and standard difficulty
-    // within a target block interval or two, keep the original difficulty.
-    // Otherwise, try to use the minimum difficulty.
+    // Offer a minimum-difficulty template only once `cur_time` is strictly past
+    // `previous_block_time + 6 * PoWTargetSpacing` (the latest time a standard-difficulty
+    // block may use; a minimum-difficulty block's time must be strictly greater).
     //
-    // This is a Zebra-specific standard rule.
+    // A minimum-difficulty block is only consensus-valid if its time is more than
+    // `6 * PoWTargetSpacing` after the previous block. Switching to a minimum-difficulty template
+    // before `cur_time` has reached that point would require clamping `cur_time` up to `min_time`,
+    // i.e. future-dating the block timestamp ahead of real time purely to obtain minimum difficulty.
     //
-    // We don't need to undo the clamping here:
-    // - if cur_time is clamped to min_time, then we're more likely to have a minimum
-    //    difficulty block, which makes mining easier;
-    // - if cur_time gets clamped to max_time, this is almost always a minimum difficulty block.
-    let local_std_difficulty_limit = std_difficulty_max_time
-        .checked_sub(Duration32::from_seconds(EXTRA_TIME_TO_MINE_A_BLOCK))
-        .expect("a valid block time minus a small constant is in-range");
-
-    if result.cur_time <= local_std_difficulty_limit {
+    // Zebra used to do this, switching 150 seconds early (`2 * PoWTargetSpacing` after Blossom),
+    // via a former `EXTRA_TIME_TO_MINE_A_BLOCK` constant. On a chain with any sustained hashrate
+    // that produced a stream of future-dated minimum-difficulty blocks, each of which sharply
+    // reduces the difficulty (the difficulty average is over targets and includes
+    // minimum-difficulty blocks), depressing the difficulty far below equilibrium. See
+    // <https://github.com/zcash/zips/issues/1321>.
+    //
+    // This does not change the underlying difficulty averaging: a genuine gap of more than
+    // `6 * PoWTargetSpacing` still yields a minimum-difficulty block that reduces the difficulty.
+    // It only stops Zebra from proactively generating such blocks by future-dating timestamps.
+    //
+    // `cur_time` was already clamped into `[min_time, max_time]` by the caller
+    // (`difficulty_time_and_history_tree`); we don't restore the un-clamped `now` before
+    // choosing standard vs. minimum difficulty below, because whichever way that clamp
+    // moved `cur_time`, the outcome is benign:
+    // - clamped up to `min_time`: more likely a minimum-difficulty block, which makes
+    //   mining easier;
+    // - clamped down to `max_time`: almost always a minimum-difficulty block.
+    if result.cur_time <= std_difficulty_max_time {
         // Standard difficulty: the cur and max time need to exclude min difficulty blocks
 
         // The maximum time can only be decreased, and only as far as min_time.
@@ -363,5 +371,162 @@ fn adjust_difficulty_and_time_for_testnet(
             relevant_data.iter().cloned(),
         )
         .expected_difficulty_threshold();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the Testnet minimum-difficulty template adjustment. They construct the
+    //! [`GetBlockTemplateChainInfo`] and block context with fixed times, exercising
+    //! `adjust_difficulty_and_time_for_testnet` deterministically without reading the real
+    //! clock (the `DateTime32::now()` call lives only in its caller).
+
+    use super::*;
+    use zebra_chain::work::difficulty::ParameterDifficulty as _;
+
+    // A Testnet height at which the minimum-difficulty rule is active (>= 299188) and the
+    // target spacing is the post-Blossom 75 s, so the minimum-difficulty gap is 6 * 75 = 450 s.
+    const ACTIVE_HEIGHT: Height = Height(2_000_000);
+    const PREV: u32 = 1_600_000_000;
+    const GAP: u32 = 6 * 75;
+
+    /// Recent block difficulties and times in reverse order from the tip, with the most
+    /// recent (first) block time equal to `PREV`. The difficulty thresholds are irrelevant
+    /// to the minimum-difficulty rule under test.
+    fn recent_block_data(network: &Network) -> Vec<(CompactDifficulty, DateTime<Utc>)> {
+        let threshold = network.target_difficulty_limit().to_compact();
+        (0..POW_ADJUSTMENT_BLOCK_SPAN)
+            .map(|i| (threshold, DateTime32::from(PREV - i as u32).into()))
+            .collect()
+    }
+
+    /// A [`GetBlockTemplateChainInfo`] with candidate time `cur_time` and a wide
+    /// `[min_time, max_time]` window around `PREV`, so the only clamping under test comes
+    /// from the minimum-difficulty adjustment. `expected_difficulty` starts at a sentinel.
+    fn chain_info(cur_time: u32) -> GetBlockTemplateChainInfo {
+        GetBlockTemplateChainInfo {
+            tip_hash: Hash([0; 32]),
+            tip_height: Height(0),
+            chain_history_root: None,
+            expected_difficulty: CompactDifficulty::default(),
+            cur_time: DateTime32::from(cur_time),
+            min_time: DateTime32::from(PREV - 100),
+            max_time: DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN),
+        }
+    }
+
+    /// A candidate time inside the old "eager" window (`PREV + 300 .. PREV + 450`) must stay
+    /// standard-difficulty and must not be future-dated. Zebra used to switch this to a
+    /// minimum-difficulty template with `cur_time` clamped up to `PREV + 451`.
+    #[test]
+    fn eager_window_stays_standard_difficulty_and_is_not_future_dated() {
+        let network = Network::new_default_testnet();
+        let cur = PREV + 400;
+        let mut result = chain_info(cur);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            ACTIVE_HEIGHT,
+            recent_block_data(&network),
+        );
+
+        // Still standard difficulty: expected_difficulty left untouched (sentinel unchanged).
+        assert_eq!(result.expected_difficulty, CompactDifficulty::default());
+        // Not future-dated: cur_time unchanged, still before the consensus threshold.
+        assert_eq!(result.cur_time, DateTime32::from(cur));
+        // max_time clamped down to the standard-difficulty boundary (PREV + 450).
+        assert_eq!(result.max_time, DateTime32::from(PREV + GAP));
+    }
+
+    /// A candidate time strictly past `PREV + 450` switches to a minimum-difficulty template.
+    #[test]
+    fn past_the_threshold_switches_to_minimum_difficulty() {
+        let network = Network::new_default_testnet();
+        let cur = PREV + 500;
+        let mut result = chain_info(cur);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            ACTIVE_HEIGHT,
+            recent_block_data(&network),
+        );
+
+        // Minimum difficulty: expected_difficulty recomputed to the PoWLimit.
+        assert_eq!(
+            result.expected_difficulty,
+            network.target_difficulty_limit().to_compact()
+        );
+        // min_time raised to PREV + 451; cur_time is already past it, so it is unchanged.
+        assert_eq!(result.min_time, DateTime32::from(PREV + GAP + 1));
+        assert_eq!(result.cur_time, DateTime32::from(cur));
+    }
+
+    /// The gap is a strict `>`: exactly `PREV + 450` is standard, `PREV + 451` is minimum.
+    #[test]
+    fn threshold_is_inclusive_for_standard_difficulty() {
+        let network = Network::new_default_testnet();
+
+        let mut at_threshold = chain_info(PREV + GAP);
+        adjust_difficulty_and_time_for_testnet(
+            &mut at_threshold,
+            &network,
+            ACTIVE_HEIGHT,
+            recent_block_data(&network),
+        );
+        assert_eq!(at_threshold.expected_difficulty, CompactDifficulty::default());
+
+        let mut past_threshold = chain_info(PREV + GAP + 1);
+        adjust_difficulty_and_time_for_testnet(
+            &mut past_threshold,
+            &network,
+            ACTIVE_HEIGHT,
+            recent_block_data(&network),
+        );
+        assert_eq!(
+            past_threshold.expected_difficulty,
+            network.target_difficulty_limit().to_compact()
+        );
+    }
+
+    /// The adjustment only applies to test networks: on Mainnet it is a no-op.
+    #[test]
+    fn mainnet_is_a_no_op() {
+        let network = Network::Mainnet;
+        let cur = PREV + 400;
+        let mut result = chain_info(cur);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            ACTIVE_HEIGHT,
+            recent_block_data(&network),
+        );
+
+        assert_eq!(result.expected_difficulty, CompactDifficulty::default());
+        assert_eq!(result.cur_time, DateTime32::from(cur));
+        assert_eq!(result.min_time, DateTime32::from(PREV - 100));
+        assert_eq!(result.max_time, DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN));
+    }
+
+    /// Below `TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT` (299188) the rule is inactive, so the
+    /// adjustment is a no-op even on Testnet.
+    #[test]
+    fn below_start_height_is_a_no_op() {
+        let network = Network::new_default_testnet();
+        let cur = PREV + 400;
+        let mut result = chain_info(cur);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            Height(100_000),
+            recent_block_data(&network),
+        );
+
+        assert_eq!(result.expected_difficulty, CompactDifficulty::default());
+        assert_eq!(result.cur_time, DateTime32::from(cur));
+        assert_eq!(result.max_time, DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN));
     }
 }

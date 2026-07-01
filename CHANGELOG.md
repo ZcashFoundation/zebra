@@ -30,12 +30,32 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+- On Testnet, the `getblocktemplate` RPC no longer switches to a
+  minimum-difficulty block template early. Zebra previously treated a template
+  as minimum-difficulty as soon as its `cur_time` came within a fixed 150
+  seconds (`2 * PoWTargetSpacing` after Blossom) of the consensus
+  minimum-difficulty threshold, clamping `cur_time` up to just past the
+  threshold. On Testnet this future-dated the block's timestamp and produced
+  spurious minimum-difficulty blocks that depress difficulty far below its
+  equilibrium. Templates now switch to minimum difficulty only once `cur_time`
+  reaches the consensus threshold itself. This is a Testnet-only,
+  template-construction (non-consensus) change: it does not alter block
+  validity, and it does not change the difficulty-averaging rule that amplifies
+  each minimum-difficulty block into a large difficulty drop (tracked in
+  [zcash/zips#1321](https://github.com/zcash/zips/issues/1321))
+  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
 - Opening a Zebra state read-only (for example, as a secondary instance over a
   running node's database) now fails with a clear error instead of panicking when
   the cache directory is missing or unreadable, when no database exists at the
   configured path, or when an ephemeral database is also configured (a read-only
   secondary must not delete the primary's files). The read-write open path is
   unchanged.
+
+### Removed
+
+- The public constant `EXTRA_TIME_TO_MINE_A_BLOCK` in `zebra-state`, made unused by
+  the Testnet `getblocktemplate` change above
+  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
 
 ### Fixed
 
