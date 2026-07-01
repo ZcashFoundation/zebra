@@ -27,7 +27,7 @@ fi
 # Delete templates if any are found
 for TEMPLATE in ${TEMPLATES}; do
     echo "Deleting template: ${TEMPLATE}"
-    if ! gcloud compute instance-templates delete "${TEMPLATE}"; then
+    if ! gcloud compute instance-templates delete "${TEMPLATE}" --quiet; then
         echo "Failed to delete template: ${TEMPLATE}"
     fi
 done
