@@ -82,7 +82,7 @@ jobs:
             in code fences.
 
             Zebra keeps one operator changelog (root `CHANGELOG.md`) and one changelog per
-            crate (`<crate>/CHANGELOG.md`). Produce a block for each file the PR affects, each
+            crate (`<crate>/CHANGELOG.md`). Produce a block for each changelog file that should be updated for this PR, each
             led by a bold path label, then only the sections that have entries. Use this shape:
 
             **`CHANGELOG.md`** (node operators)
