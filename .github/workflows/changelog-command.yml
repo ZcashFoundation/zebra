@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Acknowledge the command
