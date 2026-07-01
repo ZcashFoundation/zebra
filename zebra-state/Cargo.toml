@@ -61,6 +61,7 @@ rocksdb = { workspace = true, features = ["lz4"] }
 semver = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
+serde-big-array = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 

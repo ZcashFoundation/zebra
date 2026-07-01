@@ -71,6 +71,22 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Reconstructs an [`Entry`] from raw serialized bytes written by an earlier database
+    /// format, zero-padding (or truncating) to the current [`zcash_history::MAX_ENTRY_SIZE`].
+    ///
+    /// The on-disk width of an entry is `zcash_history::MAX_ENTRY_SIZE`, which grew when NU6.3
+    /// (Ironwood) added fields to `zcash_history::NodeData`. Earlier formats stored the same node
+    /// data in a narrower array with fewer trailing zero bytes, so copying the stored prefix into
+    /// a zeroed current-width array preserves the entry. This is only used by the finalized
+    /// state's backward-compatible history-tree deserialization; new entries are written at the
+    /// current width.
+    pub fn from_raw_bytes_padded(bytes: &[u8]) -> Self {
+        let mut inner = [0; zcash_history::MAX_ENTRY_SIZE];
+        let len = bytes.len().min(inner.len());
+        inner[..len].copy_from_slice(&bytes[..len]);
+        Entry { inner }
+    }
+
     /// Create a leaf Entry for the given block, its network, and the root of its
     /// note commitment trees.
     ///

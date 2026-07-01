@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use bincode::Options;
+use serde_big_array::BigArray;
 
 use zebra_chain::{
     amount::NonNegative,
@@ -87,10 +88,67 @@ impl IntoDisk for HistoryTreeParts {
     }
 }
 
+/// The width of a history-tree [`zcash_history::Entry`] as serialized by database formats written
+/// before NU6.3 (Ironwood) widened `zcash_history::NodeData`. Equal to the pre-Ironwood
+/// `MAX_ENTRY_SIZE`: a `MAX_NODE_DATA_SIZE` of 244 bytes plus the 9-byte entry header.
+const LEGACY_MAX_ENTRY_SIZE: usize = 253;
+
+/// A mirror of [`HistoryTreeParts`] using the pre-NU6.3 [`zcash_history::Entry`] width.
+///
+/// Used to read history trees written by earlier database formats, whose entries are too narrow to
+/// parse at the current width. The field order must match [`HistoryTreeParts`] so the two share a
+/// bincode layout (bincode ignores field names and identifies fields by position).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LegacyHistoryTreeParts {
+    network_kind: NetworkKind,
+    size: u32,
+    peaks: BTreeMap<u32, LegacyEntry>,
+    current_height: Height,
+}
+
+/// A history-tree entry serialized at the pre-NU6.3 [`LEGACY_MAX_ENTRY_SIZE`] width.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LegacyEntry {
+    #[serde(with = "BigArray")]
+    inner: [u8; LEGACY_MAX_ENTRY_SIZE],
+}
+
+impl From<LegacyHistoryTreeParts> for HistoryTreeParts {
+    fn from(legacy: LegacyHistoryTreeParts) -> Self {
+        HistoryTreeParts {
+            network_kind: legacy.network_kind,
+            size: legacy.size,
+            peaks: legacy
+                .peaks
+                .into_iter()
+                .map(|(index, entry)| {
+                    (
+                        index,
+                        zcash_history::Entry::from_raw_bytes_padded(&entry.inner),
+                    )
+                })
+                .collect(),
+            current_height: legacy.current_height,
+        }
+    }
+}
+
 impl FromDisk for HistoryTreeParts {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
+        let bytes = bytes.as_ref();
+        let options = bincode::DefaultOptions::new();
+
+        // Try the current entry width first. Databases written before NU6.3 (Ironwood) widened
+        // `zcash_history::Entry` store narrower entries that fail to parse at the current width, so
+        // fall back to the legacy width and zero-pad each entry up to the current width. New data
+        // always parses at the current width, so it never reaches the fallback.
+        options
+            .deserialize::<HistoryTreeParts>(bytes)
+            .or_else(|_| {
+                options
+                    .deserialize::<LegacyHistoryTreeParts>(bytes)
+                    .map(HistoryTreeParts::from)
+            })
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -135,5 +193,76 @@ impl FromDisk for BlockInfo {
             }
             _ => panic!("invalid format"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A history tree written by a pre-NU6.3 database format (253-byte entries) must be read in
+    /// place, zero-padding each entry up to the current width.
+    #[test]
+    fn history_tree_parts_reads_legacy_entry_width() {
+        // Two legacy-width entries with distinct, nonzero content.
+        let legacy = LegacyHistoryTreeParts {
+            network_kind: NetworkKind::Mainnet,
+            size: 42,
+            peaks: BTreeMap::from([
+                (
+                    0,
+                    LegacyEntry {
+                        inner: [0xAB; LEGACY_MAX_ENTRY_SIZE],
+                    },
+                ),
+                (
+                    5,
+                    LegacyEntry {
+                        inner: [0xCD; LEGACY_MAX_ENTRY_SIZE],
+                    },
+                ),
+            ]),
+            current_height: Height(1_000),
+        };
+
+        let legacy_bytes = bincode::DefaultOptions::new()
+            .serialize(&legacy)
+            .expect("legacy serialization succeeds");
+
+        // Reading the narrower blob must succeed via the compatibility fallback (this used to panic
+        // with `UnexpectedEof` because the current, wider entry width overran the stored bytes).
+        let parts = HistoryTreeParts::from_bytes(&legacy_bytes);
+
+        assert_eq!(parts.network_kind, NetworkKind::Mainnet);
+        assert_eq!(parts.size, 42);
+        assert_eq!(parts.current_height, Height(1_000));
+        assert_eq!(parts.peaks.len(), 2);
+
+        // The read path reconstructs exactly the same parts as converting the legacy data directly,
+        // and re-encodes at the current (wider) entry width.
+        assert_eq!(parts.as_bytes(), HistoryTreeParts::from(legacy).as_bytes());
+        assert!(parts.as_bytes().len() > legacy_bytes.len());
+    }
+
+    /// Data written at the current entry width round-trips without hitting the legacy fallback.
+    #[test]
+    fn history_tree_parts_round_trips_current_width() {
+        let parts = HistoryTreeParts {
+            network_kind: NetworkKind::Testnet,
+            size: 3,
+            peaks: BTreeMap::from([(
+                0,
+                zcash_history::Entry::from_raw_bytes_padded(&[7; LEGACY_MAX_ENTRY_SIZE]),
+            )]),
+            current_height: Height(9),
+        };
+
+        let bytes = parts.as_bytes();
+        let parsed = HistoryTreeParts::from_bytes(&bytes);
+
+        assert_eq!(parsed.network_kind, NetworkKind::Testnet);
+        assert_eq!(parsed.size, 3);
+        assert_eq!(parsed.current_height, Height(9));
+        assert_eq!(parsed.as_bytes(), bytes);
     }
 }
