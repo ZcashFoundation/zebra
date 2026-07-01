@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
+    parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -31,11 +31,6 @@ use crate::{
     },
     BoxError, GetBlockTemplateChainInfo,
 };
-
-/// The amount of extra time we allow for a miner to mine a standard difficulty block on testnet.
-///
-/// This is a Zebra-specific standard rule.
-pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
@@ -321,21 +316,31 @@ fn adjust_difficulty_and_time_for_testnet(
         .checked_add(Duration32::from_seconds(1))
         .expect("a valid block time plus a small constant is in-range");
 
-    // If a miner is likely to find a block with the cur_time and standard difficulty
-    // within a target block interval or two, keep the original difficulty.
-    // Otherwise, try to use the minimum difficulty.
+    // Offer a minimum-difficulty template only once `cur_time` is strictly past
+    // `previous_block_time + 6 * PoWTargetSpacing` (the latest time a standard-difficulty
+    // block may use; a minimum-difficulty block's time must be strictly greater).
     //
-    // This is a Zebra-specific standard rule.
+    // A minimum-difficulty block is only consensus-valid if its time is more than
+    // `6 * PoWTargetSpacing` after the previous block. Switching to a minimum-difficulty template
+    // before `cur_time` has reached that point would require clamping `cur_time` up to `min_time`,
+    // i.e. future-dating the block timestamp ahead of real time purely to obtain minimum difficulty.
+    //
+    // Zebra used to do this, switching 150 seconds early (`2 * PoWTargetSpacing` after Blossom),
+    // via a former `EXTRA_TIME_TO_MINE_A_BLOCK` constant. On a chain with any sustained hashrate
+    // that produced a stream of future-dated minimum-difficulty blocks, each of which sharply
+    // reduces the difficulty (the difficulty average is over targets and includes
+    // minimum-difficulty blocks), depressing the difficulty far below equilibrium. See
+    // <https://github.com/zcash/zips/issues/1321>.
+    //
+    // This does not change the underlying difficulty averaging: a genuine gap of more than
+    // `6 * PoWTargetSpacing` still yields a minimum-difficulty block that reduces the difficulty.
+    // It only stops Zebra from proactively generating such blocks by future-dating timestamps.
     //
     // We don't need to undo the clamping here:
     // - if cur_time is clamped to min_time, then we're more likely to have a minimum
     //    difficulty block, which makes mining easier;
     // - if cur_time gets clamped to max_time, this is almost always a minimum difficulty block.
-    let local_std_difficulty_limit = std_difficulty_max_time
-        .checked_sub(Duration32::from_seconds(EXTRA_TIME_TO_MINE_A_BLOCK))
-        .expect("a valid block time minus a small constant is in-range");
-
-    if result.cur_time <= local_std_difficulty_limit {
+    if result.cur_time <= std_difficulty_max_time {
         // Standard difficulty: the cur and max time need to exclude min difficulty blocks
 
         // The maximum time can only be decreased, and only as far as min_time.
