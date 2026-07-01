@@ -12,12 +12,6 @@ fail-fast = true
 status-level = "pass"
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
-# --- Platform overrides ---
-
-[[profile.default.overrides]]
-platform = 'cfg(target_os = "windows")'
-filter = "not test(=integration::database::delete_old_databases)"
-
 # --- CI Profile (PRs) ---
 
 [profile.ci]
@@ -25,10 +19,6 @@ fail-fast = false
 failure-output = "immediate"
 slow-timeout = { period = "5m", terminate-after = 4 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
-
-[[profile.ci.overrides]]
-platform = 'cfg(target_os = "windows")'
-filter = "not test(=integration::database::delete_old_databases)"
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
