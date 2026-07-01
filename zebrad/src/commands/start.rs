@@ -42,6 +42,9 @@
 //!  * Block Gossip Task
 //!    * runs in the background and continuously queries the state for
 //!      newly committed blocks to be gossiped to peers
+//!  * Block Notify Task
+//!    * if the user has configured a `notify.block_notify_command`, runs that command
+//!      whenever the best chain tip changes (Zebra's equivalent of zcashd's `-blocknotify`)
 //!  * Progress Task
 //!    * logs progress towards the chain tip
 //!
@@ -92,6 +95,7 @@ use crate::{
         health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
+        notify::{self, BlockNotifyError},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
@@ -344,6 +348,21 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        info!("spawning block notify task");
+        let block_notify_task_handle: tokio::task::JoinHandle<Result<(), BlockNotifyError>> =
+            if let Some(command) = config.notify.block_notify_command.clone() {
+                tokio::spawn(
+                    notify::run_block_notify(
+                        command,
+                        sync_status.clone(),
+                        chain_tip_change.clone(),
+                    )
+                    .in_current_span(),
+                )
+            } else {
+                tokio::spawn(std::future::pending().in_current_span())
+            };
+
         info!("spawning mempool queue checker task");
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
@@ -458,6 +477,7 @@ impl StartCmd {
         pin!(indexer_rpc_task_handle);
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
+        pin!(block_notify_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
@@ -509,6 +529,11 @@ impl StartCmd {
                 block_gossip_result = &mut block_gossip_task_handle => block_gossip_result
                     .expect("unexpected panic in the chain tip block gossip task")
                     .map(|_| info!("chain tip block gossip task exited"))
+                    .map_err(|e| eyre!(e)),
+
+                block_notify_result = &mut block_notify_task_handle => block_notify_result
+                    .expect("unexpected panic in the block notify task")
+                    .map(|_| info!("block notify task exited"))
                     .map_err(|e| eyre!(e)),
 
                 mempool_crawl_result = &mut mempool_crawler_task_handle => mempool_crawl_result
@@ -582,6 +607,7 @@ impl StartCmd {
         health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
+        block_notify_task_handle.abort();
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();

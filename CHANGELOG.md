@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
   locator that is on the best chain — the fork point — for clients tracking chain
   reorganizations through a read-only state service.
+- Added a `[notify] block_notify_command` option that runs a command on each best-chain-tip
+  change, with `%s` replaced by the new block hash — Zebra's equivalent of `zcashd`'s
+  `-blocknotify`.
 
 ### Changed
 
