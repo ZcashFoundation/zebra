@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Experimental support for the NU6.3 "Ironwood" shielded pool and v6 transaction
-  format. This is incomplete pending the deploy ZIP (no real activation height,
-  version group ID, or consensus branch ID yet), so it cannot activate on any
-  network.
+- Support for the NU6.3 "Ironwood" shielded pool and v6 transaction format,
+  activating on Testnet at height 4,134,000. The consensus parameters (v6 version
+  group ID, consensus branch ID, and Testnet activation height) match
+  `zcash_protocol`. No Mainnet activation height is set yet.
 - Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
   to forbid spending coinbase outputs into transparent outputs (the inverse of
   zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving

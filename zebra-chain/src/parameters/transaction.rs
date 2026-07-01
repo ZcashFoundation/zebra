@@ -13,5 +13,4 @@ pub const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 
 /// The version group ID for version 6 transactions.
-/// TODO: update this after it's chosen
-pub const TX_V6_VERSION_GROUP_ID: u32 = 0xFFFF_FFFF;
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0xD884_B698;
