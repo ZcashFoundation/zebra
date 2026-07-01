@@ -59,7 +59,7 @@ pub struct ShieldedData {
 /// A v6 (NU6.3) Orchard-protocol shielded bundle — used for both the Orchard and the Ironwood pool.
 ///
 /// This newtype wraps [`ShieldedData`] to give it the NU6.3 flag-byte serialization
-/// ([`FlagFormat::Nu6_3`], which permits the `enableCrossAddress` flag), distinct from the
+/// ([`FlagsV6`], which permits the `enableCrossAddress` flag), distinct from the
 /// pre-NU6.3 serialization that the bare [`ShieldedData`] uses for v5 Orchard bundles. The two
 /// formats differ only in which flag bits are reserved; encoding the format in the type keeps the
 /// v5 and v6 (de)serialization paths from being confused.
@@ -308,7 +308,7 @@ bitflags! {
 /// (`enableCrossAddress`) is valid and only bits 3..7 are reserved. The bare [`Flags`] codec is the
 /// pre-NU6.3 (v5 Orchard) format, where bits 2..7 are all reserved. Encoding the format in the type
 /// keeps the v5 and v6 flag-parsing paths from being confused (parallels
-/// [`ShieldedDataV6`](super::ShieldedDataV6)).
+/// [`ShieldedDataV6`]).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FlagsV6(Flags);
 
