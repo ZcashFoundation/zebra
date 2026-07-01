@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `getblocktemplate` now caches the built coinbase transaction per `(height, fees)`, so repeated
+  short-poll requests within a block no longer rebuild it. This avoids re-running the
+  Sapling/Orchard proof on every request when mining to a shielded address, which otherwise pegged
+  the CPU and made each template take seconds.
 - `TrustedChainSync` no longer busy-loops and saturates logs when a block repeatedly
   fails to commit to the non-finalized state: it now backs off before re-subscribing
   and only logs the warning on transitions.
