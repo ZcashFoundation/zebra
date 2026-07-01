@@ -4,6 +4,7 @@ runs:
   using: 'composite'
   steps:
     - name: Install protoc and librocksdb-dev on Ubuntu
+      if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo apt-get -qq update
