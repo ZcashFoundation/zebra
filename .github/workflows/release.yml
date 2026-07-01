@@ -230,6 +230,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # These rules follow the GitHub Release Format in book/src/dev/changelog-guidelines.md.
           prompt: |
             Rewrite the changelog section below into operator-facing GitHub Release
             notes for Zebra ${{ steps.zebrad-release.outputs.tag }}.

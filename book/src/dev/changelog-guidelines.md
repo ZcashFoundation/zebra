@@ -93,6 +93,8 @@ When a PR touches multiple categories, place it in **one section only** based on
 6. Added
 7. Fixed
 
+Exception for crate changelogs: a change that is both breaking and additive (for example, adding a variant to a public enum that is not `#[non_exhaustive]`) is listed under Breaking Changes for its impact and under Added for the new capability, so consumers see both signals.
+
 Fixed vs Changed: use Fixed only when the fix is invisible, meaning the bug is gone but output looks the same. If users see anything different (error messages, logs, behavior), use Changed.
 
 ### Tone and language
