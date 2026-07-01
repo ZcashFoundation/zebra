@@ -1586,6 +1586,22 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::AnyChainSaplingTree(hash_or_height) => {
+                Ok(ReadResponse::SaplingTree(read::any_sapling_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }
+
+            ReadRequest::AnyChainOrchardTree(hash_or_height) => {
+                Ok(ReadResponse::OrchardTree(read::any_orchard_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
                     .and_then(|limit| start_index.0.checked_add(limit.0))

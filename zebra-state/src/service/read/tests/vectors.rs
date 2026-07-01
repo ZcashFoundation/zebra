@@ -609,3 +609,123 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
 
     Ok(())
 }
+
+/// Test that the any-chain treestate lookups find trees in side chains by hash,
+/// while the best-chain-only lookups do not.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
+    use crate::{
+        arbitrary::Prepare,
+        service::{
+            finalized_state::FinalizedState,
+            non_finalized_state::NonFinalizedState,
+            read::tree::{any_orchard_tree, any_sapling_tree, orchard_tree, sapling_tree},
+        },
+        tests::FakeChainHelper,
+    };
+    use zebra_chain::{amount::NonNegative, value_balance::ValueBalance};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+
+    // Use pre-Heartwood blocks to avoid history tree complications
+    let genesis: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    // Create two competing children of genesis with different work, so they fork.
+    let best_chain_block = genesis.make_fake_child().set_work(100);
+    let side_chain_block = genesis.make_fake_child().set_work(50);
+
+    let best_hash = best_chain_block.hash();
+    let side_hash = side_chain_block.hash();
+
+    // If hashes are the same, we can't test side chains properly.
+    if best_hash == side_hash {
+        tracing::warn!("unable to create different block hashes, skipping side chain test");
+        return Ok(());
+    }
+
+    let mut non_finalized_state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_finalized_value_pool(fake_value_pool);
+
+    non_finalized_state.commit_new_chain(genesis.prepare(), &finalized_state)?;
+    non_finalized_state.commit_block(best_chain_block.clone().prepare(), &finalized_state)?;
+    non_finalized_state.commit_block(side_chain_block.clone().prepare(), &finalized_state)?;
+
+    assert_eq!(
+        non_finalized_state.chain_count(),
+        2,
+        "Should have 2 competing chains"
+    );
+
+    // Sapling: any-chain lookup finds the side chain tree by hash, best-chain lookup does not.
+    assert!(
+        any_sapling_tree(
+            non_finalized_state.chain_iter(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_some(),
+        "any_sapling_tree should find side chain treestate by hash"
+    );
+    assert!(
+        sapling_tree(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_none(),
+        "sapling_tree should NOT find side chain treestate by hash"
+    );
+
+    // Orchard: same expectations.
+    assert!(
+        any_orchard_tree(
+            non_finalized_state.chain_iter(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_some(),
+        "any_orchard_tree should find side chain treestate by hash"
+    );
+    assert!(
+        orchard_tree(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_none(),
+        "orchard_tree should NOT find side chain treestate by hash"
+    );
+
+    // Both lookups find the best chain treestate by hash.
+    assert!(
+        any_sapling_tree(
+            non_finalized_state.chain_iter(),
+            &finalized_state.db,
+            best_hash.into(),
+        )
+        .is_some(),
+        "any_sapling_tree should find best chain treestate by hash"
+    );
+    assert!(
+        sapling_tree(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            best_hash.into(),
+        )
+        .is_some(),
+        "sapling_tree should find best chain treestate by hash"
+    );
+
+    Ok(())
+}
