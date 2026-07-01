@@ -22,6 +22,11 @@ keywords = ["tower", "batch"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["algorithms", "asynchronous"]
 
+[features]
+# Implement `RequestWeight` for `tonic::Request<T>`, so gRPC requests can be
+# used as the batch request type without consumer-side newtype wrappers.
+tonic = ["dep:tonic"]
+
 [dependencies]
 futures = { workspace = true }
 futures-core = { workspace = true }
@@ -30,6 +35,7 @@ rayon = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "tracing", "macros"] }
 tokio-util = { workspace = true }
 tower = { workspace = true, features = ["util", "buffer"] }
+tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
 tracing-futures = { workspace = true }
 

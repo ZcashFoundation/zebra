@@ -133,3 +133,11 @@ pub trait RequestWeight {
 // `RequestWeight` impls for test `Item` types
 impl RequestWeight for () {}
 impl RequestWeight for &'static str {}
+
+// `tonic::Request<T>` is a foreign type, so consumers cannot implement the
+// foreign `RequestWeight` trait for it due to the orphan rule. Provide the impl
+// here, behind the `tonic` feature, so gRPC requests can be used as the batch
+// request type directly. Uses the default weight of `1`, which is correct for
+// gRPC services where each request has equal weight.
+#[cfg(feature = "tonic")]
+impl<T> RequestWeight for tonic::Request<T> {}
