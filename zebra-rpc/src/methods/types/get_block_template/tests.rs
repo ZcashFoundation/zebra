@@ -115,15 +115,8 @@ fn coinbase_cache_reuses_built_coinbase() {
     let fee = Amount::zero();
 
     let build = || {
-        TransactionTemplate::new_coinbase(
-            &net,
-            height,
-            &miner_params,
-            fee,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            None,
-        )
-        .expect("valid coinbase tx")
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, fee)
+            .expect("valid coinbase tx")
     };
 
     // A shielded coinbase carries a randomized proof, so two fresh builds differ. Identical bytes
