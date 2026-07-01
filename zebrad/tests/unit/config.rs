@@ -13,13 +13,10 @@ use zebrad::config::ZebradConfig;
 use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
-        config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
+        config_file_full_path, configs_dir, default_test_config, os_assigned_rpc_port_config,
+        persistent_test_config, read_listen_addr_from_logs, testdir,
     },
     launch::{ZebradTestDirExt, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY},
-};
-
-use crate::common::{
-    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
     sync::TINY_CHECKPOINT_TIMEOUT,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
