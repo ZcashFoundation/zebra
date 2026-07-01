@@ -142,12 +142,22 @@ impl FromDisk for HistoryTreeParts {
         // `zcash_history::Entry` store narrower entries that fail to parse at the current width, so
         // fall back to the legacy width and zero-pad each entry up to the current width. New data
         // always parses at the current width, so it never reaches the fallback.
+        //
+        // The fallback is gated on `UnexpectedEof`, which is the specific error a legacy-width
+        // record produces (we run out of bytes reading a wider-format entry). Any other error
+        // indicates real corruption of a current-format record and must not be silently
+        // reinterpreted as legacy data.
         options
             .deserialize::<HistoryTreeParts>(bytes)
-            .or_else(|_| {
-                options
-                    .deserialize::<LegacyHistoryTreeParts>(bytes)
-                    .map(HistoryTreeParts::from)
+            .or_else(|err| match err.as_ref() {
+                bincode::ErrorKind::Io(io_err)
+                    if io_err.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    options
+                        .deserialize::<LegacyHistoryTreeParts>(bytes)
+                        .map(HistoryTreeParts::from)
+                }
+                _ => Err(err),
             })
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
