@@ -9,6 +9,7 @@ use std::process::Stdio;
 
 use thiserror::Error;
 use tokio::sync::watch;
+use tracing::Instrument;
 
 use zebra_chain::block;
 use zebra_state::ChainTipChange;
@@ -146,19 +147,20 @@ fn spawn_notify_command(command: &str, hash: block::Hash, height: block::Height)
             // Reap the child asynchronously to avoid zombies, and log non-zero exits like zcashd's
             // `runCommand`. The main loop never awaits this, so it returns immediately to await the
             // next tip change. stdout/stderr go to `/dev/null`, so we only need the exit status.
-            tokio::spawn(async move {
-                let _enter = span.enter();
-
-                match child.wait().await {
-                    Ok(status) if !status.success() => {
-                        warn!(?rendered, ?status, "block notify command exited non-zero");
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        warn!(?rendered, ?error, "failed to wait on block notify command");
+            tokio::spawn(
+                async move {
+                    match child.wait().await {
+                        Ok(status) if !status.success() => {
+                            warn!(?rendered, ?status, "block notify command exited non-zero");
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            warn!(?rendered, ?error, "failed to wait on block notify command");
+                        }
                     }
                 }
-            });
+                .instrument(span),
+            );
         }
         Err(error) => warn!(?rendered, ?error, "failed to spawn block notify command"),
     }
