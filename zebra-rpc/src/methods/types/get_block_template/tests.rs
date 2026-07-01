@@ -147,3 +147,36 @@ fn coinbase_cache_reuses_built_coinbase() {
     cache.clear();
     assert!(cache.get(height, fee).is_none(), "a cleared cache misses");
 }
+
+/// From NU6.3 onward, a shielded coinbase paid to a Unified miner address with an Orchard
+/// receiver routes newly minted value into the Ironwood pool, not the Orchard pool.
+#[test]
+fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
+    let net = Network::new_default_testnet();
+    let height = NetworkUpgrade::Nu6_3
+        .activation_height(&net)
+        .expect("Nu6.3 is scheduled on Testnet");
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Unified),
+        )
+        .expect("hard-coded Unified address is valid"),
+    );
+
+    let template = TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
+        .expect("valid coinbase tx");
+    let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
+
+    // The coinbase is a v6 transaction with Ironwood shielded data and no Orchard shielded data.
+    // ZIP-229: from NU6.3, coinbase MUST have an empty Orchard component.
+    assert_eq!(coinbase.version(), 6, "coinbase is v6 at NU6.3");
+    assert!(
+        coinbase.ironwood_shielded_data().is_some(),
+        "coinbase creates an Ironwood output"
+    );
+    assert!(
+        coinbase.orchard_shielded_data().is_none(),
+        "coinbase must not create Orchard components on NU6.3"
+    );
+}
