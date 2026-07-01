@@ -35,9 +35,13 @@ filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
+# These tests sync mainnet to genesis from live peers; they normally finish in
+# ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
+# retry instead of hanging near the old 30m hard limit, where they flaked.
 [[profile.ci.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
-slow-timeout = { period = "15m", terminate-after = 2 }
+slow-timeout = { period = "5m", terminate-after = 2 }
+retries = 2
 
 [[profile.ci.overrides]]
 filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
