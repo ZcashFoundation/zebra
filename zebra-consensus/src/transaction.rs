@@ -387,170 +387,11 @@ where
         Poll::Ready(Ok(()))
     }
 
-    // TODO: break up each chunk into its own method
     fn call(&mut self, req: Request) -> Self::Future {
-        let script_verifier = self.script_verifier;
-        let network = self.network.clone();
-        let state = self.state.clone();
-        let mempool = self.mempool.clone();
-
-        let tx = req.transaction();
-        let tx_id = req.tx_id();
-        let span = tracing::debug_span!("tx", ?tx_id);
-
-        async move {
-            tracing::trace!(?tx_id, ?req, "got tx verify request");
-
-            // Do quick checks first
-            Self::check_structure_and_network_rules(tx.as_ref(), req.height(), &network)?;
-
-            // Validate the coinbase input consensus rules
-            if req.is_mempool() && tx.is_coinbase() {
-                return Err(TransactionError::CoinbaseInMempool);
-            }
-
-            if tx.is_coinbase() {
-                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-            } else if !tx.is_valid_non_coinbase() {
-                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
-            }
-
-            // Validate `nExpiryHeight` consensus rules
-            if tx.is_coinbase() {
-                check::coinbase_expiry_height(&req.height(), &tx, &network)?;
-            } else {
-                check::non_coinbase_expiry_height(&req.height(), &tx)?;
-            }
-
-            // Transaction invariants that apply regardless of request type or transaction version.
-            // These are pure consensus rules over the transaction structure and must always hold.
-            Self::check_transaction_invariants(tx.as_ref(), req.height(), &network)?;
-
-            tracing::trace!(?tx_id, "passed quick checks");
-
-            // Block transactions are checked against the block's own time directly;
-            // mempool transactions are checked against the next median-time-past from state.
-            if let Some(block_time) = req.block_time() {
-                check::lock_time_has_passed(&tx, req.height(), block_time)?;
-            } else {
-                Self::verify_mempool_lock_time(tx.as_ref(), req.height(), state.clone()).await?;
-            }
-
-            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
-            // in non-coinbase transactions MUST also be applied to coinbase transactions."
-            //
-            // This rule is implicitly implemented during Sapling and Orchard verification,
-            // because they do not distinguish between coinbase and non-coinbase transactions.
-            //
-            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
-            //
-            // https://zips.z.cash/zip-0213#specification
-
-            // Load spent UTXOs from state.
-            // The UTXOs are required for almost all the async checks.
-            let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
-            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
-
-            // WONTFIX: Return an error for Request::Block as well to replace this check in
-            //       the state once #2336 has been implemented?
-            if req.is_mempool() {
-                Self::check_maturity_height(&network, &req, &spent_utxos)?;
-            }
-
-            let nu = req.upgrade(&network);
-            let cached_ffi_transaction =
-                Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
-
-            tracing::trace!(?tx_id, "got state UTXOs");
-
-            // Select version-specific async verification pipeline
-            let mut async_checks = Self::dispatch_version_verification(
-                tx.as_ref(),
-                nu,
-                script_verifier,
-                cached_ffi_transaction.clone()
-            )?;
-
-            if let Some(unmined_tx) = req.mempool_transaction() {
-                let check_anchors_and_revealed_nullifiers_query = state
-                    .clone()
-                    .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
-                        unmined_tx,
-                    ))
-                    .map(|res| {
-                        assert!(
-                            res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
-                            "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
-                        );
-                        Ok(())
-                    }
-                    );
-
-                async_checks.push(check_anchors_and_revealed_nullifiers_query);
-            }
-
-            tracing::trace!(?tx_id, "awaiting async checks...");
-
-            async_checks.check().await?;
-
-            tracing::trace!(?tx_id, "finished async checks");
-
-            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
-
-            let rsp = match req {
-                Request::Block { .. } => Response::Block {
-                    tx_id,
-                    miner_fee,
-                    // In block validation, the consensus sigop total must include P2SH
-                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
-                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
-                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
-                    // sigops. See
-                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
-                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
-                },
-                Request::Mempool { transaction: tx, .. } => {
-                    // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
-                    // spends both chain and mempool UTXOs (mempool outputs are appended last by
-                    // `spent_utxos()`), causing policy checks to pair the wrong input with
-                    // the wrong spent output.
-                    // https://github.com/ZcashFoundation/zebra/issues/10346
-                    let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
-                    let transaction = VerifiedUnminedTx::new(
-                        tx,
-                        miner_fee.expect("fee should have been checked earlier"),
-                        sigops,
-                        cached_ffi_transaction.p2sh_sigops(),
-                        spent_outputs.into(),
-                    )?;
-
-                    if let Some(mut mempool) = mempool {
-                        tokio::spawn(async move {
-                            // Best-effort poll of the mempool to provide a timely response to
-                            // `sendrawtransaction` RPC calls or `AwaitOutput` mempool calls.
-                            tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
-                            let _ = mempool
-                                .ready()
-                                .await
-                                .expect("mempool poll_ready() method should not return an error")
-                                .call(mempool::Request::CheckForVerifiedTransactions)
-                                .await;
-                        });
-                    }
-
-                    Response::Mempool { transaction, spent_mempool_outpoints }
-                },
-            };
-
-            Ok(rsp)
+        match req {
+            Request::Block { .. } => self.verify_block(req),
+            Request::Mempool { .. } => self.verify_mempool(req),
         }
-            .inspect(move |result| {
-                // Hide the transaction data to avoid filling the logs
-                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
-            })
-            .instrument(span)
-            .boxed()
     }
 }
 
@@ -564,6 +405,247 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    /// Verifies a transaction in block context.
+    fn verify_block(
+        &self,
+        req: Request,
+    ) -> Pin<Box<dyn Future<Output = Result<Response, TransactionError>> + Send + 'static>> {
+        let script_verifier = self.script_verifier;
+        let network = self.network.clone();
+        let state = self.state.clone();
+
+        let tx = req.transaction();
+        let tx_id = req.tx_id();
+        let height = req.height();
+        let time = req.block_time().expect("block requests always have a time");
+        let known_utxos = req.known_utxos();
+        let nu = req.upgrade(&network);
+        let span = tracing::debug_span!("tx", ?tx_id);
+
+        async move {
+            tracing::trace!(?tx_id, ?req, "got tx verify request");
+
+            // Do quick checks first
+            Self::check_structure_and_network_rules(tx.as_ref(), height, &network)?;
+
+            if tx.is_coinbase() {
+                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            } else if !tx.is_valid_non_coinbase() {
+                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
+            }
+
+            // Validate `nExpiryHeight` consensus rules
+            if tx.is_coinbase() {
+                check::coinbase_expiry_height(&height, &tx, &network)?;
+            } else {
+                check::non_coinbase_expiry_height(&height, &tx)?;
+            }
+
+            // Transaction invariants that apply regardless of request type or transaction version.
+            // These are pure consensus rules over the transaction structure and must always hold.
+            Self::check_transaction_invariants(tx.as_ref(), height, &network)?;
+
+            tracing::trace!(?tx_id, "passed quick checks");
+
+            // Block transactions are checked against the block's own time directly.
+            check::lock_time_has_passed(&tx, height, time)?;
+
+            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
+            // in non-coinbase transactions MUST also be applied to coinbase transactions."
+            //
+            // This rule is implicitly implemented during Sapling and Orchard verification,
+            // because they do not distinguish between coinbase and non-coinbase transactions.
+            //
+            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
+            //
+            // https://zips.z.cash/zip-0213#specification
+
+            // Load spent UTXOs from state.
+            // The UTXOs are required for almost all the async checks.
+            let (spent_utxos, spent_outputs) =
+                Self::block_spent_utxos(tx.clone(), known_utxos, state.clone()).await?;
+
+            let cached_ffi_transaction =
+                Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
+
+            tracing::trace!(?tx_id, "got state UTXOs");
+
+            // Select version-specific async verification pipeline
+            let async_checks = Self::dispatch_version_verification(
+                tx.as_ref(),
+                nu,
+                script_verifier,
+                cached_ffi_transaction.clone()
+            )?;
+
+            tracing::trace!(?tx_id, "awaiting async checks...");
+
+            async_checks.check().await?;
+
+            tracing::trace!(?tx_id, "finished async checks");
+
+            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
+
+            Ok(Response::Block {
+                    tx_id,
+                    miner_fee,
+                    // In block validation, the consensus sigop total must include P2SH
+                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
+                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
+                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
+                    // sigops. See
+                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
+                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
+                })
+        }
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+            })
+            .instrument(span)
+            .boxed()
+    }
+
+    /// Verifies a transaction in mempool context.
+    fn verify_mempool(
+        &self,
+        req: Request,
+    ) -> Pin<Box<dyn Future<Output = Result<Response, TransactionError>> + Send + 'static>> {
+        let script_verifier = self.script_verifier;
+        let network = self.network.clone();
+        let state = self.state.clone();
+        let mempool = self.mempool.clone();
+
+        let tx = req.transaction();
+        let tx_id = req.tx_id();
+        let height = req.height();
+        let unmined_tx = req
+            .mempool_transaction()
+            .expect("mempool requests always contain an unmined transaction");
+        let nu = req.upgrade(&network);
+        let span = tracing::debug_span!("tx", ?tx_id);
+
+        async move {
+            tracing::trace!(?tx_id, ?req, "got tx verify request");
+
+            // Do quick checks first
+            Self::check_structure_and_network_rules(tx.as_ref(), height, &network)?;
+
+            // Validate the coinbase input consensus rules
+            if tx.is_coinbase() {
+                return Err(TransactionError::CoinbaseInMempool);
+            }
+
+            if !tx.is_valid_non_coinbase() {
+                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
+            }
+
+            // Validate `nExpiryHeight` consensus rules
+            check::non_coinbase_expiry_height(&height, &tx)?;
+
+            // Transaction invariants that apply regardless of request type or transaction version.
+            // These are pure consensus rules over the transaction structure and must always hold.
+            Self::check_transaction_invariants(tx.as_ref(), height, &network)?;
+
+            tracing::trace!(?tx_id, "passed quick checks");
+
+            // Mempool transactions are checked against the next median-time-past from state.
+            Self::verify_mempool_lock_time(tx.as_ref(), height, state.clone()).await?;
+
+            // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
+            // in non-coinbase transactions MUST also be applied to coinbase transactions."
+            //
+            // This rule is implicitly implemented during Sapling and Orchard verification,
+            // because they do not distinguish between coinbase and non-coinbase transactions.
+            //
+            // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
+            //
+            // https://zips.z.cash/zip-0213#specification
+
+            // Load spent UTXOs from state.
+            // The UTXOs are required for almost all the async checks.
+            let (spent_utxos, spent_outputs, spent_mempool_outpoints) =
+                Self::mempool_spent_utxos(tx.clone(), height, state.clone(), mempool.clone()).await?;
+
+            // Mempool transactions have no block context, so there are no outputs from
+            // earlier transactions in the same block to consider.
+            Self::check_maturity_height(tx.clone(), height, &network, &spent_utxos)?;
+
+            let cached_ffi_transaction =
+                Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
+
+            tracing::trace!(?tx_id, "got state UTXOs");
+
+            // Select version-specific async verification pipeline
+            let mut async_checks = Self::dispatch_version_verification(
+                tx.as_ref(),
+                nu,
+                script_verifier,
+                cached_ffi_transaction.clone()
+            )?;
+
+            let check_anchors_and_revealed_nullifiers_query = state
+                .clone()
+                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+                    unmined_tx.clone(),
+                ))
+                .map(|res| {
+                    assert!(
+                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                        "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
+                    );
+                    Ok(())
+                });
+
+            async_checks.push(check_anchors_and_revealed_nullifiers_query);
+
+            tracing::trace!(?tx_id, "awaiting async checks...");
+
+            async_checks.check().await?;
+
+            tracing::trace!(?tx_id, "finished async checks");
+
+            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
+
+            // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
+            // spends both chain and mempool UTXOs (mempool outputs are appended last by
+            // `mempool_spent_utxos()`), causing policy checks to pair the wrong input with
+            // the wrong spent output.
+            // https://github.com/ZcashFoundation/zebra/issues/10346
+            let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
+
+            let transaction = VerifiedUnminedTx::new(
+                unmined_tx,
+                miner_fee.expect("fee should have been checked earlier"),
+                sigops,
+                cached_ffi_transaction.p2sh_sigops(),
+                spent_outputs.into(),
+            )?;
+
+            if let Some(mut mempool) = mempool {
+                tokio::spawn(async move {
+                    // Best-effort poll of the mempool to provide a timely response to
+                    // `sendrawtransaction` RPC calls or `AwaitOutput` mempool calls.
+                    tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
+                    let _ = mempool
+                        .ready()
+                        .await
+                        .expect("mempool poll_ready() method should not return an error")
+                        .call(mempool::Request::CheckForVerifiedTransactions)
+                        .await;
+                });
+            }
+
+            Ok(Response::Mempool { transaction, spent_mempool_outpoints })
+        }
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+            })
+            .instrument(span)
+            .boxed()
+    }
+
     /// Performs basic structural validation and Orchard-related network upgrade rules.
     fn check_structure_and_network_rules(
         tx: &Transaction,
@@ -686,65 +768,34 @@ where
         }
     }
 
-    /// Wait for the UTXOs that are being spent by the given transaction.
+    /// Looks up UTXOs spent by `tx` from the best chain state, also checking
+    /// `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
-    /// Looks up UTXOs that are being spent by the given transaction in the state or waits
-    /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
-    ///
-    /// Returns a triple containing:
-    /// - `OutPoint` -> `Utxo` map,
-    /// - vec of `Output`s in the same order as the matching inputs in the `tx`,
-    /// - vec of `Outpoint`s spent by a mempool `tx` that were not found in the best chain's utxo set.
-    async fn spent_utxos(
+    /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
+    /// order as the matching inputs in `tx`.
+    async fn block_spent_utxos(
         tx: Arc<Transaction>,
-        req: Request,
+        known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         state: Timeout<ZS>,
-        mempool: Option<Timeout<Mempool>>,
     ) -> Result<
         (
             HashMap<transparent::OutPoint, transparent::Utxo>,
             Vec<transparent::Output>,
-            Vec<transparent::OutPoint>,
         ),
         TransactionError,
     > {
-        let is_mempool = req.is_mempool();
-        // Additional UTXOs known at the time of validation,
-        // i.e., from previous transactions in the block.
-        let known_utxos = req.known_utxos();
-
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
-        // Pre-allocate with None so we can fill each slot by input index, preserving input order
-        // even when chain and mempool UTXOs are fetched in separate passes.
+        // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
-        // Stores (input_idx, outpoint) for UTXOs not found in the best chain (fetched from mempool later).
-        let mut spent_mempool_outpoints: Vec<(usize, transparent::OutPoint)> = Vec::new();
 
         for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
+
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()
-                } else if is_mempool {
-                    let query = state
-                        .clone()
-                        .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
-
-                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                        .await
-                        .map_err(|_| TransactionError::TransparentInputNotFound)?
-                    else {
-                        unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
-                    };
-
-                    let Some(utxo) = utxo else {
-                        spent_mempool_outpoints.push((input_idx, *outpoint));
-                        continue;
-                    };
-
-                    utxo
                 } else {
                     let response = state
                         .clone()
@@ -764,8 +815,67 @@ where
                 tracing::trace!(?utxo, "got UTXO");
                 spent_outputs[input_idx] = Some(utxo.output.clone());
                 spent_utxos.insert(*outpoint, utxo);
-            } else {
-                continue;
+            }
+        }
+
+        let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
+
+        Ok((spent_utxos, spent_outputs))
+    }
+
+    /// Looks up UTXOs spent by a mempool `tx`, first querying the best chain state
+    /// and then the mempool for inputs whose outputs are not present in the best chain.
+    ///
+    /// `height` is the next block height, used to construct `Utxo` values for
+    /// outputs sourced from the mempool.
+    ///
+    /// Returns an `OutPoint -> Utxo` map, a vec of `Output`s in the same order
+    /// as the matching inputs in `tx`, and a vec of `OutPoint`s that were
+    /// sourced from the mempool rather than the best chain.
+    async fn mempool_spent_utxos(
+        tx: Arc<Transaction>,
+        height: block::Height,
+        state: Timeout<ZS>,
+        mempool: Option<Timeout<Mempool>>,
+    ) -> Result<
+        (
+            HashMap<transparent::OutPoint, transparent::Utxo>,
+            Vec<transparent::Output>,
+            Vec<transparent::OutPoint>,
+        ),
+        TransactionError,
+    > {
+        let inputs = tx.inputs();
+        let mut spent_utxos = HashMap::new();
+        // Pre-allocate with None so we can fill each slot by input index, preserving input order
+        // even when chain and mempool UTXOs are fetched in separate passes.
+        let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        // Stores (input_idx, outpoint) for UTXOs not found in the best chain (fetched from mempool later).
+        let mut spent_mempool_outpoints: Vec<(usize, transparent::OutPoint)> = Vec::new();
+
+        for (input_idx, input) in inputs.iter().enumerate() {
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
+                tracing::trace!("awaiting outpoint lookup");
+
+                let query = state
+                    .clone()
+                    .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+
+                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
+                    .await
+                    .map_err(|_| TransactionError::TransparentInputNotFound)?
+                else {
+                    unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
+                };
+
+                let Some(utxo) = utxo else {
+                    spent_mempool_outpoints.push((input_idx, *outpoint));
+                    continue;
+                };
+
+                tracing::trace!(?utxo, "got UTXO");
+                spent_outputs[input_idx] = Some(utxo.output.clone());
+                spent_utxos.insert(*outpoint, utxo);
             }
         }
 
@@ -795,7 +905,7 @@ where
                     //
                     // If the tip height changes while an umined transaction is being verified,
                     // the transaction must be re-verified before being added to the mempool.
-                    transparent::Utxo::new(output, req.height(), false),
+                    transparent::Utxo::new(output, height, false),
                 );
             }
         } else if !spent_mempool_outpoints.is_empty() {
@@ -812,26 +922,26 @@ where
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
 
-    /// Accepts `request`, a transaction verifier [`&Request`](Request),
-    /// and `spent_utxos`, a HashMap of UTXOs in the chain that are spent by this transaction.
+    /// Checks that every transparent coinbase output spent by `tx` has matured
+    /// by `height`.
     ///
-    /// Gets the `transaction`, `height`, and `known_utxos` for the request and checks calls
-    /// [`check::tx_transparent_coinbase_spends_maturity`] to verify that every transparent
-    /// coinbase output spent by the transaction will have matured by `height`.
+    /// This check applies only to mempool transactions. Block transactions are
+    /// checked during contextual validation in the state (see #2336).
     ///
     /// Returns `Ok(())` if every transparent coinbase output spent by the transaction is
     /// mature and valid for the request height, or a [`TransactionError`] if the transaction
     /// spends transparent coinbase outputs that are immature and invalid for the request height.
     pub fn check_maturity_height(
+        tx: Arc<Transaction>,
+        height: block::Height,
         network: &Network,
-        request: &Request,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<(), TransactionError> {
         check::tx_transparent_coinbase_spends_maturity(
             network,
-            request.transaction(),
-            request.height(),
-            request.known_utxos(),
+            tx,
+            height,
+            Arc::new(HashMap::new()),
             spent_utxos,
         )
     }
