@@ -246,7 +246,7 @@ jobs:
             ${{ steps.notes.outputs.section }}
           claude_args: |
             --json-schema '{"type":"object","properties":{"notes":{"type":"string"}},"required":["notes"],"additionalProperties":false}'
-            --max-turns 1
+            --max-turns 5
 
       - name: Select release notes
         if: steps.zebrad-release.outputs.released == 'true'

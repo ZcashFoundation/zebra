@@ -103,7 +103,7 @@ jobs:
             Return the changelog markdown in the structured output.
           claude_args: |
             --json-schema '{"type":"object","properties":{"changelog":{"type":"string"}},"required":["changelog"],"additionalProperties":false}'
-            --max-turns 1
+            --max-turns 5
 
       - name: Post the changelog suggestion
         env:
