@@ -23,10 +23,7 @@ use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 
-use zcash_script::{
-    opcode::{Evaluable, PushValue},
-    pv::push_value,
-};
+use zcash_script::{opcode::PushValue, pv::push_value};
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
@@ -50,10 +47,12 @@ use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
-    config,
+    config::{
+        self,
+        mining::{ZEBRA_COINBASE_MARKER, ZEBRA_COINBASE_SEPARATOR},
+    },
     methods::types::{
-        default_roots::DefaultRoots, get_block_template::constants::MAX_MINER_DATA_LEN,
-        long_poll::LongPollId, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::OkOrError,
     SubmitBlockChannel,
@@ -473,24 +472,37 @@ pub struct MinerParams {
     memo: Option<MemoBytes>,
 }
 
+/// Builds the coinbase input data for a block Zebra constructs: the [`ZEBRA_COINBASE_MARKER`],
+/// followed by the [`ZEBRA_COINBASE_SEPARATOR`] and `extra` when `extra` is non-empty.
+fn coinbase_data(extra: &[u8]) -> Vec<u8> {
+    let mut bytes = ZEBRA_COINBASE_MARKER.as_bytes().to_vec();
+    if !extra.is_empty() {
+        bytes.extend_from_slice(ZEBRA_COINBASE_SEPARATOR.as_bytes());
+        bytes.extend_from_slice(extra);
+    }
+    bytes
+}
+
 impl MinerParams {
     /// Creates a new instance of [`MinerParams`].
+    // The `push_value` below `expect`s a type-guaranteed invariant (`extra_coinbase_data` is
+    // length-validated), not a recoverable error.
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(net: &Network, conf: config::mining::Config) -> Result<Self, MinerParamsError> {
         let addr = conf
             .miner_address
             .map(|addr| Address::try_from_zcash_address(net, addr))
             .ok_or(MinerParamsError::MissingAddr)??;
 
-        let data = conf
-            .extra_coinbase_data
-            .map(|s| {
-                let data = push_value(s.as_bytes()).ok_or(MinerParamsError::OversizedData)?;
-
-                (data.byte_len() <= MAX_MINER_DATA_LEN)
-                    .then_some(data)
-                    .ok_or(MinerParamsError::OversizedData)
-            })
-            .transpose()?;
+        // Always tag the coinbase with the Zebra marker, even without configured
+        // `extra_coinbase_data`, so every block Zebra builds is identifiable. The type of
+        // `extra_coinbase_data` bounds its length, so the marker, separator, and data always fit in
+        // a single push.
+        let user_data = conf.extra_coinbase_data.as_deref().unwrap_or_default();
+        let data = Some(
+            push_value(&coinbase_data(user_data.as_bytes()))
+                .expect("coinbase data fits in a push: extra_coinbase_data is length-validated"),
+        );
 
         let memo = conf
             .miner_memo
@@ -522,11 +534,11 @@ impl MinerParams {
         self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
     }
 
-    /// Randomizes the miner data.
+    /// Randomizes the miner data, keeping the `🦓` marker prefix and separator.
     pub fn randomize_data(&mut self) {
         let mut random = [0u8; 32];
         OsRng.fill_bytes(&mut random);
-        self.data = push_value(&random);
+        self.data = push_value(&coinbase_data(&random));
     }
 }
 
@@ -547,8 +559,6 @@ pub enum MinerParamsError {
     MissingAddr,
     #[error("Invalid miner address: {0}")]
     InvalidAddr(zcash_address::ConversionError<&'static str>),
-    #[error("Miner data exceeds {MAX_MINER_DATA_LEN} bytes")]
-    OversizedData,
     #[error(transparent)]
     InvalidMemo(#[from] zcash_protocol::memo::Error),
 }
