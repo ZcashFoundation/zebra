@@ -75,6 +75,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # These rules distill book/src/dev/changelog-guidelines.md; keep the two in sync.
           prompt: |
             Draft Keep-a-Changelog entries for this Zebra pull request. Output raw markdown
             for a maintainer to paste into the [Unreleased] sections. Do not wrap the output
