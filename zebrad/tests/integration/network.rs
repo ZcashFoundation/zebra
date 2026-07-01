@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-#[cfg(not(target_os = "windows"))]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -16,11 +15,9 @@ use zebra_chain::{
     },
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-#[cfg(not(target_os = "windows"))]
 use zebra_rpc::client::PeerInfo;
 use zebra_test::{args, net::random_known_port, prelude::*};
 
-#[cfg(not(target_os = "windows"))]
 use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
@@ -35,7 +32,6 @@ use crate::integration::database::check_config_conflict;
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
-#[cfg(not(target_os = "windows"))]
 fn zebra_zcash_listener_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -64,7 +60,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash metrics
 /// conflict hint added in #1535.
 #[test]
-#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
+#[cfg(feature = "prometheus")]
 fn zebra_metrics_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -93,7 +89,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash tracing
 /// conflict hint added in #1535.
 #[test]
-#[cfg(all(feature = "filter-reload", not(target_os = "windows")))]
+#[cfg(feature = "filter-reload")]
 fn zebra_tracing_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -120,11 +116,7 @@ fn zebra_tracing_conflict() -> Result<()> {
 /// Start 2 zebrad nodes using the same RPC listener port, but different
 /// state directories and Zcash listener ports. The first node should get
 /// exclusive use of the port. The second node will panic.
-///
-/// This test is sometimes unreliable on Windows, and hangs on macOS.
-/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[test]
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn zebra_rpc_conflict() -> Result<()> {
     use crate::common::config::random_known_rpc_port_config;
 
@@ -164,7 +156,6 @@ fn zebra_rpc_conflict() -> Result<()> {
 /// The second zebrad instance will connect to the first one, and when the first one mines
 /// blocks with invalid PoW the second one should disconnect from it.
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn disconnects_from_misbehaving_peers() -> Result<()> {
     tokio::time::timeout(
         Duration::from_secs(10 * 60),
@@ -174,7 +165,6 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
     .wrap_err("disconnects_from_misbehaving_peers timed out")?
 }
 
-#[cfg(not(target_os = "windows"))]
 async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     use crate::common::regtest::MiningRpcMethods;
     use zebra_rpc::client::PeerInfo;
@@ -377,7 +367,6 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
 async fn wait_for_outbound_peer(rpc_client: &RpcRequestClient) -> Result<Vec<PeerInfo>> {
     tokio::time::timeout(Duration::from_secs(2 * 60), async {
         loop {
@@ -403,17 +392,14 @@ async fn wait_for_outbound_peer(rpc_client: &RpcRequestClient) -> Result<Vec<Pee
     .wrap_err("timed out waiting for outbound peer")?
 }
 
-#[cfg(not(target_os = "windows"))]
 struct FinishOnDrop(Arc<AtomicBool>);
 
-#[cfg(not(target_os = "windows"))]
 impl FinishOnDrop {
     fn new(is_finished: Arc<AtomicBool>) -> Self {
         Self(is_finished)
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 impl Drop for FinishOnDrop {
     fn drop(&mut self) {
         self.0.store(true, Ordering::SeqCst);
