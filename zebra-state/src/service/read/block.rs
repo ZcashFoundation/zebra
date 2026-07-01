@@ -29,7 +29,7 @@ use crate::{
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::tip_height,
+        read::tip,
     },
     HashOrHeight,
 };
@@ -153,9 +153,10 @@ where
     let chain = chain.as_ref();
 
     let (tx, height, time) = transaction(chain, db, hash)?;
-    let confirmations = 1 + tip_height(chain, db)?.0 - height.0;
+    let (tip_height, tip_hash) = tip(chain, db)?;
+    let confirmations = 1 + tip_height.0 - height.0;
 
-    Some(MinedTx::new(tx, height, confirmations, time))
+    Some(MinedTx::new(tx, height, confirmations, time, tip_hash))
 }
 
 /// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],
@@ -194,8 +195,15 @@ pub fn any_transaction<'a>(
         })?;
 
     if in_best_chain {
-        let confirmations = 1 + tip_height(best_chain, db)?.0 - height.0;
-        Some(AnyTx::Mined(MinedTx::new(tx, height, confirmations, time)))
+        let (tip_height, tip_hash) = tip(best_chain, db)?;
+        let confirmations = 1 + tip_height.0 - height.0;
+        Some(AnyTx::Mined(MinedTx::new(
+            tx,
+            height,
+            confirmations,
+            time,
+            tip_hash,
+        )))
     } else {
         let block_hash = containing_chain?.block(height.into())?.hash;
         Some(AnyTx::Side((tx, block_hash)))
