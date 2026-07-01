@@ -343,7 +343,13 @@ pub fn miner_fees_are_valid(
     #[cfg(zcash_unstable = "zip235")]
     if let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) {
         if height >= nsm_activation_height {
-            let minimum_zip233_amount = ((block_miner_fees * 6).unwrap() / 10).unwrap();
+            if coinbase_tx.version() < 6 {
+                Err(SubsidyError::InvalidCoinbaseVersion)?
+            }
+
+            let minimum_zip233_amount: Amount<NonNegative> = (block_miner_fees.zatoshis() * 6 / 10)
+                .try_into()
+                .map_err(|_| SubsidyError::Overflow)?;
             if zip233_amount < minimum_zip233_amount {
                 Err(SubsidyError::InvalidZip233Amount)?
             }

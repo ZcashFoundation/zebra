@@ -25,9 +25,6 @@ use zebra_node_services::mempool::TransactionDependencies;
 use crate::methods::types::transaction::TransactionTemplate;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use crate::methods::Amount;
-
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::amount::NonNegative;
 
 #[cfg(test)]
