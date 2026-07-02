@@ -266,10 +266,12 @@ impl NoteCommitmentTrees {
     /// Update the ironwood note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     ///
-    /// Ironwood reuses the Orchard note commitment tree type, but commits into a separate tree.
+    /// Ironwood reuses the Orchard note commitment tree type but commits into a separate tree, so
+    /// this delegates to [`Self::update_orchard_note_commitment_tree`] and only re-tags the error
+    /// variant as [`NoteCommitmentTreeError::Ironwood`].
     #[allow(clippy::unwrap_in_result)]
     pub fn update_ironwood_note_commitment_tree(
-        mut ironwood: Arc<orchard::tree::NoteCommitmentTree>,
+        ironwood: Arc<orchard::tree::NoteCommitmentTree>,
         ironwood_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
     ) -> Result<
         (
@@ -278,30 +280,11 @@ impl NoteCommitmentTrees {
         ),
         NoteCommitmentTreeError,
     > {
-        let ironwood_nct = Arc::make_mut(&mut ironwood);
-
-        // It is impossible for blocks to contain more than one level 16 ironwood root, by the same
-        // per-block action-count bound as Orchard:
-        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        let mut subtree_root = None;
-
-        for ironwood_note_commitment in ironwood_note_commitments {
-            ironwood_nct
-                .append(ironwood_note_commitment)
-                .map_err(NoteCommitmentTreeError::Ironwood)?;
-
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = ironwood_nct.completed_subtree_index_and_root() {
-                subtree_root = Some(index_and_node);
-            }
-        }
-
-        // Re-calculate and cache the tree root.
-        let _ = ironwood_nct.root();
-
-        Ok((ironwood, subtree_root))
+        Self::update_orchard_note_commitment_tree(ironwood, ironwood_note_commitments).map_err(
+            |err| match err {
+                NoteCommitmentTreeError::Orchard(inner) => NoteCommitmentTreeError::Ironwood(inner),
+                other => other,
+            },
+        )
     }
 }

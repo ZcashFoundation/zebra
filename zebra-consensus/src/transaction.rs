@@ -1300,46 +1300,52 @@ where
         sighash: &SigHash,
         network_upgrade: NetworkUpgrade,
     ) -> AsyncChecks {
-        let mut async_checks = AsyncChecks::new();
-
-        if let Some(bundle) = bundle {
-            // # Consensus
-            //
-            // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
-            // > nf, rk, cm_x, enableSpends, enableOutputs)
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#actiondesc
-            //
-            // Unlike Sapling, Orchard shielded transactions have a single
-            // aggregated Halo2 proof per transaction, even with multiple
-            // Actions in one transaction. So we queue it for verification
-            // only once instead of queuing it up for every Action description.
-            async_checks.push(
-                primitives::halo2::orchard_v5_verifier_for(network_upgrade)
-                    .clone()
-                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
-            );
-        }
-
-        async_checks
+        Self::queue_orchard_bundle(
+            || primitives::halo2::orchard_v5_verifier_for(network_upgrade),
+            bundle,
+            sighash,
+        )
     }
 
     /// Verifies a **v6** transaction's Orchard bundle.
     ///
     /// A v6 Orchard bundle commits to the NU6.3 cross-address circuit, so it always verifies under
     /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
-    /// network upgrade (v6 transactions only exist from NU6.3 onward).
+    /// network upgrade (v6 transactions only exist from NU6.3 onward). The Ironwood bundle reuses
+    /// the same verifier.
     fn verify_orchard_v6_bundle(
+        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
+        Self::queue_orchard_bundle(primitives::halo2::orchard_v6_verifier, bundle, sighash)
+    }
+
+    /// Queues an Orchard-shaped bundle's single aggregated Halo2 proof against a verifier.
+    ///
+    /// # Consensus
+    ///
+    /// > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard}, nf, rk, cm_x,
+    /// > enableSpends, enableOutputs)
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+    ///
+    /// Unlike Sapling, Orchard shielded transactions have a single aggregated Halo2 proof per
+    /// transaction, even with multiple Actions, so it is queued for verification only once instead
+    /// of once per Action description. The choice of verifying key is the caller's; see
+    /// [`Self::verify_orchard_bundle`] and [`Self::verify_orchard_v6_bundle`].
+    ///
+    /// `select_verifier` is only invoked when a bundle is present, so a bundle-less transaction
+    /// never forces the (lazily initialized) verifier services.
+    fn queue_orchard_bundle(
+        select_verifier: impl FnOnce() -> &'static primitives::halo2::VerifierService,
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
     ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
         if let Some(bundle) = bundle {
-            // The v6 Orchard bundle has a single aggregated Halo2 proof, queued once for batch
-            // verification against the NU6.3 key.
             async_checks.push(
-                primitives::halo2::orchard_v6_verifier()
+                select_verifier()
                     .clone()
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
