@@ -507,15 +507,19 @@ impl ZebraDb {
 
         let ironwood_trees = self.db.cf_handle("ironwood_note_commitment_tree").unwrap();
 
-        // If we know there must be a tree, search backwards for it.
-        let (_first_duplicate_height, tree) = self
-            .db
-            .zs_prev_key_value_back_from(&ironwood_trees, height)
-            .expect(
-                "Ironwood note commitment trees must exist for all heights below the finalized tip",
-            );
-
-        Some(Arc::new(tree))
+        // Search backwards for the tree.
+        //
+        // The Ironwood column family is seeded with the genesis (empty) tree by the
+        // `add_ironwood_tree` format upgrade and then written per-height by block commits, so once
+        // the upgrade has run there is always a tree at or below any height up to the tip. The
+        // upgrade runs on a background thread, so there is a brief window right after a v27->v28
+        // upgrade where the column family is still empty. That window only occurs before NU6.3
+        // activation, when the Ironwood tree at every height is in fact the empty tree, so fall
+        // back to the empty tree instead of panicking.
+        match self.db.zs_prev_key_value_back_from(&ironwood_trees, height) {
+            Some((_first_duplicate_height, tree)) => Some(Arc::new(tree)),
+            None => Some(Default::default()),
+        }
     }
 
     /// Returns the Ironwood note commitment trees in the supplied range, in increasing height order.
