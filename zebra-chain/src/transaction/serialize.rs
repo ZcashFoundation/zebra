@@ -1197,13 +1197,7 @@ impl ZcashDeserialize for Transaction {
                 let ironwood_shielded_data = (&mut limited_reader)
                     .zcash_deserialize_into::<Option<ironwood::ShieldedData>>()?;
 
-                // Unlike the v5 arm, the v6 arm does not round-trip through `to_librustzcash` here:
-                // that would drive librustzcash's proof parser (which rejects the structurally-fake
-                // proofs the test helpers produce), coupling wire deserialization to proof parsing.
-                // The `enableCrossAddress` divergence that would otherwise reach the txid-path
-                // `expect(...)` is already rejected above, inside `orchard::Flags::from_byte`, before
-                // this transaction is constructed.
-                Ok(Transaction::V6 {
+                let tx = Transaction::V6 {
                     network_upgrade,
                     lock_time,
                     expiry_height,
@@ -1212,7 +1206,16 @@ impl ZcashDeserialize for Transaction {
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ironwood_shielded_data,
-                })
+                };
+
+                // Validate that the whole transaction round-trips to the librustzcash format, as the
+                // v5 arm above does. Zebra's and librustzcash's parsers are not identical, so this
+                // fails closed at the wire layer for any divergence, ensuring an incompatibility can
+                // never reach the `expect(...)` in the txid/auth-digest path (`Hash::from`), which
+                // would otherwise abort the node on attacker-supplied input.
+                tx.to_librustzcash(network_upgrade)?;
+
+                Ok(tx)
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
         }

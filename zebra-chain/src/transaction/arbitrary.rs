@@ -1129,7 +1129,15 @@ pub fn fake_v6_orchard_shielded_data(
         flags,
         value_balance,
         shared_anchor: orchard::tree::Root::default(),
-        proof: Halo2Proof(vec![]),
+        // A canonically-sized (zero-filled) proof, so librustzcash's parser — which enforces the
+        // canonical proof size — accepts the bundle when the wire deserializer round-trips through
+        // it. The proof is not cryptographically valid.
+        proof: Halo2Proof(vec![
+            0u8;
+            orchard::shielded_data::expected_proof_size(
+                action_count.max(1)
+            )
+        ]),
         actions: actions.try_into().expect("action_count is at least one"),
         binding_sig: Signature::from([0u8; 64]),
     }
