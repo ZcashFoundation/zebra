@@ -254,6 +254,18 @@ impl ZebraDb {
         self.orchard_tree_by_height(&height)
     }
 
+    /// Returns the Ironwood [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
+    /// a hash or height, if it exists in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn ironwood_tree_by_hash_or_height(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        self.ironwood_tree_by_height(&height)
+    }
+
     // Read tip block methods
 
     /// Returns the hash of the current finalized tip block.

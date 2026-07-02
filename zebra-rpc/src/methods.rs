@@ -1304,6 +1304,8 @@ where
                 transactions_request,
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                // Ironwood trees
+                zebra_state::ReadRequest::IronwoodTree(hash_or_height),
                 // Block info
                 zebra_state::ReadRequest::BlockInfo(previous_block_hash.into()),
                 zebra_state::ReadRequest::BlockInfo(hash_or_height),
@@ -1379,7 +1381,25 @@ where
                 size: orchard_tree_size,
             };
 
-            let trees = GetBlockTrees { sapling, orchard };
+            let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
+                ironwood_tree_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to an IronwoodTree request");
+            };
+
+            // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
+            // Ironwood tree is empty (size 0).
+            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
+            let ironwood = IronwoodTrees {
+                size: ironwood_tree.count(),
+            };
+
+            let trees = GetBlockTrees {
+                sapling,
+                orchard,
+                ironwood,
+            };
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
@@ -1956,6 +1976,27 @@ where
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
+        let ironwood = if network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into()) {
+            match read_state
+                .ready()
+                .and_then(|service| {
+                    service.call(zebra_state::ReadRequest::IronwoodTree(hash.into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::IronwoodTree(tree) => {
+                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
+                }
+                _ => unreachable!("unmatched response to an Ironwood tree request"),
+            }
+        } else {
+            None
+        };
+        // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
+        let ironwood = ironwood
+            .map(|(tree, root)| Treestate::new(trees::Commitments::new(Some(root), Some(tree))));
+
         Ok(GetTreestateResponse::new(
             hash,
             height,
@@ -1965,6 +2006,7 @@ where
             None,
             Treestate::new(trees::Commitments::new(sapling_root, sapling_tree)),
             Treestate::new(trees::Commitments::new(orchard_root, orchard_tree)),
+            ironwood,
         ))
     }
 
@@ -1976,7 +2018,7 @@ where
     ) -> Result<GetSubtreesByIndexResponse> {
         let mut read_state = self.read_state.clone();
 
-        const POOL_LIST: &[&str] = &["sapling", "orchard"];
+        const POOL_LIST: &[&str] = &["sapling", "orchard", "ironwood"];
 
         if pool == "sapling" {
             let request = zebra_state::ReadRequest::SaplingSubtrees { start_index, limit };
@@ -2017,6 +2059,33 @@ where
                 _ => unreachable!("unmatched response to a subtrees request"),
             };
 
+            let subtrees = subtrees
+                .values()
+                .map(|subtree| SubtreeRpcData {
+                    root: subtree.root.encode_hex(),
+                    end_height: subtree.end_height,
+                })
+                .collect();
+
+            Ok(GetSubtreesByIndexResponse {
+                pool,
+                start_index,
+                subtrees,
+            })
+        } else if pool == "ironwood" {
+            let request = zebra_state::ReadRequest::IronwoodSubtrees { start_index, limit };
+            let response = read_state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_misc_error()?;
+
+            let subtrees = match response {
+                zebra_state::ReadResponse::IronwoodSubtrees(subtrees) => subtrees,
+                _ => unreachable!("unmatched response to a subtrees request"),
+            };
+
+            // Ironwood reuses the Orchard note type, so the subtree root is encoded like Orchard's.
             let subtrees = subtrees
                 .values()
                 .map(|subtree| SubtreeRpcData {
@@ -4369,6 +4438,10 @@ pub struct GetBlockTrees {
     sapling: SaplingTrees,
     #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
     orchard: OrchardTrees,
+    // `default` so responses and fixtures from before Ironwood (which have no `ironwood` field)
+    // still deserialize, as the empty tree.
+    #[serde(default, skip_serializing_if = "IronwoodTrees::is_empty")]
+    ironwood: IronwoodTrees,
 }
 
 impl Default for GetBlockTrees {
@@ -4376,16 +4449,18 @@ impl Default for GetBlockTrees {
         GetBlockTrees {
             sapling: SaplingTrees { size: 0 },
             orchard: OrchardTrees { size: 0 },
+            ironwood: IronwoodTrees { size: 0 },
         }
     }
 }
 
 impl GetBlockTrees {
     /// Constructs a new instance of ['GetBlockTrees'].
-    pub fn new(sapling: u64, orchard: u64) -> Self {
+    pub fn new(sapling: u64, orchard: u64, ironwood: u64) -> Self {
         GetBlockTrees {
             sapling: SaplingTrees { size: sapling },
             orchard: OrchardTrees { size: orchard },
+            ironwood: IronwoodTrees { size: ironwood },
         }
     }
 
@@ -4397,6 +4472,11 @@ impl GetBlockTrees {
     /// Returns orchard data held by ['GetBlockTrees'].
     pub fn orchard(self) -> u64 {
         self.orchard.size
+    }
+
+    /// Returns ironwood data held by ['GetBlockTrees'].
+    pub fn ironwood(self) -> u64 {
+        self.ironwood.size
     }
 }
 
@@ -4419,6 +4499,18 @@ pub struct OrchardTrees {
 }
 
 impl OrchardTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
+
+/// Ironwood note commitment tree information. Ironwood reuses the Orchard tree type.
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct IronwoodTrees {
+    size: u64,
+}
+
+impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }

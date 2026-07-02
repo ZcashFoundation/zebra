@@ -281,7 +281,12 @@ async fn rpc_getblock() {
     // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
     let orchard = OrchardTrees { size: 0 };
-    let trees = GetBlockTrees { sapling, orchard };
+    let ironwood = IronwoodTrees { size: 0 };
+    let trees = GetBlockTrees {
+        sapling,
+        orchard,
+        ironwood,
+    };
 
     // Make height calls with verbosity=1 and check response
     let mut prev_block_info: Option<BlockInfo> = None;
@@ -900,7 +905,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         .await
         .respond(ReadResponse::Depth(None));
 
-    // get_block: BlockAndSize, OrchardTree, BlockInfo x2
+    // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
         .await
@@ -909,6 +914,10 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
         .await
         .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::IronwoodTree(_)))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
     read_state
         .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
         .await
