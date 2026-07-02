@@ -324,7 +324,7 @@ impl Transaction {
                     .orchard_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_SPENDS))
-            || (self.ironwood_actions().count() > 0
+            || (self.has_ironwood_shielded_data()
                 && self
                     .ironwood_flags()
                     .unwrap_or_else(orchard::Flags::empty)
@@ -342,7 +342,7 @@ impl Transaction {
                     .orchard_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
-            || (self.ironwood_actions().count() > 0
+            || (self.has_ironwood_shielded_data()
                 && self
                     .ironwood_flags()
                     .unwrap_or_else(orchard::Flags::empty)
@@ -369,7 +369,7 @@ impl Transaction {
     ///
     /// Mirrors [`Self::has_enough_orchard_flags`] for the Ironwood pool.
     pub fn has_enough_ironwood_flags(&self) -> bool {
-        if self.ironwood_actions().count() == 0 {
+        if !self.has_ironwood_shielded_data() {
             return true;
         }
         self.ironwood_flags()

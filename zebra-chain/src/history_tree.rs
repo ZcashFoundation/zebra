@@ -399,7 +399,16 @@ impl NonEmptyHistoryTree {
         // Remove all non-peak entries
         self.peaks.retain(|k, _| peak_pos_set.contains(k));
         // Rebuild tree
-        self.inner = match self.inner {
+        self.inner = self.rebuilt_inner()?;
+        Ok(())
+    }
+
+    /// Rebuilds the inner tree from the cached `network`, `network_upgrade`, `size`, and `peaks`.
+    ///
+    /// Shared by [`Self::prune`] and the [`Clone`] impl, which reconstruct the inner tree
+    /// identically and differ only in how they handle the (practically impossible) rebuild error.
+    fn rebuilt_inner(&self) -> Result<InnerHistoryTree, io::Error> {
+        Ok(match &self.inner {
             InnerHistoryTree::PreOrchard(_) => {
                 InnerHistoryTree::PreOrchard(Tree::<PreOrchard>::new_from_cache(
                     &self.network,
@@ -427,8 +436,7 @@ impl NonEmptyHistoryTree {
                     &Default::default(),
                 )?)
             }
-        };
-        Ok(())
+        })
     }
 
     /// Return the hash of the tree root.
@@ -463,38 +471,9 @@ impl NonEmptyHistoryTree {
 
 impl Clone for NonEmptyHistoryTree {
     fn clone(&self) -> Self {
-        let tree = match self.inner {
-            InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
-                Tree::<PreOrchard>::new_from_cache(
-                    &self.network,
-                    self.network_upgrade,
-                    self.size,
-                    &self.peaks,
-                    &Default::default(),
-                )
-                .expect("rebuilding an existing tree should always work"),
-            ),
-            InnerHistoryTree::OrchardOnward(_) => InnerHistoryTree::OrchardOnward(
-                Tree::<OrchardOnward>::new_from_cache(
-                    &self.network,
-                    self.network_upgrade,
-                    self.size,
-                    &self.peaks,
-                    &Default::default(),
-                )
-                .expect("rebuilding an existing tree should always work"),
-            ),
-            InnerHistoryTree::IronwoodOnward(_) => InnerHistoryTree::IronwoodOnward(
-                Tree::<IronwoodOnward>::new_from_cache(
-                    &self.network,
-                    self.network_upgrade,
-                    self.size,
-                    &self.peaks,
-                    &Default::default(),
-                )
-                .expect("rebuilding an existing tree should always work"),
-            ),
-        };
+        let tree = self
+            .rebuilt_inner()
+            .expect("rebuilding an existing tree should always work");
         NonEmptyHistoryTree {
             network: self.network.clone(),
             network_upgrade: self.network_upgrade,

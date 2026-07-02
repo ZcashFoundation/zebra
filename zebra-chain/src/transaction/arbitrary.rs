@@ -8,7 +8,6 @@ use reddsa::{orchard::Binding, Signature};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
-    at_least_one,
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
     orchard,
     parameters::{Network, NetworkUpgrade},
@@ -1078,28 +1077,12 @@ pub fn transactions_from_blocks<'a>(
 pub fn insert_fake_orchard_shielded_data(
     transaction: &mut Transaction,
 ) -> &mut orchard::ShieldedData {
-    // Create a dummy action
-    let mut runner = TestRunner::default();
-    let dummy_action = orchard::Action::arbitrary()
-        .new_tree(&mut runner)
-        .unwrap()
-        .current();
-
-    // Pair the dummy action with a fake signature
-    let dummy_authorized_action = orchard::AuthorizedAction {
-        action: dummy_action,
-        spend_auth_sig: Signature::from([0u8; 64]),
-    };
-
-    // Place the dummy action inside the Orchard shielded data
-    let dummy_shielded_data = orchard::ShieldedData {
-        flags: orchard::Flags::empty(),
-        value_balance: Amount::try_from(0).expect("invalid transaction amount"),
-        shared_anchor: orchard::tree::Root::default(),
-        proof: Halo2Proof(vec![]),
-        actions: at_least_one![dummy_authorized_action],
-        binding_sig: Signature::from([0u8; 64]),
-    };
+    // A single-action dummy bundle with no flags and a zero value balance.
+    let dummy_shielded_data = fake_v6_orchard_shielded_data(
+        orchard::Flags::empty(),
+        Amount::try_from(0).expect("invalid transaction amount"),
+        1,
+    );
 
     // Replace the shielded data in the transaction
     match transaction {
