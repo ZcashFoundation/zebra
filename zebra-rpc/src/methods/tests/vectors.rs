@@ -3292,6 +3292,8 @@ async fn rpc_get_standard_fee() {
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (tip, _tip_sender) = MockChainTip::new();
+
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _rpc_tx_queue) = RpcImpl::new(
         Mainnet,
@@ -3304,7 +3306,7 @@ async fn rpc_get_standard_fee() {
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
-        NoChainTip,
+        tip,
         MockAddressBookPeers::default(),
         rx,
         None,
