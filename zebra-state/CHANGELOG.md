@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- The finalized-state open functions now return `Result<_, StateInitError>` instead
+  of panicking when a read-only state cannot be opened: `FinalizedState::new`,
+  `FinalizedState::new_with_debug`, `init_read_only`, `spawn_init_read_only`, and the
+  lower-level `ZebraDb::new` / `DiskDb::new`. A read-only open against a missing or
+  unreadable cache directory, with no existing database on disk, or with an ephemeral
+  database also configured (a read-only secondary must not delete the primary's
+  files), now returns the new public `StateInitError` rather than panicking. The
+  read-write open path is unchanged.
+  ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `ReadRequest::NonFinalizedBlocksListener` is now a struct variant carrying the
+  caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
+  blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
+  is now re-exported from the crate root.
+- Added `ReadRequest::FindForkPoint { known_blocks }` request and the corresponding
+  `ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)` response. The
+  server returns the most recent block in the caller-supplied locator that is
+  on the best chain (the fork point) to assist in reorg handling for clients
+  that track only a single chain tip at a time.
+  ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764)).
+
+### Added
+
+- `request::Spend::Ironwood`
+- `impl From<ironwood::Nullifier> for Spend`
+- `ValidateContextError::{DuplicateIronwoodNullifier, UnknownIronwoodAnchor}`
+- `DiskWriteBatch::{create_ironwood_tree, insert_ironwood_subtree}`
+- `ZebraDb`:
+  - `contains_ironwood_anchor`
+  - `contains_ironwood_nullifier`
+  - `ironwood_revealing_tx_loc`
+  - `ironwood_subtree_list_by_index_range`
+  - `ironwood_tree_by_height`
+  - `ironwood_tree_by_height_range`
+  - `ironwood_tree_for_tip`
+- `impl IntoDisk for ironwood::Nullifier`
+- `impl DuplicateNullifierError for ironwood::Nullifier`
+
+### Changed
+
+- Bumped the on-disk database format version (27 → 28) for the Ironwood note
+  commitment tree, anchors, subtrees, and nullifier set.
+- `IntoDisk for ValueBalance<NonNegative>` now serializes to `[u8; 48]`
+  (was `[u8; 40]`), for the added Ironwood pool balance.
+
+## [9.0.1] - 2026-06-18
+
+### Changed
+
+- Increased the local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to 1000
+  blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
+
 ## [9.0.0] - 2026-06-10
 
 ### Breaking Changes

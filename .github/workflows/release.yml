@@ -1,0 +1,304 @@
+# Release workflow: crate publishing and GitHub Release creation.
+#
+# Changelog generation is handled by release-plz + git-cliff.
+#
+# Pipeline (release-pr and release both run on every push to main, independently):
+#   release-pr → creates/updates the single Release PR
+#   release    → on a Release PR merge, publishes crates + tags and creates the
+#                app-authored zebrad GitHub Release; downstream workflows fire
+#                from that release event (exits early on non-release commits)
+#
+# Downstream triggers (independent workflows, not managed here):
+#   release:released  → release-binaries.yml (Docker Hub)
+#   release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Deny all at workflow level — each job declares minimum permissions
+permissions: {}
+
+jobs:
+  # ── Stage 1: Create or update the Release PR ────────────────────────────
+  #
+  # Runs on every push to main. Detects changed crates by comparing local
+  # source against crates.io, bumps versions based on conventional commits,
+  # generates per-crate changelogs, and opens/updates a single Release PR.
+  release-pr:
+    name: Create or update Release PR
+    runs-on: ubuntu-latest
+    # Avoid racing updates to the single release-plz Release PR branch when
+    # multiple commits land on main while a previous release-pr job is running.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Generate release app token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Create or update Release PR
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+  # ── Stage 2: Publish crates and create the public zebrad release ────────
+  #
+  # Runs on every push to main, but exits early for non-Release-PR commits
+  # (release_always = false in .release-plz.toml). When a Release PR merge
+  # is detected:
+  #   1. Publishes changed crates to crates.io in dependency order
+  #   2. Uses trusted publishing (OIDC) — no static API tokens
+  #   3. Creates per-crate git tags
+  #   4. Creates one public GitHub Release for zebrad
+  #
+  # The Release PR merge is the human gate. The GitHub Release must be created
+  # with a GitHub App installation token because release events created by the
+  # repository GITHUB_TOKEN do not trigger downstream workflows.
+  #
+  # No `needs: release-pr`: this job self-detects the merge and must publish even
+  # when release-pr's concurrency group cancels its superseded pending run.
+  release:
+    name: Publish crates and GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: read
+    environment: release
+    steps:
+      - name: Generate release app token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Detect Release PR merge
+        id: release-pr
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          ASSOCIATED_PRS="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPOSITORY}/commits/${TARGET_SHA}/pulls")"
+
+          if jq -e 'map(select(.head.ref | startswith("release-plz-"))) | length > 0' <<< "${ASSOCIATED_PRS}" >/dev/null; then
+            echo "merged=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "merged=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Validate release app token
+        if: steps.release-pr.outputs.merged == 'true' && steps.app-token.outputs.token == ''
+        run: |
+          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
+          exit 1
+      - name: Publish crates and create tags
+        id: release-plz
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Extract zebrad release metadata
+        id: zebrad-release
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          set -euo pipefail
+
+          ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES:-[]}")"
+
+          if [ -z "${ZEBRAD_RELEASE}" ]; then
+            echo "released=false" >> "${GITHUB_OUTPUT}"
+            echo "No zebrad release in release-plz output; skipping GitHub Release."
+            exit 0
+          fi
+
+          VERSION="$(jq -r '.version' <<< "${ZEBRAD_RELEASE}")"
+          TAG="$(jq -r '.tag' <<< "${ZEBRAD_RELEASE}")"
+
+          if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ] || [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+            echo "::error::release-plz did not return both version and tag for zebrad: ${ZEBRAD_RELEASE}"
+            exit 1
+          fi
+
+          {
+            echo "released=true"
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        if: steps.zebrad-release.outputs.released == 'true'
+        with:
+          toolchain: stable
+          cache-on-failure: true
+      - name: Verify zebrad installs from crates.io
+        if: steps.zebrad-release.outputs.released == 'true'
+        timeout-minutes: 30
+        env:
+          VERSION: ${{ steps.zebrad-release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          cargo install --locked --force --version "${VERSION}" zebrad
+          ~/.cargo/bin/zebrad --version
+      - name: Build release notes
+        id: notes
+        if: steps.zebrad-release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.zebrad-release.outputs.version }}
+          TAG: ${{ steps.zebrad-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
+            exit 1
+          fi
+
+          awk -v version="${VERSION}" '
+            BEGIN {
+              heading = "## [Zebra " version "]"
+            }
+            /^##[[:space:]]+\[/ {
+              if (found) {
+                exit
+              }
+              if (index($0, heading) == 1) {
+                found = 1
+              }
+            }
+            found {
+              print
+            }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
+
+          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
+            {
+              echo "Zebra ${TAG}"
+              echo
+              echo "See CHANGELOG.md for release details."
+            } > "${RUNNER_TEMP}/release-notes.md"
+          fi
+
+          # Pass the extracted section to the optional Claude step. The content is
+          # this repo's own curated CHANGELOG, so the random delimiter is precautionary.
+          delim="SECTION_$(openssl rand -hex 8)"
+          {
+            echo "section<<${delim}"
+            cat "${RUNNER_TEMP}/release-notes.md"
+            echo "${delim}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Enhance release notes with Claude
+        id: enhance
+        if: steps.zebrad-release.outputs.released == 'true' && vars.CLAUDE_ENABLED != ''
+        continue-on-error: true
+        uses: anthropics/claude-code-action@11ba60486e4aec9ddfeafcf4bb3f00b028ac2c16 # v1.0.142
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Distills the summary and a brief update-priority line from the GitHub Release Format in
+          # book/src/dev/changelog-guidelines.md; How to Upgrade and Compatibility are added at release time.
+          prompt: |
+            Rewrite the changelog section below into operator-facing GitHub Release
+            notes for Zebra ${{ steps.zebrad-release.outputs.tag }}.
+
+            Rules:
+            - Keep the "## [Zebra <version>]" heading line exactly as given.
+            - After the heading, add an "Update priority" line and a one-paragraph
+              summary for node operators, keeping any existing summary text.
+            - Keep every changelog entry; do not invent, drop, or reorder entries.
+            - Do not add detail that is not present in the section.
+            Return the full release notes, heading included, in the structured output.
+
+            Changelog section:
+            ${{ steps.notes.outputs.section }}
+          claude_args: |
+            --json-schema '{"type":"object","properties":{"notes":{"type":"string"}},"required":["notes"],"additionalProperties":false}'
+            --max-turns 5
+
+      - name: Select release notes
+        if: steps.zebrad-release.outputs.released == 'true'
+        env:
+          STRUCTURED: ${{ steps.enhance.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+
+          enhanced="${RUNNER_TEMP}/release-notes.enhanced.md"
+          final="${RUNNER_TEMP}/release-notes.final.md"
+
+          if [ -n "${STRUCTURED}" ]; then
+            jq -r '.notes // empty' <<< "${STRUCTURED}" > "${enhanced}"
+          fi
+
+          # Use Claude's notes only when non-empty and still carrying the version
+          # heading; otherwise keep the deterministic extracted notes.
+          if [ -s "${enhanced}" ] && grep -q '^## \[Zebra ' "${enhanced}"; then
+            cp "${enhanced}" "${final}"
+            echo "Using Claude-enhanced release notes."
+          else
+            cp "${RUNNER_TEMP}/release-notes.md" "${final}"
+            echo "Using extracted changelog notes."
+          fi
+
+      - name: Create zebrad GitHub Release
+        if: steps.zebrad-release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+          TAG: ${{ steps.zebrad-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          notes_file="${RUNNER_TEMP}/release-notes.final.md"
+
+          if gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" \
+              --repo "${REPOSITORY}" \
+              --title "Zebra ${TAG}" \
+              --notes-file "${notes_file}" \
+              --target "${TARGET_SHA}" \
+              --latest
+          else
+            gh release create "${TAG}" \
+              --repo "${REPOSITORY}" \
+              --title "Zebra ${TAG}" \
+              --notes-file "${notes_file}" \
+              --target "${TARGET_SHA}" \
+              --verify-tag \
+              --latest
+          fi

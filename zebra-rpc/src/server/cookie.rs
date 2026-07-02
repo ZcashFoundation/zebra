@@ -3,6 +3,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use color_eyre::Result;
 use rand::RngCore;
+use subtle::ConstantTimeEq;
 
 use std::{
     fs::{remove_file, File},
@@ -21,9 +22,12 @@ const FILE: &str = ".cookie";
 pub struct Cookie(String);
 
 impl Cookie {
-    /// Checks if the given passwd matches the contents of the cookie.
+    /// Constant-time comparison to prevent timing side-channels.
     pub fn authenticate(&self, passwd: String) -> bool {
-        *passwd == self.0
+        if passwd.len() != self.0.len() {
+            return false;
+        }
+        passwd.as_bytes().ct_eq(self.0.as_bytes()).into()
     }
 }
 

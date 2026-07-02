@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use zcash_protocol::value::BalanceError;
 use zebra_chain::{
-    amount, block, orchard,
+    amount, block, ironwood, orchard,
     parameters::subsidy::SubsidyError,
     sapling, sprout,
     transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
@@ -49,6 +49,15 @@ pub enum TransactionError {
 
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
+
+    #[error("coinbase transaction MUST NOT have the EnableSpendsIronwood flag set")]
+    CoinbaseHasEnableSpendsIronwood,
+
+    #[error("coinbase transaction MUST have an empty Orchard component (no Orchard actions) from NU6.3 onward")]
+    CoinbaseHasOrchardActions,
+
+    #[error("Orchard transaction MUST NOT have the EnableCrossAddress flag set")]
+    OrchardHasEnableCrossAddress,
 
     #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
     CoinbaseOutputsNotDecryptable,
@@ -162,6 +171,9 @@ pub enum TransactionError {
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
 
+    #[error("the Orchard value balance must be non-negative from NU6.3 onward")]
+    NegativeOrchardValueBalance,
+
     #[error("could not calculate the transaction fee")]
     IncorrectFee,
 
@@ -177,8 +189,14 @@ pub enum TransactionError {
     #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
     DuplicateOrchardNullifier(orchard::Nullifier),
 
+    #[error("ironwood double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateIronwoodNullifier(ironwood::Nullifier),
+
     #[error("must have at least one active orchard flag")]
-    NotEnoughFlags,
+    NotEnoughOrchardFlags,
+
+    #[error("must have at least one active ironwood flag")]
+    NotEnoughIronwoodFlags,
 
     #[error("could not find transparent input UTXO in the best chain or mempool")]
     TransparentInputNotFound,
@@ -244,6 +262,9 @@ pub enum TransactionError {
 
     #[error("Orchard proof has a non-canonical size")]
     OrchardProofSize,
+
+    #[error("Ironwood proof has a non-canonical size")]
+    IronwoodProofSize,
 
     #[error("unexpected error")]
     Other(String),
@@ -339,6 +360,9 @@ impl TransactionError {
             | CoinbaseHasSpend
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
+            | CoinbaseHasEnableSpendsIronwood
+            | CoinbaseHasOrchardActions
+            | OrchardHasEnableCrossAddress
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
@@ -358,7 +382,9 @@ impl TransactionError {
             | RedPallas(_)
             | BothVPubsNonZero
             | DisabledAddToSproutPool
-            | NotEnoughFlags
+            | NegativeOrchardValueBalance
+            | NotEnoughOrchardFlags
+            | NotEnoughIronwoodFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId
             | LockedUntilAfterBlockHeight(_)

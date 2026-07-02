@@ -7,7 +7,6 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
-    time::Duration,
 };
 
 use chrono::Utc;
@@ -38,9 +37,6 @@ use crate::{
 
 #[cfg(test)]
 mod vectors;
-
-/// The maximum time a mocked peer connection should be alive during a test.
-const MAX_PEER_CONNECTION_TIME: Duration = Duration::from_secs(10);
 
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
@@ -209,6 +205,10 @@ impl ClientTestHarness {
 /// The result of an attempt to receive a [`ClientRequest`] sent by the [`Client`] instance.
 ///
 /// The remote peer that would receive the request is mocked for testing.
+// The size disparity between the empty `Closed`/`Empty` variants and the
+// request-carrying variant is intrinsic to this test helper, which is only
+// constructed once per receive attempt.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ReceiveRequestAttempt {
     /// The [`Client`] instance has closed the sender endpoint of the channel.
     Closed,
@@ -355,14 +355,14 @@ where
     /// Spawn a mock background abortable task `task_future` if provided, or a fallback task
     /// otherwise.
     ///
-    /// The fallback task lives as long as [`MAX_PEER_CONNECTION_TIME`].
+    /// The fallback task stays alive until explicitly aborted.
     fn spawn_background_task_or_fallback<T>(task_future: Option<T>) -> (JoinHandle<()>, AbortHandle)
     where
         T: Future<Output = ()> + Send + 'static,
     {
         match task_future {
             Some(future) => Self::spawn_background_task(future),
-            None => Self::spawn_background_task(tokio::time::sleep(MAX_PEER_CONNECTION_TIME)),
+            None => Self::spawn_background_task(future::pending()),
         }
     }
 
@@ -391,9 +391,7 @@ where
     {
         match task_future {
             Some(future) => Self::spawn_background_task_with_result(future),
-            None => Self::spawn_background_task_with_result(tokio::time::sleep(
-                MAX_PEER_CONNECTION_TIME,
-            )),
+            None => Self::spawn_background_task_with_result(future::pending()),
         }
     }
 

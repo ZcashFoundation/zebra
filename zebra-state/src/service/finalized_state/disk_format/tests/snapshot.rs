@@ -63,7 +63,8 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     // Snapshot the column family names
     let mut cf_names = state.db.list_cf().expect("empty database is valid");

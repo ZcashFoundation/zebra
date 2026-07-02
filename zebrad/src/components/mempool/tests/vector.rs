@@ -639,7 +639,8 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
             nu6: Some(8),
             nu6_1: Some(9),
             nu6_2: Some(10),
-            nu7: Some(11),
+            nu6_3: Some(11),
+            nu7: Some(12),
         })
         .expect("activation heights are valid")
         .extend_funding_streams()

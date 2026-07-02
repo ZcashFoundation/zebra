@@ -46,20 +46,20 @@ impl Runnable for TipHeightCmd {
 impl TipHeightCmd {
     /// Load the chain tip height from the state cache directory.
     fn load_tip_height(&self) -> Result<block::Height> {
-        self.load_read_state()
+        self.load_read_state()?
             .best_tip()
             .map(|(height, _hash)| height)
             .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))
     }
 
     /// Starts a state service using the `cache_dir` and `network` from the provided arguments.
-    fn load_read_state(&self) -> ReadStateService {
+    fn load_read_state(&self) -> Result<ReadStateService> {
         let mut config = APPLICATION.config().state.clone();
 
         if let Some(cache_dir) = self.cache_dir.clone() {
             config.cache_dir = cache_dir;
         }
 
-        zebra_state::init_read_only(config, &self.network).0
+        Ok(zebra_state::init_read_only(config, &self.network)?.0)
     }
 }

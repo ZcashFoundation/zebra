@@ -190,6 +190,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
                 NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
                 NetworkUpgrade::Nu6_1 => &mut configured_activation_heights.nu6_1,
                 NetworkUpgrade::Nu6_2 => &mut configured_activation_heights.nu6_2,
+                NetworkUpgrade::Nu6_3 => &mut configured_activation_heights.nu6_3,
                 NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
                 #[cfg(zcash_unstable = "zfuture")]
                 NetworkUpgrade::ZFuture => &mut configured_activation_heights.zfuture,
@@ -366,6 +367,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6.2` network upgrade.
     #[serde(rename = "NU6.2")]
     pub nu6_2: Option<u32>,
+    /// Activation height for `NU6.3` (Ironwood) network upgrade.
+    #[serde(rename = "NU6.3")]
+    pub nu6_3: Option<u32>,
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
@@ -390,6 +394,7 @@ impl ConfiguredActivationHeights {
             nu6,
             nu6_1,
             nu6_2,
+            nu6_3,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -412,6 +417,7 @@ impl ConfiguredActivationHeights {
             nu6,
             nu6_1,
             nu6_2,
+            nu6_3,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -605,6 +611,7 @@ impl ParametersBuilder {
             nu6,
             nu6_1,
             nu6_2,
+            nu6_3,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -633,6 +640,7 @@ impl ParametersBuilder {
                 .chain(nu6.into_iter().map(|h| (h, Nu6)))
                 .chain(nu6_1.into_iter().map(|h| (h, Nu6_1)))
                 .chain(nu6_2.into_iter().map(|h| (h, Nu6_2)))
+                .chain(nu6_3.into_iter().map(|h| (h, Nu6_3)))
                 .chain(nu7.into_iter().map(|h| (h, Nu7)));
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -746,7 +754,8 @@ impl ParametersBuilder {
         self
     }
 
-    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    /// Sets whether coinbase outputs may be spent into transparent outputs in the
+    /// [`Parameters`] being built (the inverse of zcashd's `-regtestshieldcoinbase`).
     pub fn with_unshielded_coinbase_spends(
         mut self,
         should_allow_unshielded_coinbase_spends: bool,
@@ -948,6 +957,9 @@ pub struct RegtestParameters {
     pub checkpoints: Option<ConfiguredCheckpoints>,
     /// Whether funding stream addresses should be repeated to fill all required funding stream periods.
     pub extend_funding_stream_addresses_as_required: Option<bool>,
+    /// Whether to allow coinbase spends to have transparent outputs (inverse of
+    /// zcashd's `-regtestshieldcoinbase`).
+    pub should_allow_unshielded_coinbase_spends: Option<bool>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -1021,6 +1033,7 @@ impl Parameters {
             lockbox_disbursements,
             checkpoints,
             extend_funding_stream_addresses_as_required,
+            should_allow_unshielded_coinbase_spends,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1028,7 +1041,9 @@ impl Parameters {
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
             .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))?
             .with_disable_pow(true)
-            .with_unshielded_coinbase_spends(true)
+            .with_unshielded_coinbase_spends(
+                should_allow_unshielded_coinbase_spends.unwrap_or(true),
+            )
             .with_slow_start_interval(Height::MIN)
             // Like the default Testnet activation heights stripped below, the default Testnet's
             // temporary Orchard-disabling soft fork does not apply to Regtest.
@@ -1075,7 +1090,8 @@ impl Parameters {
             funding_streams: _,
             target_difficulty_limit,
             disable_pow,
-            should_allow_unshielded_coinbase_spends,
+            // Configurable on Regtest
+            should_allow_unshielded_coinbase_spends: _,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements: _,
@@ -1089,8 +1105,6 @@ impl Parameters {
             && self.slow_start_shift == slow_start_shift
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
-            && self.should_allow_unshielded_coinbase_spends
-                == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
     }

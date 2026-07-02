@@ -893,17 +893,18 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
 
-                // Queue inv-advertised candidates from a specific peer.
-                // Per-peer accounting is enforced inside the downloader.
-                Request::QueueFromPeer { txids, source } => {
-                    trace!(req_count = ?txids.len(), ?source, "got mempool QueueFromPeer request");
+                // Queue candidates received from a specific peer (advertised IDs
+                // or a directly pushed transaction). Per-peer accounting is
+                // enforced inside the downloader.
+                Request::QueueFromPeer { candidates, source } => {
+                    trace!(req_count = ?candidates.len(), ?source, "got mempool QueueFromPeer request");
 
-                    for txid in txids {
-                        if storage.should_download_or_verify(txid).is_err() {
+                    for candidate in candidates {
+                        if storage.should_download_or_verify(candidate.id()).is_err() {
                             continue;
                         }
                         let _ = tx_downloads.download_if_needed_and_verify(
-                            Gossip::Id(txid),
+                            candidate,
                             Some(source),
                             None,
                         );

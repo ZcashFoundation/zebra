@@ -81,8 +81,6 @@ fn coinbase() -> anyhow::Result<()> {
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
                         Amount::zero(),
-                        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                        None,
                     )?
                     .data()
                     .as_ref()
@@ -95,4 +93,143 @@ fn coinbase() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// The Zebra marker is always prepended, and `extra_coinbase_data` can't exceed the limit.
+#[test]
+fn coinbase_tag_and_limit() {
+    use zcash_address::ZcashAddress;
+
+    use crate::config::mining::{
+        Config, ExtraCoinbaseData, MAX_USER_COINBASE_DATA_LEN, ZEBRA_COINBASE_MARKER,
+        ZEBRA_COINBASE_SEPARATOR,
+    };
+
+    // `ExtraCoinbaseData` accepts data up to the limit and rejects one byte over. Its `Deserialize`
+    // impl delegates here, so an oversized `mining.extra_coinbase_data` makes the config fail to
+    // load and the node refuse to start.
+    assert!(ExtraCoinbaseData::try_from("x".repeat(MAX_USER_COINBASE_DATA_LEN)).is_ok());
+    assert!(ExtraCoinbaseData::try_from("x".repeat(MAX_USER_COINBASE_DATA_LEN + 1)).is_err());
+
+    let net = Network::Mainnet;
+    let addr: ZcashAddress = default_miner_address(net.kind(), &MinerAddressType::Transparent)
+        .parse()
+        .expect("default miner address parses");
+
+    let params = |extra: Option<ExtraCoinbaseData>| {
+        MinerParams::new(
+            &net,
+            Config {
+                miner_address: Some(addr.clone()),
+                extra_coinbase_data: extra,
+                ..Default::default()
+            },
+        )
+    };
+
+    // The marker is prepended whether or not `extra_coinbase_data` is set, so every block Zebra
+    // builds is tagged. Without extra data, the coinbase data is exactly the marker.
+    let untagged = params(None).expect("valid config");
+    let untagged = untagged.data().as_ref().expect("marker is always present");
+    assert_eq!(
+        untagged.value().as_slice(),
+        ZEBRA_COINBASE_MARKER.as_bytes()
+    );
+
+    // With extra data, the marker and separator precede it.
+    let tag = ExtraCoinbaseData::try_from("/pool/".to_string()).expect("within the limit");
+    let tagged = params(Some(tag)).expect("valid config");
+    let tagged = tagged.data().as_ref().expect("marker is always present");
+    assert_eq!(
+        tagged.value().as_slice(),
+        [ZEBRA_COINBASE_MARKER, ZEBRA_COINBASE_SEPARATOR, "/pool/"]
+            .concat()
+            .as_bytes()
+    );
+}
+
+/// Tests that the coinbase cache reuses a previously built coinbase for the same height and fees,
+/// so a short-polling miner doesn't re-run the shielded-coinbase proof on every request.
+#[test]
+fn coinbase_cache_reuses_built_coinbase() {
+    use super::CoinbaseCache;
+
+    let net = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("Nu5 is active on Mainnet");
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Sapling),
+        )
+        .expect("hard-coded Sapling address is valid"),
+    );
+    let fee = Amount::zero();
+
+    let build = || {
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, fee)
+            .expect("valid coinbase tx")
+    };
+
+    // A shielded coinbase carries a randomized proof, so two fresh builds differ. Identical bytes
+    // therefore prove the cache returned a reused transaction rather than rebuilding it.
+    let coinbase = build();
+    assert_ne!(
+        build(),
+        coinbase,
+        "fresh shielded coinbases differ (randomized proof)"
+    );
+
+    let cache = CoinbaseCache::default();
+    assert!(cache.get(height, fee).is_none(), "an empty cache misses");
+
+    cache.store(height, fee, coinbase.clone());
+    assert_eq!(
+        cache.get(height, fee),
+        Some(coinbase.clone()),
+        "a cache hit reuses the stored coinbase",
+    );
+
+    // A different height key or a cleared cache misses, so the next request rebuilds.
+    let next_height = height.next().expect("height is below Height::MAX");
+    assert!(
+        cache.get(next_height, fee).is_none(),
+        "a different height misses"
+    );
+    cache.clear();
+    assert!(cache.get(height, fee).is_none(), "a cleared cache misses");
+}
+
+/// From NU6.3 onward, a shielded coinbase paid to a Unified miner address with an Orchard
+/// receiver routes newly minted value into the Ironwood pool, not the Orchard pool.
+#[test]
+fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
+    let net = Network::new_default_testnet();
+    let height = NetworkUpgrade::Nu6_3
+        .activation_height(&net)
+        .expect("Nu6.3 is scheduled on Testnet");
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Unified),
+        )
+        .expect("hard-coded Unified address is valid"),
+    );
+
+    let template = TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
+        .expect("valid coinbase tx");
+    let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
+
+    // The coinbase is a v6 transaction with Ironwood shielded data and no Orchard shielded data.
+    // ZIP-229: from NU6.3, coinbase MUST have an empty Orchard component.
+    assert_eq!(coinbase.version(), 6, "coinbase is v6 at NU6.3");
+    assert!(
+        coinbase.ironwood_shielded_data().is_some(),
+        "coinbase creates an Ironwood output"
+    );
+    assert!(
+        coinbase.orchard_shielded_data().is_none(),
+        "coinbase must not create Orchard components on NU6.3"
+    );
 }

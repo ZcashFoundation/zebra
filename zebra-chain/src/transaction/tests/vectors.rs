@@ -1011,7 +1011,6 @@ fn binding_signatures() {
                             at_least_one_v5_checked = true;
                         }
                     }
-                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                     Transaction::V6 {
                         sapling_shielded_data,
                         ..
@@ -1050,6 +1049,77 @@ fn binding_signatures() {
         assert!(at_least_one_v4_checked);
         assert!(at_least_one_v5_checked);
     }
+}
+
+/// Check that a v6 (Ironwood / NU6.3) transaction computes a txid and round-trips through
+/// serialization.
+///
+/// Computing the txid drives [`Transaction::to_librustzcash`] into the librustzcash Ironwood fork's
+/// v6 (ZIP-244) digest path, which is the runtime path that does not work against released
+/// librustzcash. The branch id resolves to the fork's `BranchId::Nu6_3`.
+#[test]
+fn v6_ironwood_txid_and_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let tx = Transaction::V6 {
+        network_upgrade: NetworkUpgrade::Nu6_3,
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        ironwood_shielded_data: None,
+    };
+
+    // Drives the librustzcash Ironwood fork's v6 digest computation.
+    let txid = tx.hash();
+
+    // The v6 wire format round-trips through Zebra's own (de)serializer.
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("v6 transaction serializes");
+    let tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("v6 transaction deserializes");
+
+    assert_eq!(tx, tx2);
+    assert_eq!(tx2.hash(), txid, "txid is stable across serialization");
+}
+
+/// A v6 transaction carrying populated Orchard-v6 and Ironwood bundles round-trips through Zebra's
+/// own v6 (de)serializer.
+///
+/// Unlike [`v6_ironwood_txid_and_roundtrip`], this does not compute a txid: that drives the
+/// librustzcash fork's parser, which does not accept the structurally-fake proof bytes the test
+/// helpers produce. This exercises Zebra's self-contained v6 wire codec for *non-empty* bundles
+/// (the empty-bundle path is already covered above).
+#[test]
+fn v6_transaction_with_bundles_round_trips() {
+    use crate::ironwood;
+    use crate::orchard::{Flags, ShieldedDataV6};
+
+    let _init_guard = zebra_test::init();
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    let orchard = ShieldedDataV6::new(arbitrary::fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
+        zero,
+        1,
+    ));
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(
+        arbitrary::fake_v6_orchard_shielded_data(Flags::ENABLE_SPENDS, zero, 2),
+    ));
+
+    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), Some(ironwood));
+
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("v6 transaction serializes");
+    let tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("v6 transaction deserializes");
+    assert_eq!(tx, tx2);
 }
 
 #[test]

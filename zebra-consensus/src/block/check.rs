@@ -329,31 +329,15 @@ pub fn miner_fees_are_valid(
         .map_err(|e| BlockError::Other(format!("invalid transparent value balance: {e}")))?;
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
-
-    // Coinbase transaction can still have a NSM deposit
-    #[cfg(zcash_unstable = "zip235")]
-    let zip233_amount: Amount<NegativeAllowed> = coinbase_tx
-        .zip233_amount()
-        .constrain()
-        .map_err(|_| SubsidyError::InvalidZip233Amount)?;
-
-    #[cfg(not(zcash_unstable = "zip235"))]
-    let zip233_amount = Amount::zero();
-
-    #[cfg(zcash_unstable = "zip235")]
-    if let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) {
-        if height >= nsm_activation_height {
-            let minimum_zip233_amount = ((block_miner_fees * 6).unwrap() / 10).unwrap();
-            if zip233_amount < minimum_zip233_amount {
-                Err(SubsidyError::InvalidZip233Amount)?
-            }
-        }
-    }
+    // [NU6.3 onward] The Ironwood pool is shielded too, so its value balance affects the coinbase
+    // output value exactly like Sapling and Orchard. This is zero for pre-v6 coinbase transactions
+    // (no Ironwood bundle), so it is a no-op before NU6.3.
+    let ironwood_value_balance = coinbase_tx.ironwood_value_balance().ironwood_amount();
 
     // # Consensus
     //
     // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
-    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, plus totalDeferredOutput(height);
+    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, minus vbalanceIronwood, plus totalDeferredOutput(height);
     // > – define the total input value of its coinbase transaction to be the value in zatoshi of the block subsidy,
     // >   plus the transaction fees paid by transactions in the block.
     //
@@ -361,11 +345,12 @@ pub fn miner_fees_are_valid(
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    let total_output_value =
-        (transparent_value_balance - sapling_value_balance - orchard_value_balance
-            + expected_deferred_pool_balance_change.value()
-            + zip233_amount)
-            .map_err(|_| SubsidyError::Overflow)?;
+    let total_output_value = (transparent_value_balance
+        - sapling_value_balance
+        - orchard_value_balance
+        - ironwood_value_balance
+        + expected_deferred_pool_balance_change.value())
+    .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;

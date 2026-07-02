@@ -1339,27 +1339,24 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-                    let transactions =
-                        block
-                            .transactions
-                            .iter()
-                            .map(|tx| {
-                                GetBlockTransaction::Object(Box::new(
-                                    TransactionObject::from_transaction(
-                                        tx.clone(),
-                                        Some(height),
-                                        Some(confirmations.try_into().expect(
-                                            "should be less than max block height, i32::MAX",
-                                        )),
-                                        &network,
-                                        Some(block_time),
-                                        Some(hash),
-                                        Some(true),
-                                        tx.hash(),
-                                    ),
-                                ))
-                            })
-                            .collect();
+                    let transactions = block
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            GetBlockTransaction::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    Some(confirmations),
+                                    &network,
+                                    Some(block_time),
+                                    Some(hash),
+                                    Some(true),
+                                    tx.hash(),
+                                ),
+                            ))
+                        })
+                        .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -1802,7 +1799,7 @@ where
                         AnyTx::Mined(mined) if in_best_chain => (
                             mined.tx.clone(),
                             Some(mined.height),
-                            Some(mined.confirmations),
+                            Some(mined.confirmations.into()),
                             Some(mined.block_time),
                         ),
                         _ => {
@@ -1845,7 +1842,7 @@ where
                                 TransactionObject::from_transaction(
                                     tx.tx.clone(),
                                     Some(tx.height),
-                                    Some(tx.confirmations),
+                                    Some(tx.confirmations.into()),
                                     &self.network,
                                     // TODO: Performance gain:
                                     // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
@@ -2475,6 +2472,7 @@ where
                     return Ok(BlockTemplateResponse::new_internal(
                         &self.network,
                         precomputed_coinbase,
+                        None,
                         miner_params,
                         &chain_info,
                         server_long_poll_id,
@@ -2518,14 +2516,14 @@ where
         let height = chain_info.tip_height.next().map_misc_error()?;
 
         // Randomly select some mempool transactions.
+        let coinbase_cache = self.gbt.coinbase_cache();
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
             miner_params,
             mempool_txs,
             mempool_tx_deps,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            None,
+            Some(&coinbase_cache),
         );
 
         tracing::debug!(
@@ -2541,13 +2539,12 @@ where
         Ok(BlockTemplateResponse::new_internal(
             &self.network,
             None,
+            Some(self.gbt.coinbase_cache()),
             miner_params,
             &chain_info,
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            None,
         )
         .into())
     }
@@ -3373,7 +3370,7 @@ impl GetInfoResponse {
 }
 
 /// Type alias for the array of `GetBlockchainInfoBalance` objects
-pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 5];
+pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 6];
 
 /// Response to a `getblockchaininfo` RPC request.
 ///

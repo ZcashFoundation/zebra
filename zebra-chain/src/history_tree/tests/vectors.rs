@@ -63,6 +63,7 @@ fn push_and_prune_for_network_upgrade(
         first_block,
         &first_sapling_root,
         &Default::default(),
+        &Default::default(),
     )?;
 
     assert_eq!(tree.size(), 1);
@@ -91,8 +92,13 @@ fn push_and_prune_for_network_upgrade(
             .get(&(height + 1))
             .expect("test vector exists"),
     )?;
-    tree.push(second_block, &second_sapling_root, &Default::default())
-        .unwrap();
+    tree.push(
+        second_block,
+        &second_sapling_root,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
 
     // Adding a second block will produce a 3-node tree (one parent and two leaves).
     assert_eq!(tree.size(), 3);
@@ -139,6 +145,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
         block_prev,
         &sapling_root_prev,
         &Default::default(),
+        &Default::default(),
     )?;
 
     assert_eq!(tree.size(), 1);
@@ -164,6 +171,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     tree.push(
         activation_block,
         &activation_sapling_root,
+        &Default::default(),
         &Default::default(),
     )
     .unwrap();

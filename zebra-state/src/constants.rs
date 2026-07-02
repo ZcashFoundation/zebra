@@ -13,22 +13,10 @@ use crate::{
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
-/// The maximum chain reorganisation height.
-///
-/// This threshold determines the maximum length of the best non-finalized chain.
-/// Larger reorganisations would allow double-spends of coinbase transactions.
-///
-/// This threshold uses the relevant chain for the block being verified by the
-/// non-finalized state.
-///
-/// For the best chain, coinbase spends are only allowed from blocks at or below
-/// the finalized tip. For other chains, coinbase spends can use outputs from
-/// early non-finalized blocks, or finalized blocks. But if that chain becomes
-/// the best chain, all non-finalized blocks past the [`MAX_BLOCK_REORG_HEIGHT`]
-/// will be finalized. This includes all mature coinbase outputs.
-//
-// TODO: change to HeightDiff
-pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
+/// The maximum chain reorganisation height; it bounds the length of the best
+/// non-finalized chain. The value lives in `zebra-chain` so tooling (e.g.
+/// `zebra-checkpoints`) can use it without depending on `zebra-state`.
+pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
@@ -46,7 +34,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 27;
+const DATABASE_FORMAT_VERSION: u64 = 28;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -55,6 +43,16 @@ const DATABASE_FORMAT_VERSION: u64 = 27;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
+///
+/// Version history:
+/// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
+///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
+///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
+///   `zcash_history::Entry` records from 253 to 326 bytes, because NU6.3 adds Ironwood fields to
+///   `zcash_history::NodeData` (read code accepts the legacy 253-byte width and zero-pads it up to
+///   the current width). New CFs are created and the wider records are read in place when the
+///   database is opened, so this is a major bump that is restorable from the previous major
+///   database format version (no resync, no data migration).
 const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
@@ -99,8 +97,8 @@ pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100_000;
 /// 100 blocks. (1 fork per 20 blocks.) When block propagation is efficient, there is around
 /// 1 fork per 300 blocks.
 ///
-/// This limits non-finalized chain memory to around:
-/// `10 forks * 100 blocks * 2 MB per block = 2 GB`
+/// This limits non-finalized chain memory, in the worst case, to around:
+/// `10 forks * 1000 blocks * 2 MB per block = 20 GB`
 pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
@@ -111,8 +109,10 @@ pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
 /// The maximum number of invalidated block records.
 ///
-/// This limits the memory use to around:
-/// `100 entries * up to 99 blocks * 2 MB per block = 20 GB`
+/// Each record can hold a chain of invalidated descendants up to the rollback
+/// window ([`MAX_BLOCK_REORG_HEIGHT`]) deep, so this limits the memory use, in
+/// the worst case, to around:
+/// `100 entries * up to 1000 blocks * 2 MB per block = 200 GB`
 pub const MAX_INVALIDATED_BLOCKS: usize = 100;
 
 lazy_static! {

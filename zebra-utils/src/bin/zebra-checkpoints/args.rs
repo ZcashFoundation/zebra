@@ -4,7 +4,7 @@
 
 use std::{net::SocketAddr, str::FromStr};
 
-use structopt::StructOpt;
+use clap::Parser;
 use thiserror::Error;
 
 use zebra_chain::block::Height;
@@ -92,33 +92,34 @@ impl FromStr for Transport {
 pub struct InvalidTransportError(String);
 
 /// zebra-checkpoints arguments
-#[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
+#[derive(Clone, Debug, Eq, PartialEq, Parser)]
+#[command(version)]
 pub struct Args {
     /// Backend type: the node we're connecting to.
-    #[structopt(default_value = "zebrad", short, long)]
+    #[arg(default_value = "zebrad", short, long)]
     pub backend: Backend,
 
     /// Transport type: the way we connect.
-    #[structopt(default_value = "cli", short, long)]
+    #[arg(default_value = "cli", short, long)]
     pub transport: Transport,
 
     /// Path or name of zcash-cli command.
     /// Only used if the transport is [`Cli`](Transport::Cli).
-    #[structopt(default_value = "zcash-cli", short, long)]
+    #[arg(default_value = "zcash-cli", short, long)]
     pub cli: String,
 
     /// Address and port for RPC connections.
     /// Used for all transports.
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub addr: Option<SocketAddr>,
 
     /// Start looking for checkpoints after this height.
     /// If there is no last checkpoint, we start looking at the Genesis block (height 0).
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub last_checkpoint: Option<Height>,
 
     /// Passthrough args for `zcash-cli`.
     /// Only used if the transport is [`Cli`](Transport::Cli).
-    #[structopt(last = true)]
+    #[arg(last = true)]
     pub zcli_args: Vec<String>,
 }

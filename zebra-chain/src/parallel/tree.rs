@@ -29,6 +29,15 @@ pub struct NoteCommitmentTrees {
 
     /// The orchard note commitment subtree.
     pub orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+
+    /// The ironwood note commitment tree (NU6.3).
+    ///
+    /// Ironwood reuses the Orchard note commitment tree type (same Pallas/Sinsemilla MerkleCRH),
+    /// but commits Ironwood-pool notes into a separate tree. Stays empty until NU6.3.
+    pub ironwood: Arc<orchard::tree::NoteCommitmentTree>,
+
+    /// The ironwood note commitment subtree (NU6.3).
+    pub ironwood_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
 }
 
 /// Note commitment tree errors.
@@ -45,6 +54,13 @@ pub enum NoteCommitmentTreeError {
     /// A orchard tree error
     #[error("orchard error: {0}")]
     Orchard(#[from] orchard::tree::NoteCommitmentTreeError),
+
+    /// An ironwood tree error
+    ///
+    /// Ironwood reuses the Orchard tree type, so this wraps the same error type as
+    /// [`Self::Orchard`]; the distinct variant keeps the pool that failed identifiable.
+    #[error("ironwood error: {0}")]
+    Ironwood(#[source] orchard::tree::NoteCommitmentTreeError),
 }
 
 impl NoteCommitmentTrees {
@@ -68,16 +84,20 @@ impl NoteCommitmentTrees {
             sprout,
             sapling,
             orchard,
+            ironwood,
             ..
         } = self.clone();
 
         let sprout_note_commitments: Vec<_> = block.sprout_note_commitments().cloned().collect();
         let sapling_note_commitments: Vec<_> = block.sapling_note_commitments().cloned().collect();
         let orchard_note_commitments: Vec<_> = block.orchard_note_commitments().cloned().collect();
+        let ironwood_note_commitments: Vec<_> =
+            block.ironwood_note_commitments().cloned().collect();
 
         let mut sprout_result = None;
         let mut sapling_result = None;
         let mut orchard_result = None;
+        let mut ironwood_result = None;
 
         rayon::in_place_scope_fifo(|scope| {
             if !sprout_note_commitments.is_empty() {
@@ -106,6 +126,15 @@ impl NoteCommitmentTrees {
                     ));
                 });
             }
+
+            if !ironwood_note_commitments.is_empty() {
+                scope.spawn_fifo(|_scope| {
+                    ironwood_result = Some(Self::update_ironwood_note_commitment_tree(
+                        ironwood,
+                        ironwood_note_commitments,
+                    ));
+                });
+            }
         });
 
         if let Some(sprout_result) = sprout_result {
@@ -123,6 +152,13 @@ impl NoteCommitmentTrees {
             let (orchard, subtree_root) = orchard_result?;
             self.orchard = orchard;
             self.orchard_subtree =
+                subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
+        };
+
+        if let Some(ironwood_result) = ironwood_result {
+            let (ironwood, subtree_root) = ironwood_result?;
+            self.ironwood = ironwood;
+            self.ironwood_subtree =
                 subtree_root.map(|(idx, node)| NoteCommitmentSubtree::new(idx, height, node));
         };
 
@@ -225,5 +261,47 @@ impl NoteCommitmentTrees {
         let _ = orchard_nct.root();
 
         Ok((orchard, subtree_root))
+    }
+
+    /// Update the ironwood note commitment tree.
+    /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
+    ///
+    /// Ironwood reuses the Orchard note commitment tree type, but commits into a separate tree.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn update_ironwood_note_commitment_tree(
+        mut ironwood: Arc<orchard::tree::NoteCommitmentTree>,
+        ironwood_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
+    ) -> Result<
+        (
+            Arc<orchard::tree::NoteCommitmentTree>,
+            Option<(NoteCommitmentSubtreeIndex, orchard::tree::Node)>,
+        ),
+        NoteCommitmentTreeError,
+    > {
+        let ironwood_nct = Arc::make_mut(&mut ironwood);
+
+        // It is impossible for blocks to contain more than one level 16 ironwood root, by the same
+        // per-block action-count bound as Orchard:
+        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        let mut subtree_root = None;
+
+        for ironwood_note_commitment in ironwood_note_commitments {
+            ironwood_nct
+                .append(ironwood_note_commitment)
+                .map_err(NoteCommitmentTreeError::Ironwood)?;
+
+            // Subtrees end heights come from the blocks they are completed in,
+            // so we check for new subtrees after appending the note.
+            // (If we check before, subtrees at the end of blocks have the wrong heights.)
+            if let Some(index_and_node) = ironwood_nct.completed_subtree_index_and_root() {
+                subtree_root = Some(index_and_node);
+            }
+        }
+
+        // Re-calculate and cache the tree root.
+        let _ = ironwood_nct.root();
+
+        Ok((ironwood, subtree_root))
     }
 }

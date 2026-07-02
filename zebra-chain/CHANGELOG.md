@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `parameters::NetworkUpgrade::Nu6_3`
+- `parameters::testnet::ConfiguredActivationHeights::nu6_3`
+- `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:
+  optional override for whether Regtest allows coinbase outputs to be spent into
+  transparent outputs. Defaults to allowing them, and does not affect
+  `Network::is_regtest()`.
+- `ironwood` module
+- `orchard::shielded_data::Flags::ENABLE_CROSS_ADDRESS`
+- `block::Block::{ironwood_note_commitments, ironwood_nullifiers, ironwood_transactions_count}`
+- `transaction::Transaction`:
+  - `ironwood_actions`
+  - `ironwood_flags`
+  - `ironwood_shielded_data`
+  - `ironwood_note_commitments`
+  - `ironwood_nullifiers`
+  - `ironwood_value_balance`
+  - `has_ironwood_shielded_data`
+  - `has_enough_ironwood_flags`
+- `value_balance::ValueBalance::{from_ironwood_amount, ironwood_amount, set_ironwood_value_balance}`
+- `value_balance::ValueBalanceError::Ironwood`
+- `parallel::tree::NoteCommitmentTrees`:
+  - `ironwood`
+  - `ironwood_subtree`
+  - `update_ironwood_note_commitment_tree`
+- `parallel::tree::NoteCommitmentTreeError::Ironwood`
+- `primitives::zcash_history::V3` (the ZIP-221 Ironwood history node).
+- `impl Version for zcash_history::version::V3`
+
+### Changed
+
+- The following history-tree functions now take an additional
+  `ironwood_root: &orchard::tree::Root` parameter:
+  - `history_tree::HistoryTree::{from_block, push}`
+  - `history_tree::NonEmptyHistoryTree::{from_block, push, try_extend}`
+  - `primitives::zcash_history::Tree::{append_leaf, new_from_block}`
+  - `primitives::zcash_history::Version::block_to_history_node`
+- `value_balance::ValueBalance<NonNegative>::to_bytes` now returns `[u8; 48]`
+  (was `[u8; 40]`), to include the Ironwood pool balance.
+
+### Removed
+
+- `transaction::Transaction::zip233_amount` (the abandoned ZIP-233 burn amount).
+
+## [10.1.0] - 2026-06-18
+
+### Added
+
+- `parameters::constants::MAX_BLOCK_REORG_HEIGHT`: the maximum chain reorganisation height (1000).
+
 ## [10.0.0] - 2026-06-10
 
 ### Breaking Changes

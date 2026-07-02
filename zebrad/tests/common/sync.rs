@@ -1,4 +1,4 @@
-//! `zebrad` sync-specific shared code for the `zebrad` acceptance tests.
+//! `zebrad` sync-specific shared code for the `zebrad` tests.
 //!
 //! # Warning
 //!

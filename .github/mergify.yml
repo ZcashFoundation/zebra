@@ -30,12 +30,13 @@ defaults:
       - "#approved-reviews-by >= 1"
       # no reviewer has requested changes
       - "#changes-requested-reviews-by = 0"
-      # The three required aggregator check runs must pass. After the
+      # The four required aggregator check runs must pass. After the
       # `changes` + paths-filter refactor (#10637), each aggregator is
       # produced by exactly one workflow, so the names below are stable.
       - check-success=lint
       - check-success=unit-tests
       - check-success=test-crates
+      - check-success=semver-checks-result
 
 
 # Allows to define the rules that reign over our merge queues
@@ -44,7 +45,20 @@ queue_rules:
     batch_size: 5
     # Wait a short time to embark hotfixes together in a merge train
     batch_max_wait_time: "2 minutes"
+    # A queue_rule's `queue_conditions` REPLACES the value from
+    # `defaults.queue_rule.queue_conditions` rather than extending it. Restate
+    # the same gates here so a P-Critical label cannot bypass the approval,
+    # changes-requested, base-branch, and required-check checks.
     queue_conditions:
+      - base=main
+      - -draft
+      - label!=do-not-merge
+      - "#approved-reviews-by >= 1"
+      - "#changes-requested-reviews-by = 0"
+      - check-success=lint
+      - check-success=unit-tests
+      - check-success=test-crates
+      - check-success=semver-checks-result
       # is labeled with Critical priority
       - 'label~=^P-Critical'
 

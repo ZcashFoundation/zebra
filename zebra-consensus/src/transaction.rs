@@ -402,46 +402,7 @@ where
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do quick checks first
-            check::has_inputs_and_outputs(&tx)?;
-            check::has_enough_orchard_flags(&tx)?;
-            check::consensus_branch_id(&tx, req.height(), &network)?;
-
-            // Soft fork: temporarily require transactions to not contain Orchard actions.
-            //
-            // This soft fork was added while NU 6.1 was the active epoch on the Zcash
-            // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
-            // ported to other chains with a different sequence of NUs.
-            //
-            // This will be treated as "Rules that apply generally before the next NU"
-            // when we add the NU that re-enables Orchard actions.
-            if network.is_orchard_temporarily_disabled(req.height()) && tx.orchard_shielded_data().is_some() {
-                return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
-            }
-
-            // From the network upgrade that re-enables Orchard actions (NU6.2), require
-            // that any Orchard proof has the canonical length for its number of actions.
-            // A proof that is present but not canonically sized can be padded with
-            // arbitrary trailing data without affecting its validity, allowing excess
-            // bandwidth and storage costs to be imposed while paying only fees sized to a
-            // canonical proof (GHSA-jfw5-j458-pfv6).
-            //
-            // This is a constricting rule, so it is gated on that network upgrade:
-            // Orchard actions mined before it, under earlier rules that did not enforce
-            // the proof size, must remain valid so that nodes can sync and reindex the
-            // chain before the soft fork that temporarily disabled Orchard. Orchard
-            // bundles are deserialized leniently, so the size is checked here, where the
-            // block height is available, rather than during parsing.
-            //
-            // The gate activates at the NU6.2 activation height committed in
-            // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
-            // `Network::orchard_canonical_proof_size_rule_active`.
-            if network.orchard_canonical_proof_size_rule_active(req.height()) {
-                if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-                    if !orchard_shielded_data.proof_size_is_canonical() {
-                        return Err(TransactionError::OrchardProofSize);
-                    }
-                }
-            }
+            Self::check_structure_and_network_rules(tx.as_ref(), req.height(), &network)?;
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
@@ -461,36 +422,18 @@ where
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
             }
 
-            // Consensus rule:
-            //
-            // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            check::joinsplit_has_vpub_zero(&tx)?;
-
-            // [Canopy onward]: `vpub_old` MUST be zero.
-            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-            check::disabled_add_to_sprout_pool(&tx, req.height(), &network)?;
-
-            check::spend_conflicts(&tx)?;
+            // Transaction invariants that apply regardless of request type or transaction version.
+            // These are pure consensus rules over the transaction structure and must always hold.
+            Self::check_transaction_invariants(tx.as_ref(), req.height(), &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
+            // Block transactions are checked against the block's own time directly;
+            // mempool transactions are checked against the next median-time-past from state.
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
             } else {
-                // Skip the state query if we don't need the time for this check.
-                let next_median_time_past = if tx.lock_time_is_time() {
-                    // This state query is much faster than loading UTXOs from the database,
-                    // so it doesn't need to be executed in parallel
-                    let state = state.clone();
-                    Some(Self::mempool_best_chain_next_median_time_past(state).await?.to_chrono())
-                } else {
-                    None
-                };
-
-                // This consensus check makes sure Zebra produces valid block templates.
-                check::lock_time_has_passed(&tx, req.height(), next_median_time_past)?;
+                Self::verify_mempool_lock_time(tx.as_ref(), req.height(), state.clone()).await?;
             }
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
@@ -521,39 +464,13 @@ where
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let mut async_checks = match tx.as_ref() {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
-                    tracing::debug!(?tx, "got transaction with wrong version");
-                    return Err(TransactionError::WrongVersion);
-                }
-                Transaction::V4 {
-                    joinsplit_data,
-                    ..
-                } => Self::verify_v4_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                    joinsplit_data,
-                )?,
-                Transaction::V5 {
-                    ..
-                } => Self::verify_v5_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                )?,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6 {
-                    ..
-                } => Self::verify_v6_transaction(
-                    &req,
-                    &network,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                )?,
-            };
+            // Select version-specific async verification pipeline
+            let mut async_checks = Self::dispatch_version_verification(
+                tx.as_ref(),
+                nu,
+                script_verifier,
+                cached_ffi_transaction.clone()
+            )?;
 
             if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
@@ -579,32 +496,7 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            // Get the `value_balance` to calculate the transaction fee.
-            let value_balance = tx.value_balance(&spent_utxos);
-
-            let zip233_amount = match *tx {
-            	#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6{ .. } => tx.zip233_amount(),
-                _ => Amount::zero()
-            };
-
-            // Calculate the fee only for non-coinbase transactions.
-            let mut miner_fee = None;
-            if !tx.is_coinbase() {
-                // TODO: deduplicate this code with remaining_transaction_value()?
-                miner_fee = match value_balance {
-                    Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => match tx_rtv - zip233_amount {
-                            Ok(fee) => Some(fee),
-                            Err(_) => return Err(TransactionError::IncorrectFee),
-                        }
-                        Err(_) => return Err(TransactionError::IncorrectFee),
-                    },
-                    Err(_) => return Err(TransactionError::IncorrectFee),
-                };
-            }
-
-            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
@@ -672,6 +564,127 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    /// Performs basic structural validation and Orchard-related network upgrade rules.
+    fn check_structure_and_network_rules(
+        tx: &Transaction,
+        height: block::Height,
+        network: &Network,
+    ) -> Result<(), TransactionError> {
+        check::has_inputs_and_outputs(tx)?;
+        check::has_enough_orchard_flags(tx)?;
+        // NU6.3 / Ironwood flag rules (no-ops for pre-v6 transactions).
+        check::has_enough_ironwood_flags(tx)?;
+        check::orchard_cross_address_disabled(tx)?;
+        // [NU6.3 onward] valueBalanceOrchard must be non-negative (Orchard pool frozen against new
+        // inflows; see `orchard_value_balance_non_negative`).
+        check::orchard_value_balance_non_negative(tx, height, network)?;
+        // [NU6.3 onward] Coinbase transactions must have an empty Orchard component (new shielded
+        // coinbase value is routed to the Ironwood pool instead).
+        check::coinbase_orchard_component_empty(tx, height, network)?;
+        check::consensus_branch_id(tx, height, network)?;
+
+        // Soft fork: temporarily require transactions to not contain Orchard actions.
+        //
+        // This soft fork was added while NU 6.1 was the active epoch on the Zcash
+        // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
+        // ported to other chains with a different sequence of NUs.
+        //
+        // This will be treated as "Rules that apply generally before the next NU"
+        // when we add the NU that re-enables Orchard actions.
+        if network.is_orchard_temporarily_disabled(height) && tx.orchard_shielded_data().is_some() {
+            return Err(TransactionError::Other(
+                "transaction has Orchard actions (temporarily disabled)".into(),
+            ));
+        }
+
+        // From the network upgrade that re-enables Orchard actions (NU6.2), require
+        // that any Orchard proof has the canonical length for its number of actions.
+        // A proof that is present but not canonically sized can be padded with
+        // arbitrary trailing data without affecting its validity, allowing excess
+        // bandwidth and storage costs to be imposed while paying only fees sized to a
+        // canonical proof (GHSA-jfw5-j458-pfv6).
+        //
+        // This is a constricting rule, so it is gated on that network upgrade:
+        // Orchard actions mined before it, under earlier rules that did not enforce
+        // the proof size, must remain valid so that nodes can sync and reindex the
+        // chain before the soft fork that temporarily disabled Orchard. Orchard
+        // bundles are deserialized leniently, so the size is checked here, where the
+        // block height is available, rather than during parsing.
+        //
+        // The gate activates at the NU6.2 activation height committed in
+        // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
+        // `Network::orchard_canonical_proof_size_rule_active`.
+        if network.orchard_canonical_proof_size_rule_active(height) {
+            if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+                if !orchard_shielded_data.proof_size_is_canonical() {
+                    return Err(TransactionError::OrchardProofSize);
+                }
+            }
+        }
+
+        // The Ironwood bundle's Halo2 proof must also have a canonical size. Ironwood only exists
+        // from NU6.3 onward (there is no legacy lenient period as there was for Orchard), so this is
+        // enforced unconditionally whenever an Ironwood bundle is present. Like the Orchard bundle,
+        // Ironwood bundles are deserialized leniently, so the size is checked here rather than during
+        // parsing.
+        if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
+            if !ironwood_shielded_data.proof_size_is_canonical() {
+                return Err(TransactionError::IronwoodProofSize);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates transaction invariants.
+    fn check_transaction_invariants(
+        tx: &Transaction,
+        height: block::Height,
+        network: &Network,
+    ) -> Result<(), TransactionError> {
+        // Consensus rule:
+        //
+        // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        check::joinsplit_has_vpub_zero(tx)?;
+
+        // [Canopy onward]: `vpub_old` MUST be zero.
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        check::disabled_add_to_sprout_pool(tx, height, network)?;
+
+        check::spend_conflicts(tx)?;
+
+        Ok(())
+    }
+
+    /// Validates mempool lock-time consensus rules.
+    ///
+    /// Queries state only for time-based lock times.
+    async fn verify_mempool_lock_time(
+        tx: &Transaction,
+        height: block::Height,
+        state: Timeout<ZS>,
+    ) -> Result<(), TransactionError> {
+        // Skip the state query if we don't need the time for this check.
+        let next_median_time_past = if tx.lock_time_is_time() {
+            // This state query is much faster than loading UTXOs from the database,
+            // so it doesn't need to be executed in parallel
+            Some(
+                Self::mempool_best_chain_next_median_time_past(state)
+                    .await?
+                    .to_chrono(),
+            )
+        } else {
+            None
+        };
+
+        // This consensus check makes sure Zebra produces valid block templates.
+        check::lock_time_has_passed(tx, height, next_median_time_past)?;
+
+        Ok(())
+    }
+
     /// Fetches the median-time-past of the *next* block after the best state tip.
     ///
     /// This is used to verify that the lock times of mempool transactions
@@ -753,10 +766,16 @@ where
 
                     utxo
                 } else {
-                    let query = state
+                    let response = state
                         .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                    if let zebra_state::Response::Utxo(utxo) = query.await? {
+                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
+                        .await
+                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                            Ok(_) => TransactionError::TransparentInputNotFound,
+                            Err(boxed_error) => TransactionError::from(boxed_error),
+                        })?;
+
+                    if let zebra_state::Response::Utxo(utxo) = response {
                         utxo
                     } else {
                         unreachable!("AwaitUtxo always responds with Utxo")
@@ -837,6 +856,40 @@ where
         )
     }
 
+    /// Dispatches version-specific async verification checks for `tx`.
+    ///
+    /// `nu` is the network upgrade active at the transaction's block height,
+    /// pre-computed by the caller from `req.upgrade(&network)`.
+    ///
+    /// Returns [`TransactionError::WrongVersion`] for V1-V3 transactions, which
+    /// are not supported by any network upgrade Zebra verifies.
+    fn dispatch_version_verification(
+        tx: &Transaction,
+        nu: NetworkUpgrade,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        match tx {
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+                tracing::debug!(?tx, "got transaction with wrong version");
+                Err(TransactionError::WrongVersion)
+            }
+            Transaction::V4 { joinsplit_data, .. } => Self::verify_v4_transaction(
+                tx,
+                nu,
+                script_verifier,
+                cached_ffi_transaction,
+                joinsplit_data,
+            ),
+            Transaction::V5 { .. } => {
+                Self::verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
+            }
+            Transaction::V6 { .. } => {
+                Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
+            }
+        }
+    }
+
     /// Verify a V4 transaction.
     ///
     /// Returns a set of asynchronous checks that must all succeed for the transaction to be
@@ -848,25 +901,20 @@ where
     ///
     /// The parameters of this method are:
     ///
-    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
-    ///   for more information)
-    /// - the `network` to consider when verifying
+    /// - the `tx` transaction to verify
+    /// - the `nu` network upgrade active at the transaction's block height
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the prepared `cached_ffi_transaction` used by the script verifier
     /// - the Sprout `joinsplit_data` shielded data in the transaction
-    /// - the `sapling_shielded_data` in the transaction
     #[allow(clippy::unwrap_in_result)]
     fn verify_v4_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let tx = request.transaction();
-        let nu = request.upgrade(network);
-
-        Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
+        Self::verify_v4_transaction_network_upgrade(tx, nu)?;
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
 
@@ -875,7 +923,7 @@ where
             .sighash(HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            request,
+            tx,
             script_verifier,
             cached_ffi_transaction,
         )?
@@ -911,7 +959,8 @@ where
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2 => Ok(()),
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -939,24 +988,18 @@ where
     ///
     /// The parameters of this method are:
     ///
-    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
-    ///   for more information)
-    /// - the `network` to consider when verifying
+    /// - the `tx` transaction to verify
+    /// - the `nu` network upgrade active at the transaction's block height
     /// - the `script_verifier` to use for verifying the transparent transfers
     /// - the prepared `cached_ffi_transaction` used by the script verifier
-    /// - the sapling shielded data of the transaction, if any
-    /// - the orchard shielded data of the transaction, if any
     #[allow(clippy::unwrap_in_result)]
     fn verify_v5_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let transaction = request.transaction();
-        let nu = request.upgrade(network);
-
-        Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
+        Self::verify_v5_transaction_network_upgrade(tx, nu)?;
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
@@ -966,7 +1009,7 @@ where
             .sighash(HashType::ALL, None);
 
         Ok(Self::verify_transparent_inputs_and_outputs(
-            request,
+            tx,
             script_verifier,
             cached_ffi_transaction,
         )?
@@ -996,6 +1039,7 @@ where
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3
             | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -1015,15 +1059,68 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    /// Verifies a V6 (NU6.3 / Ironwood) transaction's shielded data.
+    ///
+    /// Differs from [`Self::verify_v5_transaction`] in the Orchard verifier: a v6 Orchard bundle
+    /// commits to the NU6.3 cross-address circuit, so it (and the Ironwood bundle) verify under the
+    /// NU6.3 key, not the v5 fixed key.
     fn verify_v6_transaction(
-        request: &Request,
-        network: &Network,
+        tx: &Transaction,
+        nu: NetworkUpgrade,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+        Self::verify_v6_transaction_network_upgrade(tx, nu)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+        let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
+
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
+        // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            tx,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(ironwood_bundle, &sighash)))
+    }
+
+    /// Verifies that a V6 `transaction` is supported by `network_upgrade`.
+    ///
+    /// V6 transactions are only valid from NU6.3 onward.
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // V6 transactions are not valid before NU6.3.
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1031,19 +1128,17 @@ where
     ///
     /// Returns script verification responses via the `utxo_sender`.
     fn verify_transparent_inputs_and_outputs(
-        request: &Request,
+        tx: &Transaction,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        let transaction = request.transaction();
-
-        if transaction.is_coinbase() {
+        if tx.is_coinbase() {
             // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())
         } else {
             // feed all of the inputs to the script verifier
-            let inputs = transaction.inputs();
+            let inputs = tx.inputs();
 
             let script_checks = (0..inputs.len())
                 .map(move |input_index| {
@@ -1191,16 +1286,15 @@ where
         async_checks
     }
 
-    /// Verifies a transaction's Orchard shielded data.
+    /// Verifies a **v5** transaction's Orchard bundle.
     ///
-    /// `network_upgrade` is the network upgrade active at the verified transaction's block
-    /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
-    /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
-    /// (GHSA-jfw5-j458-pfv6), so pre-NU6.2 bundles must be verified against the historical
-    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
-    /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
-    /// the verifier holding the matching key; the two verifiers keep separate batches, so eras
-    /// are never mixed.
+    /// A v5 Orchard bundle commits to the Orchard Action circuit of the block's era, so the
+    /// verifying key is selected by `network_upgrade` via
+    /// [`primitives::halo2::orchard_v5_verifier_for`]: the historical insecure key before NU6.2, the
+    /// fixed key from NU6.2 until NU6.3, and the NU6.3 key from NU6.3 onward. The Orchard-pool
+    /// cross-address restriction applies to every Orchard Action from NU6.3 onward regardless of
+    /// transaction version (ZIP 229), so a v5 bundle at NU6.3 uses the NU6.3 circuit — the same key
+    /// as v6 Orchard and Ironwood bundles — not the fixed one.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
@@ -1220,17 +1314,66 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            //
-            // Route the bundle to the verifier for its circuit era: pre-NU6.2 bundles only
-            // verify under the insecure key, NU6.2+ bundles only under the fixed key.
             async_checks.push(
-                primitives::halo2::verifier_for(network_upgrade)
+                primitives::halo2::orchard_v5_verifier_for(network_upgrade)
                     .clone()
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
         }
 
         async_checks
+    }
+
+    /// Verifies a **v6** transaction's Orchard bundle.
+    ///
+    /// A v6 Orchard bundle commits to the NU6.3 cross-address circuit, so it always verifies under
+    /// the NU6.3 key ([`primitives::halo2::orchard_v6_verifier`]), independent of the block's
+    /// network upgrade (v6 transactions only exist from NU6.3 onward).
+    fn verify_orchard_v6_bundle(
+        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
+        let mut async_checks = AsyncChecks::new();
+
+        if let Some(bundle) = bundle {
+            // The v6 Orchard bundle has a single aggregated Halo2 proof, queued once for batch
+            // verification against the NU6.3 key.
+            async_checks.push(
+                primitives::halo2::orchard_v6_verifier()
+                    .clone()
+                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
+            );
+        }
+
+        async_checks
+    }
+
+    /// Computes the miner fee and transaction sigop count for `tx`.
+    ///
+    /// Returns `None` for coinbase transaction fees.
+    fn compute_fee_and_sigops(
+        tx: &Transaction,
+        spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<(Option<Amount<NonNegative>>, u32), TransactionError> {
+        // Get the `value_balance` to calculate the transaction fee.
+        let value_balance = tx.value_balance(spent_utxos);
+
+        // Calculate the fee only for non-coinbase transactions.
+        let mut miner_fee = None;
+        if !tx.is_coinbase() {
+            // TODO: deduplicate this code with remaining_transaction_value()?
+            miner_fee = match value_balance {
+                Ok(vb) => match vb.remaining_transaction_value() {
+                    Ok(tx_rtv) => Some(tx_rtv),
+                    Err(_) => return Err(TransactionError::IncorrectFee),
+                },
+                Err(_) => return Err(TransactionError::IncorrectFee),
+            };
+        }
+
+        let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+
+        Ok((miner_fee, sigops))
     }
 }
 

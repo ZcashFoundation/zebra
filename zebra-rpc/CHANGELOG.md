@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `client::GetBlockchainInfoBalance::ironwood`, exposing the Ironwood value pool
+  in `getblockchaininfo`.
+- The indexer gRPC service has a new unary `GetBlock` method that returns a block
+  from the best chain by hash or height.
+- The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
+  tip hashes and streams only the blocks above them, so a re-subscribing consumer
+  resumes instead of being sent the entire non-finalized state again.
+- `config::mining::ExtraCoinbaseData` and `config::mining::ExtraCoinbaseDataTooLong`.
+
+### Changed
+
+- `methods::BlockchainValuePoolBalances` is now `[GetBlockchainInfoBalance; 6]`
+  (was `; 5`), and `GetBlockchainInfoBalance::{value_pools, zero_pools}` were
+  updated for the added Ironwood pool.
+- Zebra now prepends a `🦓` marker to the coinbase input of every block it builds.
+- `config::mining::Config::extra_coinbase_data` is now `Option<ExtraCoinbaseData>` (was
+  `Option<String>`), limited to 86 bytes (was 94) and validated on construction.
+- The read-state syncer (`TrustedChainSync`) applies backpressure to the non-finalized
+  block stream instead of dropping blocks for a slow consumer, bridges the gap between
+  a lagging finalized tip and the streamed non-finalized chain by fetching the missing
+  finalized blocks via `GetBlock`, and bounds its indexer streams with read timeouts
+  and HTTP/2 keep-alive so a half-open connection re-subscribes instead of hanging.
+
+### Fixed
+
+- `getblocktemplate` now caches the built coinbase transaction per `(height, fees)`, so repeated
+  short-poll requests within a block no longer rebuild it. This avoids re-running the
+  Sapling/Orchard proof on every request when mining to a shielded address, which otherwise pegged
+  the CPU and made each template take seconds.
+- `TrustedChainSync` no longer busy-loops and saturates logs when a block repeatedly
+  fails to commit to the non-finalized state: it now backs off before re-subscribing
+  and only logs the warning on transitions.
+  ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+
+## [10.0.1] - 2026-06-18
+
+### Changed
+
+- `zebra-state` dependency bumped to `9.0.1`, and `zebra-consensus` to `9.0.1`
+
 ## [10.0.0] - 2026-06-10
 
 ### Breaking Changes

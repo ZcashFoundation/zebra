@@ -92,7 +92,8 @@ fn test_block_db_round_trip_with(
             .iter()
             .map(ToString::to_string),
         false,
-    );
+    )
+    .expect("opening an ephemeral database should succeed");
 
     // Check that each block round-trips to the database
     for original_block in block_test_cases.into_iter() {

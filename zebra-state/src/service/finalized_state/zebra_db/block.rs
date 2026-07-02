@@ -376,6 +376,7 @@ impl ZebraDb {
             Spend::Sprout(nullifier) => self.sprout_revealing_tx_loc(nullifier)?,
             Spend::Sapling(nullifier) => self.sapling_revealing_tx_loc(nullifier)?,
             Spend::Orchard(nullifier) => self.orchard_revealing_tx_loc(nullifier)?,
+            Spend::Ironwood(nullifier) => self.ironwood_revealing_tx_loc(nullifier)?,
         };
 
         self.transaction_hash(tx_loc)
@@ -569,9 +570,9 @@ impl ZebraDb {
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
-        self.db
-            .write(batch)
-            .expect("unexpected rocksdb error while writing block");
+        if let Err(error) = self.db.write(batch) {
+            panic!("unexpected rocksdb error while writing block: {error}");
+        }
         metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
             .record(batch_start.elapsed().as_secs_f64());
 

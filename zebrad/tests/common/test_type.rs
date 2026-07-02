@@ -1,4 +1,4 @@
-//! Provides TestType enum with shared code for acceptance tests
+//! Provides TestType enum with shared code for zebrad tests
 
 use std::{
     env,
@@ -86,6 +86,9 @@ pub enum TestType {
     /// Sync to tip from a lightwalletd cached state.
     ///
     /// This test requires a cached Zebra and lightwalletd state.
+    // Only used with the `lightwalletd-grpc-tests` feature.
+    // Only used with the `lightwalletd-grpc-tests` feature.
+    #[allow(dead_code)]
     UpdateCachedState,
 
     /// Launch `zebrad` and sync it to the tip, but don't launch `lightwalletd`.

@@ -174,6 +174,7 @@ impl Strategy for PreparedChain {
                 // Dummy roots since this is only used for tests
                 &Default::default(),
                 &Default::default(),
+                &Default::default(),
             )
             .expect("history tree should be created");
             *chain = Some((
