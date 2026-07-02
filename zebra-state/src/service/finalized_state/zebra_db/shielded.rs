@@ -21,6 +21,7 @@ use zebra_chain::{
     block::Height,
     ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
+    parameters::NetworkUpgrade,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
@@ -527,18 +528,29 @@ impl ZebraDb {
 
         let ironwood_trees = self.db.cf_handle("ironwood_note_commitment_tree").unwrap();
 
+        // The genesis Ironwood tree is seeded with the empty tree by the `add_ironwood_tree` format
+        // upgrade and then written per-height by block commits, so once the upgrade has run there is
+        // always a tree at or below any height up to the tip. The upgrade runs on a background
+        // thread (`spawn_format_change`), so there is a brief window right after a v27->v28 upgrade
+        // where the column family is still empty while block commits proceed. Any read during that
+        // window is at a pre-NU6.3 height — an upgrading node's chain is entirely pre-NU6.3, and no
+        // NU6.3 block can be committed before the tree is seeded — where the empty tree is the
+        // correct answer. So before activation, fall back to the empty tree rather than panicking.
+        // (This also covers networks where NU6.3 is not scheduled, whose whole chain is
+        // pre-Ironwood.) From NU6.3 activation onward a missing tree is a real invariant violation
+        // (corruption or an interrupted backfill), so fail loudly instead of masking it.
+        let nu6_3_activated = NetworkUpgrade::Nu6_3
+            .activation_height(&self.network())
+            .is_some_and(|activation| *height >= activation);
+
         // Search backwards for the tree.
-        //
-        // The Ironwood column family is seeded with the genesis (empty) tree by the
-        // `add_ironwood_tree` format upgrade and then written per-height by block commits, so once
-        // the upgrade has run there is always a tree at or below any height up to the tip. The
-        // upgrade runs on a background thread, so there is a brief window right after a v27->v28
-        // upgrade where the column family is still empty. That window only occurs before NU6.3
-        // activation, when the Ironwood tree at every height is in fact the empty tree, so fall
-        // back to the empty tree instead of panicking.
         match self.db.zs_prev_key_value_back_from(&ironwood_trees, height) {
             Some((_first_duplicate_height, tree)) => Some(Arc::new(tree)),
-            None => Some(Default::default()),
+            None if !nu6_3_activated => Some(Default::default()),
+            None => panic!(
+                "Ironwood note commitment tree must exist for all heights at or below the finalized \
+                 tip from NU6.3 activation onward"
+            ),
         }
     }
 
