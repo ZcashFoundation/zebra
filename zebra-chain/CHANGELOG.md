@@ -36,11 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parallel::tree::NoteCommitmentTreeError::Ironwood`
 - `primitives::zcash_history::V3` (the ZIP-221 Ironwood history node).
 - `impl Version for zcash_history::version::V3`
+- `primitives::zcash_history::BlockCommitmentTreeRoots`, grouping a block's Sapling,
+  Orchard, and Ironwood note commitment tree roots.
 
 ### Changed
 
-- The following history-tree functions now take an additional
-  `ironwood_root: &orchard::tree::Root` parameter:
+- The following history-tree functions now take a
+  `primitives::zcash_history::BlockCommitmentTreeRoots` struct grouping the Sapling,
+  Orchard, and Ironwood roots by name, instead of separate positional root parameters:
   - `history_tree::HistoryTree::{from_block, push}`
   - `history_tree::NonEmptyHistoryTree::{from_block, push, try_extend}`
   - `primitives::zcash_history::Tree::{append_leaf, new_from_block}`

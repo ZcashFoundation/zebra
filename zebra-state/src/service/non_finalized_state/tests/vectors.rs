@@ -8,6 +8,7 @@ use zebra_chain::{
     history_tree::NonEmptyHistoryTree,
     orchard,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
     transaction::Transaction,
@@ -879,9 +880,11 @@ fn history_tree_is_updated_for_network_upgrade(
     let tree = NonEmptyHistoryTree::from_block(
         &Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree_for_tip().root(),
-        &chain.orchard_note_commitment_tree_for_tip().root(),
-        &chain.ironwood_note_commitment_tree_for_tip().root(),
+        BlockCommitmentTreeRoots {
+            sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
+            orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
+            ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+        },
     )
     .unwrap();
 
@@ -964,9 +967,11 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let tree = NonEmptyHistoryTree::from_block(
         &Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree_for_tip().root(),
-        &chain.orchard_note_commitment_tree_for_tip().root(),
-        &chain.ironwood_note_commitment_tree_for_tip().root(),
+        BlockCommitmentTreeRoots {
+            sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
+            orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
+            ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+        },
     )
     .unwrap();
 

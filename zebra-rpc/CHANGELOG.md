@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `client::GetBlockchainInfoBalance::ironwood`, exposing the Ironwood value pool
   in `getblockchaininfo`.
+- `client::TransactionObject::ironwood`, exposing a v6 transaction's Ironwood bundle
+  in verbose `getrawtransaction`/`getblock` output.
 - The indexer gRPC service has a new unary `GetBlock` method that returns a block
   from the best chain by hash or height.
 - The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain

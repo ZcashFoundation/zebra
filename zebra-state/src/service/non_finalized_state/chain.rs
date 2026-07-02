@@ -20,6 +20,7 @@ use zebra_chain::{
     ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     primitives::Groth16Proof,
     sapling,
     serialization::ZcashSerialize as _,
@@ -1040,40 +1041,21 @@ impl Chain {
         height: Height,
         tree: Arc<orchard::tree::NoteCommitmentTree>,
     ) {
-        // Having updated all the note commitment trees and nullifier sets in
-        // this block, the roots of the note commitment trees as of the last
-        // transaction are the anchor treestates of this block.
-        //
-        // Use the previously cached root which was calculated in parallel.
-        let anchor = tree.root();
-        trace!(?height, ?anchor, "adding orchard tree");
+        let prev_tree = (!height.is_min())
+            .then(|| self.orchard_tree(height.previous().expect("prev height").into()))
+            .flatten();
 
-        // Add the new tree only if:
-        //
-        // - it differs from the previous one, or
-        // - there's no previous tree.
-        if height.is_min()
-            || self
-                .orchard_tree(height.previous().expect("prev height").into())
-                .is_none_or(|prev_tree| prev_tree != tree)
-        {
-            assert_eq!(
-                self.orchard_trees_by_height.insert(height, tree),
-                None,
-                "incorrect overwrite of orchard tree: trees must be reverted then inserted",
-            );
-        }
-
-        // Store the root.
-        assert_eq!(
-            self.orchard_anchors_by_height.insert(height, anchor),
-            None,
-            "incorrect overwrite of orchard anchor: anchors must be reverted then inserted",
+        // Deref once to `ChainInner` so the disjoint field borrows below can be split.
+        let inner: &mut ChainInner = self;
+        Self::add_note_commitment_tree_and_anchor(
+            "orchard",
+            &mut inner.orchard_trees_by_height,
+            &mut inner.orchard_anchors_by_height,
+            &mut inner.orchard_anchors,
+            height,
+            tree,
+            prev_tree,
         );
-
-        // Multiple inserts are expected here,
-        // because the anchors only change if a block has shielded transactions.
-        self.orchard_anchors.insert(anchor);
     }
 
     /// Removes the Orchard tree and anchor indexes at `height`.
@@ -1089,39 +1071,114 @@ impl Chain {
     ///  - If the anchor being removed is not present.
     ///  - If there is no tree at `height`.
     fn remove_orchard_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
-            (
-                // Remove all trees and anchors at or below the removed block.
-                // This makes sure the temporary trees from finalized tip forks are removed.
-                self.orchard_anchors_by_height
-                    .keys()
-                    .cloned()
-                    .filter(|index_height| *index_height <= height)
-                    .collect(),
-                // Cache the highest (rightmost) tree before its removal.
-                self.orchard_tree(height.into()),
-            )
+        // Cache the highest (rightmost) tree before its removal, to restore the invariant below.
+        let highest_removed_tree = (position == RevertPosition::Root)
+            .then(|| self.orchard_tree(height.into()))
+            .flatten();
+        let non_finalized_tip_height = (!self.is_empty()).then(|| self.non_finalized_tip_height());
+
+        let inner: &mut ChainInner = self;
+        Self::remove_note_commitment_tree_and_anchor(
+            "orchard",
+            &mut inner.orchard_trees_by_height,
+            &mut inner.orchard_anchors_by_height,
+            &mut inner.orchard_anchors,
+            position,
+            height,
+            highest_removed_tree,
+            non_finalized_tip_height,
+        );
+    }
+
+    /// Shared implementation of `add_{orchard,ironwood}_tree_and_anchor`.
+    ///
+    /// Ironwood reuses the Orchard note commitment tree and root types, so the two pools index into
+    /// identically-typed maps; only the target fields and the `pool` log/panic label differ.
+    /// `prev_tree` is the tree at the previous height (`None` at the minimum height).
+    fn add_note_commitment_tree_and_anchor(
+        pool: &'static str,
+        trees_by_height: &mut BTreeMap<Height, Arc<orchard::tree::NoteCommitmentTree>>,
+        anchors_by_height: &mut BTreeMap<Height, orchard::tree::Root>,
+        anchors: &mut MultiSet<orchard::tree::Root>,
+        height: Height,
+        tree: Arc<orchard::tree::NoteCommitmentTree>,
+        prev_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    ) {
+        // Having updated all the note commitment trees and nullifier sets in this block, the roots
+        // of the note commitment trees as of the last transaction are the anchor treestates of this
+        // block. Use the previously cached root which was calculated in parallel.
+        let anchor = tree.root();
+        trace!(?height, ?anchor, pool, "adding note commitment tree");
+
+        // Add the new tree only if it differs from the previous one, or there's no previous tree.
+        if height.is_min() || prev_tree.is_none_or(|prev_tree| prev_tree != tree) {
+            assert_eq!(
+                trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of {pool} tree: trees must be reverted then inserted",
+            );
+        }
+
+        // Store the root.
+        assert_eq!(
+            anchors_by_height.insert(height, anchor),
+            None,
+            "incorrect overwrite of {pool} anchor: anchors must be reverted then inserted",
+        );
+
+        // Multiple inserts are expected here,
+        // because the anchors only change if a block has shielded transactions.
+        anchors.insert(anchor);
+    }
+
+    /// Shared implementation of `remove_{orchard,ironwood}_tree_and_anchor`.
+    ///
+    /// `highest_removed_tree` is the tree at `height` cached before removal (only needed for
+    /// [`RevertPosition::Root`]); `non_finalized_tip_height` is `None` when the chain is empty.
+    #[allow(clippy::too_many_arguments)]
+    fn remove_note_commitment_tree_and_anchor(
+        pool: &'static str,
+        trees_by_height: &mut BTreeMap<Height, Arc<orchard::tree::NoteCommitmentTree>>,
+        anchors_by_height: &mut BTreeMap<Height, orchard::tree::Root>,
+        anchors: &mut MultiSet<orchard::tree::Root>,
+        position: RevertPosition,
+        height: Height,
+        highest_removed_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+        non_finalized_tip_height: Option<Height>,
+    ) {
+        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
+            // Remove all trees and anchors at or below the removed block.
+            // This makes sure the temporary trees from finalized tip forks are removed.
+            anchors_by_height
+                .keys()
+                .cloned()
+                .filter(|index_height| *index_height <= height)
+                .collect()
         } else {
             // Just remove the reverted tip trees and anchors.
-            // We don't need to cache the highest (rightmost) tree.
-            (vec![height], None)
+            vec![height]
         };
 
         for height in &removed_heights {
-            let anchor = self
-                .orchard_anchors_by_height
-                .remove(height)
-                .expect("Orchard anchor must be present if block was added to chain");
+            let anchor = anchors_by_height.remove(height).unwrap_or_else(|| {
+                panic!("{pool} anchor must be present if block was added to chain")
+            });
 
-            self.orchard_trees_by_height.remove(height);
+            trees_by_height.remove(height);
 
-            trace!(?height, ?position, ?anchor, "removing orchard tree");
+            trace!(
+                ?height,
+                ?position,
+                ?anchor,
+                pool,
+                "removing note commitment tree"
+            );
 
             // Multiple removals are expected here,
             // because the anchors only change if a block has shielded transactions.
             assert!(
-                self.orchard_anchors.remove(&anchor),
-                "Orchard anchor must be present if block was added to chain"
+                anchors.remove(&anchor),
+                "{pool} anchor must be present if block was added to chain"
             );
         }
 
@@ -1133,16 +1190,16 @@ impl Chain {
         // The loop above can violate the invariant, and if `position` is [`RevertPosition::Root`],
         // it will always violate the invariant. We restore the invariant by storing the highest
         // (rightmost) removed tree just above `height` if there is no tree at that height.
-        if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height
-                .next()
-                .expect("Zebra should never reach the max height in normal operation.");
+        if let Some(non_finalized_tip_height) = non_finalized_tip_height {
+            if height < non_finalized_tip_height {
+                let next_height = height
+                    .next()
+                    .expect("Zebra should never reach the max height in normal operation.");
 
-            self.orchard_trees_by_height
-                .entry(next_height)
-                .or_insert_with(|| {
+                trees_by_height.entry(next_height).or_insert_with(|| {
                     highest_removed_tree.expect("There should be a cached removed tree.")
                 });
+            }
         }
     }
 
@@ -1223,74 +1280,42 @@ impl Chain {
         height: Height,
         tree: Arc<orchard::tree::NoteCommitmentTree>,
     ) {
-        let anchor = tree.root();
-        trace!(?height, ?anchor, "adding ironwood tree");
+        let prev_tree = (!height.is_min())
+            .then(|| self.ironwood_tree(height.previous().expect("prev height").into()))
+            .flatten();
 
-        if height.is_min()
-            || self
-                .ironwood_tree(height.previous().expect("prev height").into())
-                .is_none_or(|prev_tree| prev_tree != tree)
-        {
-            assert_eq!(
-                self.ironwood_trees_by_height.insert(height, tree),
-                None,
-                "incorrect overwrite of ironwood tree: trees must be reverted then inserted",
-            );
-        }
-
-        assert_eq!(
-            self.ironwood_anchors_by_height.insert(height, anchor),
-            None,
-            "incorrect overwrite of ironwood anchor: anchors must be reverted then inserted",
+        let inner: &mut ChainInner = self;
+        Self::add_note_commitment_tree_and_anchor(
+            "ironwood",
+            &mut inner.ironwood_trees_by_height,
+            &mut inner.ironwood_anchors_by_height,
+            &mut inner.ironwood_anchors,
+            height,
+            tree,
+            prev_tree,
         );
-
-        self.ironwood_anchors.insert(anchor);
     }
 
     /// Removes the Ironwood tree and anchor indexes at `height`.
     ///
     /// See [`Chain::remove_orchard_tree_and_anchor`] for the revert-position semantics and invariants.
     fn remove_ironwood_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        let (removed_heights, highest_removed_tree) = if position == RevertPosition::Root {
-            (
-                self.ironwood_anchors_by_height
-                    .keys()
-                    .cloned()
-                    .filter(|index_height| *index_height <= height)
-                    .collect(),
-                self.ironwood_tree(height.into()),
-            )
-        } else {
-            (vec![height], None)
-        };
+        let highest_removed_tree = (position == RevertPosition::Root)
+            .then(|| self.ironwood_tree(height.into()))
+            .flatten();
+        let non_finalized_tip_height = (!self.is_empty()).then(|| self.non_finalized_tip_height());
 
-        for height in &removed_heights {
-            let anchor = self
-                .ironwood_anchors_by_height
-                .remove(height)
-                .expect("Ironwood anchor must be present if block was added to chain");
-
-            self.ironwood_trees_by_height.remove(height);
-
-            trace!(?height, ?position, ?anchor, "removing ironwood tree");
-
-            assert!(
-                self.ironwood_anchors.remove(&anchor),
-                "Ironwood anchor must be present if block was added to chain"
-            );
-        }
-
-        if !self.is_empty() && height < self.non_finalized_tip_height() {
-            let next_height = height
-                .next()
-                .expect("Zebra should never reach the max height in normal operation.");
-
-            self.ironwood_trees_by_height
-                .entry(next_height)
-                .or_insert_with(|| {
-                    highest_removed_tree.expect("There should be a cached removed tree.")
-                });
-        }
+        let inner: &mut ChainInner = self;
+        Self::remove_note_commitment_tree_and_anchor(
+            "ironwood",
+            &mut inner.ironwood_trees_by_height,
+            &mut inner.ironwood_anchors_by_height,
+            &mut inner.ironwood_anchors,
+            position,
+            height,
+            highest_removed_tree,
+            non_finalized_tip_height,
+        );
     }
 
     /// Returns the History tree of the tip of this [`Chain`],
@@ -1715,9 +1740,11 @@ impl Chain {
             .push(
                 &self.network,
                 contextually_valid.block.clone(),
-                &sapling_root,
-                &orchard_root,
-                &ironwood_root,
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &ironwood_root,
+                },
             )
             .map_err(Arc::new)?;
 

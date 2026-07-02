@@ -396,10 +396,6 @@ pub enum SubsidyError {
 
     #[error("invalid amount")]
     InvalidAmount(#[from] amount::Error),
-
-    #[cfg(zcash_unstable = "zip235")]
-    #[error("invalid zip233 amount")]
-    InvalidZip233Amount,
 }
 
 /// The divisor used for halvings.

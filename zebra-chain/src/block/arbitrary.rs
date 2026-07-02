@@ -8,6 +8,7 @@ use crate::{
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::{self, BytesInDisplayOrder},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{
@@ -537,9 +538,11 @@ impl Block {
                             .push(
                                 &current.network,
                                 Arc::new(block.clone()),
-                                &sapling_tree.root(),
-                                &orchard_tree.root(),
-                                &ironwood_tree.root(),
+                                BlockCommitmentTreeRoots {
+                                    sapling: &sapling_tree.root(),
+                                    orchard: &orchard_tree.root(),
+                                    ironwood: &ironwood_tree.root(),
+                                },
                             )
                             .unwrap();
                     } else {
@@ -547,9 +550,11 @@ impl Block {
                             HistoryTree::from_block(
                                 &current.network,
                                 Arc::new(block.clone()),
-                                &sapling_tree.root(),
-                                &orchard_tree.root(),
-                                &ironwood_tree.root(),
+                                BlockCommitmentTreeRoots {
+                                    sapling: &sapling_tree.root(),
+                                    orchard: &orchard_tree.root(),
+                                    ironwood: &ironwood_tree.root(),
+                                },
                             )
                             .unwrap(),
                         );

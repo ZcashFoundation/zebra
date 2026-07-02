@@ -24,6 +24,7 @@ use zebra_chain::{
     block,
     parallel::tree::NoteCommitmentTrees,
     parameters::{subsidy::block_subsidy, Network},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
 };
 use zebra_db::{
     chain::BLOCK_INFO,
@@ -393,9 +394,11 @@ impl FinalizedState {
                     .push(
                         &self.network(),
                         block.clone(),
-                        &sapling_root,
-                        &orchard_root,
-                        &ironwood_root,
+                        BlockCommitmentTreeRoots {
+                            sapling: &sapling_root,
+                            orchard: &orchard_root,
+                            ironwood: &ironwood_root,
+                        },
                     )
                     .map_err(Arc::new)
                     .map_err(ValidateContextError::from)?;

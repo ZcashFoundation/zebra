@@ -461,14 +461,14 @@ impl Service<BatchControl<Item>> for Verifier {
                 tracing::trace!("got item");
                 match self.batch.queue(item) {
                     Ok(()) => {}
-                    Err(orchard::bundle::BatchError::RestrictionUnsupportedByKey) => unreachable!(
-                        "the error fires only for a bundle with cross_address_enabled = false on a \
-                         key that does not support the restriction; VERIFIER_NU6_3_ONWARD's key supports it, \
-                         and the pre-NU6.3 verifiers only ever see v5-format bundles, which always \
-                         report cross_address_enabled = true"
-                    ),
-                    // `BatchError` is `#[non_exhaustive]`; any future variant lands here. Reject the
-                    // item on its own without poisoning the rest of the batch.
+                    // Reject the item on its own without poisoning the rest of the batch. In
+                    // particular `BatchError::RestrictionUnsupportedByKey` should not be reachable
+                    // (it fires only for a bundle with `cross_address_enabled = false` on a key
+                    // that does not support the restriction; `VERIFIER_NU6_3_ONWARD`'s key supports
+                    // it, and the pre-NU6.3 verifiers only ever see v5-format bundles, which always
+                    // report `cross_address_enabled = true`), but failing closed per-item is
+                    // strictly safer than panicking this shared, long-lived verifier service if a
+                    // future routing change or `#[non_exhaustive]` variant ever reaches here.
                     Err(other) => {
                         return Box::pin(async move {
                             metrics::counter!("proofs.halo2.invalid").increment(1);
