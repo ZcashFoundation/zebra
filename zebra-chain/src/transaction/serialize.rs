@@ -419,15 +419,19 @@ impl ZcashSerialize for orchard::ShieldedData {
     }
 }
 
-// A v6 (NU6.3) Orchard or Ironwood bundle differs from a v5 Orchard bundle only in its flag-byte
-// format on *deserialization* (the NU6.3 format permits `enableCrossAddress`). It encodes
-// identically on the wire (the flag byte is written as-is), so the v6 Orchard and Ironwood
-// (de)serializers below delegate to the v5 Orchard bundle codec, only wrapping/unwrapping their
-// newtypes (`orchard::ShieldedDataV6` and `ironwood::ShieldedData`).
+// A v6 (NU6.3) Orchard or Ironwood bundle encodes identically on the wire to a v5 Orchard bundle
+// (the flag byte is written as-is), so the (de)serializers below delegate to the v5 Orchard bundle
+// codec, only wrapping/unwrapping their newtypes (`orchard::ShieldedDataV6` and
+// `ironwood::ShieldedData`). They differ only in the reserved-bit rule applied to `flagsOrchard` on
+// *deserialization*: the `enableCrossAddress` bit (bit 2) is permitted only for the Ironwood pool,
+// and is reserved (MUST be 0) for the Orchard pool regardless of tx version — matching
+// `orchard::bundle::Flags::from_byte`, which rejects bit 2 for `ValuePool::Orchard`. So the v6
+// Orchard bundle parses with the pre-NU6.3 `orchard::Flags` codec (exactly like v5); only the
+// Ironwood bundle uses the `orchard::FlagsV6` codec.
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
-            deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
+            deserialize_orchard_shielded_data::<R, orchard::Flags>(reader)?
                 .map(orchard::ShieldedDataV6::new),
         )
     }
@@ -441,8 +445,11 @@ impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
 
 impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        // Unlike the v6 Orchard bundle above, the Ironwood bundle permits `enableCrossAddress`
+        // (bit 2), so it parses with the `orchard::FlagsV6` codec.
         Ok(
-            Option::<orchard::ShieldedDataV6>::zcash_deserialize(reader)?
+            deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
+                .map(orchard::ShieldedDataV6::new)
                 .map(ironwood::ShieldedData::new),
         )
     }
@@ -1166,6 +1173,12 @@ impl ZcashDeserialize for Transaction {
                 let ironwood_shielded_data = (&mut limited_reader)
                     .zcash_deserialize_into::<Option<ironwood::ShieldedData>>()?;
 
+                // Unlike the v5 arm, the v6 arm does not round-trip through `to_librustzcash` here:
+                // that would drive librustzcash's proof parser (which rejects the structurally-fake
+                // proofs the test helpers produce), coupling wire deserialization to proof parsing.
+                // The `enableCrossAddress` divergence that would otherwise reach the txid-path
+                // `expect(...)` is already rejected above, inside `orchard::Flags::from_byte`, before
+                // this transaction is constructed.
                 Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,

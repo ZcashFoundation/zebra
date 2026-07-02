@@ -1122,6 +1122,56 @@ fn v6_transaction_with_bundles_round_trips() {
     assert_eq!(tx, tx2);
 }
 
+/// The `enableCrossAddress` flag (bit 2) is permitted only for the Ironwood pool: a v6 Orchard
+/// bundle carrying it MUST be rejected at deserialization (matching `orchard::Flags::from_byte`,
+/// which reserves bit 2 for `ValuePool::Orchard` in every tx version), while the same flag on the
+/// Ironwood bundle round-trips.
+///
+/// The Orchard case is the wire-layer guard: without it, a crafted bundle deserializes and then
+/// aborts the node in the txid-path `expect(...)` when `to_librustzcash` rejects the flag.
+#[test]
+fn v6_orchard_bundle_rejects_cross_address_flag_on_the_wire() {
+    use crate::ironwood;
+    use crate::orchard::{Flags, ShieldedDataV6};
+
+    let _init_guard = zebra_test::init();
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    // A v6 Orchard bundle with `enableCrossAddress` serializes (the flag byte is written as-is) but
+    // MUST NOT deserialize.
+    let orchard = ShieldedDataV6::new(arbitrary::fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
+        zero,
+        1,
+    ));
+    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("v6 transaction serializes");
+    let result: Result<Transaction, _> = bytes.zcash_deserialize_into();
+    assert!(
+        result.is_err(),
+        "a v6 Orchard bundle with enableCrossAddress must be rejected on the wire",
+    );
+
+    // The same flag on the Ironwood bundle is valid and round-trips.
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(
+        arbitrary::fake_v6_orchard_shielded_data(
+            Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
+            zero,
+            1,
+        ),
+    ));
+    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("v6 transaction serializes");
+    let tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("a v6 Ironwood bundle with enableCrossAddress round-trips");
+    assert_eq!(tx, tx2);
+}
+
 #[test]
 fn test_coinbase_script() -> Result<()> {
     let _init_guard = zebra_test::init();

@@ -38,11 +38,11 @@ impl From<orchard::Nullifier> for Nullifier {
 
 /// Ironwood shielded data: a v6 Orchard-protocol bundle committed to the Ironwood pool.
 ///
-/// Wraps [`orchard::ShieldedDataV6`] (which itself carries the NU6.3 flag-byte format that permits
-/// the `enableCrossAddress` flag). The Ironwood bundle shares the exact wire format of the v6
-/// Orchard bundle; this newtype keeps the two type-distinct so they cannot be accidentally
-/// interchanged, and so the Ironwood bundle can commit into a separate note commitment tree and
-/// nullifier set.
+/// Wraps [`orchard::ShieldedDataV6`] (the v6 Orchard bundle shape). The Ironwood bundle shares the
+/// exact wire format of the v6 Orchard bundle, but is the only pool that permits the
+/// `enableCrossAddress` flag (bit 2), which the Orchard pool reserves regardless of tx version. This
+/// newtype keeps the two type-distinct so they cannot be accidentally interchanged, and so the
+/// Ironwood bundle can commit into a separate note commitment tree and nullifier set.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ShieldedData(orchard::ShieldedDataV6);
 

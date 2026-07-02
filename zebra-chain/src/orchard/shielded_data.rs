@@ -296,19 +296,19 @@ bitflags! {
         /// `enableCrossAddress` (NU6.3, bit 2): allow output notes to use a different
         /// protocol-level address than the spending key.
         ///
-        /// Reserved (MUST be 0) before NU6.3. Valid only in the NU6.3 flag-byte format (v6
-        /// Orchard and Ironwood bundles); parsed via the `FlagsV6` newtype.
+        /// Reserved (MUST be 0) for the Orchard pool in every tx version. Valid only for the
+        /// Ironwood pool (v6), parsed via the `FlagsV6` newtype.
         const ENABLE_CROSS_ADDRESS = 0b00000100;
     }
 }
 
-/// The Orchard flags of a v6 (NU6.3) Orchard or Ironwood bundle.
+/// The Orchard flags of an Ironwood (v6) bundle.
 ///
-/// Newtype over [`Flags`] whose [`ZcashDeserialize`] impl uses the NU6.3 flag-byte format: bit 2
-/// (`enableCrossAddress`) is valid and only bits 3..7 are reserved. The bare [`Flags`] codec is the
-/// pre-NU6.3 (v5 Orchard) format, where bits 2..7 are all reserved. Encoding the format in the type
-/// keeps the v5 and v6 flag-parsing paths from being confused (parallels
-/// [`ShieldedDataV6`]).
+/// Newtype over [`Flags`] whose [`ZcashDeserialize`] impl uses the NU6.3 Ironwood flag-byte format:
+/// bit 2 (`enableCrossAddress`) is valid and only bits 3..7 are reserved. The bare [`Flags`] codec
+/// is the format for every Orchard-pool bundle (v5 *and* v6), where bits 2..7 are all reserved —
+/// `enableCrossAddress` is permitted only for the Ironwood pool. Encoding the format in the type
+/// keeps the two flag-parsing paths from being confused (parallels [`ShieldedDataV6`]).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FlagsV6(Flags);
 
@@ -380,14 +380,14 @@ impl ZcashDeserialize for Flags {
     /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
     /// > field MUST be zero.
     ///
-    /// From NU6.3, the v6 Orchard and Ironwood flag bytes use bit 2 as `enableCrossAddress`, so
-    /// only bits 3..7 are reserved (see [`FlagsV6`]).
+    /// From NU6.3, the Ironwood flag byte uses bit 2 as `enableCrossAddress`, so only bits 3..7 are
+    /// reserved (see [`FlagsV6`]); the Orchard pool keeps bit 2 reserved in every tx version.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // The default codec is the pre-NU6.3 format, used by v5 Orchard bundles, where bits 2..7
-        // (including `enableCrossAddress`) are reserved and MUST be zero. v6 Orchard and Ironwood
-        // bundles deserialize via the `FlagsV6` newtype, which permits bit 2.
+        // The default codec is the pre-NU6.3 format, used by v5 *and* v6 Orchard bundles, where
+        // bits 2..7 (including `enableCrossAddress`) are reserved and MUST be zero. Only the Ironwood
+        // bundle deserializes via the `FlagsV6` newtype, which permits bit 2.
         Flags::from_byte(reader.read_u8()?, Flags::PRE_NU6_3_RESERVED)
     }
 }
@@ -395,13 +395,14 @@ impl ZcashDeserialize for Flags {
 impl ZcashDeserialize for FlagsV6 {
     /// # Consensus
     ///
-    /// From NU6.3, the v6 Orchard and Ironwood flag bytes use bit 2 as `enableCrossAddress`, so
-    /// only bits 3..7 are reserved and MUST be zero (cf. the v5 rule on [`Flags`]).
+    /// From NU6.3, the Ironwood flag byte uses bit 2 as `enableCrossAddress`, so only bits 3..7 are
+    /// reserved and MUST be zero (cf. the Orchard-pool rule on [`Flags`], which keeps bit 2
+    /// reserved).
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // The NU6.3 format, used by v6 Orchard and Ironwood bundles: bit 2 (`enableCrossAddress`)
-        // is valid and only bits 3..7 are reserved.
+        // The NU6.3 Ironwood format: bit 2 (`enableCrossAddress`) is valid and only bits 3..7 are
+        // reserved.
         Ok(FlagsV6(Flags::from_byte(
             reader.read_u8()?,
             Flags::NU6_3_RESERVED,

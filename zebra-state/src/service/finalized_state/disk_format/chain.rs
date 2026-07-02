@@ -143,21 +143,19 @@ impl FromDisk for HistoryTreeParts {
         // fall back to the legacy width and zero-pad each entry up to the current width. New data
         // always parses at the current width, so it never reaches the fallback.
         //
-        // The fallback is gated on `UnexpectedEof`, which is the specific error a legacy-width
-        // record produces (we run out of bytes reading a wider-format entry). Any other error
-        // indicates real corruption of a current-format record and must not be silently
-        // reinterpreted as legacy data.
+        // The fallback must run on *any* current-width parse error, not just `UnexpectedEof`.
+        // Entries are fixed-size arrays with no length prefix, so parsing a multi-peak legacy record
+        // at the wider width reads later `BTreeMap` keys from the middle of an entry's bytes; bincode
+        // then fails with a varint/integer-range error (not `UnexpectedEof`) whenever a misread key
+        // byte is out of range. Gating on `UnexpectedEof` alone panicked on those records. A genuine
+        // current-format record only reaches the fallback if it is corrupt, in which case the legacy
+        // parse fails too and the error still surfaces.
         options
             .deserialize::<HistoryTreeParts>(bytes)
-            .or_else(|err| match err.as_ref() {
-                bincode::ErrorKind::Io(io_err)
-                    if io_err.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    options
-                        .deserialize::<LegacyHistoryTreeParts>(bytes)
-                        .map(HistoryTreeParts::from)
-                }
-                _ => Err(err),
+            .or_else(|_| {
+                options
+                    .deserialize::<LegacyHistoryTreeParts>(bytes)
+                    .map(HistoryTreeParts::from)
             })
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
