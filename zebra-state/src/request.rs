@@ -33,10 +33,10 @@ use crate::{
     CommitSemanticallyVerifiedError,
 };
 
-/// The Ironwood-pool nullifier type, used by [`Spend::Ironwood`] (imported here rather than in the
-/// shared import block because it is only referenced by the indexer-only `Spend` enum).
+/// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
+/// in the shared import block because they are only referenced under the `indexer` feature.
 #[cfg(feature = "indexer")]
-use zebra_chain::ironwood;
+use zebra_chain::{ironwood, orchard, sapling, sprout};
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
