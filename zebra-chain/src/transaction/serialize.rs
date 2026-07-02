@@ -419,19 +419,45 @@ impl ZcashSerialize for orchard::ShieldedData {
     }
 }
 
-// A v6 (NU6.3) Orchard or Ironwood bundle encodes identically on the wire to a v5 Orchard bundle
-// (the flag byte is written as-is), so the (de)serializers below delegate to the v5 Orchard bundle
-// codec, only wrapping/unwrapping their newtypes (`orchard::ShieldedDataV6` and
-// `ironwood::ShieldedData`). They differ only in the reserved-bit rule applied to `flagsOrchard` on
-// *deserialization*: the `enableCrossAddress` bit (bit 2) is permitted only for the Ironwood pool,
-// and is reserved (MUST be 0) for the Orchard pool regardless of tx version — matching
-// `orchard::bundle::Flags::from_byte`, which rejects bit 2 for `ValuePool::Orchard`. So the v6
-// Orchard bundle parses with the pre-NU6.3 `orchard::Flags` codec (exactly like v5); only the
-// Ironwood bundle uses the `orchard::FlagsV6` codec.
+/// The `flagsOrchard` codec a v6 Orchard-protocol bundle newtype uses on deserialization.
+///
+/// A v6 Orchard or Ironwood bundle encodes identically on the wire to a v5 Orchard bundle (the flag
+/// byte is written as-is); the pools differ only in the reserved-bit rule applied to `flagsOrchard`.
+/// The `enableCrossAddress` bit (bit 2) is permitted only for the Ironwood pool, and is reserved
+/// (MUST be 0) for the Orchard pool regardless of tx version — matching
+/// `orchard::bundle::Flags::from_byte`, which rejects bit 2 for `ValuePool::Orchard`. Tying the
+/// codec to the bundle type lets the (de)serializers below imply it instead of naming it explicitly.
+trait V6FlagCodec {
+    /// The flag codec: `orchard::Flags` reserves bit 2, `orchard::FlagsV6` permits it.
+    type Codec: ZcashDeserialize + Into<orchard::Flags>;
+}
+
+impl V6FlagCodec for orchard::ShieldedDataV6 {
+    // The v6 Orchard bundle parses with the pre-NU6.3 codec, exactly like v5.
+    type Codec = orchard::Flags;
+}
+
+impl V6FlagCodec for ironwood::ShieldedData {
+    // Only the Ironwood bundle permits `enableCrossAddress`.
+    type Codec = orchard::FlagsV6;
+}
+
+/// Deserializes the shared Orchard-protocol bundle body of a v6 bundle newtype `T`, using the flag
+/// codec [implied by `T`](V6FlagCodec) rather than one named at the call site.
+fn deserialize_v6_orchard_shielded_data<R, T>(
+    reader: R,
+) -> Result<Option<orchard::ShieldedData>, SerializationError>
+where
+    R: io::Read,
+    T: V6FlagCodec,
+{
+    deserialize_orchard_shielded_data::<R, T::Codec>(reader)
+}
+
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
-            deserialize_orchard_shielded_data::<R, orchard::Flags>(reader)?
+            deserialize_v6_orchard_shielded_data::<R, orchard::ShieldedDataV6>(reader)?
                 .map(orchard::ShieldedDataV6::new),
         )
     }
@@ -445,10 +471,8 @@ impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
 
 impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        // Unlike the v6 Orchard bundle above, the Ironwood bundle permits `enableCrossAddress`
-        // (bit 2), so it parses with the `orchard::FlagsV6` codec.
         Ok(
-            deserialize_orchard_shielded_data::<R, orchard::FlagsV6>(reader)?
+            deserialize_v6_orchard_shielded_data::<R, ironwood::ShieldedData>(reader)?
                 .map(orchard::ShieldedDataV6::new)
                 .map(ironwood::ShieldedData::new),
         )
