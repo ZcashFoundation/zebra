@@ -256,17 +256,27 @@ pub struct ChainInner {
 
 impl Chain {
     /// Create a new Chain with the given finalized tip trees and network.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// The subtree fields of `note_commitment_trees` are unused: a forked chain starts tracking
+    /// subtrees from empty and fills them from its own block commits.
     pub(crate) fn new(
         network: &Network,
         finalized_tip_height: Height,
-        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        ironwood_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
+        note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
+        // Passing the trees in a named struct (rather than four adjacent positional arguments, two
+        // of them the same `Arc<orchard::tree::NoteCommitmentTree>` type) makes an orchard/ironwood
+        // swap a compile error instead of silent tree corruption.
+        let NoteCommitmentTrees {
+            sprout: sprout_note_commitment_tree,
+            sapling: sapling_note_commitment_tree,
+            orchard: orchard_note_commitment_tree,
+            ironwood: ironwood_note_commitment_tree,
+            ..
+        } = note_commitment_trees;
+
         let inner = ChainInner {
             blocks: Default::default(),
             height_by_hash: Default::default(),
@@ -1370,13 +1380,15 @@ impl Chain {
         let ironwood_subtree = self.ironwood_subtree(hash_or_height);
 
         Some(Treestate::new(
-            sprout_tree,
-            sapling_tree,
-            orchard_tree,
-            ironwood_tree,
-            sapling_subtree,
-            orchard_subtree,
-            ironwood_subtree,
+            NoteCommitmentTrees {
+                sprout: sprout_tree,
+                sapling: sapling_tree,
+                sapling_subtree,
+                orchard: orchard_tree,
+                orchard_subtree,
+                ironwood: ironwood_tree,
+                ironwood_subtree,
+            },
             history_tree,
         ))
     }
@@ -1783,6 +1795,7 @@ impl Chain {
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
                 orchard_shielded_data,
+                ironwood_shielded_data,
             ) = match transaction.deref() {
                 V4 {
                     inputs,
@@ -1790,7 +1803,15 @@ impl Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    None,
+                    None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -1804,12 +1825,14 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref(),
+                    None,
                 ),
                 V6 {
                     inputs,
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    ironwood_shielded_data,
                     ..
                 } => (
                     inputs,
@@ -1818,6 +1841,7 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref().map(|data| data.data()),
+                    ironwood_shielded_data.as_ref(),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
@@ -1849,17 +1873,9 @@ impl Chain {
 
                 // The Ironwood pool reuses orchard::ShieldedData, so its nullifiers are applied
                 // through a distinct UpdateWith impl keyed on the ironwood::ShieldedData newtype
-                // (which doesn't collide with the Orchard impl).
-                if let V6 {
-                    ironwood_shielded_data,
-                    ..
-                } = transaction.deref()
-                {
-                    self.update_chain_tip_with(&(
-                        ironwood_shielded_data.as_ref(),
-                        &transaction_hash,
-                    ))?;
-                }
+                // (which doesn't collide with the Orchard impl). It flows through the version match
+                // above so a new tx version cannot silently skip it.
+                self.update_chain_tip_with(&(ironwood_shielded_data, &transaction_hash))?;
             }
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -1991,6 +2007,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
                 orchard_shielded_data,
+                ironwood_shielded_data,
             ) = match transaction.deref() {
                 V4 {
                     inputs,
@@ -1998,7 +2015,15 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    None,
+                    None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -2012,12 +2037,14 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref(),
+                    None,
                 ),
                 V6 {
                     inputs,
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    ironwood_shielded_data,
                     ..
                 } => (
                     inputs,
@@ -2026,6 +2053,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data.as_ref().map(|data| data.data()),
+                    ironwood_shielded_data.as_ref(),
                 ),
 
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
@@ -2062,17 +2090,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
 
             // Revert the Ironwood nullifiers through the matching UpdateWith impl (see
-            // `update_chain_tip_with_block_except_trees`).
-            if let V6 {
-                ironwood_shielded_data,
-                ..
-            } = transaction.deref()
-            {
-                self.revert_chain_with(
-                    &(ironwood_shielded_data.as_ref(), transaction_hash),
-                    position,
-                );
-            }
+            // `update_chain_tip_with_block_except_trees`). It flows through the version match above
+            // so the revert stays in lockstep with the update for every tx version.
+            self.revert_chain_with(&(ironwood_shielded_data, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?

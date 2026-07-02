@@ -465,10 +465,7 @@ impl NonFinalizedState {
                 finalized_state
                     .finalized_tip_height()
                     .ok_or(ReconsiderError::ParentChainNotFound(block_hash))?,
-                finalized_state.sprout_tree_for_tip(),
-                finalized_state.sapling_tree_for_tip(),
-                finalized_state.orchard_tree_for_tip(),
-                finalized_state.ironwood_tree_for_tip(),
+                finalized_state.note_commitment_trees_for_tip(),
                 finalized_state.history_tree(),
                 finalized_state.finalized_value_pool(),
             );
@@ -530,10 +527,7 @@ impl NonFinalizedState {
         let chain = Chain::new(
             &self.network,
             finalized_tip_height,
-            finalized_state.sprout_tree_for_tip(),
-            finalized_state.sapling_tree_for_tip(),
-            finalized_state.orchard_tree_for_tip(),
-            finalized_state.ironwood_tree_for_tip(),
+            finalized_state.note_commitment_trees_for_tip(),
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );

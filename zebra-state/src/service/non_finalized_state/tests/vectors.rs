@@ -7,6 +7,7 @@ use zebra_chain::{
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
@@ -34,10 +35,7 @@ fn construct_empty() {
     let _chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::zero(),
     );
@@ -52,10 +50,7 @@ fn construct_single() -> Result<()> {
     let mut chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -87,10 +82,7 @@ fn construct_many() -> Result<()> {
     let mut chain = Chain::new(
         &Network::Mainnet,
         (initial_height - 1).expect("Initial height should be at least 1."),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -115,10 +107,7 @@ fn ord_matches_work() -> Result<()> {
     let mut lesser_chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -127,10 +116,7 @@ fn ord_matches_work() -> Result<()> {
     let mut bigger_chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::zero(),
     );
@@ -1074,10 +1060,7 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     let mut chain = Chain::new(
         &network,
         (block1.coinbase_height().unwrap() - 1).unwrap(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
