@@ -570,6 +570,11 @@ where
         height: block::Height,
         network: &Network,
     ) -> Result<(), TransactionError> {
+        // The network upgrade active at this height is used by several of the checks below;
+        // `NetworkUpgrade::current` rebuilds the activation-height map on each call, so compute it
+        // once and share it rather than recomputing it per check.
+        let network_upgrade = NetworkUpgrade::current(network, height);
+
         check::has_inputs_and_outputs(tx)?;
         check::has_enough_orchard_flags(tx)?;
         // NU6.3 / Ironwood flag rules (no-ops for pre-v6 transactions).
@@ -577,10 +582,10 @@ where
         check::orchard_cross_address_disabled(tx)?;
         // [NU6.3 onward] valueBalanceOrchard must be non-negative (Orchard pool frozen against new
         // inflows; see `orchard_value_balance_non_negative`).
-        check::orchard_value_balance_non_negative(tx, height, network)?;
+        check::orchard_value_balance_non_negative(tx, network_upgrade)?;
         // [NU6.3 onward] Coinbase transactions must have an empty Orchard component (new shielded
         // coinbase value is routed to the Ironwood pool instead).
-        check::coinbase_orchard_component_empty(tx, height, network)?;
+        check::coinbase_orchard_component_empty(tx, network_upgrade)?;
         check::consensus_branch_id(tx, height, network)?;
 
         // Soft fork: temporarily require transactions to not contain Orchard actions.

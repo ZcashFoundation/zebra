@@ -207,21 +207,36 @@ fn orchard_value_balance_frozen_at_nu6_3() {
 
     // Rejected from NU6.3 onward,
     assert_eq!(
-        check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network),
+        check::orchard_value_balance_non_negative(
+            &tx,
+            NetworkUpgrade::current(&network, nu6_3_height)
+        ),
         Err(TransactionError::NegativeOrchardValueBalance),
     );
     // but allowed before NU6.3, where the Orchard pool is not yet frozen.
-    assert!(check::orchard_value_balance_non_negative(&tx, pre_nu6_3_height, &network).is_ok());
+    assert!(check::orchard_value_balance_non_negative(
+        &tx,
+        NetworkUpgrade::current(&network, pre_nu6_3_height)
+    )
+    .is_ok());
 
     // A zero balance (Orchard-to-Orchard note management) is allowed at NU6.3.
     tx.orchard_shielded_data_mut().unwrap().value_balance =
         Amount::try_from(0).expect("0 is a valid amount");
-    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+    assert!(check::orchard_value_balance_non_negative(
+        &tx,
+        NetworkUpgrade::current(&network, nu6_3_height)
+    )
+    .is_ok());
 
     // A positive balance (Orchard-to-transparent unshielding) is allowed at NU6.3.
     tx.orchard_shielded_data_mut().unwrap().value_balance =
         Amount::try_from(1).expect("1 is a valid amount");
-    assert!(check::orchard_value_balance_non_negative(&tx, nu6_3_height, &network).is_ok());
+    assert!(check::orchard_value_balance_non_negative(
+        &tx,
+        NetworkUpgrade::current(&network, nu6_3_height)
+    )
+    .is_ok());
 
     // A transaction with no Orchard bundle is unaffected at NU6.3.
     let no_orchard_tx = Transaction::V5 {
@@ -233,9 +248,11 @@ fn orchard_value_balance_frozen_at_nu6_3() {
         orchard_shielded_data: None,
         network_upgrade: NetworkUpgrade::Nu5,
     };
-    assert!(
-        check::orchard_value_balance_non_negative(&no_orchard_tx, nu6_3_height, &network).is_ok()
-    );
+    assert!(check::orchard_value_balance_non_negative(
+        &no_orchard_tx,
+        NetworkUpgrade::current(&network, nu6_3_height)
+    )
+    .is_ok());
 }
 
 /// Tests the `[NU6.3 onward] if there are Ironwood actions, at least one of enableSpendsIronwood
@@ -335,7 +352,11 @@ fn coinbase_orchard_component_empty_at_nu6_3() {
         .expect("a V5 coinbase transaction");
 
     // A coinbase with no Orchard component is always accepted.
-    assert!(check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network).is_ok());
+    assert!(check::coinbase_orchard_component_empty(
+        &tx,
+        NetworkUpgrade::current(&network, nu6_3_height)
+    )
+    .is_ok());
 
     // Give the coinbase a (non-empty) Orchard component.
     insert_fake_orchard_shielded_data(&mut tx);
@@ -343,11 +364,18 @@ fn coinbase_orchard_component_empty_at_nu6_3() {
 
     // Rejected from NU6.3 onward,
     assert_eq!(
-        check::coinbase_orchard_component_empty(&tx, nu6_3_height, &network),
+        check::coinbase_orchard_component_empty(
+            &tx,
+            NetworkUpgrade::current(&network, nu6_3_height)
+        ),
         Err(TransactionError::CoinbaseHasOrchardActions),
     );
     // but allowed before NU6.3, where coinbase Orchard outputs are still permitted.
-    assert!(check::coinbase_orchard_component_empty(&tx, pre_nu6_3_height, &network).is_ok());
+    assert!(check::coinbase_orchard_component_empty(
+        &tx,
+        NetworkUpgrade::current(&network, pre_nu6_3_height)
+    )
+    .is_ok());
 
     // The rule only constrains coinbase transactions: a non-coinbase tx with an Orchard component
     // is unaffected at NU6.3.
@@ -355,7 +383,11 @@ fn coinbase_orchard_component_empty_at_nu6_3() {
         .find(|transaction| !transaction.is_coinbase())
         .expect("a non-coinbase V5 transaction");
     insert_fake_orchard_shielded_data(&mut non_coinbase);
-    assert!(check::coinbase_orchard_component_empty(&non_coinbase, nu6_3_height, &network).is_ok());
+    assert!(check::coinbase_orchard_component_empty(
+        &non_coinbase,
+        NetworkUpgrade::current(&network, nu6_3_height)
+    )
+    .is_ok());
 }
 
 /// Tests that a transaction revealing the same Ironwood nullifier twice is rejected as a

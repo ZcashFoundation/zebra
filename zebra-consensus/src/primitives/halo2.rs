@@ -5,6 +5,7 @@ use std::{
     future::Future,
     mem,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -114,7 +115,10 @@ lazy_static::lazy_static! {
 /// against exactly one key and eras are never mixed within a batch.
 #[derive(Clone, Debug)]
 pub struct Item {
-    bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+    // `Arc`-wrapped so cloning an `Item` — which `tower-fallback` does eagerly for every request —
+    // shares the bundle instead of deep-copying its actions and multi-KB proof. `add_bundle` only
+    // needs `&Bundle`.
+    bundle: Arc<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>>,
     sighash: SigHash,
 }
 
@@ -130,7 +134,10 @@ impl Item {
         bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
         sighash: SigHash,
     ) -> Self {
-        Self { bundle, sighash }
+        Self {
+            bundle: Arc::new(bundle),
+            sighash,
+        }
     }
 
     /// Perform non-batched verification of this [`Item`] against `vk`.
@@ -155,7 +162,7 @@ trait QueueBatchVerify {
 
 impl QueueBatchVerify for BatchValidator<'_> {
     fn queue(&mut self, Item { bundle, sighash }: Item) -> Result<(), orchard::bundle::BatchError> {
-        self.add_bundle(&bundle, sighash.0)
+        self.add_bundle(bundle.as_ref(), sighash.0)
     }
 }
 

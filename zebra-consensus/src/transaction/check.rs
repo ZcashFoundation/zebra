@@ -172,8 +172,9 @@ pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionErro
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///
-/// A v5 Orchard bundle can never set this flag (it is rejected at deserialization), so this only
-/// constrains v6 Orchard bundles.
+/// An Orchard bundle can never carry this flag off the wire: bit 2 is rejected at deserialization
+/// for the Orchard pool in every tx version (only the Ironwood pool permits it). So this is a
+/// defense-in-depth check that also covers an in-memory-constructed bundle.
 pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), TransactionError> {
     if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
         if orchard_shielded_data
@@ -205,10 +206,9 @@ pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), Transactio
 /// (No-op for transactions without an Orchard bundle, and before NU6.3.)
 pub fn orchard_value_balance_non_negative(
     tx: &Transaction,
-    height: Height,
-    network: &Network,
+    network_upgrade: NetworkUpgrade,
 ) -> Result<(), TransactionError> {
-    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3 {
+    if network_upgrade >= NetworkUpgrade::Nu6_3 {
         if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
             if orchard_shielded_data.value_balance() < Amount::<NegativeAllowed>::zero() {
                 return Err(TransactionError::NegativeOrchardValueBalance);
@@ -236,10 +236,9 @@ pub fn orchard_value_balance_non_negative(
 /// NU6.3.)
 pub fn coinbase_orchard_component_empty(
     tx: &Transaction,
-    height: Height,
-    network: &Network,
+    network_upgrade: NetworkUpgrade,
 ) -> Result<(), TransactionError> {
-    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3
+    if network_upgrade >= NetworkUpgrade::Nu6_3
         && tx.is_coinbase()
         && tx.orchard_shielded_data().is_some()
     {
