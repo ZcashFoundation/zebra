@@ -47,9 +47,11 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     let (mut tree, _) = Tree::<V1>::new_from_block(
         network,
         block0,
-        &sapling_root0,
-        &Default::default(),
-        &Default::default(),
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root0,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
     )?;
 
     // Compute root hash of the MMR tree, which will be included in the next block
@@ -77,9 +79,11 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     let append = tree
         .append_leaf(
             block1,
-            &sapling_root1,
-            &Default::default(),
-            &Default::default(),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root1,
+                orchard: &Default::default(),
+                ironwood: &Default::default(),
+            },
         )
         .unwrap();
 

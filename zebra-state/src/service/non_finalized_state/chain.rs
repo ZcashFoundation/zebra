@@ -20,6 +20,7 @@ use zebra_chain::{
     ironwood, orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     primitives::Groth16Proof,
     sapling,
     serialization::ZcashSerialize as _,
@@ -1739,9 +1740,11 @@ impl Chain {
             .push(
                 &self.network,
                 contextually_valid.block.clone(),
-                &sapling_root,
-                &orchard_root,
-                &ironwood_root,
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &ironwood_root,
+                },
             )
             .map_err(Arc::new)?;
 
