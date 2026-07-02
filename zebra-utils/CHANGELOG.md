@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Migrated to `zcash_primitives 0.29.0-pre.0` and `zcash_protocol 0.10.0-pre.0`.
+- Replaced the unmaintained `structopt` dependency with `clap` for command-line parsing
+  ([#10766](https://github.com/ZcashFoundation/zebra/pull/10766))
+
 ## [8.0.1] - 2026-06-18
 
 ### Changed
