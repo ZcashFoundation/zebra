@@ -1162,9 +1162,9 @@ impl ZcashDeserialize for Transaction {
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. The
-                // `ShieldedDataV6` codec uses the NU6.3 flag-byte format (`enableCrossAddress`
-                // permitted).
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. The v6 Orchard
+                // bundle reserves the `enableCrossAddress` bit (like v5); only the Ironwood bundle
+                // below permits it.
                 let orchard_shielded_data = (&mut limited_reader)
                     .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?;
 
