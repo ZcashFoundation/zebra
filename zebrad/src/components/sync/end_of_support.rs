@@ -13,7 +13,7 @@ use zebra_chain::{
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_382_189;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_399_000;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
@@ -23,10 +23,10 @@ pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_382_189;
 /// - Zebra will exit with a panic if the current tip height is bigger than the
 ///   `ESTIMATED_RELEASE_HEIGHT` plus this number of days.
 /// - Reduced to 37 days for the NU7 network upgrade expected at end of July 2026.
-pub const EOS_PANIC_AFTER: u32 = 37;
+pub const EOS_PANIC_AFTER: u32 = 10;
 
 /// The number of days before the end of support where Zebra will display warnings.
-pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
+pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 2;
 
 /// A string which is part of the panic that will be displayed if Zebra halts.
 pub const EOS_PANIC_MESSAGE_HEADER: &str = "Zebra refuses to run";

@@ -5,7 +5,7 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 
 ### Added
 
@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   activating on Testnet at height 4,134,000. The consensus parameters (v6 version
   group ID, consensus branch ID, and Testnet activation height) match
   `zcash_protocol`. No Mainnet activation height is set yet.
+- The `z_gettreestate`, `z_getsubtreesbyindex`, and verbose `getblock` RPCs expose the
+  Ironwood note commitment tree and its subtree roots from NU6.3 activation
+  ([#10888](https://github.com/ZcashFoundation/zebra/pull/10888)).
 - Zebra now tags the coinbase input of every block it mines with a `🦓`. The
   `mining.extra_coinbase_data` option is now limited to 86 bytes (was 94); Zebra
   refuses to start if it is exceeded.
@@ -53,6 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   configured path, or when an ephemeral database is also configured (a read-only
   secondary must not delete the primary's files). The read-write open path is
   unchanged.
+- Upgraded the librustzcash crate cohort to the NU6.3 pre-release wave (`orchard`
+  0.15.0-pre.1, `zcash_address` 0.13.0-pre.0, `zcash_history` 0.5.0-pre.0, `zcash_keys`
+  0.15.0-pre.0, `zcash_primitives` 0.29.0-pre.0, `zcash_proofs` 0.29.0-pre.0,
+  `zcash_protocol` 0.10.0-pre.0, `zcash_transparent` 0.9.0-pre.0) for v6 transaction
+  and Ironwood support ([#10762](https://github.com/ZcashFoundation/zebra/pull/10762)).
+- Bumped `anyhow` to 1.0.103, clearing RUSTSEC-2026-0190
+  ([#10849](https://github.com/ZcashFoundation/zebra/pull/10849)).
 
 ### Fixed
 
@@ -65,6 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
   same-height sibling-tip invalidation, repeated reconsideration) without panicking
   ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+- A timeout waiting for a transparent input UTXO during transaction verification is
+  now treated as a missing input instead of an internal error, preventing a sync
+  stall near the chain tip ([#10810](https://github.com/ZcashFoundation/zebra/pull/10810))
+- The co-located read-state syncer (used by indexers like Zaino) no longer drops and
+  re-creates its non-finalized block subscription every second while its view of the
+  finalized state lags the node's
+  ([#10818](https://github.com/ZcashFoundation/zebra/pull/10818))
 
 ### Security
 
@@ -89,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
   This is the direct-push counterpart of the advertisement-path fix in
   GHSA-4fc2-h7jh-287c. Thanks to @SuplabsYi for reporting the issue.
+- Fixed a panic in the `getblock` RPC at verbosity 2 for blocks not in the best
+  chain: their transactions' confirmations are negative and were cast to an
+  unsigned type
+  ([GHSA-x6v8-c2xp-928m](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x6v8-c2xp-928m)).
 
 ## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
 

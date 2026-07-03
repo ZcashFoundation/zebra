@@ -5,20 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [11.0.0] - 2026-07-02
 
 ### Added
 
 - `parameters::NetworkUpgrade::Nu6_3`
+- `parameters::constants::activation_heights::testnet::NU6_3`
 - `parameters::testnet::ConfiguredActivationHeights::nu6_3`
 - `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:
   optional override for whether Regtest allows coinbase outputs to be spent into
   transparent outputs. Defaults to allowing them, and does not affect
   `Network::is_regtest()`.
 - `ironwood` module
+- `impl {ZcashSerialize, ZcashDeserialize} for Option<ironwood::ShieldedData>`
+- `impl From<ironwood::Nullifier> for [u8; 32]`
 - `orchard::shielded_data::Flags::ENABLE_CROSS_ADDRESS`
+- `orchard::shielded_data::FlagsV6` (re-exported as `orchard::FlagsV6`).
+- `orchard::shielded_data::ShieldedDataV6::{new, data, data_mut, into_inner}` (re-exported as
+  `orchard::ShieldedDataV6`).
+- `impl ZcashDeserialize for orchard::shielded_data::FlagsV6`
+- `impl {ZcashSerialize, ZcashDeserialize} for Option<orchard::shielded_data::ShieldedDataV6>`
+- `impl From<orchard::shielded_data::FlagsV6> for orchard::shielded_data::Flags`
 - `block::Block::{ironwood_note_commitments, ironwood_nullifiers, ironwood_transactions_count}`
 - `transaction::Transaction`:
+  - `V6 { network_upgrade, lock_time, expiry_height, inputs, outputs, sapling_shielded_data,
+    orchard_shielded_data, ironwood_shielded_data }`
   - `ironwood_actions`
   - `ironwood_flags`
   - `ironwood_shielded_data`
@@ -27,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ironwood_value_balance`
   - `has_ironwood_shielded_data`
   - `has_enough_ironwood_flags`
+- `transaction::SigHasher::ironwood_bundle`
+- `transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction}`
 - `value_balance::ValueBalance::{from_ironwood_amount, ironwood_amount, set_ironwood_value_balance}`
 - `value_balance::ValueBalanceError::Ironwood`
 - `parallel::tree::NoteCommitmentTrees`:
@@ -36,11 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parallel::tree::NoteCommitmentTreeError::Ironwood`
 - `primitives::zcash_history::V3` (the ZIP-221 Ironwood history node).
 - `impl Version for zcash_history::version::V3`
+- `primitives::zcash_history::Entry::from_raw_bytes_padded`
 - `primitives::zcash_history::BlockCommitmentTreeRoots`, grouping a block's Sapling,
   Orchard, and Ironwood note commitment tree roots.
 
 ### Changed
 
+- Migrated to `zcash_primitives 0.29.0-pre.0` (and the rest of the librustzcash NU6.3
+  pre-release wave: `orchard 0.15.0-pre.1`, `zcash_address 0.13.0-pre.0`,
+  `zcash_history 0.5.0-pre.0`, `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`).
+- Migrated to `strum 0.27`.
 - The following history-tree functions now take a
   `primitives::zcash_history::BlockCommitmentTreeRoots` struct grouping the Sapling,
   Orchard, and Ironwood roots by name, instead of separate positional root parameters:
