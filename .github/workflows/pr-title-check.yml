@@ -30,6 +30,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # Keep in sync with .github/workflows/pr-gate.yml types
           types: |
             feat
             fix
