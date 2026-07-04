@@ -1,4 +1,4 @@
-# Required PR gate verifying that a PR's conventional-commit declaration (title and `!` marker) is consistent with its code (public-API delta) and its narrative (changelog entries); title grammar and comment UX live in pr-title-check.yml, and changelog drafting lives in changelog-command.yml.
+# Required PR gate verifying that a PR's conventional-commit declaration is consistent with its code and changelog entries; changelog drafting lives in changelog-command.yml.
 name: PR Gate
 
 on:
@@ -132,7 +132,6 @@ jobs:
           git fetch --no-tags origin "$BASE_REF"
           merge_base="$(git merge-base FETCH_HEAD HEAD)"
 
-          # Keep in sync with .github/workflows/pr-title-check.yml types
           allowed_type=false
           case "$DECLARED_TYPE" in
             feat|fix|perf|refactor|build|chore|docs|test|ci|style|revert|release)
@@ -150,17 +149,17 @@ jobs:
           failed=false
 
           if [[ "$CONVENTIONAL" != "true" || "$allowed_type" != "true" ]]; then
-            echo "Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
+            echo "::error title=Invalid PR title::Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
             failed=true
           fi
 
           if [[ "$DECLARED_TYPE" =~ ^(feat|fix|perf)$ && "$RUST_CHANGES" == "true" && "$has_changelog" != "true" && "$CHANGELOG_WAIVED" != "true" ]]; then
-            echo "Add a CHANGELOG.md entry, or label the PR C-trivial or C-exclude-from-changelog."
+            echo "::error title=Missing changelog entry::Add a CHANGELOG.md entry, or label the PR C-trivial or C-exclude-from-changelog."
             failed=true
           fi
 
           if [[ "$BREAKING" == "true" ]] && ! git diff --unified=0 "$merge_base"..HEAD -- '**CHANGELOG.md' | grep -E '^\+[[:space:]]*### Breaking Changes[[:space:]]*$' >/dev/null; then
-            echo "Add a ### Breaking Changes heading to a changed CHANGELOG.md file."
+            echo "::error title=Missing breaking changes heading::Add a ### Breaking Changes heading to a changed CHANGELOG.md file."
             failed=true
           fi
 
