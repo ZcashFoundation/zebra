@@ -125,7 +125,6 @@ jobs:
           CONVENTIONAL: ${{ needs.changes.outputs.conventional }}
           DECLARED_TYPE: ${{ needs.changes.outputs.type }}
           CHANGELOG_WAIVED: ${{ contains(github.event.pull_request.labels.*.name, 'C-trivial') || contains(github.event.pull_request.labels.*.name, 'C-exclude-from-changelog') }}
-          RUST_CHANGES: ${{ needs.changes.outputs.semver }}
         run: |
           set -euo pipefail
 
@@ -140,9 +139,13 @@ jobs:
           esac
 
           has_changelog=false
+          code_changed=false
           while IFS= read -r -d '' path; do
             if [[ "${path##*/}" == "CHANGELOG.md" ]]; then
               has_changelog=true
+            fi
+            if [[ "$path" == *.rs || "${path##*/}" == "Cargo.toml" ]]; then
+              code_changed=true
             fi
           done < <(git diff --name-only -z "$merge_base"..HEAD)
 
@@ -153,7 +156,7 @@ jobs:
             failed=true
           fi
 
-          if [[ "$DECLARED_TYPE" =~ ^(feat|fix|perf)$ && "$RUST_CHANGES" == "true" && "$has_changelog" != "true" && "$CHANGELOG_WAIVED" != "true" ]]; then
+          if [[ "$DECLARED_TYPE" =~ ^(feat|fix|perf)$ && "$code_changed" == "true" && "$has_changelog" != "true" && "$CHANGELOG_WAIVED" != "true" ]]; then
             echo "::error title=Missing changelog entry::Add a CHANGELOG.md entry, or label the PR C-trivial or C-exclude-from-changelog."
             failed=true
           fi
