@@ -8,6 +8,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Keeps this aggregator reporting if GitHub's native merge queue is ever enabled,
+  # matching the sibling required-check workflows; jobs skip and the result skip-passes.
+  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
