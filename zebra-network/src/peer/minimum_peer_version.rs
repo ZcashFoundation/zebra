@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::protocol::external::types::Version;
 
@@ -80,14 +80,9 @@ where
         }
     }
 
-    /// Return the current chain tip height.
-    ///
-    /// If it is not available return height zero.
-    pub fn chain_tip_height(&self) -> Height {
-        match self.chain_tip.best_tip_height() {
-            Some(height) => height,
-            None => Height(0),
-        }
+    /// Returns a reference to the underlying chain tip.
+    pub fn chain_tip(&self) -> &C {
+        &self.chain_tip
     }
 }
 
