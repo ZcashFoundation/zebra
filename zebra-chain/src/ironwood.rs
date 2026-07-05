@@ -57,4 +57,10 @@ impl ShieldedData {
     pub fn data(&self) -> &orchard::ShieldedData {
         self.0.data()
     }
+
+    /// Returns the inner Orchard [`ShieldedData`](orchard::ShieldedData) backing this Ironwood
+    /// bundle, mutably.
+    pub fn data_mut(&mut self) -> &mut orchard::ShieldedData {
+        self.0.data_mut()
+    }
 }
