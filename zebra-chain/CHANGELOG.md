@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AT_OR_NEAR_TIP_THRESHOLD` constant and `ChainTip::is_at_or_near_network_tip()`
   method for determining whether the node is within 5 blocks of the estimated network tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+- `ironwood::ShieldedData::data_mut`
+- With the `proptest-impl` feature:
+  - `transaction::Transaction::v6_strategy`
+  - `impl Arbitrary for orchard::ShieldedDataV6` and `ironwood::ShieldedData`
+  - `parameters::NetworkUpgrade::nu6_3_branch_id_strategy`
+  - `transaction::Transaction::ironwood_value_balance_mut`
+
+### Fixed
+
+- With the `proptest-impl` feature, the arbitrary `Transaction` strategy now generates v6
+  transactions (with v6 Orchard and Ironwood bundles) for NU6.3 and later network upgrades,
+  and accepts a transaction version override of 6. Previously it only generated v4/v5
+  transactions for those upgrades, so property tests built on it could never observe
+  v6/Ironwood data.
 
 ## [11.0.0] - 2026-07-02
 
