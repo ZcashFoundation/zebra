@@ -814,3 +814,22 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
 
     Ok(())
 }
+
+/// Duplicate block errors must stay classified as duplicate requests after the
+/// state wraps them, so they don't restart the syncer during checkpoint sync.
+#[test]
+fn state_commit_duplicate_errors_are_duplicate_requests() {
+    let duplicate = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::Finalized,
+    };
+
+    // Box the error exactly as the state's `CommitCheckpointVerifiedBlock`
+    // handler does, so this test breaks if the state's error wrapping changes.
+    let source: BoxError = Box::new(zs::CommitCheckpointVerifiedError::from(duplicate));
+
+    let err = VerifyCheckpointError::CommitCheckpointVerified(source);
+
+    assert!(err.is_duplicate_request());
+    assert_eq!(err.misbehavior_score(), 0);
+}

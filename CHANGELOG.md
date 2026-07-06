@@ -5,6 +5,18 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- Duplicate blocks that reach the state commit stage — for example, when the
+  syncer and block gossip download the same block concurrently — are correctly
+  classified as benign duplicates again: they no longer restart the syncer, and
+  `submitblock` reports them as `duplicate` instead of `rejected`. This regressed
+  in 4.1.0 ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979)), which
+  wrapped state commit errors in a new type that the block verifier's duplicate
+  check did not recognize.
+
 ## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 
 ### Added
