@@ -23,9 +23,9 @@ impl SyncStatus {
     /// The threshold that determines if the synchronization is at the chain
     /// tip.
     ///
-    /// This is based on the fact that sync lengths are around 2-20 blocks long
-    /// once Zebra reaches the tip.
-    const MIN_DIST_FROM_TIP: usize = 20;
+    /// This uses a strict less-than check, so 101 means Zebra is close to the
+    /// tip when the average recent sync length is at most 100 blocks.
+    const MIN_DIST_FROM_TIP: usize = 101;
 
     /// Create an instance of [`SyncStatus`] for a specific network.
     ///

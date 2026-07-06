@@ -161,6 +161,18 @@ fn zero_sync_lengths() {
     assert!(status.is_close_to_tip());
 }
 
+/// Test if sync lengths exactly at the close-to-tip threshold are near tip.
+#[test]
+fn threshold_sync_lengths() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(100);
+    }
+
+    assert!(status.is_close_to_tip());
+}
+
 /// Test if sync lengths array with high values is not near tip.
 #[test]
 fn high_sync_lengths() {

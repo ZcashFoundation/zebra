@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- Keep an already-active mempool and `getblocktemplate` mining RPCs running
+  when the sync status temporarily reports Zebra is far from the tip.
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))

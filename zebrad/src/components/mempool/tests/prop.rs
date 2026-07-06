@@ -190,9 +190,9 @@ proptest! {
         })?;
     }
 
-    /// Test if the mempool storage is cleared if the syncer falls behind and starts to catch up.
+    /// Test if the mempool storage is kept if legacy sync status falls behind.
     #[test]
-    fn storage_is_cleared_if_syncer_falls_behind(
+    fn storage_is_kept_if_legacy_sync_status_falls_behind(
         network in any::<Network>(),
         transaction in standard_verified_unmined_tx_strategy(),
     ) {
@@ -205,7 +205,7 @@ proptest! {
                 mut state_service,
                 mut tx_verifier,
                 mut recent_syncs,
-                mut chain_tip_sender,
+                _chain_tip_sender,
             ) = setup(&network);
 
             time::pause();
@@ -223,19 +223,15 @@ proptest! {
 
             prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
-            // Simulate the synchronizer catching up to the network chain tip.
-            mempool.disable(&mut recent_syncs).await;
+            // Simulate legacy sync discovery reporting a large gap. That signal
+            // can be caused by lower-work forks or incompatible peers, so it
+            // should not shut down an already-active mempool.
+            mempool.sync_far_from_tip(&mut recent_syncs).await;
 
-            // This time a call to `poll_ready` should clear the storage.
+            // This time a call to `poll_ready` should keep the storage.
             mempool.dummy_call().await;
 
-            // sends a new fake chain tip so that the mempool can be enabled
-            chain_tip_sender.set_finalized_tip(block1_chain_tip());
-
-            // Enable the mempool again so the storage can be accessed.
-            mempool.enable(&mut recent_syncs).await;
-
-            prop_assert_eq!(mempool.storage().transaction_count(), 0);
+            prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             peer_set.expect_no_requests().await?;
             state_service.expect_no_requests().await?;
@@ -248,14 +244,6 @@ proptest! {
 
 fn genesis_chain_tip() -> Option<ChainTipBlock> {
     zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into::<Arc<Block>>()
-        .map(CheckpointVerifiedBlock::from)
-        .map(ChainTipBlock::from)
-        .ok()
-}
-
-fn block1_chain_tip() -> Option<ChainTipBlock> {
-    zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .map(CheckpointVerifiedBlock::from)
         .map(ChainTipBlock::from)
