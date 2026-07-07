@@ -138,7 +138,7 @@ pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
 
 impl CommitSemanticallyVerifiedError {
     /// Returns the [`CommitBlockError`] describing why the commit failed.
-    pub fn commit_error(&self) -> &CommitBlockError {
+    pub fn inner(&self) -> &CommitBlockError {
         &self.0
     }
 }
@@ -173,7 +173,7 @@ pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
 
 impl CommitCheckpointVerifiedError {
     /// Returns the [`CommitBlockError`] describing why the commit failed.
-    pub fn commit_error(&self) -> &CommitBlockError {
+    pub fn inner(&self) -> &CommitBlockError {
         &self.0
     }
 }

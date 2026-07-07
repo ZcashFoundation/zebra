@@ -1030,7 +1030,7 @@ impl VerifyCheckpointError {
             // unwrapped to classify duplicate blocks as benign.
             VerifyCheckpointError::CommitCheckpointVerified(source) => source
                 .downcast_ref::<zs::CommitCheckpointVerifiedError>()
-                .is_some_and(|commit_err| commit_err.commit_error().is_duplicate_request()),
+                .is_some_and(|commit_err| commit_err.inner().is_duplicate_request()),
             _ => false,
         }
     }

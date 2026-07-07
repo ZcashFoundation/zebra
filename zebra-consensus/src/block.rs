@@ -129,7 +129,7 @@ impl VerifyBlockError {
 fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
     if let Some(commit_err) = source
         .downcast_ref::<zs::CommitSemanticallyVerifiedError>()
-        .map(zs::CommitSemanticallyVerifiedError::commit_error)
+        .map(zs::CommitSemanticallyVerifiedError::inner)
         .or_else(|| source.downcast_ref::<zs::CommitBlockError>())
     {
         return VerifyBlockError::Commit(commit_err.clone());
