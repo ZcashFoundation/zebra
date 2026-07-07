@@ -209,7 +209,10 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     config.network.crawl_new_peer_interval = Duration::from_secs(5);
 
     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-    let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
+    // Use a longer timeout because `generate [500]` mines 500 blocks in a single
+    // RPC call, which can exceed the default timeout at ~400ms per block.
+    let rpc_client_1 =
+        RpcRequestClient::new_with_timeout(rpc_listen_addr, Duration::from_secs(15 * 60));
 
     tracing::info!(
         ?rpc_listen_addr,
