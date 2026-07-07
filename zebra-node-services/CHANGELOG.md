@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-07-02
+
+### Breaking Changes
+
+- `mempool::Request::QueueFromPeer` now carries `candidates: Vec<Gossip>` instead of
+  `txids: HashSet<UnminedTxId>`, so directly pushed transactions (`Tx` messages) are
+  attributed to the sending peer and routed through the same per-peer admission
+  accounting as advertised transaction IDs
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+
 ## [8.0.0] - 2026-06-10
 
 ### Changed

@@ -281,7 +281,12 @@ async fn rpc_getblock() {
     // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
     let orchard = OrchardTrees { size: 0 };
-    let trees = GetBlockTrees { sapling, orchard };
+    let ironwood = IronwoodTrees { size: 0 };
+    let trees = GetBlockTrees {
+        sapling,
+        orchard,
+        ironwood,
+    };
 
     // Make height calls with verbosity=1 and check response
     let mut prev_block_info: Option<BlockInfo> = None;
@@ -831,6 +836,103 @@ async fn rpc_getblock_missing_error() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
+/// Regression test for GHSA-x6v8-c2xp-928m — panics (aborts) before the fix.
+///
+/// When `Depth` returns `None` (side-chain block), `get_block_header` sets
+/// `confirmations = -1`:
+/// https://github.com/ZcashFoundation/zebra/blob/v5.2.0/zebra-rpc/src/methods.rs#L1508
+/// The old code narrowed that to `u32` via `.try_into().expect()`, which panicked.
+///
+/// The fix changes `TransactionObject.confirmations` from `u32` to `i64`, matching
+/// zcashd's signed `int`:
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/rawtransaction.cpp#L311
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/blockchain.cpp#L404
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block.hash();
+    let block_header = block.header.clone();
+    let block_size = block.zcash_serialized_size();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let rpc_clone = rpc.clone();
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
+
+    // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block_header,
+            hash: block_hash,
+            height: zebra_chain::block::Height(0),
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::SaplingTree(_)))
+        .await
+        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(None));
+
+    // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
+        .await
+        .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
+        .await
+        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::IronwoodTree(_)))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .await
+        .respond(ReadResponse::BlockInfo(None));
+    read_state
+        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
+
+    block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed for side-chain blocks");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockheader() {
     let _init_guard = zebra_test::init();
@@ -1146,7 +1248,7 @@ async fn rpc_getrawtransaction() {
                 panic!("unexpected response to Depth request");
             };
 
-            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            let expected_confirmations: i64 = (1 + depth.expect("depth should be Some")).into();
 
             (confirmations, expected_confirmations)
         }

@@ -29,7 +29,7 @@ use crate::service;
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
@@ -56,6 +56,12 @@ pub(crate) fn no_duplicates_in_finalized_chain(
         }
     }
 
+    for nullifier in semantically_verified.block.ironwood_nullifiers() {
+        if finalized_state.contains_ironwood_nullifier(&nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -66,15 +72,15 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// non-finalized or finalized chains.
 ///
 /// Returns `Ok(())` if all the `revealed_nullifiers` have not been seen in either chain.
-fn find_duplicate_nullifier<'a, NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
-    revealed_nullifiers: impl IntoIterator<Item = &'a NullifierT>,
+fn find_duplicate_nullifier<NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
+    revealed_nullifiers: impl IntoIterator<Item = NullifierT>,
     finalized_chain_contains: FinalizedStateContainsFn,
     non_finalized_chain_contains: Option<NonFinalizedStateContainsFn>,
 ) -> Result<(), ValidateContextError>
 where
-    NullifierT: DuplicateNullifierError + 'a,
-    FinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
-    NonFinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
+    NullifierT: DuplicateNullifierError + Copy,
+    FinalizedStateContainsFn: Fn(NullifierT) -> bool,
+    NonFinalizedStateContainsFn: Fn(NullifierT) -> bool,
 {
     for nullifier in revealed_nullifiers {
         if let Some(true) = non_finalized_chain_contains.as_ref().map(|f| f(nullifier)) {
@@ -95,7 +101,7 @@ where
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
@@ -106,24 +112,32 @@ pub(crate) fn tx_no_duplicates_in_chain(
     transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
     find_duplicate_nullifier(
-        transaction.sprout_nullifiers(),
-        |nullifier| finalized_chain.contains_sprout_nullifier(nullifier),
+        transaction.sprout_nullifiers().copied(),
+        |nullifier| finalized_chain.contains_sprout_nullifier(&nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.sprout_nullifiers.contains_key(nullifier)),
+            .map(|chain| move |nullifier| chain.sprout_nullifiers.contains_key(&nullifier)),
     )?;
 
     find_duplicate_nullifier(
-        transaction.sapling_nullifiers(),
-        |nullifier| finalized_chain.contains_sapling_nullifier(nullifier),
+        transaction.sapling_nullifiers().copied(),
+        |nullifier| finalized_chain.contains_sapling_nullifier(&nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.sapling_nullifiers.contains_key(nullifier)),
+            .map(|chain| move |nullifier| chain.sapling_nullifiers.contains_key(&nullifier)),
     )?;
 
     find_duplicate_nullifier(
-        transaction.orchard_nullifiers(),
-        |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
+        transaction.orchard_nullifiers().copied(),
+        |nullifier| finalized_chain.contains_orchard_nullifier(&nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.orchard_nullifiers.contains_key(nullifier)),
+            .map(|chain| move |nullifier| chain.orchard_nullifiers.contains_key(&nullifier)),
+    )?;
+
+    // `Transaction::ironwood_nullifiers` already yields owned `ironwood::Nullifier`s.
+    find_duplicate_nullifier(
+        transaction.ironwood_nullifiers(),
+        |nullifier| finalized_chain.contains_ironwood_nullifier(&nullifier),
+        non_finalized_chain
+            .map(|chain| move |nullifier| chain.ironwood_nullifiers.contains_key(&nullifier)),
     )?;
 
     Ok(())
@@ -144,7 +158,7 @@ pub(crate) fn tx_no_duplicates_in_chain(
 ///
 /// > A nullifier MUST NOT repeat either within a transaction,
 /// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > Sprout, Sapling, Orchard, and Ironwood nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
@@ -161,20 +175,20 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// [4]: zebra_chain::block::Block
 /// [5]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
-pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
+pub(crate) fn add_to_non_finalized_chain_unique<NullifierT>(
     chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
-    shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
+    shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
     revealing_tx_id: SpendingTransactionId,
 ) -> Result<(), ValidateContextError>
 where
-    NullifierT: DuplicateNullifierError + Copy + std::fmt::Debug + Eq + std::hash::Hash + 'block,
+    NullifierT: DuplicateNullifierError + Copy + std::fmt::Debug + Eq + std::hash::Hash,
 {
     for nullifier in shielded_data_nullifiers.into_iter() {
         trace!(?nullifier, "adding nullifier");
 
         // reject the nullifier if it is already present in this non-finalized chain
         if chain_nullifiers
-            .insert(*nullifier, revealing_tx_id)
+            .insert(nullifier, revealing_tx_id)
             .is_some()
         {
             Err(nullifier.duplicate_nullifier_error(false))?;
@@ -209,17 +223,17 @@ where
 ///
 /// [1]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
-pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
+pub(crate) fn remove_from_non_finalized_chain<NullifierT>(
     chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
-    shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
+    shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
 ) where
-    NullifierT: std::fmt::Debug + Eq + std::hash::Hash + 'block,
+    NullifierT: std::fmt::Debug + Eq + std::hash::Hash,
 {
     for nullifier in shielded_data_nullifiers.into_iter() {
         trace!(?nullifier, "removing nullifier");
 
         assert!(
-            chain_nullifiers.remove(nullifier).is_some(),
+            chain_nullifiers.remove(&nullifier).is_some(),
             "nullifier must be present if block was added to chain"
         );
     }

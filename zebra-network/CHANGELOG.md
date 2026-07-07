@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `MinimumPeerVersion::chain_tip_height()` is replaced by `chain_tip()`, which returns a
+  reference to the underlying chain tip instead of a `Height`
+  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+
+## [10.0.0] - 2026-07-02
+
+### Breaking Changes
+
+- `Request::PushTransaction` now carries the sending peer's address as a second field
+  (`Option<PeerSocketAddr>`), so directly pushed transactions are attributed to the
+  sending peer and subject to the same per-peer mempool admission cap as advertised
+  transaction IDs
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+
 ### Added
 
 - Added the Regtest-only network config option `should_allow_unshielded_coinbase_spends`,

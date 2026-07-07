@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "9.0.1"
+version = "10.0.0"
 authors.workspace = true
 description = "Implementation of Zcash consensus checks"
 license.workspace = true
@@ -28,8 +28,6 @@ progress-bar = [
     "howudoin",
     "zebra-state/progress-bar",
 ]
-
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
@@ -70,10 +68,10 @@ zcash_primitives = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.0.1" }
 
-zebra-script = { path = "../zebra-script", version = "9.0.0" }
-zebra-state = { path = "../zebra-state", version = "9.0.1" }
-zebra-node-services = { path = "../zebra-node-services", version = "8.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "10.1.0" }
+zebra-script = { path = "../zebra-script", version = "10.0.0" }
+zebra-state = { path = "../zebra-state", version = "10.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "9.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "11.0.0" }
 
 zcash_protocol.workspace = true
 
@@ -97,9 +95,9 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "9.0.1", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "10.1.0", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "3.0.0" }
+zebra-state = { path = "../zebra-state", version = "10.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "11.0.0", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "4.0.0" }
 
 criterion = { workspace = true, features = ["html_reports"] }
 

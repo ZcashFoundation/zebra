@@ -154,6 +154,9 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
     let n_spends_sapling = transaction.sapling_spends_per_anchor().count();
     let n_outputs_sapling = transaction.sapling_outputs().count();
     let n_actions_orchard = transaction.orchard_actions().count();
+    // Ironwood actions have the same structure and cost as Orchard actions, so they are counted
+    // the same way. This is zero for pre-v6 transactions.
+    let n_actions_ironwood = transaction.ironwood_actions().count();
 
     let tx_in_logical_actions = div_ceil(tx_in_total_size, P2PKH_STANDARD_INPUT_SIZE);
     let tx_out_logical_actions = div_ceil(tx_out_total_size, P2PKH_STANDARD_OUTPUT_SIZE);
@@ -161,7 +164,8 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
     let logical_actions = max(tx_in_logical_actions, tx_out_logical_actions)
         + 2 * n_join_split
         + max(n_spends_sapling, n_outputs_sapling)
-        + n_actions_orchard;
+        + n_actions_orchard
+        + n_actions_ironwood;
     let logical_actions: u32 = logical_actions
         .try_into()
         .expect("transaction items are limited by serialized size limit");

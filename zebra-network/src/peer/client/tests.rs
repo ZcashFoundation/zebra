@@ -205,6 +205,10 @@ impl ClientTestHarness {
 /// The result of an attempt to receive a [`ClientRequest`] sent by the [`Client`] instance.
 ///
 /// The remote peer that would receive the request is mocked for testing.
+// The size disparity between the empty `Closed`/`Empty` variants and the
+// request-carrying variant is intrinsic to this test helper, which is only
+// constructed once per receive attempt.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ReceiveRequestAttempt {
     /// The [`Client`] instance has closed the sender endpoint of the channel.
     Closed,

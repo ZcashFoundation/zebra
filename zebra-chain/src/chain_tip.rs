@@ -15,6 +15,13 @@ mod tests;
 
 pub use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 
+/// The maximum estimated distance to the network chain tip that is considered "at or near tip".
+///
+/// Allows for normal block-time variance and propagation delay. Considering the 75 second target
+/// for the time between blocks on mainnet, this equals approximately 6 minutes of time the node
+/// can stay without receiving a new block before being considered far from the tip.
+pub const AT_OR_NEAR_TIP_THRESHOLD: block::HeightDiff = 5;
+
 /// An interface for querying the chain tip.
 ///
 /// This trait helps avoid dependencies between:
@@ -117,6 +124,18 @@ pub trait ChainTip {
         let distance_to_tip = estimator.estimate_height_at(Utc::now()) - current_height;
 
         Some((distance_to_tip, current_height))
+    }
+
+    /// Returns `true` if the node is at or near the network chain tip.
+    ///
+    /// Returns `false` if the chain is empty or the node is more than
+    /// [`AT_OR_NEAR_TIP_THRESHOLD`] blocks behind the estimated network tip,
+    /// meaning stall detection should remain active.
+    fn is_at_or_near_network_tip(&self, network: &Network) -> bool {
+        match self.estimate_distance_to_network_chain_tip(network) {
+            None => false,
+            Some((distance, _height)) => distance <= AT_OR_NEAR_TIP_THRESHOLD,
+        }
     }
 }
 

@@ -18,12 +18,12 @@ use zcash_primitives::transaction::{
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
-        Network,
+        Network, NetworkUpgrade,
     },
     primitives::ed25519,
     sapling::ValueCommitment,
@@ -130,9 +130,6 @@ impl TransactionTemplate<NegativeOrZero> {
         height: Height,
         miner_params: &MinerParams,
         txs_fee: Amount<NonNegative>,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-            Amount<NonNegative>,
-        >,
     ) -> Result<Self, TransactionError> {
         let block_subsidy = block_subsidy(height, net)?;
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
@@ -149,16 +146,9 @@ impl TransactionTemplate<NegativeOrZero> {
         let default_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        {
-            let zip233_amount = if cfg!(zcash_unstable = "zip235") {
-                zip233_amount.unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap())
-            } else {
-                zip233_amount.unwrap_or(Amount::zero())
-            };
-
-            builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
-        }
+        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. If the
+        // Network Sustainability Mechanism re-introduces a burn, it will be plumbed back through
+        // explicitly at that point.
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
@@ -167,19 +157,29 @@ impl TransactionTemplate<NegativeOrZero> {
             };
         }
 
-        let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
-            trace_err!(
-                builder.add_orchard_output::<String>(
-                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
-                    *addr,
-                    miner_reward,
-                    memo.clone(),
-                ),
-                "Orchard"
-            )
+        // On NU6.3 onward the coinbase MUST have an empty Orchard component, and newly shielded
+        // coinbase value is routed to the Ironwood pool instead (see the Ironwood pool spec and
+        // `coinbase_orchard_component_empty` in zebra-consensus). Ironwood outputs use the same
+        // Orchard-shaped `orchard::Address` as their recipient, so a unified miner address with an
+        // Orchard receiver just gets routed to the Ironwood output builder from NU6.3 onward.
+        let use_ironwood = NetworkUpgrade::current(net, height) >= NetworkUpgrade::Nu6_3;
+
+        let add_shielded_reward = |builder: &mut Builder<_, _>, addr: &_| {
+            let ovk = Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32]));
+            if use_ironwood {
+                trace_err!(
+                    builder.add_ironwood_output::<String>(ovk, *addr, miner_reward, memo.clone()),
+                    "Ironwood"
+                )
+            } else {
+                trace_err!(
+                    builder.add_orchard_output::<String>(ovk, *addr, miner_reward, memo.clone()),
+                    "Orchard"
+                )
+            }
         };
 
-        let add_sapling_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
+        let add_sapling_reward = |builder: &mut Builder<_, _>, addr: &_| {
             trace_err!(
                 builder.add_sapling_output::<String>(
                     Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
@@ -191,7 +191,7 @@ impl TransactionTemplate<NegativeOrZero> {
             )
         };
 
-        let add_transparent_reward = |builder: &mut Builder<'_, _, _>, addr| {
+        let add_transparent_reward = |builder: &mut Builder<_, _>, addr| {
             trace_err!(
                 builder.add_transparent_output(addr, miner_reward),
                 "transparent"
@@ -201,7 +201,7 @@ impl TransactionTemplate<NegativeOrZero> {
         match miner_params.addr() {
             Address::Unified(addr) => addr
                 .orchard()
-                .and_then(|addr| add_orchard_reward(&mut builder, addr))
+                .and_then(|addr| add_shielded_reward(&mut builder, addr))
                 .or_else(|| {
                     addr.sapling()
                         .and_then(|addr| add_sapling_reward(&mut builder, addr))
@@ -290,7 +290,7 @@ pub struct TransactionObject {
     /// mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    pub(crate) confirmations: Option<u32>,
+    pub(crate) confirmations: Option<i64>,
 
     /// Transparent inputs of the transaction.
     #[serde(rename = "vin")]
@@ -345,6 +345,12 @@ pub struct TransactionObject {
     /// Orchard actions of the transaction.
     #[serde(rename = "orchard", skip_serializing_if = "Option::is_none")]
     pub(crate) orchard: Option<Orchard>,
+
+    /// Ironwood actions of the transaction (v6 transactions from NU6.3 onward).
+    ///
+    /// The Ironwood pool reuses the Orchard-shaped bundle, so this uses the same [`Orchard`] object.
+    #[serde(rename = "ironwood", skip_serializing_if = "Option::is_none")]
+    pub(crate) ironwood: Option<Orchard>,
 
     /// The net value of Sapling Spends minus Outputs in ZEC
     #[serde(rename = "valueBalance", skip_serializing_if = "Option::is_none")]
@@ -752,6 +758,49 @@ pub struct OrchardAction {
     out_ciphertext: [u8; 80],
 }
 
+/// Builds the RPC object for an Orchard-shaped shielded pool (Orchard or Ironwood) from its
+/// shielded data and net value balance.
+///
+/// The Ironwood pool reuses the Orchard bundle shape, so both pools serialize through the same
+/// [`Orchard`] object; the caller selects which pool's shielded data and value balance to pass.
+fn orchard_shaped_object(
+    shielded_data: Option<&orchard::ShieldedData>,
+    value_balance: Amount<NegativeAllowed>,
+) -> Orchard {
+    let actions = shielded_data
+        .into_iter()
+        .flat_map(|data| data.actions.iter())
+        .map(|authorized_action| {
+            let action = &authorized_action.action;
+            OrchardAction {
+                cv: action.cv.into(),
+                nullifier: action.nullifier.into(),
+                rk: action.rk.into(),
+                cm_x: action.cm_x.into(),
+                ephemeral_key: action.ephemeral_key.into(),
+                enc_ciphertext: action.enc_ciphertext.into(),
+                spend_auth_sig: authorized_action.spend_auth_sig.into(),
+                out_ciphertext: action.out_ciphertext.into(),
+            }
+        })
+        .collect();
+
+    Orchard {
+        actions,
+        value_balance: Zec::from(value_balance).lossy_zec(),
+        value_balance_zat: value_balance.zatoshis(),
+        flags: shielded_data.map(|data| {
+            OrchardFlags::new(
+                data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
+                data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+            )
+        }),
+        anchor: shielded_data.map(|data| data.shared_anchor.bytes_in_display_order()),
+        proof: shielded_data.map(|data| data.proof.bytes_in_display_order()),
+        binding_sig: shielded_data.map(|data| data.binding_sig.into()),
+    }
+}
+
 impl Default for TransactionObject {
     fn default() -> Self {
         Self {
@@ -766,6 +815,7 @@ impl Default for TransactionObject {
             shielded_outputs: Vec::new(),
             joinsplits: Vec::new(),
             orchard: None,
+            ironwood: None,
             binding_sig: None,
             joinsplit_pub_key: None,
             joinsplit_sig: None,
@@ -794,7 +844,7 @@ impl TransactionObject {
     pub fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
-        confirmations: Option<u32>,
+        confirmations: Option<i64>,
         network: &Network,
         block_time: Option<DateTime<Utc>>,
         block_hash: Option<block::Hash>,
@@ -982,62 +1032,12 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: Some(Orchard {
-                actions: tx
-                    .orchard_actions()
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|action| {
-                        let spend_auth_sig: [u8; 64] = tx
-                            .orchard_shielded_data()
-                            .and_then(|shielded_data| {
-                                shielded_data
-                                    .actions
-                                    .iter()
-                                    .find(|authorized_action| authorized_action.action == **action)
-                                    .map(|authorized_action| {
-                                        authorized_action.spend_auth_sig.into()
-                                    })
-                            })
-                            .unwrap_or([0; 64]);
-
-                        let cv: [u8; 32] = action.cv.into();
-                        let nullifier: [u8; 32] = action.nullifier.into();
-                        let rk: [u8; 32] = action.rk.into();
-                        let cm_x: [u8; 32] = action.cm_x.into();
-                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
-
-                        OrchardAction {
-                            cv,
-                            nullifier,
-                            rk,
-                            cm_x,
-                            ephemeral_key,
-                            enc_ciphertext,
-                            spend_auth_sig,
-                            out_ciphertext,
-                        }
-                    })
-                    .collect(),
-                value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
-                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-                flags: tx.orchard_shielded_data().map(|data| {
-                    OrchardFlags::new(
-                        data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
-                        data.flags.contains(orchard::Flags::ENABLE_SPENDS),
-                    )
-                }),
-                anchor: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.shared_anchor.bytes_in_display_order()),
-                proof: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.proof.bytes_in_display_order()),
-                binding_sig: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.binding_sig.into()),
+            orchard: Some(orchard_shaped_object(
+                tx.orchard_shielded_data(),
+                tx.orchard_value_balance().orchard_amount(),
+            )),
+            ironwood: tx.ironwood_shielded_data().map(|data| {
+                orchard_shaped_object(Some(data), tx.ironwood_value_balance().ironwood_amount())
             }),
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {

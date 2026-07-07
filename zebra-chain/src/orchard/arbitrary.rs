@@ -119,7 +119,14 @@ impl Arbitrary for Flags {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<u8>()).prop_map(Self::from_bits_truncate).boxed()
+        // Only generate flags valid in the pre-NU6.3 (v5 Orchard) format: bit 2
+        // (`ENABLE_CROSS_ADDRESS`) is reserved before NU6.3, so generating it would produce v5
+        // Orchard bundles that do not round-trip. The arbitrary transaction strategies generate
+        // v4/v5 transactions, whose Orchard bundles use this format.
+        let pre_nu6_3 = Self::ENABLE_SPENDS.bits() | Self::ENABLE_OUTPUTS.bits();
+        (any::<u8>())
+            .prop_map(move |bits| Self::from_bits_truncate(bits & pre_nu6_3))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

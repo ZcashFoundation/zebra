@@ -448,6 +448,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::OrchardTree`] with the specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
+    /// Response to [`ReadRequest::IronwoodTree`] with the specified Ironwood note commitment tree.
+    IronwoodTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
+
     /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
     /// subtrees.
     SaplingSubtrees(
@@ -457,6 +460,12 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
     /// subtrees.
     OrchardSubtrees(
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
+    ),
+
+    /// Response to [`ReadRequest::IronwoodSubtrees`] with the specified Ironwood note commitment
+    /// subtrees. Ironwood reuses the Orchard note type.
+    IronwoodSubtrees(
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
@@ -594,8 +603,10 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
+            | ReadResponse::IronwoodTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
+            | ReadResponse::IronwoodSubtrees(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)

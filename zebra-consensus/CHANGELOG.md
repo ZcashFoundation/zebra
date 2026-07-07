@@ -5,7 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [10.0.0] - 2026-07-02
+
+### Added
+
+- `error::TransactionError`:
+  - `CoinbaseHasEnableSpendsIronwood`
+  - `CoinbaseHasOrchardActions`
+  - `DuplicateIronwoodNullifier`
+  - `IronwoodProofSize`
+  - `NegativeOrchardValueBalance`
+  - `NotEnoughIronwoodFlags`
+  - `OrchardHasEnableCrossAddress`
+- `transaction::check`:
+  - `coinbase_orchard_component_empty`
+  - `has_enough_ironwood_flags`
+  - `orchard_cross_address_disabled`
+  - `orchard_value_balance_non_negative`
+- A third Orchard Action verifier era for the NU6.3 cross-address circuit:
+  - `halo2::VERIFYING_KEY_NU6_3_ONWARD` and `halo2::VERIFIER_NU6_3_ONWARD`
+  - `halo2::orchard_v6_verifier` (for v6 Orchard and Ironwood bundles) and `halo2::VerifierService`
+
+### Changed
+
+- Migrated to `zcash_primitives 0.29.0-pre.0` (and the rest of the librustzcash NU6.3
+  pre-release wave: `orchard 0.15.0-pre.1`, `zcash_proofs 0.29.0-pre.0`,
+  `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`).
+- `error::TransactionError::NotEnoughFlags` renamed to `NotEnoughOrchardFlags`, for symmetry with
+  the new `NotEnoughIronwoodFlags` variant.
+- `halo2::VERIFIER_PRE_NU6_2` is now declared via the `halo2::VerifierService` alias (the
+  underlying type is unchanged).
+- The Orchard Action verifying keys are now named by circuit era rather than transaction version,
+  because a bundle's key is selected by block era, not transaction version:
+  - `halo2::VERIFYING_KEY_POST_NU6_2` renamed to `halo2::VERIFYING_KEY_NU6_2`, and
+    `halo2::VERIFIER_POST_NU6_2` to `halo2::VERIFIER_NU6_2`.
+  - `halo2::verifier_for` renamed to `halo2::orchard_v5_verifier_for`; from NU6.3 it routes v5
+    Orchard bundles to the NU6.3 key (the same key as v6 Orchard and Ironwood).
 
 ## [9.0.1] - 2026-06-18
 

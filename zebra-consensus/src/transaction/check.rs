@@ -12,7 +12,7 @@ use std::{
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::Height,
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
@@ -122,15 +122,9 @@ pub fn lock_time_has_passed(
 ///
 /// This check counts both `Coinbase` and `PrevOut` transparent inputs.
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    let has_other_circulation_effects = tx.has_zip233_amount();
-
-    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
-    let has_other_circulation_effects = false;
-
     if !tx.has_transparent_or_shielded_inputs() {
         Err(TransactionError::NoInputs)
-    } else if !tx.has_transparent_or_shielded_outputs() && !has_other_circulation_effects {
+    } else if !tx.has_transparent_or_shielded_outputs() {
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
@@ -148,8 +142,109 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_enough_orchard_flags() {
-        return Err(TransactionError::NotEnoughFlags);
+        return Err(TransactionError::NotEnoughOrchardFlags);
     }
+    Ok(())
+}
+
+/// Checks that a transaction with Ironwood actions has at least one Ironwood flag set.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] If there are any Ironwood actions, then at least one of enableSpendsIronwood
+/// > and enableOutputsIronwood MUST be 1.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// (No-op for transactions without Ironwood actions, i.e. all pre-v6 transactions.)
+pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionError> {
+    if !tx.has_enough_ironwood_flags() {
+        return Err(TransactionError::NotEnoughIronwoodFlags);
+    }
+    Ok(())
+}
+
+/// Checks that the Orchard pool does not enable cross-address transfers (NU6.3 onward).
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] The `enableCrossAddress` flag of `flagsOrchard` MUST be 0.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// An Orchard bundle can never carry this flag off the wire: bit 2 is rejected at deserialization
+/// for the Orchard pool in every tx version (only the Ironwood pool permits it). So this is a
+/// defense-in-depth check that also covers an in-memory-constructed bundle.
+pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), TransactionError> {
+    if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+        if orchard_shielded_data
+            .flags
+            .contains(Flags::ENABLE_CROSS_ADDRESS)
+        {
+            return Err(TransactionError::OrchardHasEnableCrossAddress);
+        }
+    }
+    Ok(())
+}
+
+/// Checks that no net new value is shielded into the Orchard pool from NU6.3 onward.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] `valueBalanceOrchard` MUST be nonnegative.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// From NU6.3, newly shielded value is routed to the Ironwood pool, so the Orchard pool is frozen
+/// against new inflows. An Orchard bundle may still spend existing notes — Orchard-to-Orchard note
+/// management nets to a zero balance and Orchard-to-transparent unshielding to a positive one — but
+/// a net-negative `valueBalanceOrchard` (which would move new value into the pool) is rejected.
+///
+/// This applies to both v5 and v6 Orchard bundles, since v5 Orchard bundles remain valid after
+/// NU6.3 (so that non-upgraded hardware wallets can keep authorizing Orchard spends).
+///
+/// (No-op for transactions without an Orchard bundle, and before NU6.3.)
+pub fn orchard_value_balance_non_negative(
+    tx: &Transaction,
+    network_upgrade: NetworkUpgrade,
+) -> Result<(), TransactionError> {
+    if network_upgrade >= NetworkUpgrade::Nu6_3 {
+        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+            if orchard_shielded_data.value_balance() < Amount::<NegativeAllowed>::zero() {
+                return Err(TransactionError::NegativeOrchardValueBalance);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Checks that a coinbase transaction has an empty Orchard component from NU6.3 onward.
+///
+/// # Consensus
+///
+/// > [NU6.3 onward] Coinbase transactions MUST have an empty Orchard component.
+///
+/// <https://zips.z.cash/zip-0229>
+///
+/// From NU6.3, newly shielded coinbase value is routed to the Ironwood pool instead, so coinbase
+/// transactions can no longer create Orchard notes. This is stronger than the pre-NU6.3 rule (which
+/// only forbids `enableSpendsOrchard`) and applies regardless of transaction version: a v5 coinbase
+/// mined at NU6.3 is constrained too, so the rule cannot be bypassed by using an older format.
+///
+/// (No-op for non-coinbase transactions, transactions without an Orchard component, and before
+/// NU6.3.)
+pub fn coinbase_orchard_component_empty(
+    tx: &Transaction,
+    network_upgrade: NetworkUpgrade,
+) -> Result<(), TransactionError> {
+    if network_upgrade >= NetworkUpgrade::Nu6_3
+        && tx.is_coinbase()
+        && tx.orchard_shielded_data().is_some()
+    {
+        return Err(TransactionError::CoinbaseHasOrchardActions);
+    }
+
     Ok(())
 }
 
@@ -181,6 +276,21 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
         if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
             if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
+            }
+        }
+
+        // The stronger NU6.3 rule that a coinbase transaction must have an *empty* Orchard component
+        // is height-gated and applies to every transaction version, so it lives in
+        // `coinbase_orchard_component_empty` (called from `check_structure_and_network_rules`).
+
+        // > [NU6.3 onward] In a version 6 coinbase transaction, the enableSpendsIronwood flag MUST
+        // > be 0.
+        //
+        // (`ironwood_shielded_data` is only ever present in v6 transactions, so this is a no-op for
+        // earlier versions.)
+        if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
+            if ironwood_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+                return Err(TransactionError::CoinbaseHasEnableSpendsIronwood);
             }
         }
     }
@@ -271,11 +381,15 @@ pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError
     let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
     let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
     let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
+    // `ironwood_nullifiers()` yields owned `ironwood::Nullifier`s (the Ironwood-pool newtype), so
+    // they are wrapped as `Cow::Owned`. Ironwood and Orchard nullifiers are disjoint.
+    let ironwood_nullifiers = transaction.ironwood_nullifiers().map(Cow::Owned);
 
     check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;
     check_for_duplicates(sprout_nullifiers, DuplicateSproutNullifier)?;
     check_for_duplicates(sapling_nullifiers, DuplicateSaplingNullifier)?;
     check_for_duplicates(orchard_nullifiers, DuplicateOrchardNullifier)?;
+    check_for_duplicates(ironwood_nullifiers, DuplicateIronwoodNullifier)?;
 
     Ok(())
 }
