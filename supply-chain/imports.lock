@@ -438,6 +438,12 @@ who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"
 version = "2.34.0"
 
+[[audits.bytecode-alliance.audits.crossbeam-epoch]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.18 -> 0.9.20"
+notes = "Minor updates, nothing out of place."
+
 [[audits.bytecode-alliance.audits.der]]
 who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"
