@@ -844,3 +844,28 @@ fn verify_block_error_misbehavior_scores() {
     };
     assert_eq!(VerifyBlockError::Commit(dup_err).misbehavior_score(), 0);
 }
+
+/// Duplicate block errors must stay classified as duplicate requests after the
+/// state wraps them, so they don't restart the syncer or turn `submitblock`
+/// duplicates into rejections.
+#[test]
+fn state_commit_duplicate_errors_are_duplicate_requests() {
+    let duplicate = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::BestChain,
+    };
+
+    // Box the error the same way the state's `CommitSemanticallyVerifiedBlock`
+    // handler does. This mirrors the wrapping manually, so it won't fail
+    // automatically if the state changes its error type — keep it in sync by hand.
+    let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(duplicate));
+
+    let err = map_commit_error(source, block::Hash([0; 32]));
+
+    assert!(
+        matches!(err, VerifyBlockError::Commit(_)),
+        "state commit errors must be unwrapped into VerifyBlockError::Commit, got: {err:?}"
+    );
+    assert!(err.is_duplicate_request());
+    assert_eq!(err.misbehavior_score(), 0);
+}
