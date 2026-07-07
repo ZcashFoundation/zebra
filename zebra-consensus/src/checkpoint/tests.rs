@@ -824,8 +824,9 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
         location: zs::KnownBlock::Finalized,
     };
 
-    // Box the error exactly as the state's `CommitCheckpointVerifiedBlock`
-    // handler does, so this test breaks if the state's error wrapping changes.
+    // Box the error the same way the state's `CommitCheckpointVerifiedBlock`
+    // handler does. This mirrors the wrapping manually, so it won't fail
+    // automatically if the state changes its error type — keep it in sync by hand.
     let source: BoxError = Box::new(zs::CommitCheckpointVerifiedError::from(duplicate));
 
     let err = VerifyCheckpointError::CommitCheckpointVerified(source);

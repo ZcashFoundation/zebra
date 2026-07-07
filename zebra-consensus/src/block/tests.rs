@@ -855,8 +855,9 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
         location: zs::KnownBlock::BestChain,
     };
 
-    // Box the error exactly as the state's `CommitSemanticallyVerifiedBlock`
-    // handler does, so this test breaks if the state's error wrapping changes.
+    // Box the error the same way the state's `CommitSemanticallyVerifiedBlock`
+    // handler does. This mirrors the wrapping manually, so it won't fail
+    // automatically if the state changes its error type — keep it in sync by hand.
     let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(duplicate));
 
     let err = map_commit_error(source, block::Hash([0; 32]));
