@@ -123,7 +123,7 @@ regex = "1.11"
 reqwest = { version = "0.12", default-features = false }
 ripemd = "0.1"
 rlimit = "0.10"
-rocksdb = { version = "0.22", default-features = false }
+rocksdb = { version = "0.24", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
 sentry = { version = "0.47", default-features = false }

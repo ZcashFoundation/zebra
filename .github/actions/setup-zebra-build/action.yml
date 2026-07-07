@@ -1,12 +1,15 @@
 name: 'Setup Zebra Build Environment'
-description: 'Install protoc and RocksDB as system libraries'
+description: 'Install libclang, protoc, and RocksDB as system libraries'
 runs:
   using: 'composite'
   steps:
-    - name: Install protoc and librocksdb-dev on Ubuntu
+    - name: Install libclang, protoc, and librocksdb-dev on Ubuntu
       if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo apt-get -qq update
-        sudo apt-get -qq install -y --no-install-recommends protobuf-compiler librocksdb-dev
+        # libclang is needed at build time: librocksdb-sys always runs bindgen
+        # (via clang-sys) to generate FFI bindings, even when linking the system
+        # RocksDB via ROCKSDB_LIB_DIR.
+        sudo apt-get -qq install -y --no-install-recommends clang libclang-dev protobuf-compiler librocksdb-dev
         echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV

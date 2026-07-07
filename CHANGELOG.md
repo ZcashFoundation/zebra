@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
+  `bindgen` to generate its FFI bindings, so **`libclang` is required at build
+  time** (in addition to `protoc` and a C++ compiler) even when linking a system
+  RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
+  `clang` (Arch), or the equivalent for your platform.
+
 ### Fixed
 
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
