@@ -1,5 +1,6 @@
 //! A service combinator that sends requests to a first service, then retries
-//! processing on a second fallback service if the first service errors.
+//! processing on a second fallback service if the first service errors, or if a
+//! custom fallback policy selects the fallback service.
 //!
 //! Fallback designs have [a number of downsides][aws-fallback] but may be useful
 //! in some cases. For instance, when using batch verification, the `Fallback`
@@ -13,7 +14,7 @@
 pub mod future;
 mod service;
 
-pub use self::service::Fallback;
+pub use self::service::{Fallback, FallbackPolicy, OnError};
 
 /// A boxed type-erased `std::error::Error` that can be sent between threads.
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
