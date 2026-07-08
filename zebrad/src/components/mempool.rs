@@ -365,11 +365,14 @@ impl Mempool {
         };
     }
 
-    /// Update the mempool state (enabled / disabled) depending on how close to
-    /// the tip is the synchronization, including side effects to state changes.
+    /// Activate the mempool once Zebra is close enough to the tip.
     ///
-    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash` field
-    /// when enabling the mempool state, it will not enable the mempool if this is None.
+    /// Sync status only gates initial activation. Once the mempool is active,
+    /// this method does not disable it.
+    ///
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash`
+    /// field when enabling the mempool state. It will not enable the mempool if
+    /// this is [`None`].
     ///
     /// Returns `true` if the state changed.
     fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
