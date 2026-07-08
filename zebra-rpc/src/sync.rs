@@ -498,6 +498,8 @@ impl TrustedChainSync {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<(Block, block::Hash), Status> {
+        // Encode the request as a single `hash_or_height` byte string: a 32-byte hash in display
+        // order, or a 4-byte big-endian height. The server tells them apart by length.
         let hash_or_height = match hash_or_height {
             HashOrHeight::Hash(hash) => hash.bytes_in_display_order().to_vec(),
             HashOrHeight::Height(height) => height.0.to_be_bytes().to_vec(),
