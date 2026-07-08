@@ -190,9 +190,9 @@ proptest! {
         })?;
     }
 
-    /// Test if the mempool storage is kept if legacy sync status falls behind.
+    /// Test if the mempool storage is kept if sync status falls behind.
     #[test]
-    fn storage_is_kept_if_legacy_sync_status_falls_behind(
+    fn storage_is_kept_if_sync_status_falls_behind(
         network in any::<Network>(),
         transaction in standard_verified_unmined_tx_strategy(),
     ) {
@@ -223,7 +223,7 @@ proptest! {
 
             prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
-            // Simulate legacy sync discovery reporting a large gap. That signal
+            // Simulate sync status reporting a large gap. That signal
             // can be caused by lower-work forks or incompatible peers, so it
             // should not shut down an already-active mempool.
             mempool.sync_far_from_tip(&mut recent_syncs).await;
