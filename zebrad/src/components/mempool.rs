@@ -388,7 +388,7 @@ impl Mempool {
             // state proves Zebra is behind a higher-work chain that follows
             // this node's consensus rules.
             //
-            // The legacy sync status can be triggered by lower-work forks,
+            // The sync status can be triggered by lower-work forks,
             // stale peers, or peers on incompatible consensus rules, so
             // it is strong enough to delay initial activation but not to shut
             // down a working mempool.

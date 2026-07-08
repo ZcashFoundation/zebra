@@ -332,8 +332,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
 }
 
 #[tokio::test]
-async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() -> Result<(), Report>
-{
+async fn mempool_service_stays_enabled_when_sync_status_falls_behind() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
@@ -398,7 +397,7 @@ async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() ->
     assert!(queued_responses[0].is_ok());
     assert_eq!(service.tx_downloads().in_flight(), 1);
 
-    // Pretend legacy sync discovery is far from tip. Once active, the mempool
+    // Pretend sync status is far from tip. Once active, the mempool
     // should not shut down based on that heuristic alone.
     service.sync_far_from_tip(&mut recent_syncs).await;
 
@@ -406,8 +405,8 @@ async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() ->
     assert!(service.is_enabled());
     assert_eq!(service.tx_downloads().in_flight(), 1);
 
-    // Test if the mempool keeps returning its transactions when legacy sync
-    // status falls behind.
+    // Test if the mempool keeps returning its transactions when sync status
+    // falls behind.
     let response = service
         .ready()
         .await
@@ -420,13 +419,13 @@ async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() ->
             assert_eq!(
                 ids.len(),
                 1,
-                "mempool should keep transactions when legacy sync status falls behind"
+                "mempool should keep transactions when sync status falls behind"
             )
         }
         _ => unreachable!("will never happen in this test"),
     };
 
-    // Test if mempool returns QueueStats correctly when legacy sync status
+    // Test if mempool returns QueueStats correctly when sync status
     // falls behind.
     let response = service
         .ready()
@@ -448,7 +447,7 @@ async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() ->
 
     assert_eq!(
         size, 1,
-        "size should not be cleared when legacy sync status falls behind"
+        "size should not be cleared when sync status falls behind"
     );
     assert!(bytes > 0, "bytes should not be cleared");
     assert!(usage > 0, "usage should not be cleared");
@@ -461,14 +460,14 @@ async fn mempool_service_stays_enabled_when_legacy_sync_status_falls_behind() ->
 }
 
 /// Check that a disabled mempool does not consume the latest tip action until
-/// legacy sync status says Zebra is close enough to activate it.
+/// sync status says Zebra is close enough to activate it.
 ///
 /// Regression test: `poll_ready()` used to call `last_tip_change()` before
 /// checking the initial-activation gate. If Zebra was still far from tip, that
 /// consumed the only available tip action and left the disabled mempool unable
 /// to activate when sync status later caught up without another tip change.
 #[tokio::test]
-async fn disabled_mempool_keeps_tip_action_until_legacy_sync_catches_up() -> Result<(), Report> {
+async fn disabled_mempool_keeps_tip_action_until_sync_status_catches_up() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     let (
@@ -483,7 +482,7 @@ async fn disabled_mempool_keeps_tip_action_until_legacy_sync_catches_up() -> Res
 
     assert!(!service.is_enabled());
 
-    // Poll while legacy sync discovery says Zebra is far from tip. The mempool
+    // Poll while sync status says Zebra is far from tip. The mempool
     // must remain disabled, but it must not consume the latest chain-tip action.
     SyncStatus::sync_far_from_tip(&mut recent_syncs);
     service.dummy_call().await;
@@ -788,7 +787,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 /// `update_state()`, whose initial-activation gate refused to re-enable the mempool while
 /// far-from-tip, silently leaving it disabled and dropping the collected retries.
 #[tokio::test(flavor = "multi_thread")]
-async fn mempool_reset_keeps_active_state_when_legacy_sync_falls_behind() -> Result<(), Report> {
+async fn mempool_reset_keeps_active_state_when_sync_status_falls_behind() -> Result<(), Report> {
     // Use a configured Testnet where a network upgrade activates at height 2.
     //
     // The mempool resets when the chain tip reaches the block before a network
@@ -880,7 +879,7 @@ async fn mempool_reset_keeps_active_state_when_legacy_sync_falls_behind() -> Res
     // Ignore all the previous network requests.
     while let Some(_request) = peer_set.try_next_request().await {}
 
-    // Pretend legacy sync discovery is far from tip, without polling the
+    // Pretend sync status is far from tip, without polling the
     // mempool yet, so the reset and the far-from-tip status are observed in
     // the same `poll_ready()` call.
     SyncStatus::sync_far_from_tip(&mut recent_syncs);
@@ -915,11 +914,11 @@ async fn mempool_reset_keeps_active_state_when_legacy_sync_falls_behind() -> Res
     // Query the mempool to make it poll chain_tip_change and handle the reset.
     mempool.dummy_call().await;
 
-    // The reset must not disable the already-active mempool, even though the legacy sync
+    // The reset must not disable the already-active mempool, even though sync
     // status says Zebra is far from the tip.
     assert!(
         mempool.is_enabled(),
-        "mempool must stay enabled through a chain tip reset while legacy sync status is far \
+        "mempool must stay enabled through a chain tip reset while sync status is far \
          from tip"
     );
 
