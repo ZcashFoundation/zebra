@@ -66,7 +66,7 @@ impl<S1, S2: Clone> Fallback<S1, S2, OnError> {
     }
 }
 
-impl<S1, S2: Clone, F> Fallback<S1, S2, F> {
+impl<S1, S2: Clone, F: Clone> Fallback<S1, S2, F> {
     /// Creates a new `Fallback` wrapping a pair of services with a custom fallback policy.
     ///
     /// Requests are processed on `svc1`, and retried on `svc2` if `policy` returns `true`
