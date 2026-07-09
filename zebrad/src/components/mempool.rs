@@ -582,7 +582,7 @@ impl Service<Request> for Mempool {
             // Re-initialise an empty state.
             //
             // This deliberately bypasses the initial-activation gate in `update_state()`:
-            // the mempool was already active when the reset arrived, and the legacy
+            // the mempool was already active when the reset arrived, and a
             // far-from-tip sync status must not disable an already-active mempool
             // (it can be triggered by lower-work forks, stale peers, or peers on
             // incompatible consensus rules).

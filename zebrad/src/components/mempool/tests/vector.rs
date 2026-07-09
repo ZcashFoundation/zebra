@@ -779,7 +779,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     Ok(())
 }
 
-/// Check that a chain tip reset does not disable an already-active mempool when the legacy
+/// Check that a chain tip reset does not disable an already-active mempool when the
 /// sync status says Zebra is far from the tip, and that pending transactions are still
 /// requeued for download.
 ///
