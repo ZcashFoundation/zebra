@@ -1109,6 +1109,13 @@ mod v6_tests {
         zcash_tachyon::stamp::AggregateId::try_from(wtxid).unwrap()
     }
 
+    /// Helper: build a deterministic `ActionSetCommit` for stamp fixtures. The
+    /// commitment value is not asserted by consumers; it only needs to be a
+    /// valid, round-trippable curve point, so we use the `Eq` generator.
+    fn default_action_set() -> zcash_tachyon::ActionSetCommit {
+        zcash_tachyon::ActionSetCommit::from(pasta_curves::EqAffine::generator().to_curve())
+    }
+
     lazy_static! {
         /// An empty V6 transaction with no bundles at all.
         pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
@@ -1164,9 +1171,10 @@ mod v6_tests {
                 value_balance: 100i64,
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
                 stamp: zcash_tachyon::Stamp {
+                    action_set: default_action_set(),
                     tachygrams: vec![tachygram],
                     anchor: default_anchor(),
-                    proof: ragu::Proof::trivial(),
+                    proof: Box::new(ragu::Proof::trivial()),
                 },
             });
             Transaction::V6 {
@@ -1204,9 +1212,10 @@ mod v6_tests {
                 value_balance: 300i64,
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
                 stamp: zcash_tachyon::Stamp {
+                    action_set: default_action_set(),
                     tachygrams: vec![tg1, tg2, tg3],
                     anchor: default_anchor(),
-                    proof: ragu::Proof::trivial(),
+                    proof: Box::new(ragu::Proof::trivial()),
                 },
             });
             Transaction::V6 {
