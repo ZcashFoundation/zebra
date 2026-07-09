@@ -48,6 +48,7 @@ use crate::components::sync::SyncStatus;
 
 pub mod config;
 mod crawler;
+pub mod dandelion_gossip;
 pub mod downloads;
 mod error;
 pub mod gossip;
@@ -62,6 +63,7 @@ pub use crate::BoxError;
 
 pub use config::Config;
 pub use crawler::Crawler;
+pub use dandelion_gossip::{gossip_dandelion, spawn_dandelion_gossip};
 pub use error::MempoolError;
 pub use gossip::gossip_mempool_transaction_id;
 pub use queue_checker::QueueChecker;
@@ -245,6 +247,12 @@ pub struct Mempool {
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 
+    /// Dandelion++ Phase 4: tracks txids submitted via local RPC (`Request::Queue`)
+    /// so that when they are verified and inserted, `MempoolChange::StemAdded` is
+    /// broadcast instead of `MempoolChange::Added`.  Entries are cleared after each
+    /// broadcast cycle.
+    locally_submitted_ids: std::collections::HashSet<UnminedTxId>,
+
     // Diagnostics
     //
     /// Queued transactions pending download or verification transmitter.
@@ -296,6 +304,7 @@ impl Mempool {
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
+            locally_submitted_ids: std::collections::HashSet::new(),
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -719,14 +728,35 @@ impl Service<Request> for Mempool {
             }
 
             // Send transactions that were not rejected nor expired to peers and RPC listeners.
+            // Dandelion++ Phase 4: transactions that were queued via local RPC (`Request::Queue`)
+            // are broadcast as `StemAdded` so the gossip task routes them through stem phase.
+            // Peer-relayed transactions (queued via `QueueFromPeer`) use the normal `Added` path.
             if !send_to_peers_ids.is_empty() {
-                tracing::trace!(
-                    ?send_to_peers_ids,
-                    "sending new transactions to peers and RPC listeners"
-                );
+                let (stem_ids, relay_ids): (HashSet<_>, HashSet<_>) = send_to_peers_ids
+                    .into_iter()
+                    .partition(|id| self.locally_submitted_ids.contains(id));
 
-                self.transaction_sender
-                    .send(MempoolChange::added(send_to_peers_ids))?;
+                // Clear the locally-submitted tracking set now that the cycle is complete.
+                self.locally_submitted_ids
+                    .retain(|id| !stem_ids.contains(id) && !relay_ids.contains(id));
+
+                if !stem_ids.is_empty() {
+                    tracing::trace!(
+                        ?stem_ids,
+                        "sending locally-submitted transactions to peers as Dandelion++ stem candidates"
+                    );
+                    self.transaction_sender
+                        .send(MempoolChange::stem_added(stem_ids))?;
+                }
+
+                if !relay_ids.is_empty() {
+                    tracing::trace!(
+                        ?relay_ids,
+                        "sending peer-relayed transactions to peers and RPC listeners"
+                    );
+                    self.transaction_sender
+                        .send(MempoolChange::added(relay_ids))?;
+                }
             }
 
             // Send transactions that were rejected to RPC listeners.
@@ -735,6 +765,12 @@ impl Service<Request> for Mempool {
                     ?invalidated_ids,
                     "sending invalidated transactions to RPC listeners"
                 );
+
+                // Dandelion++: a locally-submitted tx that failed verification
+                // never reaches `send_to_peers_ids`, so drop it from the
+                // tracking set here to prevent unbounded growth.
+                self.locally_submitted_ids
+                    .retain(|id| !invalidated_ids.contains(id));
 
                 self.transaction_sender
                     .send(MempoolChange::invalidated(invalidated_ids))?;
@@ -873,14 +909,17 @@ impl Service<Request> for Mempool {
                                     oneshot::Receiver<Result<(), BoxError>>,
                                     MempoolError,
                                 > {
+                                    let tx_id = gossiped_tx.id();
                                     let (rsp_tx, rsp_rx) = oneshot::channel();
-                                    storage.should_download_or_verify(gossiped_tx.id())?;
+                                    storage.should_download_or_verify(tx_id)?;
                                     tx_downloads.download_if_needed_and_verify(
                                         gossiped_tx,
                                         None,
                                         Some(rsp_tx),
                                     )?;
-
+                                    // Track this txid as locally submitted so poll_ready
+                                    // can emit StemAdded instead of Added when it verifies.
+                                    self.locally_submitted_ids.insert(tx_id);
                                     Ok(rsp_rx)
                                 },
                             )

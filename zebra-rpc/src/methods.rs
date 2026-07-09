@@ -73,7 +73,7 @@ use zebra_chain::{
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
-    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
+    transaction::{self, SerializedTransaction, Transaction, UnminedTx, UnminedTxId},
     transparent::{self, Address, OutputIndex},
     value_balance::ValueBalance,
     work::{
@@ -84,7 +84,12 @@ use zebra_chain::{
 use zebra_consensus::{
     funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
 };
-use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
+use zebra_network::{
+    address_book_peers::AddressBookPeers,
+    dandelion::PropagationStateMap,
+    types::PeerServices,
+    PeerSocketAddr,
+};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
@@ -819,6 +824,10 @@ where
 
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
+
+    /// Dandelion++ propagation state — when set, stem-phase transactions are
+    /// filtered from `getrawmempool` and related RPC responses.
+    dandelion_prop_state: Option<Arc<tokio::sync::Mutex<PropagationStateMap>>>,
 }
 
 /// A type alias for the last event logged by the server.
@@ -914,6 +923,7 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            dandelion_prop_state: None,
         };
 
         // run the process queue
@@ -929,6 +939,15 @@ where
     /// Returns a reference to the configured network.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// Attach the Dandelion++ propagation state so that `getrawmempool` and
+    /// related RPCs filter stem-phase transactions from their responses.
+    pub fn set_dandelion_prop_state(
+        &mut self,
+        prop_state: Arc<tokio::sync::Mutex<PropagationStateMap>>,
+    ) {
+        self.dandelion_prop_state = Some(prop_state);
     }
 }
 
@@ -1644,12 +1663,29 @@ where
             .await
             .map_misc_error()?;
 
+        // Dandelion++ Phase 4 (RPC): build a set of stem-phase txids to suppress.
+        // Transactions in active stem phase MUST NOT be exposed via RPC until
+        // they enter fluff phase.
+        let stem_txids: HashSet<UnminedTxId> =
+            if let Some(ps_arc) = &self.dandelion_prop_state {
+                let ps = ps_arc.lock().await;
+                // We don't know which txids are in the response yet; we snapshot
+                // the full stem set here (typically very small — only txs in the
+                // last 30 s).  The filter below does a simple set-membership check.
+                ps.stem_txids()
+            } else {
+                HashSet::new()
+            };
+
         match response {
             mempool::Response::FullTransactions {
                 mut transactions,
                 transaction_dependencies,
                 last_seen_tip_hash: _,
             } => {
+                // Strip stem-phase transactions before returning.
+                transactions.retain(|tx| !stem_txids.contains(&tx.transaction.id));
+
                 if verbose {
                     let transactions_by_id = transactions
                         .iter()
@@ -1696,6 +1732,7 @@ where
             mempool::Response::TransactionIds(unmined_transaction_ids) => {
                 let mut tx_ids: Vec<String> = unmined_transaction_ids
                     .iter()
+                    .filter(|id| !stem_txids.contains(id))
                     .map(|id| id.mined_id().encode_hex())
                     .collect();
 
@@ -1725,6 +1762,19 @@ where
 
         // Check the mempool first.
         if block_hash.is_none() {
+            // Dandelion++ Phase 4: suppress stem-phase transactions from RPC.
+            // Returning a stem tx here would let callers correlate the originating
+            // node with the transaction before it enters fluff phase.
+            if let Some(ps_arc) = &self.dandelion_prop_state {
+                let ps = ps_arc.lock().await;
+                if ps.get(&UnminedTxId::from_legacy_id(txid))
+                    .map_or(false, |s| s.is_stem())
+                {
+                    return Err(server::error::LegacyCode::InvalidAddressOrKey
+                        .into_error("No information available about transaction"));
+                }
+            }
+
             match mempool
                 .ready()
                 .and_then(|service| {

@@ -182,6 +182,20 @@ pub enum Request {
     /// Returns [`Response::Nil`](super::Response::Nil).
     AdvertiseTransactionIds(HashSet<UnminedTxId>, Option<PeerSocketAddr>),
 
+    /// Advertise transaction IDs to exactly one peer, unicast, for the
+    /// Dandelion++ stem phase (see `crate::dandelion`). Unlike
+    /// [`Request::AdvertiseTransactionIds`], this is NOT flooded to a
+    /// fraction of peers — it is sent to precisely the peer named in the
+    /// second field, and fails with [`PeerError::NotReady`] if that peer is
+    /// not currently in the ready set (the caller is responsible for
+    /// deciding whether to retry, wait, or fall back to fluff).
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil), or an error if the
+    /// named peer is not ready.
+    AdvertiseTransactionIdsToPeer(HashSet<UnminedTxId>, PeerSocketAddr),
+
     /// Advertise a block to all peers.
     ///
     /// This is implemented by sending an `inv` message containing the
@@ -245,6 +259,9 @@ impl fmt::Display for Request {
             Request::AdvertiseTransactionIds(ids, _) => {
                 format!("AdvertiseTransactionIds({})", ids.len())
             }
+            Request::AdvertiseTransactionIdsToPeer(ids, peer) => {
+                format!("AdvertiseTransactionIdsToPeer({}, {peer})", ids.len())
+            }
 
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
@@ -268,6 +285,7 @@ impl Request {
 
             Request::PushTransaction(..) => "PushTransaction",
             Request::AdvertiseTransactionIds(_, _) => "AdvertiseTransactionIds",
+            Request::AdvertiseTransactionIdsToPeer(_, _) => "AdvertiseTransactionIdsToPeer",
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",

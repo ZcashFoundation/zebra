@@ -1126,6 +1126,39 @@ where
         .boxed()
     }
 
+    /// Routes `req` to exactly the peer at `target`, unicast.
+    ///
+    /// Used for Dandelion++ stem-phase forwarding (see `crate::dandelion`),
+    /// where the request must go to precisely the chosen stem peer for this
+    /// epoch, not to a peer chosen by load-balancing or inventory-awareness.
+    ///
+    /// If `target` is not currently in the ready set, this fails immediately
+    /// with [`PeerError::NoReadyPeers`] rather than falling back to any other
+    /// peer — silently routing a stem-phase request to the wrong peer would
+    /// defeat the privacy property this request type exists for. The caller
+    /// (the dandelion gossip task) is responsible for handling the failure,
+    /// e.g. by promoting the transaction to fluff.
+    fn route_to_peer(
+        &mut self,
+        req: Request,
+        target: PeerSocketAddr,
+    ) -> <Self as tower::Service<Request>>::Future {
+        if let Some(mut svc) = self.take_ready_service(&target) {
+            tracing::trace!(?target, "routing Dandelion++ stem request to peer");
+            let fut = svc.call(req);
+            self.push_unready(target, svc);
+            return fut.map_err(Into::into).boxed();
+        }
+
+        tracing::debug!(?target, "stem peer is not ready, failing stem request");
+
+        async move {
+            Err(SharedPeerError::from(PeerError::NoReadyPeers))
+        }
+        .map_err(Into::into)
+        .boxed()
+    }
+
     /// Broadcasts the same request to lots of ready peers, ignoring return values.
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
@@ -1423,6 +1456,12 @@ where
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlock(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
+
+            // Dandelion++ stem phase: route to exactly one named peer.
+            Request::AdvertiseTransactionIdsToPeer(_, ref target) => {
+                let target = *target;
+                self.route_to_peer(req, target)
+            }
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),

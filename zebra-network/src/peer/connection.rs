@@ -1123,7 +1123,7 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseTransactionIds(hashes, _)) => {
+            (AwaitingRequest, AdvertiseTransactionIds(hashes, _) | AdvertiseTransactionIdsToPeer(hashes, _)) => {
                 let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
                     .try_into()
                     .expect("constant fits in usize");

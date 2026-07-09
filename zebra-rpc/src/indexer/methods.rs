@@ -183,17 +183,26 @@ where
         tokio::spawn(async move {
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(change) = mempool_change.recv().await {
+                // Dandelion++ Phase 4: do NOT stream stem-phase additions to
+                // indexer clients (Zaino/lightwalletd). A stem tx has not yet
+                // entered fluff; surfacing it here would let the indexer — and
+                // anyone watching it — learn the transaction exists on this node
+                // before broadcast, defeating the privacy property. Stem txs are
+                // streamed later, once promoted to fluff, as a normal `Added`.
+                let change_type = match change.kind() {
+                    MempoolChangeKind::Added => 0,
+                    MempoolChangeKind::Invalidated => 1,
+                    MempoolChangeKind::Mined => 2,
+                    MempoolChangeKind::StemAdded => continue,
+                };
+
                 for tx_id in change.tx_ids() {
                     span.in_scope(|| {
                         tracing::debug!("mempool change: {:?}", change);
                     });
 
                     let msg = Ok(MempoolChangeMessage {
-                        change_type: match change.kind() {
-                            MempoolChangeKind::Added => 0,
-                            MempoolChangeKind::Invalidated => 1,
-                            MempoolChangeKind::Mined => 2,
-                        },
+                        change_type,
                         tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
                         auth_digest: tx_id
                             .auth_digest()
