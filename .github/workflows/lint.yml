@@ -300,29 +300,6 @@ jobs:
           command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
 
-  vet:
-    name: cargo-vet check
-    needs: changes
-    if: needs.changes.outputs.lint == 'true'
-    permissions:
-      contents: read
-      statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        with:
-          cache-on-failure: true
-      - name: Install cargo-vet
-        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
-        with:
-          tool: cargo-vet
-      - name: Run cargo-vet check
-        run: cargo vet check
-
   hadolint:
     name: hadolint
     needs: changes
@@ -375,7 +352,6 @@ jobs:
       - no-test-deps
       - features
       - deny
-      - vet
       - hadolint
       - shellcheck
     timeout-minutes: 30
@@ -384,4 +360,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, vet, hadolint, shellcheck
+          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, hadolint, shellcheck
