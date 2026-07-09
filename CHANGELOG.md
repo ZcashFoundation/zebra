@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
+  MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
+  builds on the new MSRV.
+
 ### Fixed
 
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
