@@ -139,12 +139,21 @@ jobs:
           esac
 
           has_changelog=false
+          has_breaking_heading=false
           code_changed=false
           while IFS= read -r -d '' path; do
             if [[ "${path##*/}" == "CHANGELOG.md" ]]; then
               has_changelog=true
+              # Only the unreleased section counts, and its heading may predate this PR's diff.
+              if [[ -f "$path" ]] && awk '
+                /^## / { unreleased = ($0 ~ /^## \[Unreleased\]/) }
+                unreleased && /^### Breaking Changes/ { found = 1 }
+                END { exit !found }
+              ' "$path"; then
+                has_breaking_heading=true
+              fi
             fi
-            if [[ "$path" == *.rs || "${path##*/}" == "Cargo.toml" ]]; then
+            if [[ "$path" == *.rs || "${path##*/}" == "Cargo.toml" || "${path##*/}" == "Cargo.lock" ]]; then
               code_changed=true
             fi
           done < <(git diff --name-only -z "$merge_base"..HEAD)
@@ -161,8 +170,8 @@ jobs:
             failed=true
           fi
 
-          if [[ "$BREAKING" == "true" ]] && ! git diff --unified=0 "$merge_base"..HEAD -- '**CHANGELOG.md' | grep -E '^\+[[:space:]]*### Breaking Changes[[:space:]]*$' >/dev/null; then
-            echo "::error title=Missing breaking changes heading::Add a ### Breaking Changes heading to a changed CHANGELOG.md file."
+          if [[ "$BREAKING" == "true" && "$has_breaking_heading" != "true" ]]; then
+            echo "::error title=Missing breaking changes heading::Add a ### Breaking Changes section under ## [Unreleased] in a CHANGELOG.md changed by this PR."
             failed=true
           fi
 
