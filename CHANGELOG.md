@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
 - Fix syncer restarts due to incorrect error downcasting.
+- Fix a read-state syncer startup hang: a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly
+  instead of syncing, advancing only one block per newly mined block
+  ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
 
 ## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 
