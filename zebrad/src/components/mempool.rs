@@ -349,9 +349,7 @@ impl Mempool {
     /// Replaces the active state with a freshly-initialised [`ActiveState::Enabled`],
     /// using `tip_action`'s best tip hash as the `last_seen_tip_hash`.
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
-        let (last_seen_tip_hash, tip_height) = tip_action.best_tip_hash_and_height();
-
-        info!(?tip_height, "activating mempool: Zebra is close to the tip");
+        let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
@@ -385,7 +383,14 @@ impl Mempool {
             (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
             // Enable state - there should be a chain tip when Zebra is close to the network tip
-            (true, false, Some(tip_action)) => self.enable_at_tip(tip_action),
+            (true, false, Some(tip_action)) => {
+                info!(
+                    tip_height = ?tip_action.best_tip_height(),
+                    "activating mempool: Zebra is close to the tip"
+                );
+
+                self.enable_at_tip(tip_action);
+            }
 
             // TODO: only disable an already-active mempool when validated sync
             // state proves Zebra is behind a higher-work chain that follows
@@ -562,9 +567,16 @@ impl Service<Request> for Mempool {
         //
         // But if the mempool was just freshly enabled,
         // skip resetting and removing mined transactions for this tip.
-        if !is_state_changed && matches!(tip_action, Some(TipAction::Reset { .. })) {
+        let reset_tip_action = match tip_action.as_ref() {
+            Some(reset_tip_action @ TipAction::Reset { .. }) if !is_state_changed => {
+                Some(reset_tip_action)
+            }
+            _ => None,
+        };
+
+        if let Some(reset_tip_action) = reset_tip_action {
             info!(
-                tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
+                tip_height = ?reset_tip_action.best_tip_height(),
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 
@@ -586,11 +598,7 @@ impl Service<Request> for Mempool {
             // far-from-tip sync status must not disable an already-active mempool
             // (it can be triggered by lower-work forks, stale peers, or peers on
             // incompatible consensus rules).
-            self.enable_at_tip(
-                tip_action
-                    .as_ref()
-                    .expect("this branch only matches when tip_action is a Reset"),
-            );
+            self.enable_at_tip(reset_tip_action);
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
