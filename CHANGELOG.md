@@ -5,13 +5,48 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
+
+### Added
+
+- NU6.3 (Ironwood) now activates on Mainnet at block height 3,428,143, matching
+  `zcash_protocol`. Node operators must upgrade to this release before activation.
+
+### Changed
+
+- Updated the `zcash_*` and `orchard` crates to their released NU6.3 versions.
+- Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
+  `bindgen` to generate its FFI bindings, so **`libclang` is required at build
+  time** (in addition to `protoc` and a C++ compiler) even when linking a system
+  RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
+  `clang` (Arch), or the equivalent for your platform.
+- Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
+  MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
+  builds on the new MSRV.
 
 ### Fixed
 
+- Keep the mempool active through transient sync-status noise. Once started, the
+  mempool is no longer cleared and its queued transaction verification is no longer
+  cancelled when a temporary signal (which lower-work forks or stale peers can
+  trigger) reports Zebra is far from the tip; initial activation still waits until
+  Zebra is near the chain tip
+  ([#10929](https://github.com/ZcashFoundation/zebra/pull/10929)).
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+- Fix syncer restarts due to incorrect error downcasting.
+- Fix a read-state syncer startup hang: a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly
+  instead of syncing, advancing only one block per newly mined block
+  ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
+- Mempool transactions with non-standard transparent inputs are now rejected
+  _before_ script verification, to avoid the more expensive script verification
+  and reduce DoS surface
+  ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
+  Thanks to @ouicate for reporting the issue.
+- Related to the previous item, script verification now runs on the shared Rayon
+  thread pool to avoid blocking the runtime.
 
 ## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 

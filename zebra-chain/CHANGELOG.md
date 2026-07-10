@@ -5,13 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [11.1.0] - 2026-07-10
 
 ### Added
 
+- NU6.3 (Ironwood) now activates on Mainnet at height 3,428,143, matching `zcash_protocol`
 - `AT_OR_NEAR_TIP_THRESHOLD` constant and `ChainTip::is_at_or_near_network_tip()`
   method for determining whether the node is within 5 blocks of the estimated network tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+
+### Changed
+
+- MSRV is now 1.88
+- Updated `zcash_protocol`, `zcash_primitives`, `zcash_keys`, `zcash_address`,
+  `zcash_transparent`, `zcash_proofs`, `zcash_history`, and `orchard` to their released
+  NU6.3 versions
 
 ## [11.0.0] - 2026-07-02
 

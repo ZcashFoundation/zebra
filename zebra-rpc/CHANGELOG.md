@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [11.1.0] - 2026-07-10
+
+### Changed
+
+- MSRV is now 1.88
+
+### Fixed
+
+- A read-state syncer startup hang where a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly instead
+  of syncing ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
+
 ## [11.0.0] - 2026-07-02
 
 ### Added

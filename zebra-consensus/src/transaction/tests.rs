@@ -2504,7 +2504,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu6_2,
+        network_upgrade: NetworkUpgrade::Nu6_3,
     };
 
     let transaction_hash = transaction.hash();
@@ -3643,9 +3643,25 @@ fn mock_transparent_transfer(
     transparent::Output,
     HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) {
-    // A script with a single opcode that accepts the transaction (pushes true on the stack)
-    let accepting_script = transparent::Script::new(&[1, 1]);
-    // A script with a single opcode that rejects the transaction (OP_FALSE)
+    // A standard, signature-free P2SH input that the script interpreter accepts. The redeem
+    // script is OP_TRUE, so the spend is valid without a signature, while the spent output is a
+    // standard P2SH `scriptPubKey`. This lets the input pass the mempool `AreInputsStandard`
+    // gate (`check::mempool_standard_input_scripts`) that now runs before script verification,
+    // as well as the interpreter itself.
+    const OP_TRUE: u8 = 0x51;
+    // `scriptSig`: a single push of the OP_TRUE redeem script (push-only, one stack item).
+    let accepting_unlock_script = transparent::Script::new(&[0x01, OP_TRUE]);
+    // `scriptPubKey`: OP_HASH160 <HASH160(OP_TRUE)> OP_EQUAL. The 20-byte hash is precomputed
+    // (RIPEMD160(SHA256([OP_TRUE]))) so the P2SH hash check passes during verification.
+    let mut p2sh_lock_bytes = vec![0xa9, 0x14];
+    p2sh_lock_bytes.extend_from_slice(&[
+        0xda, 0x17, 0x45, 0xe9, 0xb5, 0x49, 0xbd, 0x0b, 0xfa, 0x1a, 0x56, 0x99, 0x71, 0xc7, 0x7e,
+        0xba, 0x30, 0xcd, 0x5a, 0x4b,
+    ]);
+    p2sh_lock_bytes.push(0x87);
+    let accepting_lock_script = transparent::Script::new(&p2sh_lock_bytes);
+    // A script with a single opcode that rejects the transaction (OP_FALSE). Only used for block
+    // requests (the standardness gate is mempool-only), so it need not be a standard type.
     let rejecting_script = transparent::Script::new(&[0]);
 
     // Mock an unspent transaction output
@@ -3654,10 +3670,12 @@ fn mock_transparent_transfer(
         index: outpoint_index,
     };
 
-    let lock_script = if script_should_succeed {
-        accepting_script.clone()
+    let (lock_script, unlock_script) = if script_should_succeed {
+        (accepting_lock_script, accepting_unlock_script)
     } else {
-        rejecting_script.clone()
+        // The spent output's OP_FALSE `scriptPubKey` makes verification fail regardless of the
+        // `scriptSig`, so the `scriptSig` value is irrelevant here.
+        (rejecting_script.clone(), accepting_unlock_script)
     };
 
     let previous_output = transparent::Output {
@@ -3670,7 +3688,7 @@ fn mock_transparent_transfer(
     // Use the `previous_outpoint` as input
     let input = transparent::Input::PrevOut {
         outpoint: previous_outpoint,
-        unlock_script: accepting_script,
+        unlock_script,
         sequence: 0,
     };
 
@@ -4461,4 +4479,296 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
          with nExpiryHeight {mempool_height:?} via mempool cache; \
          got: {tx_err:?}"
     );
+}
+
+/// Test the mempool standardness gate that runs before script verification:
+/// a P2SH input whose redeem script exceeds `MAX_P2SH_SIGOPS` (15) must be rejected,
+/// while a redeem script at the limit is accepted.
+#[test]
+fn mempool_standard_input_scripts_limits_p2sh_redeem_sigops() {
+    let _init_guard = zebra_test::init();
+
+    const OP_CHECKSIG: u8 = 0xac;
+
+    // scriptPubKey: OP_HASH160 <20 bytes> OP_EQUAL
+    let mut p2sh_lock_bytes = vec![0xa9, 0x14];
+    p2sh_lock_bytes.extend_from_slice(&[0u8; 20]);
+    p2sh_lock_bytes.push(0x87);
+
+    let spent_output = transparent::Output {
+        value: Amount::try_from(1_000_000).expect("valid amount"),
+        lock_script: transparent::Script::new(&p2sh_lock_bytes),
+    };
+
+    // A scriptSig with a single direct push of `sigops` OP_CHECKSIGs: for a P2SH spend, the pushed
+    // data is the (non-standard) redeem script, and each OP_CHECKSIG counts as one accurate sigop.
+    let unlock_bytes_with_sigops = |sigops: usize| {
+        let mut unlock_bytes = vec![u8::try_from(sigops).expect("small test count")];
+        unlock_bytes.extend_from_slice(&vec![OP_CHECKSIG; sigops]);
+        unlock_bytes
+    };
+
+    let tx_spending = |unlock_bytes: &[u8]| Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(unlock_bytes),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // A non-standard redeem script at the standardness limit is accepted.
+    let tx = tx_spending(&unlock_bytes_with_sigops(15));
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&spent_output)),
+        Ok(()),
+        "P2SH redeem script with MAX_P2SH_SIGOPS sigops should be standard"
+    );
+
+    // One sigop above the limit is rejected before script verification.
+    let tx = tx_spending(&unlock_bytes_with_sigops(16));
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&spent_output)),
+        Err(TransactionError::NonStandardInputs),
+        "P2SH redeem script above MAX_P2SH_SIGOPS should be rejected"
+    );
+}
+
+/// Test the mempool standardness gate that runs before script verification:
+/// spending a non-standard (high-sigop) scriptPubKey must be rejected via `AreInputsStandard`,
+/// so the interpreter is never asked to run its signature operations; a genuinely standard
+/// P2PKH input is accepted.
+#[test]
+fn mempool_standard_input_scripts_rejects_nonstandard_spent_output() {
+    let _init_guard = zebra_test::init();
+
+    let tx_spending = |unlock_bytes: &[u8], spent_output: &transparent::Output| Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(unlock_bytes),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // A non-standard spent scriptPubKey (50 x OP_CHECKSIG) is not a recognized standard type, so
+    // the input is rejected before verification would run its 50 signature checks. This is the
+    // non-P2SH counterpart of the P2SH redeem-script limit: without classifying the spent output,
+    // a peer could plant such a UTXO and drive expensive verification with a cheap spend.
+    let nonstandard_output = transparent::Output {
+        value: Amount::try_from(1_000_000).expect("valid amount"),
+        lock_script: transparent::Script::new(&[0xac; 50]),
+    };
+    let tx = tx_spending(&[0x01, 0xaa], &nonstandard_output);
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&nonstandard_output)),
+        Err(TransactionError::NonStandardInputs),
+        "spending a non-standard scriptPubKey should be rejected before script verification"
+    );
+
+    // A genuinely standard P2PKH input (2 scriptSig pushes: sig + pubkey) is accepted.
+    let mut p2pkh_lock_bytes = vec![0x76, 0xa9, 0x14];
+    p2pkh_lock_bytes.extend_from_slice(&[0u8; 20]);
+    p2pkh_lock_bytes.extend_from_slice(&[0x88, 0xac]);
+    let p2pkh_output = transparent::Output {
+        value: Amount::try_from(1_000_000).expect("valid amount"),
+        lock_script: transparent::Script::new(&p2pkh_lock_bytes),
+    };
+    let tx = tx_spending(&[0x01, 0xaa, 0x01, 0xbb], &p2pkh_output);
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&p2pkh_output)),
+        Ok(()),
+        "a standard P2PKH input with the correct stack depth should be accepted"
+    );
+}
+
+/// Test the mempool standardness gate that runs before script verification:
+/// non-push-only and oversized scriptSigs must be rejected, so signature operations
+/// can't be hidden in a scriptSig that the interpreter would execute.
+#[test]
+fn mempool_standard_input_scripts_rejects_nonstandard_script_sigs() {
+    let _init_guard = zebra_test::init();
+
+    // scriptPubKey: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+    let mut p2pkh_lock_bytes = vec![0x76, 0xa9, 0x14];
+    p2pkh_lock_bytes.extend_from_slice(&[0u8; 20]);
+    p2pkh_lock_bytes.extend_from_slice(&[0x88, 0xac]);
+
+    let spent_output = transparent::Output {
+        value: Amount::try_from(1_000_000).expect("valid amount"),
+        lock_script: transparent::Script::new(&p2pkh_lock_bytes),
+    };
+
+    let tx_spending = |unlock_bytes: &[u8]| Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(unlock_bytes),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // A scriptSig containing an operation (OP_CHECKSIG) instead of only pushes is rejected.
+    let tx = tx_spending(&[0xac]);
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&spent_output)),
+        Err(TransactionError::NonStandardScriptSigNotPushOnly { input_index: 0 }),
+        "non-push-only scriptSig should be rejected"
+    );
+
+    // A push-only scriptSig above MAX_STANDARD_SCRIPTSIG_SIZE (1650) bytes is rejected:
+    // OP_PUSHDATA2 <1648 little-endian> <1648 bytes> is 1651 bytes in total.
+    let mut oversized_unlock_bytes = vec![0x4d, 0x70, 0x06];
+    oversized_unlock_bytes.extend_from_slice(&[0u8; 1648]);
+    let tx = tx_spending(&oversized_unlock_bytes);
+    assert_eq!(
+        check::mempool_standard_input_scripts(&tx, std::slice::from_ref(&spent_output)),
+        Err(TransactionError::NonStandardScriptSigSize {
+            input_index: 0,
+            size: 1651,
+        }),
+        "oversized scriptSig should be rejected"
+    );
+}
+
+// Unit tests for the private scriptSig-analysis helpers used by `check::are_inputs_standard`.
+
+#[test]
+fn count_script_push_ops_counts_pushes() {
+    let _init_guard = zebra_test::init();
+    // OP_0 <push 1 byte> <push 1 byte>
+    assert_eq!(
+        check::count_script_push_ops(&[0x00, 0x01, 0xaa, 0x01, 0xbb]),
+        3
+    );
+}
+
+#[test]
+fn count_script_push_ops_empty_script() {
+    let _init_guard = zebra_test::init();
+    assert_eq!(check::count_script_push_ops(&[]), 0);
+}
+
+#[test]
+fn count_script_push_ops_pushdata_variants() {
+    let _init_guard = zebra_test::init();
+    // OP_PUSHDATA1 <len=3> <3 bytes>
+    assert_eq!(
+        check::count_script_push_ops(&[0x4c, 0x03, 0xaa, 0xbb, 0xcc]),
+        1
+    );
+    // OP_PUSHDATA2 <len=3 LE> <3 bytes>
+    assert_eq!(
+        check::count_script_push_ops(&[0x4d, 0x03, 0x00, 0xaa, 0xbb, 0xcc]),
+        1
+    );
+    // OP_PUSHDATA4 <len=2 LE> <2 bytes>
+    assert_eq!(
+        check::count_script_push_ops(&[0x4e, 0x02, 0x00, 0x00, 0x00, 0xaa, 0xbb]),
+        1
+    );
+}
+
+#[test]
+fn count_script_push_ops_truncated_script() {
+    let _init_guard = zebra_test::init();
+    // OP_PUSHBYTES_10 with only 3 bytes: the incomplete push errors and is filtered out.
+    assert_eq!(check::count_script_push_ops(&[0x0a, 0xaa, 0xbb, 0xcc]), 0);
+}
+
+#[test]
+fn extract_p2sh_redeemed_script_extracts_last_push() {
+    let _init_guard = zebra_test::init();
+    // <push "abc"> <push "de">: the redeemed script is the last push.
+    let unlock_script = transparent::Script::new(&[0x03, 0x61, 0x62, 0x63, 0x02, 0x64, 0x65]);
+    assert_eq!(
+        check::extract_p2sh_redeemed_script(&unlock_script),
+        Some(vec![0x64, 0x65])
+    );
+}
+
+#[test]
+fn extract_p2sh_redeemed_script_empty_script() {
+    let _init_guard = zebra_test::init();
+    assert!(check::extract_p2sh_redeemed_script(&transparent::Script::new(&[])).is_none());
+}
+
+#[test]
+fn script_sig_args_expected_values() {
+    use zcash_script::solver::ScriptKind;
+
+    let _init_guard = zebra_test::init();
+
+    // Build a P2PK lock script: <compressed_pubkey> OP_CHECKSIG
+    fn p2pk_lock_script(pubkey: &[u8; 33]) -> transparent::Script {
+        let mut s = Vec::with_capacity(1 + 33 + 1);
+        s.push(0x21); // OP_PUSHBYTES_33
+        s.extend_from_slice(pubkey);
+        s.push(0xac); // OP_CHECKSIG
+        transparent::Script::new(&s)
+    }
+
+    // Build a bare multisig lock script: OP_<required> <pubkeys...> OP_<total> OP_CHECKMULTISIG
+    fn multisig_lock_script(required: u8, pubkeys: &[&[u8; 33]]) -> transparent::Script {
+        let mut s = Vec::new();
+        s.push(0x50 + required); // OP_1..=OP_16
+        for pk in pubkeys {
+            s.push(0x21); // OP_PUSHBYTES_33
+            s.extend_from_slice(*pk);
+        }
+        s.push(0x50 + pubkeys.len() as u8); // OP_N total
+        s.push(0xae); // OP_CHECKMULTISIG
+        transparent::Script::new(&s)
+    }
+
+    // P2PKH: sig + pubkey.
+    assert_eq!(
+        check::script_sig_args_expected(&ScriptKind::PubKeyHash { hash: [0xaa; 20] }),
+        Some(2)
+    );
+    // P2SH: the redeemed script push.
+    assert_eq!(
+        check::script_sig_args_expected(&ScriptKind::ScriptHash { hash: [0xbb; 20] }),
+        Some(1)
+    );
+    // OP_RETURN: non-standard to spend.
+    assert_eq!(
+        check::script_sig_args_expected(&ScriptKind::NullData { data: vec![] }),
+        None
+    );
+
+    // P2PK: sig only (classified via the solver).
+    let p2pk_kind = check::standard_script_kind(&p2pk_lock_script(&[0x02; 33]))
+        .expect("P2PK should be a standard script kind");
+    assert_eq!(check::script_sig_args_expected(&p2pk_kind), Some(1));
+
+    // 1-of-1 multisig: OP_0 + 1 sig.
+    let ms_kind = multisig_lock_script(1, &[&[0x02; 33]]);
+    let ms_kind = check::standard_script_kind(&ms_kind)
+        .expect("1-of-1 multisig should be a standard script kind");
+    assert_eq!(check::script_sig_args_expected(&ms_kind), Some(2));
 }

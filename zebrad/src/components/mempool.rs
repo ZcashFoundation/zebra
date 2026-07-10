@@ -308,7 +308,8 @@ impl Mempool {
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state(None);
+        let is_caught_up_to_start = service.is_caught_up_to_start();
+        service.update_state(None, is_caught_up_to_start);
 
         (service, transaction_subscriber)
     }
@@ -341,48 +342,70 @@ impl Mempool {
         is_debug_enabled
     }
 
-    /// Update the mempool state (enabled / disabled) depending on how close to
-    /// the tip is the synchronization, including side effects to state changes.
+    /// Returns `true` if Zebra is caught up enough to start the mempool.
+    fn is_caught_up_to_start(&self) -> bool {
+        self.sync_status.is_close_to_tip() || self.is_enabled_by_debug()
+    }
+
+    /// Replaces the active state with a freshly-initialised [`ActiveState::Enabled`],
+    /// using `tip_action`'s best tip hash as the `last_seen_tip_hash`.
+    fn enable_at_tip(&mut self, tip_action: &TipAction) {
+        let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
+
+        let tx_downloads = Box::pin(TxDownloads::new(
+            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+            self.state.clone(),
+        ));
+        self.active_state = ActiveState::Enabled {
+            storage: storage::Storage::new(&self.config),
+            tx_downloads,
+            last_seen_tip_hash,
+        };
+    }
+
+    /// Activate the mempool once Zebra is close enough to the tip.
     ///
-    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash` field
-    /// when enabling the mempool state, it will not enable the mempool if this is None.
+    /// Sync status only gates initial activation. Once the mempool is active,
+    /// this method does not disable it.
+    ///
+    /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash`
+    /// field when enabling the mempool state. It will not enable the mempool if
+    /// this is [`None`]. `is_caught_up_to_start` is supplied by the caller, which
+    /// already computes it, to avoid evaluating the sync-status predicate twice.
     ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
-        let is_close_to_tip = self.sync_status.is_close_to_tip() || self.is_enabled_by_debug();
-
-        match (is_close_to_tip, self.is_enabled(), tip_action) {
+    fn update_state(
+        &mut self,
+        tip_action: Option<&TipAction>,
+        is_caught_up_to_start: bool,
+    ) -> bool {
+        // TODO: revisit these state transitions when sync status can prove
+        // whether Zebra is behind the network tip.
+        match (is_caught_up_to_start, self.is_enabled(), tip_action) {
             // the active state is up to date, or there is no tip action to activate the mempool
             (false, false, _) | (true, true, _) | (true, false, None) => return false,
 
             // Enable state - there should be a chain tip when Zebra is close to the network tip
             (true, false, Some(tip_action)) => {
-                let (last_seen_tip_hash, tip_height) = tip_action.best_tip_hash_and_height();
-
-                info!(?tip_height, "activating mempool: Zebra is close to the tip");
-
-                let tx_downloads = Box::pin(TxDownloads::new(
-                    Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-                    Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                    self.state.clone(),
-                ));
-                self.active_state = ActiveState::Enabled {
-                    storage: storage::Storage::new(&self.config),
-                    tx_downloads,
-                    last_seen_tip_hash,
-                };
-            }
-
-            // Disable state
-            (false, true, _) => {
                 info!(
-                    tip_height = ?self.latest_chain_tip.best_tip_height(),
-                    "deactivating mempool: Zebra is syncing lots of blocks"
+                    tip_height = ?tip_action.best_tip_height(),
+                    "activating mempool: Zebra is close to the tip"
                 );
 
-                // This drops the previous ActiveState::Enabled, cancelling its download tasks.
-                // We don't preserve the previous transactions, because we are syncing lots of blocks.
-                self.active_state = ActiveState::Disabled;
+                self.enable_at_tip(tip_action);
+            }
+
+            // TODO: only disable an already-active mempool when validated sync
+            // state proves Zebra is behind a higher-work chain that follows
+            // this node's consensus rules.
+            //
+            // The sync status can be triggered by lower-work forks,
+            // stale peers, or peers on incompatible consensus rules, so
+            // it is strong enough to delay initial activation but not to shut
+            // down a working mempool.
+            (false, true, _) => {
+                return false;
             }
         };
 
@@ -526,10 +549,14 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let tip_action = self.chain_tip_change.last_tip_change();
+        let is_caught_up_to_start = self.is_caught_up_to_start();
+        let should_check_tip = self.is_enabled() || is_caught_up_to_start;
+        let tip_action = should_check_tip
+            .then(|| self.chain_tip_change.last_tip_change())
+            .flatten();
 
         // TODO: Consider broadcasting a `MempoolChange` when the mempool is disabled.
-        let is_state_changed = self.update_state(tip_action.as_ref());
+        let is_state_changed = self.update_state(tip_action.as_ref(), is_caught_up_to_start);
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
@@ -545,9 +572,16 @@ impl Service<Request> for Mempool {
         //
         // But if the mempool was just freshly enabled,
         // skip resetting and removing mined transactions for this tip.
-        if !is_state_changed && matches!(tip_action, Some(TipAction::Reset { .. })) {
+        let reset_tip_action = match tip_action.as_ref() {
+            Some(reset_tip_action @ TipAction::Reset { .. }) if !is_state_changed => {
+                Some(reset_tip_action)
+            }
+            _ => None,
+        };
+
+        if let Some(reset_tip_action) = reset_tip_action {
             info!(
-                tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
+                tip_height = ?reset_tip_action.best_tip_height(),
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 
@@ -563,7 +597,13 @@ impl Service<Request> for Mempool {
             std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
-            self.update_state(tip_action.as_ref());
+            //
+            // This deliberately bypasses the initial-activation gate in `update_state()`:
+            // the mempool was already active when the reset arrived, and a
+            // far-from-tip sync status must not disable an already-active mempool
+            // (it can be triggered by lower-work forks, stale peers, or peers on
+            // incompatible consensus rules).
+            self.enable_at_tip(reset_tip_action);
 
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.

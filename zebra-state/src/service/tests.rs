@@ -341,7 +341,7 @@ proptest! {
     /// Test the `Block.check_transaction_network_upgrade()` error inside the legacy check.
     #[test]
     fn at_least_one_transaction_with_inconsistent_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
         // this test requires that an invalid block is encountered
         // before a valid block (and before the check gives up),
@@ -382,7 +382,7 @@ proptest! {
     /// Test there is at least one transaction with a valid `network_upgrade` in the legacy check.
     #[test]
     fn at_least_one_transaction_with_valid_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());

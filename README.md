@@ -124,7 +124,7 @@ cargo install --locked zebrad
 Alternatively, you can install it from GitHub:
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v6.0.0-rc.0 zebrad
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v6.0.0 zebrad
 ```
 
 You can start Zebra by running

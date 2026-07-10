@@ -202,7 +202,8 @@ fn coinbase_cache_reuses_built_coinbase() {
 }
 
 /// From NU6.3 onward, a shielded coinbase paid to a Unified miner address with an Orchard
-/// receiver routes newly minted value into the Ironwood pool, not the Orchard pool.
+/// receiver routes newly minted value into the Ironwood pool, not the Orchard pool, and remains
+/// recoverable with the consensus-required all-zero outgoing viewing key.
 #[test]
 fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
     let net = Network::new_default_testnet();
@@ -232,4 +233,6 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         coinbase.orchard_shielded_data().is_none(),
         "coinbase must not create Orchard components on NU6.3"
     );
+    zebra_consensus::transaction::check::coinbase_outputs_are_decryptable(&coinbase, &net, height)
+        .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
 }

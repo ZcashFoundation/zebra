@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.1.0] - 2026-07-10
+
+### Added
+
+- `CommitCheckpointVerifiedError` re-exported from the crate root
+- `CommitCheckpointVerifiedError::inner()` and `CommitSemanticallyVerifiedError::inner()`
+  accessors for the underlying `CommitBlockError`
+  ([#10916](https://github.com/ZcashFoundation/zebra/pull/10916))
+
+### Changed
+
+- MSRV is now 1.88
+- Migrated to `rocksdb 0.24`
+
 ## [10.0.0] - 2026-07-02
 
 ### Breaking Changes

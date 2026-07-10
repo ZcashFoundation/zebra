@@ -110,9 +110,6 @@ skip-tree = [
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
 
-    # wait for librocksdb-sys to update bindgen
-    { name = "bindgen", version = "=0.69.5" },
-
     # wait for halo2_gadgets and primitive-types to update uint
     { name = "uint", version = "=0.9.5" },
 

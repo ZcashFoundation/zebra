@@ -36,7 +36,7 @@ defaults:
       - check-success=lint
       - check-success=unit-tests
       - check-success=test-crates
-      - check-success=semver-checks-result
+      - check-success=pr-gate-result
 
 
 # Allows to define the rules that reign over our merge queues
@@ -58,7 +58,7 @@ queue_rules:
       - check-success=lint
       - check-success=unit-tests
       - check-success=test-crates
-      - check-success=semver-checks-result
+      - check-success=pr-gate-result
       # is labeled with Critical priority
       - 'label~=^P-Critical'
 

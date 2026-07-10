@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `Fallback::new_with_policy()` for selecting fallback behavior based on
   the first service's result.
 
+## [0.2.42] - 2026-07-10
+
+### Changed
+
+- MSRV is now 1.88
+
 ## [0.2.41] - 2025-07-11
 
 First "stable" release. However, be advised that the API may still greatly
