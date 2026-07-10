@@ -15,12 +15,24 @@ ignore = [
     "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained): via librustzcash orchard -> getset
     "RUSTSEC-2025-0119", # number_prefix: transitive via indicatif
     "RUSTSEC-2025-0141", # bincode: direct dependency
-    # Advisories introduced by the tachyon librustzcash/tachyon dependency tree.
-    # All transitive; remove each as its dependency chain is upgraded.
-    "RUSTSEC-2026-0190", # anyhow: unsoundness in Error::downcast_mut()
+    # Advisories flagged after the jun29 upstream-merge snapshot. These are
+    # almost all upstream Zebra transitive deps (opentelemetry/tonic/prost,
+    # sentry, reqwest/rustls, metrics, proptest, profiling tools, and the zcash
+    # crypto stack) — not tachyon-specific — surfaced because the RustSec DB
+    # advanced past this snapshot's lockfile/ignore list. The `advisories` deny
+    # job is `continue-on-error` (non-blocking); this is the union seen across
+    # recent runs. Prune as deps upgrade (or as we catch up to upstream's main).
+    "RUSTSEC-2025-0134", # rustls-pemfile: unmaintained (deprecated; no fixed release)
     "RUSTSEC-2026-0007", # bytes: integer overflow in BytesMut::reserve
-    "RUSTSEC-2026-0204", # crossbeam-epoch: invalid pointer deref in fmt::Pointer for Atomic/Shared
+    "RUSTSEC-2026-0049", # rustls-webpki: CRLs not considered authoritative
+    "RUSTSEC-2026-0097", # rand: unsound with a custom logger using rand::rng()
+    "RUSTSEC-2026-0098", # rustls-webpki: URI name constraints incorrectly accepted
+    "RUSTSEC-2026-0099", # rustls-webpki: wildcard name constraints incorrectly accepted
+    "RUSTSEC-2026-0104", # rustls-webpki: reachable panic in CRL parsing
+    "RUSTSEC-2026-0190", # anyhow: unsoundness in Error::downcast_mut()
     "RUSTSEC-2026-0194", # quick-xml: quadratic run time on duplicate attribute names
+    "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation (DoS)
+    "RUSTSEC-2026-0204", # crossbeam-epoch: invalid pointer deref in fmt::Pointer
 ]
 
 # This section is considered when running `cargo deny check licenses`.
