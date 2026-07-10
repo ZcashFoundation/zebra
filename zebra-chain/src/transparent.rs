@@ -10,7 +10,9 @@ mod utxo;
 use std::{collections::HashMap, fmt, iter, ops::AddAssign};
 
 use zcash_script::{opcode::Evaluable as _, pattern::push_num};
-use zcash_transparent::{address::TransparentAddress, bundle::TxOut, coinbase::MAX_COINBASE_SCRIPT_LEN};
+use zcash_transparent::{
+    address::TransparentAddress, bundle::TxOut, coinbase::MAX_COINBASE_SCRIPT_LEN,
+};
 
 use crate::{
     amount::{Amount, NonNegative},

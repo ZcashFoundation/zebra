@@ -15,6 +15,13 @@ keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
+# `zcash_tachyon` and `ragu` are only used behind the `cfg(zcash_unstable = "nu7")`
+# gate (set via RUSTFLAGS, not a cargo feature), so cargo-udeps — which builds
+# without that cfg — reports them as unused. Ignore these known false positives.
+[package.metadata.cargo-udeps.ignore]
+normal = ["zcash_tachyon"]
+development = ["ragu"]
+
 [features]
 default = []
 

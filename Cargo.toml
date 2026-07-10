@@ -23,7 +23,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 homepage = "https://zfnd.org/zebra/"
 keywords = ["zebra", "zcash"]
-rust-version = "1.85.1"
+# Raised from upstream's 1.85.1: the tachyon librustzcash/tachyon fork
+# dependencies require a newer toolchain, matching rust-toolchain.toml.
+rust-version = "1.91"
 edition = "2021"
 
 # `cargo release` settings
