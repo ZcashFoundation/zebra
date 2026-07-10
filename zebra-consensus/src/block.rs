@@ -119,6 +119,25 @@ impl VerifyBlockError {
     }
 }
 
+/// Converts an error from a `CommitSemanticallyVerifiedBlock` state request
+/// into a [`VerifyBlockError`].
+///
+/// The state boxes commit errors as [`zs::CommitSemanticallyVerifiedError`], a
+/// newtype around [`zs::CommitBlockError`], so the wrapper must be unwrapped
+/// here for `is_duplicate_request()` and `misbehavior_score()` to classify
+/// duplicate blocks as benign.
+fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
+    if let Some(commit_err) = source
+        .downcast_ref::<zs::CommitSemanticallyVerifiedError>()
+        .map(zs::CommitSemanticallyVerifiedError::inner)
+        .or_else(|| source.downcast_ref::<zs::CommitBlockError>())
+    {
+        return VerifyBlockError::Commit(commit_err.clone());
+    }
+
+    VerifyBlockError::StateService { source, hash }
+}
+
 /// The maximum number of transparent signature operations allowed in a block.
 ///
 /// # Consensus
@@ -380,13 +399,7 @@ where
                     Ok(hash)
                 }
 
-                Err(source) => {
-                    if let Some(commit_err) = source.downcast_ref::<zs::CommitBlockError>() {
-                        return Err(VerifyBlockError::Commit(commit_err.clone()));
-                    }
-
-                    Err(VerifyBlockError::StateService { source, hash })
-                }
+                Err(source) => Err(map_commit_error(source, hash)),
 
                 _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
             }

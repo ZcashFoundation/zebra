@@ -113,7 +113,7 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 Zebra is a Zcash full node implementation in Rust. It is a validator node — it excludes features not strictly needed for block validation and chain sync.
 
 - **Rust edition**: 2021
-- **MSRV**: 1.85.1 (libraries), 1.91 (zebrad binary)
+- **MSRV**: 1.88 (libraries), 1.91 (zebrad binary)
 - **Database format version**: defined in `zebra-state/src/constants.rs`
 
 ## Crate Architecture

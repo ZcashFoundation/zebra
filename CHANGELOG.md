@@ -14,12 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   time** (in addition to `protoc` and a C++ compiler) even when linking a system
   RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
   `clang` (Arch), or the equivalent for your platform.
+- Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
+  MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
+  builds on the new MSRV.
 
 ### Fixed
 
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+- Fix syncer restarts due to incorrect error downcasting.
+- Fix a read-state syncer startup hang: a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly
+  instead of syncing, advancing only one block per newly mined block
+  ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
 
 ## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 

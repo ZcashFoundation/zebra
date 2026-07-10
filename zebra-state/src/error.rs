@@ -136,6 +136,13 @@ impl CommitBlockError {
 #[error("could not commit semantically-verified block")]
 pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
 
+impl CommitSemanticallyVerifiedError {
+    /// Returns the [`CommitBlockError`] describing why the commit failed.
+    pub fn inner(&self) -> &CommitBlockError {
+        &self.0
+    }
+}
+
 impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     fn from(value: ValidateContextError) -> Self {
         Self(CommitBlockError::ValidateContextError(Box::new(value)))
@@ -163,6 +170,13 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 #[derive(Debug, Error, Clone)]
 #[error("could not commit checkpoint-verified block")]
 pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+
+impl CommitCheckpointVerifiedError {
+    /// Returns the [`CommitBlockError`] describing why the commit failed.
+    pub fn inner(&self) -> &CommitBlockError {
+        &self.0
+    }
+}
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
