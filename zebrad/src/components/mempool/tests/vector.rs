@@ -453,7 +453,8 @@ async fn mempool_service_stays_enabled_when_sync_status_falls_behind() -> Result
     assert!(usage > 0, "usage should not be cleared");
     assert_eq!(
         fully_notified, None,
-        "fully_notified is not implemented for active mempool stats yet"
+        "fully_notified is currently always None: a placeholder pending the regtest \
+         network-info TODO in the QueueStats handler"
     );
 
     Ok(())

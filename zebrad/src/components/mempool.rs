@@ -308,7 +308,8 @@ impl Mempool {
 
         // Make sure `is_enabled` is accurate.
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
-        service.update_state(None);
+        let is_caught_up_to_start = service.is_caught_up_to_start();
+        service.update_state(None, is_caught_up_to_start);
 
         (service, transaction_subscriber)
     }
@@ -370,12 +371,15 @@ impl Mempool {
     ///
     /// Accepts an optional [`TipAction`] for setting the `last_seen_tip_hash`
     /// field when enabling the mempool state. It will not enable the mempool if
-    /// this is [`None`].
+    /// this is [`None`]. `is_caught_up_to_start` is supplied by the caller, which
+    /// already computes it, to avoid evaluating the sync-status predicate twice.
     ///
     /// Returns `true` if the state changed.
-    fn update_state(&mut self, tip_action: Option<&TipAction>) -> bool {
-        let is_caught_up_to_start = self.is_caught_up_to_start();
-
+    fn update_state(
+        &mut self,
+        tip_action: Option<&TipAction>,
+        is_caught_up_to_start: bool,
+    ) -> bool {
         // TODO: revisit these state transitions when sync status can prove
         // whether Zebra is behind the network tip.
         match (is_caught_up_to_start, self.is_enabled(), tip_action) {
@@ -545,13 +549,14 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let should_check_tip = self.is_enabled() || self.is_caught_up_to_start();
+        let is_caught_up_to_start = self.is_caught_up_to_start();
+        let should_check_tip = self.is_enabled() || is_caught_up_to_start;
         let tip_action = should_check_tip
             .then(|| self.chain_tip_change.last_tip_change())
             .flatten();
 
         // TODO: Consider broadcasting a `MempoolChange` when the mempool is disabled.
-        let is_state_changed = self.update_state(tip_action.as_ref());
+        let is_state_changed = self.update_state(tip_action.as_ref(), is_caught_up_to_start);
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 

@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   cancelled when a temporary signal (which lower-work forks or stale peers can
   trigger) reports Zebra is far from the tip; initial activation still waits until
   Zebra is near the chain tip
-  ([#10926](https://github.com/ZcashFoundation/zebra/pull/10926)).
+  ([#10929](https://github.com/ZcashFoundation/zebra/pull/10929)).
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
