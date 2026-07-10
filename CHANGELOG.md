@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- NU6.3 (Ironwood) now activates on Mainnet at block height 3,428,143, matching
+  `zcash_protocol`. Node operators must upgrade to this release before activation.
+
 ### Changed
 
+- Updated the `zcash_*` and `orchard` crates to their released NU6.3 versions.
 - Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
   `bindgen` to generate its FFI bindings, so **`libclang` is required at build
   time** (in addition to `protoc` and a C++ compiler) even when linking a system
