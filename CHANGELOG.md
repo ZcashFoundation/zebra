@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+- Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
+  `bindgen` to generate its FFI bindings, so **`libclang` is required at build
+  time** (in addition to `protoc` and a C++ compiler) even when linking a system
+  RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
+  `clang` (Arch), or the equivalent for your platform.
 - Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
   MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
   builds on the new MSRV.
