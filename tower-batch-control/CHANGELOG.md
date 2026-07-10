@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so gRPC requests can be used as the batch request type without consumer-side
   newtype wrappers ([#10667](https://github.com/ZcashFoundation/zebra/issues/10667))
 
+### Changed
+
+- MSRV is now 1.88
+
 ## [0.2.42] - 2025-10-15
 
 ### Added

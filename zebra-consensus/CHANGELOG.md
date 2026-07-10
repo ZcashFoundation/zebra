@@ -7,30 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
-
-- Added new variants of `error::TransactionError`:
-  - `NonStandardScriptSigSize`
-  - `NonStandardScriptSigNotPushOnly`
-  - `NonStandardInputs`
-
 ### Added
 
+- `error::TransactionError`:
+  - `NonStandardInputs`
+  - `NonStandardScriptSigNotPushOnly { input_index }`
+  - `NonStandardScriptSigSize { input_index, size }`
 - `transaction::check`:
-  - `mempool_standard_input_scripts`, the pre-verification mempool input-script gate
-  - `are_inputs_standard` and `standard_script_kind` (zcashd's `AreInputsStandard()` and
-    scriptPubKey classifier, moved here from `zebrad`)
-  - the `MAX_P2SH_SIGOPS` and `MAX_STANDARD_SCRIPTSIG_SIZE` policy constants
+  - `MAX_P2SH_SIGOPS`
+  - `MAX_STANDARD_SCRIPTSIG_SIZE`
+  - `are_inputs_standard`
+  - `mempool_standard_input_scripts`
+  - `standard_script_kind`
 
-### Fixed
+### Changed
 
-- Mempool transactions with non-standard transparent inputs are now rejected
-  _before_ script verification, to avoid the more expensive script verification
-  and reduce DoS surface
+- MSRV is now 1.88
+
+### Security
+
+- Mempool transactions with non-standard transparent inputs are now rejected before
+  script verification, reducing DoS surface
   ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
-  Thanks to @ouicate for reporting the issue.
-- Related to the previous item, script verification now runs on the shared Rayon
-  thread pool to avoid blocking the runtime.
+  Thanks to @ouicate for reporting the issue. Script verification also now runs on
+  the shared Rayon thread pool to avoid blocking the runtime.
 
 ## [10.0.0] - 2026-07-02
 

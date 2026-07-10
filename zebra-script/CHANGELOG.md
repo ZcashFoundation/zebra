@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can apply per-input standardness limits (zcashd's `MAX_P2SH_SIGOPS`) in addition to
   the existing transaction-wide `p2sh_sigop_count` total.
 
+### Changed
+
+- MSRV is now 1.88
+
 ## [10.0.0] - 2026-07-02
 
 ### Changed

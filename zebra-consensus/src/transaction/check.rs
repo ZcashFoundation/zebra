@@ -107,21 +107,23 @@ pub fn lock_time_has_passed(
 ///
 /// # Consensus
 ///
-/// For `Transaction::V4`:
-///
 /// > [Sapling onward] If effectiveVersion < 5, then at least one of
 /// > tx_in_count, nSpendsSapling, and nJoinSplit MUST be nonzero.
 ///
 /// > [Sapling onward] If effectiveVersion < 5, then at least one of
 /// > tx_out_count, nOutputsSapling, and nJoinSplit MUST be nonzero.
 ///
-/// For `Transaction::V5`:
-///
-/// > [NU5 onward] If effectiveVersion >= 5 then this condition MUST hold:
+/// > [NU5 onward] If effectiveVersion = 5 then this condition MUST hold:
 /// > tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1).
 ///
-/// > [NU5 onward] If effectiveVersion >= 5 then this condition MUST hold:
+/// > [NU5 onward] If effectiveVersion = 5 then this condition MUST hold:
 /// > tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1).
+///
+/// > [NU6.3 onward] If effectiveVersion >= 6 then this condition MUST hold:
+/// > tx_in_count > 0 or nSpendsSapling > 0 or (nActionsOrchard > 0 and enableSpendsOrchard = 1) or (nActionsIronwood > 0 and enableSpendsIronwood = 1).
+///
+/// > [NU6.3 onward] If effectiveVersion >= 6 then this condition MUST hold:
+/// > tx_out_count > 0 or nOutputsSapling > 0 or (nActionsOrchard > 0 and enableOutputsOrchard = 1) or (nActionsIronwood > 0 and enableOutputsIronwood = 1).
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///
@@ -156,8 +158,8 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 ///
 /// # Consensus
 ///
-/// > [NU6.3 onward] If there are any Ironwood actions, then at least one of enableSpendsIronwood
-/// > and enableOutputsIronwood MUST be 1.
+/// > [NU6.3 onward] If effectiveVersion ≥ 6 and nActionsIronwood > 0, then at least one of
+/// > enableSpendsIronwood and enableOutputsIronwood MUST be 1.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///

@@ -7,11 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
+### Changed
 
-- `MinimumPeerVersion::chain_tip_height()` is replaced by `chain_tip()`, which returns a
-  reference to the underlying chain tip instead of a `Height`
-  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+- MSRV is now 1.88
 
 ## [10.0.0] - 2026-07-02
 
