@@ -32,7 +32,7 @@ semver:
   - "**/*.rs"
   - "**/Cargo.toml"
   - "**/Cargo.lock"
-  - ".github/workflows/semver-checks.yml"
+  - ".github/workflows/pr-gate.yml"
   - ".github/path-filters.yml"
 
 unit_tests:
