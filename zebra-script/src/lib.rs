@@ -378,9 +378,19 @@ fn extract_p2sh_redeem_script(unlock_script: &transparent::Script) -> Option<Vec
 
 /// Returns the P2SH sigop count for a single input.
 ///
+/// `spent_output` must be the output spent by `input`.
+///
 /// Returns 0 for non-P2SH inputs, coinbase inputs, and P2SH inputs where no redeem script can be
-/// extracted from the scriptSig.
-fn p2sh_input_sigop_count(input: &transparent::Input, spent_output: &transparent::Output) -> u32 {
+/// extracted from the scriptSig (mirroring zcashd's `CScript::GetSigOpCount(scriptSig)`, which
+/// returns 0 when the scriptSig is not push-only).
+///
+/// This is the per-input counting used by [`p2sh_sigop_count`] for the block-wide consensus sigop
+/// total, and by the mempool standardness gate that rejects high-sigop P2SH inputs before script
+/// verification.
+pub fn p2sh_input_sigop_count(
+    input: &transparent::Input,
+    spent_output: &transparent::Output,
+) -> u32 {
     let unlock_script = match input {
         transparent::Input::PrevOut { unlock_script, .. } => unlock_script,
         transparent::Input::Coinbase { .. } => return 0,

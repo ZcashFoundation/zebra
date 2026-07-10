@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Added new variants of `error::TransactionError`:
+  - `NonStandardScriptSigSize`
+  - `NonStandardScriptSigNotPushOnly`
+  - `NonStandardInputs`
+
+### Added
+
+- `transaction::check`:
+  - `mempool_standard_input_scripts`, the pre-verification mempool input-script gate
+  - `are_inputs_standard` and `standard_script_kind` (zcashd's `AreInputsStandard()` and
+    scriptPubKey classifier, moved here from `zebrad`)
+  - the `MAX_P2SH_SIGOPS` and `MAX_STANDARD_SCRIPTSIG_SIZE` policy constants
+
+### Fixed
+
+- Mempool transactions with non-standard transparent inputs are now rejected
+  _before_ script verification, to avoid the more expensive script verification
+  and reduce DoS surface
+  ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
+  Thanks to @ouicate for reporting the issue.
+- Related to the previous item, script verification now runs on the shared Rayon
+  thread pool to avoid blocking the runtime.
+
 ## [10.0.0] - 2026-07-02
 
 ### Added

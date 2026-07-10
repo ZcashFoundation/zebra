@@ -19,7 +19,7 @@ use zebra_chain::{
 };
 use zebra_state::ValidateContextError;
 
-use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
+use crate::{block::MAX_BLOCK_SIGOPS, transaction::check::MAX_STANDARD_SCRIPTSIG_SIZE, BoxError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -242,6 +242,20 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
 
+    // Mempool standardness (policy) rejections, applied before script verification.
+    // These are not consensus rules: the same input scripts are valid in blocks.
+    #[error(
+        "mempool transaction input {input_index} has a {size} byte scriptSig, \
+         above the {MAX_STANDARD_SCRIPTSIG_SIZE} byte standardness limit"
+    )]
+    NonStandardScriptSigSize { input_index: usize, size: usize },
+
+    #[error("mempool transaction input {input_index} has a non-push-only scriptSig")]
+    NonStandardScriptSigNotPushOnly { input_index: usize },
+
+    #[error("mempool transaction has non-standard transparent inputs")]
+    NonStandardInputs,
+
     #[error("transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,
 
@@ -390,6 +404,9 @@ impl TransactionError {
             | LockedUntilAfterBlockHeight(_)
             | LockedUntilAfterBlockTime(_) => 100,
 
+            // Standardness (policy) rejections must not be punished: non-standard
+            // transactions are consensus-valid, and zcashd relays a reject message
+            // without a DoS score for them.
             _other => 0,
         }
     }
