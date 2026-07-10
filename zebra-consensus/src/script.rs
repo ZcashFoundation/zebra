@@ -5,7 +5,7 @@ use tracing::Instrument;
 use zebra_chain::transparent;
 use zebra_script::CachedFfiTransaction;
 
-use crate::BoxError;
+use crate::{primitives::spawn_fifo_and_convert, BoxError};
 
 #[cfg(test)]
 mod tests;
@@ -58,7 +58,7 @@ impl tower::Service<Request> for Verifier {
 
         let span = tracing::trace_span!("script");
         async move {
-            let input = &cached_ffi_transaction
+            let input = cached_ffi_transaction
                 .inputs()
                 .get(input_index)
                 .ok_or_else(|| {
@@ -69,8 +69,9 @@ impl tower::Service<Request> for Verifier {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     let outpoint = *outpoint;
 
-                    // Avoid calling the state service if the utxo is already known
-                    cached_ffi_transaction.is_valid(input_index)?;
+                    // Script verification is CPU-bound so run in Rayon thread
+                    spawn_fifo_and_convert(move || cached_ffi_transaction.is_valid(input_index))
+                        .await?;
                     tracing::trace!(?outpoint, "script verification succeeded");
 
                     Ok(())

@@ -456,6 +456,12 @@ where
             //       the state once #2336 has been implemented?
             if req.is_mempool() {
                 Self::check_maturity_height(&network, &req, &spent_utxos)?;
+
+                // Reject non-standard input scripts (oversized or non-push-only
+                // scriptSigs, and high-sigop P2SH redeem scripts) *before*
+                // doing expensive script verification, to avoid DoS attacks on
+                // the script interpreter.
+                check::mempool_standard_input_scripts(tx.as_ref(), &spent_outputs)?;
             }
 
             let nu = req.upgrade(&network);

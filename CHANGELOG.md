@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   had caught up past the node's non-finalized root would re-subscribe endlessly
   instead of syncing, advancing only one block per newly mined block
   ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
+- Mempool transactions with non-standard transparent inputs are now rejected
+  _before_ script verification, to avoid the more expensive script verification
+  and reduce DoS surface
+  ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
+  Thanks to @ouicate for reporting the issue.
+- Related to the previous item, script verification now runs on the shared Rayon
+  thread pool to avoid blocking the runtime.
 
 ## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
 
