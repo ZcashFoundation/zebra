@@ -18,7 +18,7 @@ use crate::{
 #[allow(unused_imports)]
 use crate::service;
 
-/// Reject double-spends of nullifers:
+/// Reject double-spends of nullifiers:
 /// - one from this [`SemanticallyVerifiedBlock`], and the other already committed to the
 ///   [`FinalizedState`](service::FinalizedState).
 ///
@@ -143,13 +143,15 @@ pub(crate) fn tx_no_duplicates_in_chain(
     Ok(())
 }
 
-/// Reject double-spends of nullifers:
+/// Reject double-spends of nullifiers:
 /// - both within the same `JoinSplit` (sprout only),
-/// - from different `JoinSplit`s, [`sapling::Spend`][2]s or
-///   [`orchard::Action`][3]s in this [`Transaction`][1]'s shielded data, or
+/// - from different `JoinSplit`s, [`sapling::Spend`](zebra_chain::sapling::Spend)s or
+///   [`orchard::Action`](zebra_chain::orchard::Action)s in this
+///   [`Transaction`]'s shielded data, or
 /// - one from this shielded data, and another from:
-///   - a previous transaction in this [`Block`][4], or
-///   - a previous block in this non-finalized [`Chain`][5].
+///   - a previous transaction in this [`Block`](zebra_chain::block::Block), or
+///   - a previous block in this non-finalized
+///     [`Chain`].
 ///
 /// (Duplicate finalized nullifiers are rejected during service contextual validation,
 /// see [`no_duplicates_in_finalized_chain`] for details.)
@@ -168,12 +170,6 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// different pools have nullifiers with same bit pattern, they won't be
 /// considered the same when determining uniqueness. This is enforced by the
 /// callers of this function.
-///
-/// [1]: zebra_chain::transaction::Transaction
-/// [2]: zebra_chain::sapling::Spend
-/// [3]: zebra_chain::orchard::Action
-/// [4]: zebra_chain::block::Block
-/// [5]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<NullifierT>(
     chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
@@ -199,7 +195,7 @@ where
 }
 
 /// Remove nullifiers that were previously added to this non-finalized
-/// [`Chain`][1] by this shielded data.
+/// [`Chain`] by this shielded data.
 ///
 /// "A note can change from being unspent to spent as a node’s view
 /// of the best valid block chain is extended by new transactions.
@@ -219,9 +215,8 @@ where
 ///
 /// Blocks with duplicate nullifiers are rejected by
 /// [`add_to_non_finalized_chain_unique`], so this shielded data should be the
-/// only shielded data that added this nullifier to this [`Chain`][1].
-///
-/// [1]: service::non_finalized_state::Chain
+/// only shielded data that added this nullifier to this
+/// [`Chain`].
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<NullifierT>(
     chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
