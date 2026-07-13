@@ -92,7 +92,7 @@ ARG CARGO_TARGET_DIR
 
 # Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-1+b1 curl=8.14.1-2+deb13u3 && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-1+b1 curl=8.14.1-2+deb13u4 && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -210,7 +210,7 @@ ENV HOME=${HOME}
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
     adduser=3.152 \
-    curl=8.14.1-2+deb13u3 \
+    curl=8.14.1-2+deb13u4 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \

@@ -66,7 +66,7 @@ jobs:
         env:
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-          RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links -D warnings
+          RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links -A rustdoc::redundant_explicit_links -D warnings
 
       - name: Build internal docs
         run: |
@@ -78,7 +78,7 @@ jobs:
           # Keep in sync with ./lint.yml:jobs.docs
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-          RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
+          RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links -A rustdoc::redundant_explicit_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Include benchmark dashboard
         # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into
