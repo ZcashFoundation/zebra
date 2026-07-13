@@ -10,19 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 - NU6.3 (Ironwood) now activates on Mainnet at block height 3,428,143, matching
-  `zcash_protocol`. Node operators must upgrade to this release before activation.
+  `zcash_protocol`. Node operators must upgrade to this release before activation
+  ([#10938](https://github.com/ZcashFoundation/zebra/pull/10938)).
 
 ### Changed
 
-- Updated the `zcash_*` and `orchard` crates to their released NU6.3 versions.
+- Updated the `zcash_*` and `orchard` crates to their released NU6.3 versions
+  ([#10938](https://github.com/ZcashFoundation/zebra/pull/10938)).
 - Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
   `bindgen` to generate its FFI bindings, so **`libclang` is required at build
   time** (in addition to `protoc` and a C++ compiler) even when linking a system
   RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
-  `clang` (Arch), or the equivalent for your platform.
+  `clang` (Arch), or the equivalent for your platform
+  ([#10922](https://github.com/ZcashFoundation/zebra/pull/10922)).
 - Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
   MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
-  builds on the new MSRV.
+  builds on the new MSRV
+  ([#10927](https://github.com/ZcashFoundation/zebra/pull/10927)).
 
 ### Fixed
 
@@ -35,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
   responses when the local node is at or near the chain tip
   ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
-- Fix syncer restarts due to incorrect error downcasting.
+- Fix syncer restarts due to incorrect error downcasting
+  ([#10916](https://github.com/ZcashFoundation/zebra/pull/10916)).
 - Fix a read-state syncer startup hang: a co-located consumer whose finalized state
   had caught up past the node's non-finalized root would re-subscribe endlessly
   instead of syncing, advancing only one block per newly mined block

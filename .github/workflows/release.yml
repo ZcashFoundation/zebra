@@ -121,6 +121,8 @@ jobs:
         run: |
           echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
+      - name: Install libclang for librocksdb-sys bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Publish crates and create tags
         id: release-plz
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
