@@ -1,9 +1,17 @@
 //! Fixed test vectors for the peer set.
 
-use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    cmp::max,
+    collections::HashSet,
+    iter,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
+use futures::{stream, FutureExt as _, StreamExt};
 use tokio::time::timeout;
-use tower::{Service, ServiceExt};
+use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
     block,
@@ -11,11 +19,11 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::DEFAULT_MAX_CONNS_PER_IP,
-    peer::{ClientRequest, MinimumPeerVersion},
-    peer_set::inventory_registry::InventoryStatus,
+    constants::{CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP},
+    peer::{ClientRequest, ClientTestHarness, ConnectedAddr, MinimumPeerVersion},
+    peer_set::{inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD},
     protocol::external::{types::Version, InventoryHash},
-    PeerSocketAddr, Request, SharedPeerError,
+    BoxError, PeerSocketAddr, Request, Response, SharedPeerError,
 };
 use indexmap::IndexMap;
 use tokio::sync::watch;
@@ -692,6 +700,63 @@ fn peer_set_route_inv_all_missing_fail() {
                 .expect("peer set should return a boxed SharedPeerError")
                 .inner_debug(),
             "NotFoundRegistry([Block(block::Hash(\"0000000000000000000000000000000000000000000000000000000000000000\"))])"
+        );
+    });
+}
+
+/// Check that the sync stall detector does not disconnect the configured zcashd-compat sidecar.
+#[test]
+fn find_blocks_stall_not_tracked_for_zcashd_compat() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let sidecar_ip = Ipv4Addr::LOCALHOST;
+    let sidecar_addr: PeerSocketAddr =
+        SocketAddr::new(IpAddr::V6(sidecar_ip.to_ipv6_mapped()), 1).into();
+    let (sidecar, mut sidecar_handle) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .with_connected_addr(ConnectedAddr::new_inbound_direct(sidecar_addr))
+        .finish();
+    let discovered_peers = stream::iter([Ok::<_, BoxError>(Change::Insert(
+        sidecar_addr,
+        sidecar.into(),
+    ))])
+    .chain(stream::pending());
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Simulate Zebra syncing ahead of its zcashd-compat sidecar.
+    best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_block_gossip_peer_ips(vec![sidecar_ip.into()])
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+            let client_request = sidecar_handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("sidecar received the request");
+            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            response_fut.await.expect("response received");
+        }
+
+        // If sidecar responses were tracked, this poll would process the final
+        // stall event and disconnect it.
+        let _ = peer_set.ready().now_or_never();
+
+        assert!(
+            sidecar_handle.wants_connection_heartbeats(),
+            "zcashd-compat sidecar should not be disconnected by the sync stall detector"
         );
     });
 }

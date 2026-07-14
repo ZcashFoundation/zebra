@@ -244,6 +244,9 @@ where
         HashSet<D::Key>,
     )>,
 
+    /// Inbound peer IPs that must always receive block inventory broadcasts.
+    block_gossip_peer_ips: HashSet<IpAddr>,
+
     // Peer Tracking: Busy Peers
     //
     /// Connected peers that are handling a Zebra request,
@@ -324,6 +327,7 @@ where
     ///
     /// Arguments:
     /// - `config`: configures the peer set connection limit;
+    /// - `block_gossip_peer_ips`: inbound peer IPs that must always receive block inventory broadcasts.
     /// - `discover`: handles peer connects and disconnects;
     /// - `demand_signal`: requests more peers when all peers are busy (unready);
     /// - `handle_rx`: receives background task handles,
@@ -339,6 +343,7 @@ where
     ///   [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
+        block_gossip_peer_ips: Vec<IpAddr>,
         discover: D,
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
@@ -366,6 +371,7 @@ where
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
+            block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -926,6 +932,36 @@ where
             .choose_multiple(&mut rand::thread_rng(), max_peers)
     }
 
+    /// Randomly chooses ready peers for block gossip, always including configured
+    /// zcashd compat sidecar peers.
+    fn select_block_broadcast_peers(&self, max_peers: usize) -> Vec<D::Key> {
+        use rand::seq::IteratorRandom;
+
+        let mut selected_peers: Vec<_> = self
+            .ready_services
+            .iter()
+            .filter_map(|(key, service)| self.is_zcashd_compat_peer(service).then_some(*key))
+            .collect();
+
+        let zcashd_compat_peers: HashSet<_> = selected_peers.iter().copied().collect();
+        selected_peers.extend(
+            self.ready_services
+                .keys()
+                .filter(|key| !zcashd_compat_peers.contains(key))
+                .copied()
+                .choose_multiple(&mut rand::thread_rng(), max_peers),
+        );
+
+        selected_peers
+    }
+
+    /// Returns true if `service` is a configured zcashd sidecar peer.
+    fn is_zcashd_compat_peer(&self, service: &D::Service) -> bool {
+        self.block_gossip_peer_ips
+            .iter()
+            .any(|ip| service.is_inbound_direct_from_ip(ip))
+    }
+
     /// Accesses a ready endpoint by `key` and returns its current load.
     ///
     /// Returns `None` if the service is not in the ready service list.
@@ -946,7 +982,7 @@ where
             let track_stalls = matches!(
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
-            );
+            ) && !self.is_zcashd_compat_peer(&svc);
 
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
@@ -1123,6 +1159,12 @@ where
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
         self.route_multiple(req, self.number_of_peers_to_broadcast())
+    }
+
+    /// Broadcasts a block inventory request to sampled peers and configured sidecars.
+    fn route_block_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let selected_peers = self.select_block_broadcast_peers(self.number_of_peers_to_broadcast());
+        self.send_multiple(req, selected_peers)
     }
 
     /// Broadcasts the same request to all ready peers, ignoring return values.
@@ -1414,7 +1456,7 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlock(_, _) => self.route_broadcast(req),
+            Request::AdvertiseBlock(_, _) => self.route_block_broadcast(req),
             Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
             // Choose a random less-loaded peer for all other requests
