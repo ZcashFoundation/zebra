@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A new `lightwalletd` module with a tonic gRPC server that implements the
   lightwalletd `CompactTxStreamer` interface (`lightwalletd::server::init`),
-  and a new `rpc.lightwalletd_listen_addr` config field to enable it.
+  and a new `rpc.lightwalletd_listen_addr` config field to enable it
+  ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
 
 ## [11.1.0] - 2026-07-10
 

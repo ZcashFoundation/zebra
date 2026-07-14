@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Zebra can now serve Zcash light clients directly: a new gRPC server implements
   the lightwalletd `CompactTxStreamer` interface, enabled by setting
-  `rpc.lightwalletd_listen_addr` in the config.
+  `rpc.lightwalletd_listen_addr` in the config
+  ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
 
 ## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
 
