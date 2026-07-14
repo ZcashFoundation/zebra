@@ -5,6 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- Zebra can now serve Zcash light clients directly: a new gRPC server implements
+  the lightwalletd `CompactTxStreamer` interface, enabled by setting
+  `rpc.lightwalletd_listen_addr` in the config.
+
 ## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
 
 ### Added
