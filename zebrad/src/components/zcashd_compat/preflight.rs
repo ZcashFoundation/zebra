@@ -182,6 +182,14 @@ fn run_linux_preflight(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<
             resolve_zcashd_datadir_path(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args);
     }
 
+    // Only check zcashd disk capacity against a datadir Zebra actually knows:
+    // the resolved managed datadir, or an explicitly configured external one.
+    // An unmanaged sidecar without `zcashd_datadir` set can keep its data on a
+    // filesystem (or host) Zebra never uses.
+    let zcashd_datadir_for_disk_check = (config.zcashd_compat.manage_zcashd
+        || config.zcashd_compat.zcashd_datadir.is_some())
+    .then_some(zcashd_datadir.as_path());
+
     let mut summary = PreflightSummary::default();
     check_permissions(&mut summary, config, &zcashd_datadir)?;
     check_cpu(&mut summary)?;
@@ -190,7 +198,7 @@ fn run_linux_preflight(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<
         &mut summary,
         &config.network.network,
         &config.state.cache_dir,
-        &zcashd_datadir,
+        zcashd_datadir_for_disk_check,
     )?;
 
     for warning in finalize_preflight(summary, unsafe_low_specs)? {
@@ -517,21 +525,25 @@ fn check_disk(
     summary: &mut PreflightSummary,
     network: &Network,
     zebra_cache_dir: &Path,
-    zcashd_datadir: &Path,
+    zcashd_datadir: Option<&Path>,
 ) -> Result<(), Report> {
     let thresholds = disk_thresholds(network);
-    let requirements = vec![
-        PathRequirement {
-            role: DiskRole::ZebraState,
-            target_path: zebra_cache_dir.to_path_buf(),
-            min_provisioned_bytes: thresholds.min_zebra_bytes,
-        },
-        PathRequirement {
+    let mut requirements = vec![PathRequirement {
+        role: DiskRole::ZebraState,
+        target_path: zebra_cache_dir.to_path_buf(),
+        min_provisioned_bytes: thresholds.min_zebra_bytes,
+    }];
+
+    // In externally managed mode without a configured `zcashd_datadir`, the
+    // sidecar's datadir location is unknown to Zebra (it can be on another
+    // host or filesystem), so there is no path to check capacity against.
+    if let Some(zcashd_datadir) = zcashd_datadir {
+        requirements.push(PathRequirement {
             role: DiskRole::ZcashdData,
             target_path: zcashd_datadir.to_path_buf(),
             min_provisioned_bytes: thresholds.min_zcashd_bytes,
-        },
-    ];
+        });
+    }
 
     let grouped_filesystems = grouped_requirements_by_filesystem(&requirements)?;
     evaluate_disk_thresholds(

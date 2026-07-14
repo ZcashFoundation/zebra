@@ -21,5 +21,5 @@ pub use preflight::run_preflight;
 pub use supervisor::{
     is_command_resolvable, reject_peer_selection_extra_args, run as run_supervisor,
     set_supervision_config_disabled_metrics, set_supervision_unexpectedly_disabled_metrics,
-    SupervisorConfig,
+    terminate_abandoned_zcashd, SupervisorConfig,
 };

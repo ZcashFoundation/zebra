@@ -76,6 +76,18 @@ pub struct Config {
     /// If empty while zcashd-compat is enabled, Zebra defaults this list to
     /// loopback addresses. This setting is rejected when zcashd-compat is
     /// disabled.
+    ///
+    /// # Security
+    ///
+    /// This is a trusted-peer privilege boundary, not just a gossip list.
+    /// Inbound peers connecting from these IPs also:
+    /// - get one reserved inbound connection slot (shared across the list),
+    /// - bypass the recent-IP reconnection rate limit, and
+    /// - are exempt from the `FindBlocks`/`FindHeaders` sync stall detector.
+    ///
+    /// Only list addresses where every process is trusted, like the loopback
+    /// addresses of a host that runs nothing but Zebra and its sidecar.
+    /// Never list IPs that untrusted machines can connect from.
     pub block_gossip_peer_ips: Vec<IpAddr>,
 
     /// Delay before the first `zcashd` spawn attempt.

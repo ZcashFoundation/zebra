@@ -210,7 +210,7 @@ reqwest = { workspace = true, default-features = false, features = ["blocking", 
 sha2 = { workspace = true }
 flate2 = "1.1"
 tar = "0.4"
-nix = { workspace = true, features = ["fs", "signal"] }
+nix = { workspace = true, features = ["fs", "signal", "process"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 

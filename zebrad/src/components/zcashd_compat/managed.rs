@@ -121,10 +121,11 @@ pub(super) fn cached_managed_zcashd_binary_is_current(
 
     let provenance_path = binary_path.with_file_name("zcashd.sha256");
 
-    Ok(Some(
-        binary_path.is_file()
-            && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?,
-    ))
+    Ok(Some(provenance_matches(
+        &provenance_path,
+        &artifact.runtime_archive_sha256,
+        &binary_path,
+    )?))
 }
 
 fn resolve_managed_zcashd_binary_from_manifest(
@@ -151,9 +152,11 @@ fn resolve_managed_zcashd_binary_from_manifest(
 
     let binary_path = cache_dir.join("zcashd");
     let provenance_path = cache_dir.join("zcashd.sha256");
-    if binary_path.is_file()
-        && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?
-    {
+    if provenance_matches(
+        &provenance_path,
+        &artifact.runtime_archive_sha256,
+        &binary_path,
+    )? {
         return Ok(binary_path);
     }
 
@@ -164,9 +167,11 @@ fn resolve_managed_zcashd_binary_from_manifest(
     )?;
 
     // Re-check after acquiring the lock.
-    if binary_path.is_file()
-        && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?
-    {
+    if provenance_matches(
+        &provenance_path,
+        &artifact.runtime_archive_sha256,
+        &binary_path,
+    )? {
         return Ok(binary_path);
     }
 
@@ -189,6 +194,7 @@ fn resolve_managed_zcashd_binary_from_manifest(
         extracted_temp.path(),
     )?;
     make_executable(extracted_temp.path())?;
+    let binary_sha256 = sha256_hex_file(extracted_temp.path())?;
     extracted_temp.persist(&binary_path).map_err(|err| {
         eyre!(
             "failed to persist managed zcashd binary {}: {}",
@@ -198,7 +204,7 @@ fn resolve_managed_zcashd_binary_from_manifest(
     })?;
     fs::write(
         &provenance_path,
-        format!("{}\n", artifact.runtime_archive_sha256),
+        provenance_content(&artifact.runtime_archive_sha256, &binary_sha256),
     )?;
 
     Ok(binary_path)
@@ -318,16 +324,52 @@ fn normalize_member_path(path: &str) -> String {
     path.trim_start_matches("./").to_string()
 }
 
-/// Returns `true` if `path` exists and stores exactly `expected_sha256`.
-fn provenance_matches(path: &Path, expected_sha256: &str) -> Result<bool, Report> {
-    if !path.is_file() {
+/// Returns the provenance marker content for a verified extraction:
+/// the manifest-pinned archive digest and the digest of the extracted binary.
+fn provenance_content(archive_sha256: &str, binary_sha256: &str) -> String {
+    format!("archive_sha256:{archive_sha256}\nbinary_sha256:{binary_sha256}\n")
+}
+
+/// Returns `true` if the provenance marker at `path` records exactly the
+/// manifest-pinned `expected_archive_sha256`, and the binary at `binary_path`
+/// still hashes to the recorded binary digest.
+///
+/// # Security
+///
+/// The cached executable is re-hashed on every reuse: a marker file alone
+/// cannot vouch for a binary that was modified or corrupted after extraction.
+fn provenance_matches(
+    path: &Path,
+    expected_archive_sha256: &str,
+    binary_path: &Path,
+) -> Result<bool, Report> {
+    if !path.is_file() || !binary_path.is_file() {
         return Ok(false);
     }
 
-    let value = fs::read_to_string(path)
-        .map(|content| content.trim().to_string())
-        .unwrap_or_default();
-    Ok(value == expected_sha256)
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let mut recorded_archive = None;
+    let mut recorded_binary = None;
+    for line in content.lines() {
+        if let Some(value) = line.strip_prefix("archive_sha256:") {
+            recorded_archive = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("binary_sha256:") {
+            recorded_binary = Some(value.trim().to_string());
+        }
+    }
+
+    let (Some(recorded_archive), Some(recorded_binary)) = (recorded_archive, recorded_binary)
+    else {
+        // Markers from older formats do not record the binary digest, so they
+        // cannot be trusted: re-download and re-verify.
+        return Ok(false);
+    };
+
+    if recorded_archive != expected_archive_sha256 {
+        return Ok(false);
+    }
+
+    Ok(sha256_hex_file(binary_path)? == recorded_binary)
 }
 
 /// Computes the lowercase hex SHA256 digest for `path`.
@@ -531,9 +573,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        acquire_lock, effective_zcashd_source, normalize_member_path, provenance_matches,
-        resolve_managed_zcashd_binary_from_manifest, sha256_hex_file, zcashd_target_triple, Config,
-        ZcashdBinarySource,
+        acquire_lock, effective_zcashd_source, normalize_member_path, provenance_content,
+        provenance_matches, resolve_managed_zcashd_binary_from_manifest, sha256_hex_file,
+        zcashd_target_triple, Config, ZcashdBinarySource,
     };
     use crate::components::zcashd_compat::{
         ConfigZcashdBinarySource, ZcashdReleaseArtifact, ZcashdReleaseManifest,
@@ -589,23 +631,49 @@ mod tests {
     }
 
     #[test]
-    fn provenance_matches_handles_missing_and_present_files() {
+    fn provenance_matches_verifies_marker_and_binary_digest() {
         let temp = tempdir().expect("tempdir should exist");
         let path = temp.path().join("sha.txt");
+        let binary_path = temp.path().join("zcashd");
 
         assert!(
-            !provenance_matches(&path, "abc").expect("missing file should not match"),
+            !provenance_matches(&path, "abc", &binary_path).expect("missing file should not match"),
             "missing provenance should not match"
         );
 
-        std::fs::write(&path, "abc\n").expect("provenance file should write");
+        std::fs::write(&binary_path, b"binary contents").expect("binary file should write");
+        let binary_sha256 =
+            sha256_hex_file(&binary_path).expect("binary digest should be computable");
+
+        std::fs::write(&path, provenance_content("abc", &binary_sha256))
+            .expect("provenance file should write");
         assert!(
-            provenance_matches(&path, "abc").expect("matching provenance should succeed"),
+            provenance_matches(&path, "abc", &binary_path)
+                .expect("matching provenance should succeed"),
             "written provenance should match"
         );
         assert!(
-            !provenance_matches(&path, "def").expect("mismatched provenance should succeed"),
-            "different expected hash should not match"
+            !provenance_matches(&path, "def", &binary_path)
+                .expect("mismatched provenance should succeed"),
+            "different expected archive hash should not match"
+        );
+
+        // A legacy archive-only marker cannot vouch for the binary.
+        std::fs::write(&path, "abc\n").expect("provenance file should write");
+        assert!(
+            !provenance_matches(&path, "abc", &binary_path)
+                .expect("legacy provenance should be readable"),
+            "legacy archive-only provenance should not match"
+        );
+
+        // A modified binary must not be reused, even with an intact marker.
+        std::fs::write(&path, provenance_content("abc", &binary_sha256))
+            .expect("provenance file should write");
+        std::fs::write(&binary_path, b"tampered contents").expect("binary file should write");
+        assert!(
+            !provenance_matches(&path, "abc", &binary_path)
+                .expect("tampered binary check should succeed"),
+            "a tampered cached binary should not match"
         );
     }
 

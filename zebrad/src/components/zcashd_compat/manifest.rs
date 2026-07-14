@@ -1,9 +1,9 @@
 //! Embedded zcashd compatibility release manifest.
 //!
 //! [`zebrad/zcashd-compat-manifest.json`](../../../zcashd-compat-manifest.json) is the
-//! single source of truth for the zcashd compat pin: CI and Docker builds read it via
-//! `scripts/resolve-zcashd-compat-manifest.sh`, and zebrad embeds it at compile time
-//! and parses it here.
+//! single source of truth for the zcashd compat pin: `make/zcashd-compat.mk` and
+//! `scripts/install-zebra.sh` read it with `jq`, and zebrad embeds it at compile
+//! time and parses it here.
 
 use std::sync::LazyLock;
 

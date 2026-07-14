@@ -849,6 +849,15 @@ impl Runnable for StartCmd {
         rt.expect("runtime should not already be taken")
             .run(self.start());
 
+        // On SIGINT/SIGTERM the runtime drops the whole `start()` future,
+        // including the zcashd-compat supervisor task, so its graceful
+        // shutdown path never runs. Terminate any abandoned supervised zcashd
+        // synchronously, now that the runtime has shut down.
+        let config = APPLICATION.config();
+        if config.zcashd_compat.enabled && config.zcashd_compat.manage_zcashd {
+            zcashd_compat::terminate_abandoned_zcashd(config.zcashd_compat.shutdown_grace_period);
+        }
+
         info!("stopping zebrad");
     }
 }

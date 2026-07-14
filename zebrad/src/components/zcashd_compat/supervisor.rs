@@ -3,6 +3,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::atomic::{AtomicU32, Ordering},
     time::{Duration, Instant},
 };
 
@@ -20,9 +21,19 @@ use zebra_chain::parameters::NetworkKind;
 
 use super::{effective_zcashd_datadir, ensure_zcashd_datadir, resolve_zcashd_datadir_path, Config};
 
-const SUPERVISOR_ACTIVE_METRIC: &str = "zcashd_compat.supervisor.active";
-const SUPERVISOR_DISABLED_METRIC: &str = "zcashd_compat.supervisor.disabled";
-const SUPERVISOR_EXHAUSTED_METRIC: &str = "zcashd_compat.supervisor.exhausted";
+const SUPERVISOR_ACTIVE_METRIC: &str = "zcashd.compat.supervisor.active";
+const SUPERVISOR_DISABLED_METRIC: &str = "zcashd.compat.supervisor.disabled";
+const SUPERVISOR_EXHAUSTED_METRIC: &str = "zcashd.compat.supervisor.exhausted";
+
+/// The pid of the currently running supervised zcashd child, or `0` when none.
+///
+/// On SIGINT/SIGTERM, the tokio runtime drops the whole `start()` future — and
+/// the supervisor task with it — without ever running the supervisor's
+/// graceful-shutdown path. The child is spawned without `kill_on_drop`, so it
+/// would be silently orphaned. This pid lets
+/// [`terminate_abandoned_zcashd`] clean up synchronously after the runtime has
+/// shut down.
+static SUPERVISED_ZCASHD_PID: AtomicU32 = AtomicU32::new(0);
 
 /// The full configuration used by the zcashd-compat supervisor task.
 #[derive(Clone, Debug)]
@@ -219,6 +230,7 @@ pub async fn run(
             }
         };
         let child_started_at = Instant::now();
+        SUPERVISED_ZCASHD_PID.store(child.id().unwrap_or(0), Ordering::SeqCst);
         info!(
             path = %config.zcashd_path.display(),
             datadir = %config.zcashd_datadir.display(),
@@ -234,12 +246,16 @@ pub async fn run(
                     grace_period = ?config.shutdown_grace_period,
                     "zcashd-compat supervisor received shutdown request; terminating zcashd child"
                 );
-                terminate_child(&mut child, config.shutdown_grace_period).await?;
+                let terminate_result =
+                    terminate_child(&mut child, config.shutdown_grace_period).await;
+                SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+                terminate_result?;
                 info!("zcashd-compat zcashd child stopped on shutdown");
                 set_supervision_inactive_metrics();
                 return Ok(());
             }
             ChildOutcome::Exited(status) => {
+                SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
                 let child_uptime = child_started_at.elapsed();
                 if should_reset_restart_count(child_uptime, config.restart_reset_after) {
                     info!(
@@ -272,6 +288,81 @@ pub async fn run(
                 }
             }
         }
+    }
+}
+
+/// Terminates a supervised zcashd child that the supervisor task never got to
+/// shut down, blocking the calling thread.
+///
+/// On SIGINT/SIGTERM, the tokio runtime cancels the supervisor task without
+/// polling it again, so its graceful-shutdown path never runs and the child
+/// (spawned without `kill_on_drop`) is orphaned. Call this after the runtime
+/// has shut down: it sends SIGTERM, waits up to `shutdown_grace_period` for the
+/// child to exit, and SIGKILLs it as a last resort — the same sequence as the
+/// supervisor's own [`terminate_child`].
+///
+/// Does nothing when no supervised child is running, or on non-Unix targets
+/// (managed zcashd is only supported on Linux).
+pub fn terminate_abandoned_zcashd(shutdown_grace_period: Duration) {
+    let pid = SUPERVISED_ZCASHD_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return;
+    }
+
+    #[cfg(unix)]
+    {
+        use nix::{
+            sys::{
+                signal::{kill, Signal::SIGKILL, Signal::SIGTERM},
+                wait::{waitpid, WaitPidFlag, WaitStatus},
+            },
+            unistd::Pid,
+        };
+
+        let pid = Pid::from_raw(pid as i32);
+
+        // Returns true once the child has exited. zebrad is the child's
+        // parent, and its dropped `Child` handle no longer reaps it, so an
+        // exited child stays a zombie (where `kill(pid, 0)` still succeeds)
+        // until this `waitpid` reaps it.
+        let child_has_exited = || match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => false,
+            // Reaped here, already reaped, or never ours: nothing left running.
+            Ok(_) | Err(_) => true,
+        };
+
+        info!(
+            %pid,
+            grace_period = ?shutdown_grace_period,
+            "terminating zcashd-compat zcashd child abandoned by runtime shutdown"
+        );
+        if kill(pid, SIGTERM).is_err() || child_has_exited() {
+            return;
+        }
+
+        const POLL_INTERVAL: Duration = Duration::from_millis(200);
+        let deadline = Instant::now() + shutdown_grace_period;
+        while Instant::now() < deadline {
+            std::thread::sleep(POLL_INTERVAL);
+            if child_has_exited() {
+                info!(%pid, "abandoned zcashd-compat zcashd child exited after SIGTERM");
+                return;
+            }
+        }
+
+        warn!(
+            %pid,
+            grace_period = ?shutdown_grace_period,
+            "abandoned zcashd-compat zcashd child did not exit within the grace period; \
+             sending SIGKILL as a last resort"
+        );
+        let _ = kill(pid, SIGKILL);
+        let _ = waitpid(pid, None);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, shutdown_grace_period);
     }
 }
 
