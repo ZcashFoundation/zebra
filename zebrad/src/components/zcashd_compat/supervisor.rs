@@ -248,7 +248,12 @@ pub async fn run(
                 );
                 let terminate_result =
                     terminate_child(&mut child, config.shutdown_grace_period).await;
-                SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+                if terminate_result.is_ok() {
+                    // Only forget the pid once the child's exit is confirmed:
+                    // on errors it may still be running, and the pid arms the
+                    // post-runtime `terminate_abandoned_zcashd` cleanup.
+                    SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+                }
                 terminate_result?;
                 info!("zcashd-compat zcashd child stopped on shutdown");
                 set_supervision_inactive_metrics();
@@ -319,17 +324,34 @@ pub fn terminate_abandoned_zcashd(shutdown_grace_period: Duration) {
             unistd::Pid,
         };
 
-        let pid = Pid::from_raw(pid as i32);
+        let Ok(pid) = i32::try_from(pid) else {
+            // Linux pids fit in i32; a value that doesn't cannot be signalled
+            // safely (a wrapped negative pid would target a process group).
+            warn!(
+                pid,
+                "abandoned zcashd-compat zcashd pid does not fit in i32"
+            );
+            return;
+        };
+        let pid = Pid::from_raw(pid);
 
         // Returns true once the child has exited. zebrad is the child's
         // parent, and its dropped `Child` handle no longer reaps it, so an
         // exited child stays a zombie (where `kill(pid, 0)` still succeeds)
-        // until this `waitpid` reaps it.
+        // until this `waitpid` reaps it. `waitpid` only matches our own
+        // children, so a recycled pid belonging to another process reports
+        // as exited instead of being signalled.
         let child_has_exited = || match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
             Ok(WaitStatus::StillAlive) => false,
             // Reaped here, already reaped, or never ours: nothing left running.
             Ok(_) | Err(_) => true,
         };
+
+        // Check before signalling: if the child already exited and was reaped,
+        // its pid may have been recycled by an unrelated process.
+        if child_has_exited() {
+            return;
+        }
 
         info!(
             %pid,
@@ -472,9 +494,12 @@ where
 
 /// Returns a sanitized log line with ANSI escape/control noise removed.
 fn sanitize_child_log_line(line: &str) -> Cow<'_, str> {
+    // Take the slow path for any non-ASCII byte too: C1 controls like U+009B
+    // (single-byte CSI) are multi-byte in UTF-8 and would slip through an
+    // ASCII-only gate, but are stripped by the `is_control` filter below.
     let has_escape_or_control = line
         .bytes()
-        .any(|byte| byte == 0x1b || (byte.is_ascii_control() && byte != b'\t'));
+        .any(|byte| byte == 0x1b || byte >= 0x80 || (byte.is_ascii_control() && byte != b'\t'));
 
     if !has_escape_or_control {
         return Cow::Borrowed(line);
@@ -613,13 +638,15 @@ async fn terminate_child(
             unistd::Pid,
         };
 
-        if let Some(id) = pid {
+        // Linux pids fit in i32; a value that doesn't cannot be signalled
+        // safely (a wrapped negative pid would target a process group).
+        if let Some(id) = pid.and_then(|id| i32::try_from(id).ok()) {
             info!(
                 pid = id,
                 grace_period = ?shutdown_grace_period,
                 "sending SIGTERM to zcashd-compat zcashd child"
             );
-            if let Err(error) = kill(Pid::from_raw(id as i32), SIGTERM) {
+            if let Err(error) = kill(Pid::from_raw(id), SIGTERM) {
                 warn!(
                     pid = id,
                     ?error,
@@ -627,7 +654,7 @@ async fn terminate_child(
                 );
             }
         } else {
-            warn!("zcashd-compat zcashd child has no process id; cannot send SIGTERM");
+            warn!("zcashd-compat zcashd child has no usable process id; cannot send SIGTERM");
         }
     }
 

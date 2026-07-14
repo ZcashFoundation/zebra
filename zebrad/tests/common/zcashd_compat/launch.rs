@@ -81,16 +81,24 @@ impl ZcashdCompatSetup {
         let zcashd_pid = self.zcashd_pid().ok();
 
         if let Some(mut z) = self.managed.take() {
-            z.kill(false)?;
+            // Kill zebrad first so its supervisor cannot respawn zcashd,
+            // then kill zcashd BEFORE the fallible asserts: an early `?`
+            // return would drop the testdir (and pid file), turning the
+            // `Drop` backstop into a no-op and leaking the sidecar.
+            let kill_result = z.kill(false);
+            if let Some(pid) = zcashd_pid {
+                // Best-effort: zcashd may already have exited.
+                let _ = send_signal(pid, "-KILL");
+            }
+            kill_result?;
             z.wait_with_output()?
                 .assert_failure()?
                 .assert_was_killed()?;
-        }
-
-        // Best-effort: zcashd may already have exited (resilience tests stop it).
-        if let Some(pid) = zcashd_pid {
+        } else if let Some(pid) = zcashd_pid {
+            // Best-effort: zcashd may already have exited (resilience tests stop it).
             let _ = send_signal(pid, "-KILL");
         }
+
         Ok(())
     }
 }

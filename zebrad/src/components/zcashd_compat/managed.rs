@@ -87,7 +87,10 @@ pub fn resolve_managed_zcashd_binary(state_cache_dir: &Path) -> Result<PathBuf, 
 
 /// Returns the managed zcashd binary cache path without creating directories,
 /// or `None` when managed downloads are unsupported for this target.
-#[allow(dead_code)]
+///
+/// Only called from Linux-gated preflight code, so it is dead code on other
+/// targets.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(super) fn managed_zcashd_binary_path(state_cache_dir: &Path) -> Option<PathBuf> {
     let target = zcashd_target_triple()?;
 
@@ -101,31 +104,40 @@ pub(super) fn managed_zcashd_binary_path(state_cache_dir: &Path) -> Option<PathB
     )
 }
 
-/// Returns whether the cached managed zcashd binary is current for this target,
-/// or `None` when managed downloads are unsupported for this target.
-#[allow(dead_code)]
-pub(super) fn cached_managed_zcashd_binary_is_current(
-    state_cache_dir: &Path,
-) -> Result<Option<bool>, Report> {
-    let Some(target) = zcashd_target_triple() else {
-        return Ok(None);
-    };
-    let artifact = EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifact_for_target(target);
-    let Some(artifact) = artifact else {
-        return Ok(None);
-    };
-
-    let Some(binary_path) = managed_zcashd_binary_path(state_cache_dir) else {
-        return Ok(None);
-    };
-
+/// Returns whether a cached managed zcashd binary exists for this target with
+/// a provenance marker recording the manifest-pinned archive digest, or `None`
+/// when managed downloads are unsupported for this target.
+///
+/// Preflight uses this to decide whether a download is likely needed, so it
+/// compares the marker's recorded archive digest (a cheap string check that
+/// catches a bumped release pin) but deliberately skips re-hashing the whole
+/// binary: the security-critical digest verification happens in
+/// [`resolve_managed_zcashd_binary`] before the binary is used.
+///
+/// Only called from Linux-gated preflight code, so it is dead code on other
+/// targets.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(super) fn cached_managed_zcashd_binary_is_present(state_cache_dir: &Path) -> Option<bool> {
+    let target = zcashd_target_triple()?;
+    let artifact = EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifact_for_target(target)?;
+    let binary_path = managed_zcashd_binary_path(state_cache_dir)?;
     let provenance_path = binary_path.with_file_name("zcashd.sha256");
 
-    Ok(Some(provenance_matches(
-        &provenance_path,
-        &artifact.runtime_archive_sha256,
-        &binary_path,
-    )?))
+    if !binary_path.is_file() {
+        return Some(false);
+    }
+
+    let content = fs::read_to_string(provenance_path).unwrap_or_default();
+    let recorded_archive = content
+        .lines()
+        .find_map(|line| line.strip_prefix("archive_sha256:"))
+        .map(str::trim);
+
+    Some(
+        recorded_archive.is_some_and(|recorded| {
+            recorded.eq_ignore_ascii_case(&artifact.runtime_archive_sha256)
+        }),
+    )
 }
 
 fn resolve_managed_zcashd_binary_from_manifest(
@@ -180,7 +192,7 @@ fn resolve_managed_zcashd_binary_from_manifest(
     archive_temp.as_file_mut().sync_all()?;
 
     let archive_sha256 = sha256_hex_file(archive_temp.path())?;
-    if archive_sha256 != artifact.runtime_archive_sha256 {
+    if !archive_sha256.eq_ignore_ascii_case(&artifact.runtime_archive_sha256) {
         return Err(eyre!(
             "managed zcashd archive hash mismatch for target {target}: expected {}, got {archive_sha256}",
             artifact.runtime_archive_sha256
@@ -365,11 +377,11 @@ fn provenance_matches(
         return Ok(false);
     };
 
-    if recorded_archive != expected_archive_sha256 {
+    if !recorded_archive.eq_ignore_ascii_case(expected_archive_sha256) {
         return Ok(false);
     }
 
-    Ok(sha256_hex_file(binary_path)? == recorded_binary)
+    Ok(sha256_hex_file(binary_path)?.eq_ignore_ascii_case(&recorded_binary))
 }
 
 /// Computes the lowercase hex SHA256 digest for `path`.
@@ -387,7 +399,7 @@ fn sha256_hex_file(path: &Path) -> Result<String, Report> {
     }
 
     let digest = hasher.finalize();
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(hex::encode(digest))
 }
 
 /// Makes `path` executable on Unix targets.

@@ -1,5 +1,9 @@
 .PHONY: help
 
+# Keep `make` with no target printing help: the first rule in an included
+# file would otherwise become the default goal.
+.DEFAULT_GOAL := help
+
 include make/zcashd-compat.mk
 
 help:

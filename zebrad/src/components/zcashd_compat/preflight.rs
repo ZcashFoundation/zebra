@@ -25,7 +25,7 @@ use super::{
     datadir::resolve_zcashd_conf_path,
     effective_zcashd_datadir, effective_zcashd_source, ensure_zcashd_datadir,
     is_command_resolvable,
-    managed::{cached_managed_zcashd_binary_is_current, managed_zcashd_binary_path},
+    managed::{cached_managed_zcashd_binary_is_present, managed_zcashd_binary_path},
     resolve_zcashd_datadir_path, ZcashdBinarySource,
 };
 use crate::config::ZebradConfig;
@@ -378,13 +378,8 @@ fn check_zcashd_binary(
             let Some(binary_path) = managed_zcashd_binary_path(state_cache_dir) else {
                 return;
             };
-            let cache_is_current = match cached_managed_zcashd_binary_is_current(state_cache_dir) {
-                Ok(cache_is_current) => cache_is_current.unwrap_or(false),
-                Err(error) => {
-                    summary.errors.push(error.to_string());
-                    false
-                }
-            };
+            let cache_is_current =
+                cached_managed_zcashd_binary_is_present(state_cache_dir).unwrap_or(false);
 
             if binary_path.exists() && !is_command_resolvable(&binary_path) {
                 summary.errors.push(format!(
@@ -841,6 +836,9 @@ fn display_paths(paths: &[PathBuf]) -> String {
 
 #[cfg(target_os = "linux")]
 fn human_gib(bytes: u64) -> String {
+    // Cast is safe: these are display-only values, and f64 represents all
+    // disk/memory sizes below 2^53 bytes (8 PiB) exactly enough for one
+    // decimal place of GiB.
     format!("{:.1} GiB", bytes as f64 / GIB as f64)
 }
 

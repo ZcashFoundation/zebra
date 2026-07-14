@@ -136,18 +136,10 @@ impl PeerSetBuilder<(), ()> {
 
 impl<D, C> PeerSetBuilder<D, C> {
     /// Use the provided [`Config`] when constructing the [`PeerSet`] instance.
-    #[allow(dead_code)]
     pub fn with_config(self, config: Config) -> PeerSetBuilder<D, C> {
         PeerSetBuilder {
             config: Some(config),
-            discover: self.discover,
-            demand_signal: self.demand_signal,
-            handle_rx: self.handle_rx,
-            inv_stream: self.inv_stream,
-            address_book: self.address_book,
-            minimum_peer_version: self.minimum_peer_version,
-            max_conns_per_ip: self.max_conns_per_ip,
-            block_gossip_peer_ips: self.block_gossip_peer_ips,
+            ..self
         }
     }
 
@@ -157,15 +149,8 @@ impl<D, C> PeerSetBuilder<D, C> {
         block_gossip_peer_ips: Vec<IpAddr>,
     ) -> PeerSetBuilder<D, C> {
         PeerSetBuilder {
-            config: self.config,
-            discover: self.discover,
-            demand_signal: self.demand_signal,
-            handle_rx: self.handle_rx,
-            inv_stream: self.inv_stream,
-            address_book: self.address_book,
-            minimum_peer_version: self.minimum_peer_version,
-            max_conns_per_ip: self.max_conns_per_ip,
             block_gossip_peer_ips,
+            ..self
         }
     }
 

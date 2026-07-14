@@ -1034,7 +1034,17 @@ compat_normalize_inputs() {
   fi
   ZEBRA_P2P_ADDR="$(printf '%s' "$ZEBRA_P2P_ADDR" | sanitize_terminal_input)"
 
-  if [[ "$ZEBRA_P2P_ADDR" != *:* || -z "$(compat_p2p_port_from_addr "$ZEBRA_P2P_ADDR")" ]]; then
+  # Require a numeric port: a port-less IPv6 address like `::1` would pass a
+  # bare HOST:PORT shape check and yield an unparsable listen address plus a
+  # bogus `-connect` port extracted from the last address segment.
+  local zebra_p2p_port
+  zebra_p2p_port="$(compat_p2p_port_from_addr "$ZEBRA_P2P_ADDR")"
+  case "$zebra_p2p_port" in
+    '' | *[!0-9]*)
+      add_error "--zebra-p2p-addr must be HOST:PORT with a numeric port, got: $ZEBRA_P2P_ADDR"
+      ;;
+  esac
+  if [[ "$ZEBRA_P2P_ADDR" != *:* ]]; then
     add_error "--zebra-p2p-addr must be HOST:PORT, got: $ZEBRA_P2P_ADDR"
   fi
 }

@@ -968,16 +968,16 @@ where
         use rand::seq::IteratorRandom;
 
         let mut selected_peers: Vec<_> = self
-            .ready_services
+            .zcashd_compat_peer_keys
             .iter()
-            .filter_map(|(key, service)| self.is_zcashd_compat_peer(service).then_some(*key))
+            .filter(|key| self.ready_services.contains_key(*key))
+            .copied()
             .collect();
 
-        let zcashd_compat_peers: HashSet<_> = selected_peers.iter().copied().collect();
         selected_peers.extend(
             self.ready_services
                 .keys()
-                .filter(|key| !zcashd_compat_peers.contains(key))
+                .filter(|key| !self.zcashd_compat_peer_keys.contains(key))
                 .copied()
                 .choose_multiple(&mut rand::thread_rng(), max_peers),
         );
@@ -986,6 +986,10 @@ where
     }
 
     /// Returns true if `service` is a configured zcashd sidecar peer.
+    ///
+    /// Only used to classify peers once, when they are inserted into the peer
+    /// set; every later check uses the O(1) [`Self::zcashd_compat_peer_keys`]
+    /// set instead.
     fn is_zcashd_compat_peer(&self, service: &D::Service) -> bool {
         self.block_gossip_peer_ips
             .iter()
@@ -1012,7 +1016,7 @@ where
             let track_stalls = matches!(
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
-            ) && !self.is_zcashd_compat_peer(&svc);
+            ) && !self.zcashd_compat_peer_keys.contains(&p2c_key);
 
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
@@ -1228,6 +1232,11 @@ where
             return;
         };
 
+        // Like `broadcast_all_queued`, don't deliver to peers that were banned
+        // while the advert was queued.
+        let bans = self.bans_receiver.borrow().clone();
+        remaining_sidecars.retain(|key| !bans.contains_key(&key.ip()));
+
         let ready_sidecars: Vec<D::Key> = remaining_sidecars
             .iter()
             .filter(|key| self.ready_services.contains_key(*key))
@@ -1238,7 +1247,7 @@ where
 
             let mut svc = self
                 .take_ready_service(&key)
-                .expect("selected sidecars are ready");
+                .expect("sidecars are ready because they were filtered from ready_services above");
             let advert_fut = svc.call(req.clone());
             self.push_unready(key, svc);
 

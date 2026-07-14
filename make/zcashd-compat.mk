@@ -129,9 +129,12 @@ compat-zcashd-start-standalone:
 		-listenonion=0 \
 		-discover=0
 
+# The bracketed first characters ([z]ebrad) stop pgrep -f from matching the
+# `sh -c` wrapper process that runs this recipe, whose own command line
+# contains the pattern text.
 compat-zebrad-status:
 	@echo "Checking zebrad process..."
-	@if pgrep -f "zebrad start --zcashd-compat" >/dev/null; then \
+	@if pgrep -f "[z]ebrad start --zcashd-compat" >/dev/null; then \
 		echo "zebrad process: OK"; \
 	else \
 		echo "zebrad process: NOT RUNNING"; \
@@ -140,7 +143,7 @@ compat-zebrad-status:
 
 compat-zcashd-status:
 	@echo "Checking zcashd process..."
-	@if pgrep -f "zcashd.*-connect" >/dev/null; then \
+	@if pgrep -f "[z]cashd.*-connect" >/dev/null; then \
 		echo "zcashd process: OK"; \
 	else \
 		echo "zcashd process: NOT RUNNING"; \
@@ -168,6 +171,8 @@ compat-status-sync:
 		--data '{"jsonrpc":"1.0","id":"make","method":"getblockcount","params":[]}' \
 		"$(ZEBRA_RPC_URL)" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"])')"; \
 		zcashd_height="$$( "$(ZCASH_CLI_BIN)" -conf="$(ZCASHD_CONF)" -datadir="$(ZCASHD_DATADIR)" getblockcount )"; \
+		case "$$zebra_height" in '' | *[!0-9]*) echo "ERROR: failed to fetch zebrad height"; exit 1;; esac; \
+		case "$$zcashd_height" in '' | *[!0-9]*) echo "ERROR: failed to fetch zcashd height"; exit 1;; esac; \
 		drift=$$(( zebra_height - zcashd_height )); \
 		if [ $$drift -lt 0 ]; then drift=$$(( -drift )); fi; \
 		echo "zebrad height: $$zebra_height"; \

@@ -208,6 +208,7 @@ dirs = { workspace = true }
 # zcashd-compat sidecar supervision dependencies
 reqwest = { workspace = true, default-features = false, features = ["blocking", "rustls-tls"] }
 sha2 = { workspace = true }
+hex = { workspace = true }
 flate2 = "1.1"
 tar = "0.4"
 nix = { workspace = true, features = ["fs", "signal", "process"] }
@@ -278,7 +279,6 @@ tonic-prost-build = { workspace = true, optional = true }
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
 anyhow = { workspace = true }
-hex = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }

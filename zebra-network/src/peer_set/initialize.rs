@@ -652,14 +652,22 @@ where
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
     );
-    let mut active_zcashd_compat_connections =
-        ActiveConnectionCounter::new_counter_with(1, "zcashd-compat Inbound Connection");
     let zcashd_compat_peer_ips: HashSet<_> = zcashd_compat_peer_ips
         .into_iter()
         .map(|ip| canonical_socket_addr(SocketAddr::new(ip, 0)).ip())
         .collect();
-    let zcashd_compat_reserved_slots = usize::from(
-        !zcashd_compat_peer_ips.is_empty() && config.peerset_inbound_connection_limit() > 0,
+    // Reserve one inbound slot per configured sidecar IP, always leaving at
+    // least one public slot. Reserved slots are a fast path, not a cap:
+    // when they are taken, further connections from listed IPs compete for
+    // public slots like any other peer, so an unrelated local process (or a
+    // sidecar reconnecting before its dead connection is noticed) can never
+    // lock the real sidecar out of the node.
+    let zcashd_compat_reserved_slots = zcashd_compat_peer_ips
+        .len()
+        .min(config.peerset_inbound_connection_limit().saturating_sub(1));
+    let mut active_zcashd_compat_connections = ActiveConnectionCounter::new_counter_with(
+        zcashd_compat_reserved_slots,
+        "zcashd-compat Inbound Connections",
     );
     let public_inbound_connection_limit = config
         .peerset_inbound_connection_limit()
@@ -710,20 +718,16 @@ where
 
             // The peer already opened a connection to us.
             // So we want to increment the connection count as soon as possible.
-            let connection_tracker = if is_zcashd_compat_peer {
-                if active_zcashd_compat_inbound_connections >= zcashd_compat_reserved_slots
-                    || active_total_inbound_connections >= config.peerset_inbound_connection_limit()
-                {
-                    // Too many zcashd-compat or total open inbound connections already.
-                    // Close the connection.
-                    std::mem::drop(tcp_stream);
-                    // Allow invalid connections to be cleared quickly,
-                    // but still put a limit on our CPU and network usage from failed connections.
-                    tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL)
-                        .await;
-                    continue;
-                }
+            //
+            // Sidecar-listed IPs use a reserved slot when one is free, and
+            // otherwise fall back to competing for a public slot (including
+            // the recent-IP rate limit), so a taken reserved slot delays a
+            // sidecar rather than locking it out.
+            let use_reserved_slot = is_zcashd_compat_peer
+                && active_zcashd_compat_inbound_connections < zcashd_compat_reserved_slots
+                && active_total_inbound_connections < config.peerset_inbound_connection_limit();
 
+            let connection_tracker = if use_reserved_slot {
                 active_zcashd_compat_connections.track_connection()
             } else if active_public_inbound_connections >= public_inbound_connection_limit
                 || active_total_inbound_connections >= config.peerset_inbound_connection_limit()

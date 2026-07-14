@@ -185,7 +185,14 @@ impl StartCmd {
         }
 
         if local_listener.ip().is_unspecified() {
-            SocketAddr::from(([127, 0, 0, 1], local_listener.port()))
+            // Substitute the loopback address of the same IP family: an
+            // IPv6-only listener is not reachable via 127.0.0.1.
+            match local_listener.ip() {
+                IpAddr::V4(_) => SocketAddr::from(([127, 0, 0, 1], local_listener.port())),
+                IpAddr::V6(_) => {
+                    SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), local_listener.port())
+                }
+            }
         } else {
             local_listener
         }
@@ -277,7 +284,15 @@ impl StartCmd {
         };
 
         if config.zcashd_compat.enabled {
-            zcashd_compat::run_preflight(&config, self.unsafe_low_specs)?;
+            // Preflight does blocking filesystem and /proc reads, and can hash
+            // the cached zcashd binary, so keep it off the async runtime.
+            let preflight_config = config.clone();
+            let unsafe_low_specs = self.unsafe_low_specs;
+            tokio::task::spawn_blocking(move || {
+                zcashd_compat::run_preflight(&preflight_config, unsafe_low_specs)
+            })
+            .await
+            .map_err(|err| eyre!("failed to join zcashd-compat preflight task: {err}"))??;
         }
 
         let resolved_zcashd_path = if config.zcashd_compat.enabled
@@ -848,15 +863,6 @@ impl Runnable for StartCmd {
 
         rt.expect("runtime should not already be taken")
             .run(self.start());
-
-        // On SIGINT/SIGTERM the runtime drops the whole `start()` future,
-        // including the zcashd-compat supervisor task, so its graceful
-        // shutdown path never runs. Terminate any abandoned supervised zcashd
-        // synchronously, now that the runtime has shut down.
-        let config = APPLICATION.config();
-        if config.zcashd_compat.enabled && config.zcashd_compat.manage_zcashd {
-            zcashd_compat::terminate_abandoned_zcashd(config.zcashd_compat.shutdown_grace_period);
-        }
 
         info!("stopping zebrad");
     }
