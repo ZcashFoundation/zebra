@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   controlling whether coinbase outputs may be spent into transparent outputs. Setting it
   on a configured Testnet is rejected with an error
   ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698)).
+- Added `init_with_block_gossip_peer_ips`, an `init` variant that treats inbound peers
+  from the listed IP addresses as trusted zcashd-compat sidecars: they always receive
+  `AdvertiseBlock` inventory broadcasts (queued while the peer is busy), share one
+  reserved inbound connection slot, bypass the recent-IP reconnection rate limit, and
+  are exempt from the `FindBlocks`/`FindHeaders` stall detector. Callers must only list
+  IPs where every process is trusted
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
 
 ## [9.0.0] - 2026-06-10
 

@@ -247,6 +247,23 @@ where
     /// Inbound peer IPs that must always receive block inventory broadcasts.
     block_gossip_peer_ips: HashSet<IpAddr>,
 
+    /// The keys of connected peers that matched [`Self::block_gossip_peer_ips`]
+    /// when they were inserted into the peer set.
+    ///
+    /// Stale keys of disconnected peers are pruned in
+    /// [`Self::route_block_broadcast`].
+    zcashd_compat_peer_keys: HashSet<D::Key>,
+
+    /// The most recent block inventory broadcast that has not been delivered to
+    /// all connected zcashd-compat sidecar peers, and the sidecar peers that are
+    /// still owed it.
+    ///
+    /// A sidecar can be busy with another request when a block is advertised.
+    /// The advert is queued here and delivered as soon as the sidecar is ready
+    /// again, so configured sidecars never miss block gossip. A newer advert
+    /// replaces an older undelivered one.
+    queued_sidecar_block_broadcast: Option<(Request, HashSet<D::Key>)>,
+
     // Peer Tracking: Busy Peers
     //
     /// Connected peers that are handling a Zebra request,
@@ -372,6 +389,8 @@ where
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
+            zcashd_compat_peer_keys: HashSet::new(),
+            queued_sidecar_block_broadcast: None,
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -751,6 +770,10 @@ where
                         continue;
                     }
 
+                    if self.is_zcashd_compat_peer(&svc) {
+                        self.zcashd_compat_peer_keys.insert(key);
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
@@ -809,6 +832,13 @@ where
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
+        self.zcashd_compat_peer_keys.remove(key);
+        if let Some((_, remaining_sidecars)) = self.queued_sidecar_block_broadcast.as_mut() {
+            remaining_sidecars.remove(key);
+            if remaining_sidecars.is_empty() {
+                self.queued_sidecar_block_broadcast = None;
+            }
+        }
 
         if let Some(ready_service) = self.take_ready_service(key) {
             // A ready service has no work to cancel, so just drop it.
@@ -1162,9 +1192,71 @@ where
     }
 
     /// Broadcasts a block inventory request to sampled peers and configured sidecars.
+    ///
+    /// Connected sidecars that are busy with another request are owed the advert:
+    /// it is queued and delivered by [`Self::send_queued_sidecar_block_broadcast`]
+    /// as soon as they are ready again.
     fn route_block_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Forget sidecar peers that have disconnected: connected peers are
+        // either ready, or unready with a registered cancel handle.
+        let ready_services = &self.ready_services;
+        let cancel_handles = &self.cancel_handles;
+        self.zcashd_compat_peer_keys
+            .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
+
         let selected_peers = self.select_block_broadcast_peers(self.number_of_peers_to_broadcast());
+
+        // A newer advert supersedes any older undelivered one: sidecars only
+        // need the latest tip to stay live, and they fetch any blocks in
+        // between over the same connection.
+        let busy_sidecars: HashSet<D::Key> = self
+            .zcashd_compat_peer_keys
+            .iter()
+            .filter(|key| !self.ready_services.contains_key(*key))
+            .copied()
+            .collect();
+        self.queued_sidecar_block_broadcast =
+            (!busy_sidecars.is_empty()).then(|| (req.clone(), busy_sidecars));
+
         self.send_multiple(req, selected_peers)
+    }
+
+    /// Delivers the queued block inventory broadcast to any owed sidecar peers
+    /// that have become ready. See [`Self::route_block_broadcast`].
+    fn send_queued_sidecar_block_broadcast(&mut self) {
+        let Some((req, mut remaining_sidecars)) = self.queued_sidecar_block_broadcast.take() else {
+            return;
+        };
+
+        let ready_sidecars: Vec<D::Key> = remaining_sidecars
+            .iter()
+            .filter(|key| self.ready_services.contains_key(*key))
+            .copied()
+            .collect();
+        for key in ready_sidecars {
+            remaining_sidecars.remove(&key);
+
+            let mut svc = self
+                .take_ready_service(&key)
+                .expect("selected sidecars are ready");
+            let advert_fut = svc.call(req.clone());
+            self.push_unready(key, svc);
+
+            // Detach the response future: the connection cancels requests whose
+            // response channel is dropped, and there is no caller left to drive
+            // this delivery.
+            tokio::spawn(advert_fut.map(|_| ()));
+        }
+
+        // Drop sidecars that disconnected while the advert was queued.
+        let ready_services = &self.ready_services;
+        let cancel_handles = &self.cancel_handles;
+        remaining_sidecars
+            .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
+
+        if !remaining_sidecars.is_empty() {
+            self.queued_sidecar_block_broadcast = Some((req, remaining_sidecars));
+        }
     }
 
     /// Broadcasts the same request to all ready peers, ignoring return values.
@@ -1434,6 +1526,7 @@ where
         }
 
         self.broadcast_all_queued();
+        self.send_queued_sidecar_block_broadcast();
 
         if self.ready_services.is_empty() {
             self.poll_peers(cx)

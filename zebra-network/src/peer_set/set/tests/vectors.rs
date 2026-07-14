@@ -16,6 +16,7 @@ use tower::{discover::Change, Service, ServiceExt};
 use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
 };
 
 use crate::{
@@ -757,6 +758,87 @@ fn find_blocks_stall_not_tracked_for_zcashd_compat() {
         assert!(
             sidecar_handle.wants_connection_heartbeats(),
             "zcashd-compat sidecar should not be disconnected by the sync stall detector"
+        );
+    });
+}
+
+/// Check that a configured sidecar that is busy with another request when a block
+/// is advertised still receives the advert once it becomes ready again.
+#[test]
+fn busy_sidecar_receives_queued_block_gossip() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block::Hash::from(&block);
+
+    let sidecar_ip = Ipv4Addr::LOCALHOST;
+    let sidecar_addr: PeerSocketAddr = SocketAddr::new(IpAddr::V4(sidecar_ip), 1).into();
+    let (sidecar, mut sidecar_handle) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .with_connected_addr(ConnectedAddr::new_inbound_direct(sidecar_addr))
+        .finish();
+    let discovered_peers = stream::iter([Ok::<_, BoxError>(Change::Insert(
+        sidecar_addr,
+        sidecar.into(),
+    ))])
+    .chain(stream::pending());
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_block_gossip_peer_ips(vec![sidecar_ip.into()])
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        // Make the sidecar busy with an in-flight request.
+        let peer_ready = peer_set.ready().await.expect("peer set is ready");
+        let find_blocks_fut = peer_ready.call(Request::FindBlocks {
+            known_blocks: vec![],
+            stop: None,
+        });
+        let find_blocks_request = sidecar_handle
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("sidecar received the find blocks request");
+
+        // Advertise a block while the sidecar is busy: nothing can be sent yet,
+        // so the advert must be queued for the sidecar.
+        let advert_response = peer_set
+            .route_block_broadcast(Request::AdvertiseBlock(block_hash, None))
+            .await;
+        advert_response.expect("broadcast to zero ready peers succeeds");
+        assert!(
+            sidecar_handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .is_none(),
+            "busy sidecar must not receive the advert while unready"
+        );
+
+        // Complete the in-flight request, making the sidecar ready again.
+        let _ = find_blocks_request
+            .tx
+            .send(Ok(Response::BlockHashes(vec![])));
+        find_blocks_fut.await.expect("response received");
+
+        // Polling the peer set delivers the queued advert to the now-ready sidecar.
+        let _ = peer_set.ready().await.expect("peer set is ready");
+        // Let the detached advert delivery task run.
+        tokio::task::yield_now().await;
+
+        let delivered = sidecar_handle
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("sidecar received the queued block advert");
+        assert_eq!(
+            delivered.request,
+            Request::AdvertiseBlock(block_hash, None),
+            "the queued request must be the block advert"
         );
     });
 }

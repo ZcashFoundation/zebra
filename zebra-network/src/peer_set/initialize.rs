@@ -687,7 +687,15 @@ where
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
 
-            if bans_receiver.borrow().clone().contains_key(&addr.ip()) {
+            // # Security
+            //
+            // Check bans in both the raw and canonical representations: on a
+            // dual-stack listener, an IPv4 peer can connect as IPv4-mapped IPv6,
+            // and it must not dodge a ban stored for its IPv4 address and then
+            // be granted the zcashd-compat sidecar privileges below.
+            let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
+            let bans = bans_receiver.borrow().clone();
+            if bans.contains_key(&addr.ip()) || bans.contains_key(&canonical_ip) {
                 debug!(?addr, "banned inbound connection attempt");
                 std::mem::drop(tcp_stream);
                 continue;
@@ -698,7 +706,6 @@ where
                 active_zcashd_compat_connections.update_count();
             let active_total_inbound_connections =
                 active_public_inbound_connections + active_zcashd_compat_inbound_connections;
-            let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
             let is_zcashd_compat_peer = zcashd_compat_peer_ips.contains(&canonical_ip);
 
             // The peer already opened a connection to us.
