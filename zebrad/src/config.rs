@@ -86,6 +86,9 @@ pub struct ZebradConfig {
     /// See the Zebra Book for details and examples:
     /// <https://zebra.zfnd.org/user/health.html>
     pub health: crate::components::health::Config,
+
+    /// zcashd-compat mode configuration.
+    pub zcashd_compat: crate::components::zcashd_compat::Config,
 }
 
 impl ZebradConfig {

@@ -186,7 +186,7 @@ toml = { workspace = true }
 
 futures = { workspace = true }
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process"] }
 tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
@@ -204,6 +204,15 @@ tracing = { workspace = true }
 metrics = { workspace = true }
 
 dirs = { workspace = true }
+
+# zcashd-compat sidecar supervision dependencies
+reqwest = { workspace = true, default-features = false, features = ["blocking", "rustls-tls"] }
+sha2 = { workspace = true }
+flate2 = "1.1"
+tar = "0.4"
+nix = { workspace = true, features = ["fs", "signal"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 # Health check server dependencies
 hyper = { workspace = true, features = ["server", "http1"] }
