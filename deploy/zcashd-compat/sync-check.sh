@@ -19,6 +19,10 @@ ZCASHD_PROCESS_PATTERN="${ZCASHD_PROCESS_PATTERN:-zcashd .*-connect}"
 HEIGHT_MAX_DRIFT="${HEIGHT_MAX_DRIFT:-10}"
 SYNC_CHECK_TIMEOUT="${SYNC_CHECK_TIMEOUT:-600}"
 SYNC_CHECK_INTERVAL="${SYNC_CHECK_INTERVAL:-15}"
+# Bound each RPC call so one stalled endpoint cannot hang the retry loop and
+# defeat SYNC_CHECK_TIMEOUT. Must stay well below SYNC_CHECK_TIMEOUT.
+RPC_CONNECT_TIMEOUT="${RPC_CONNECT_TIMEOUT:-5}"
+RPC_MAX_TIME="${RPC_MAX_TIME:-30}"
 
 conf_value() {
     local config_file="$1"
@@ -70,6 +74,8 @@ json_rpc() {
     fi
 
     curl -sS --fail \
+        --connect-timeout "$RPC_CONNECT_TIMEOUT" \
+        --max-time "$RPC_MAX_TIME" \
         "${auth_args[@]}" \
         -H "Content-Type: application/json" \
         --data "{\"jsonrpc\":\"1.0\",\"id\":\"sync-check\",\"method\":\"$method\",\"params\":[]}" \
@@ -163,6 +169,8 @@ main() {
     require_uint HEIGHT_MAX_DRIFT "$HEIGHT_MAX_DRIFT"
     require_uint SYNC_CHECK_TIMEOUT "$SYNC_CHECK_TIMEOUT"
     require_uint SYNC_CHECK_INTERVAL "$SYNC_CHECK_INTERVAL"
+    require_uint RPC_CONNECT_TIMEOUT "$RPC_CONNECT_TIMEOUT"
+    require_uint RPC_MAX_TIME "$RPC_MAX_TIME"
 
     start_time="$(date +%s)"
 

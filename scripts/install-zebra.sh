@@ -1979,7 +1979,8 @@ compat_prepare_docker_images() {
       elif docker_image_available_or_pull "$ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE"; then
         ZEBRA_COMPAT_DOCKER_SELECTED="$ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE"
       else
-        add_error "Docker image is missing or could not be pulled: $ZEBRA_COMPAT_DOCKER_IMAGE; fallback also failed: $ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE"
+        add_error "Docker image is missing or could not be pulled: $ZEBRA_COMPAT_DOCKER_IMAGE; fallback also failed: $ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE.
+Zebra's zcashd-compat images have not been published yet: build one locally with 'make compat-docker-build' and re-run, or use the split-binary or supervised modes instead."
       fi
       ;;
     docker-split-containers)

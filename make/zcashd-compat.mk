@@ -92,6 +92,7 @@ compat-zebrad-start-supervised-managed:
 	@echo "Starting zebrad in zcashd-compat mode with embedded zcashd download..."
 	ZEBRA_NETWORK__NETWORK="$(NETWORK)" \
 	ZEBRA_STATE__CACHE_DIR="$(ZEBRA_STATE_CACHE_DIR)" \
+	ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \
 	ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=embedded \
 	ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR="$(ZCASHD_DATADIR)" \
 	"$(ZEBRAD_BIN)" start --zcashd-compat
@@ -100,6 +101,7 @@ compat-zebrad-start-supervised:
 	@echo "Starting zebrad in zcashd-compat mode with supervision enabled..."
 	ZEBRA_NETWORK__NETWORK="$(NETWORK)" \
 	ZEBRA_STATE__CACHE_DIR="$(ZEBRA_STATE_CACHE_DIR)" \
+	ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \
 	ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=path \
 	ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH="$(ZCASHD_BIN)" \
 	ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR="$(ZCASHD_DATADIR)" \

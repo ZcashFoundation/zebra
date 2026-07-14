@@ -155,6 +155,14 @@ zcashd_extra_args = ["-rpcbind=127.0.0.1", "-rpcallowip=127.0.0.1"]
 Zebra's embedded release manifest; use `zcashd_source = "path"` plus
 `zcashd_path` to run a binary you provide.)
 
+> [!WARNING]
+> The `embedded` source is **experimental**: it downloads a third-party
+> `zcashd` build from [valargroup/zcashd](https://github.com/valargroup/zcashd)
+> releases, which the Zcash Foundation does not build or audit. Until a
+> provenance decision is made for sidecar binaries, production deployments
+> should build the sidecar from source (or otherwise verify it) and use
+> `zcashd_source = "path"`.
+
 On start, Zebra:
 
 1. runs Linux hardware and filesystem preflight checks (see
@@ -264,7 +272,9 @@ misconfigured miner fails loudly instead of building on a lagging view.
 ## Wallet shielded-pool support (Orchard & Ironwood)
 
 Orchard and Ironwood are shielded pools, exercised through the unified `z_*` wallet RPCs
-(`z_sendmany`, and the rest). Those RPCs remain registered and callable. However, disabled. This is not the same mechanism as the removed miner RPCs:
+(`z_sendmany`, and the rest). Those RPCs remain registered, but restricted
+operations are rejected when the transaction is prepared. This is not the same
+mechanism as the removed miner RPCs:
 
 | | Miner RPCs (`getblocktemplate`, …) | Orchard / Ironwood |
 | --- | --- | --- |
