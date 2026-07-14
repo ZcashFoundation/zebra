@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- New zcashd-compat mode (`zebrad start --zcashd-compat` or `[zcashd_compat]`
+  config section) for operators migrating from `zcashd` while keeping its
+  wallet and RPC surface: Zebra faces the Zcash network and always includes
+  the configured sidecar peers in block gossip (reserving them an inbound
+  connection slot), while a hard-locked `zcashd` wallet build runs as a P2P
+  sidecar with a single outbound connection to the local Zebra node. Zebra
+  can optionally download (SHA256-pinned), spawn, and supervise the sidecar
+  (`manage_zcashd = true`). Includes an interactive installer
+  (`scripts/install-zebra.sh`) with binary, Docker, and build-from-source
+  modes, a `runtime-zcashd-compat` Docker image stage, make targets, a
+  sync-check script, and a Zebra Book chapter (`user/zcashd-compat.md`)
+
 - Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
   `x86_64` and `aarch64`, so operators can run a node without Docker or a source
   build, also installable with `cargo binstall zebrad`. Each `.tar.gz` carries a
