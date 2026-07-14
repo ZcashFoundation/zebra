@@ -240,3 +240,10 @@ CMD ["zebrad"]
 # - with mining enabled using S-nomp and `nheqminer`.
 #
 # We can add further functionality to this stage for further purposes.
+
+# zcashd-compat runtime image, expects an externally prepared build context named
+# `zcashd_compat` with a Linux executable at /bin/zcashd.
+FROM runtime AS runtime-zcashd-compat
+
+COPY --link --from=zcashd_compat /bin/zcashd /usr/local/bin/zcashd
+RUN test -x /usr/local/bin/zcashd && /usr/local/bin/zcashd --version

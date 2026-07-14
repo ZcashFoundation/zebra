@@ -14,6 +14,25 @@ set -eo pipefail
 : "${ZEBRA_STATE__CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${ZEBRA_RPC__COOKIE_DIR:=${HOME}/.cache/zebra}"
 
+# Leave zcashd-compat disabled unless the container runtime explicitly opts in.
+# Compat images can set ZCASHD_COMPAT_ENABLED=true to use a vendored
+# /usr/local/bin/zcashd, while still allowing ZEBRA_ZCASHD_COMPAT__* overrides.
+case "${ZCASHD_COMPAT_ENABLED:-}" in
+true | TRUE | 1 | yes | YES | on | ON)
+  export ZEBRA_ZCASHD_COMPAT__ENABLED="${ZEBRA_ZCASHD_COMPAT__ENABLED:-true}"
+  if [[ -x /usr/local/bin/zcashd ]]; then
+    export ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD="${ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD:-true}"
+    export ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE="${ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE:-path}"
+    export ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH="${ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH:-/usr/local/bin/zcashd}"
+  fi
+  ;;
+false | FALSE | 0 | no | NO | off | OFF | "") ;;
+*)
+  echo "ZCASHD_COMPAT_ENABLED must be true or false" >&2
+  exit 1
+  ;;
+esac
+
 # Use setpriv to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
@@ -53,6 +72,7 @@ create_owned_directory() {
 # Create and own cache and config directories based on ZEBRA_* environment variables
 [[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
 [[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
+[[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_directory "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
 [[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
 
 # --- Optional config file support ---
