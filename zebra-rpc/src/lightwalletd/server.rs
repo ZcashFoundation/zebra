@@ -64,8 +64,7 @@ where
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::lightwalletd::FILE_DESCRIPTOR_SET)
-        .build_v1()
-        .unwrap();
+        .build_v1()?;
 
     tracing::info!(
         "Trying to open lightwalletd gRPC endpoint at {}...",

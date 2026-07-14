@@ -6,7 +6,7 @@
 //!
 //! [`zcash/lightwalletd`]: https://github.com/zcash/lightwalletd/tree/master/walletrpc
 
-use zebra_chain::{block, transaction::Transaction};
+use zebra_chain::{block, transaction, transaction::Transaction};
 
 pub mod methods;
 pub mod server;
@@ -28,6 +28,14 @@ pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
 /// outputs and actions, from the `compact_formats.proto` specification.
 const COMPACT_CIPHERTEXT_SIZE: usize = 52;
 
+/// Returns true if the transaction contains any data that belongs in a
+/// [`CompactTx`]: Sapling spends or outputs, or Orchard actions.
+pub(crate) fn has_compact_data(tx: &Transaction) -> bool {
+    tx.sapling_nullifiers().next().is_some()
+        || tx.sapling_outputs().next().is_some()
+        || tx.orchard_actions().next().is_some()
+}
+
 impl CompactBlock {
     /// Builds a [`CompactBlock`] from a full block and the note commitment tree sizes
     /// at the end of that block.
@@ -47,12 +55,10 @@ impl CompactBlock {
             .transactions
             .iter()
             .enumerate()
-            .filter(|(_, tx)| {
-                tx.sapling_nullifiers().next().is_some()
-                    || tx.sapling_outputs().next().is_some()
-                    || tx.orchard_actions().next().is_some()
+            .filter(|(_, tx)| has_compact_data(tx))
+            .map(|(index, tx)| {
+                CompactTx::from_transaction(index as u64, tx.hash(), tx, nullifiers_only)
             })
-            .map(|(index, tx)| CompactTx::from_transaction(index as u64, tx, nullifiers_only))
             .collect();
 
         CompactBlock {
@@ -75,11 +81,17 @@ impl CompactBlock {
 }
 
 impl CompactTx {
-    /// Builds a [`CompactTx`] from a transaction and its index within its block.
+    /// Builds a [`CompactTx`] from a transaction, its precomputed mined transaction
+    /// ID, and its index within its block.
     ///
     /// If `nullifiers_only` is true, compact outputs are omitted and compact actions
     /// only contain nullifiers.
-    pub fn from_transaction(index: u64, tx: &Transaction, nullifiers_only: bool) -> Self {
+    pub fn from_transaction(
+        index: u64,
+        hash: transaction::Hash,
+        tx: &Transaction,
+        nullifiers_only: bool,
+    ) -> Self {
         let spends = tx
             .sapling_nullifiers()
             .map(|nullifier| CompactSaplingSpend {
@@ -122,7 +134,7 @@ impl CompactTx {
 
         CompactTx {
             index,
-            hash: tx.hash().0.to_vec(),
+            hash: hash.0.to_vec(),
             // The fee is optional in the protocol, and stateless servers can't
             // calculate it for transactions with transparent inputs, so it is unset.
             fee: 0,

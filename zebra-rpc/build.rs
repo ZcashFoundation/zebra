@@ -36,7 +36,7 @@ fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
     // `service.proto` imports `compact_formats.proto`, so both are compiled with
     // the `proto` directory as the include path.
     build_or_copy_proto_set(
-        &["proto/service.proto"],
+        &["proto/service.proto", "proto/compact_formats.proto"],
         &["proto"],
         "lightwalletd_descriptor.bin",
         &["lightwalletd_descriptor.bin", "cash.z.wallet.sdk.rpc.rs"],

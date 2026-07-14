@@ -8,8 +8,8 @@ use tonic::{Request, Response, Status, Streaming};
 use tower::util::ServiceExt;
 
 use zebra_chain::{
-    block, chain_tip::ChainTip, parameters::Network, serialization::BytesInDisplayOrder,
-    serialization::ZcashSerialize, subtree::NoteCommitmentSubtreeIndex, transaction,
+    block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
+    subtree::NoteCommitmentSubtreeIndex, transaction,
 };
 use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
@@ -29,6 +29,18 @@ use super::{
 
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
+
+/// The maximum number of addresses a `GetTaddressBalanceStream` client can send.
+///
+/// Bounds the memory used to buffer the client-streamed addresses.
+const MAX_ADDRESS_STREAM_ADDRESSES: usize = 10_000;
+
+/// How long to wait for a backpressured send to a response stream before treating
+/// the consumer as hung and dropping the stream.
+///
+/// Without a bound, a consumer whose connection is half-open (dead TCP not yet
+/// detected) would block the streaming task indefinitely.
+const STREAM_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// A type alias for the boxed response streams returned by server-streaming methods.
 type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
@@ -116,30 +128,30 @@ where
         })?;
         let hash = transaction::Hash::from(hash);
 
-        // Look for the transaction in the best chain first, then in the mempool.
-        match self
+        // Look for the transaction in any chain first, then in the mempool.
+        let side_chain_tx = match self
             .read_state
             .clone()
-            .oneshot(ReadRequest::Transaction(hash))
+            .oneshot(ReadRequest::AnyChainTransaction(hash))
             .await
         {
-            Ok(ReadResponse::Transaction(Some(mined_tx))) => {
+            Ok(ReadResponse::AnyChainTransaction(Some(zebra_state::AnyTx::Mined(mined_tx)))) => {
                 return Ok(Response::new(RawTransaction {
-                    data: mined_tx
-                        .tx
-                        .zcash_serialize_to_vec()
-                        .map_err(|_| Status::internal("failed to serialize transaction"))?,
+                    data: serialize_transaction(&mined_tx.tx)?,
                     height: mined_tx.height.0.into(),
                 }));
             }
-            Ok(ReadResponse::Transaction(None)) => {}
+            Ok(ReadResponse::AnyChainTransaction(Some(zebra_state::AnyTx::Side((tx, _))))) => {
+                Some(tx)
+            }
+            Ok(ReadResponse::AnyChainTransaction(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::unavailable(format!(
                     "failed to read transaction: {error}"
                 )));
             }
-        }
+        };
 
         let mempool_response = self
             .mempool
@@ -150,21 +162,26 @@ where
             .await
             .map_err(|error| Status::unavailable(format!("failed to query mempool: {error}")))?;
 
-        match mempool_response {
-            mempool::Response::Transactions(transactions) => transactions
-                .first()
-                .map(|tx| {
-                    Ok(Response::new(RawTransaction {
-                        data: tx
-                            .transaction
-                            .zcash_serialize_to_vec()
-                            .map_err(|_| Status::internal("failed to serialize transaction"))?,
-                        // A height of 0 means the transaction is in the mempool.
-                        height: 0,
-                    }))
-                })
-                .unwrap_or_else(|| Err(Status::not_found("transaction not found"))),
+        let mempool_tx = match mempool_response {
+            mempool::Response::Transactions(transactions) => transactions.into_iter().next(),
             _ => unreachable!("unexpected response type from mempool service"),
+        };
+
+        if let Some(tx) = mempool_tx {
+            Ok(Response::new(RawTransaction {
+                data: serialize_transaction(&tx.transaction)?,
+                // A height of 0 means the transaction is in the mempool.
+                height: 0,
+            }))
+        } else if let Some(tx) = side_chain_tx {
+            Ok(Response::new(RawTransaction {
+                data: serialize_transaction(&tx)?,
+                // The protocol's sentinel height for a transaction that has been
+                // mined on a fork that is not currently the main chain.
+                height: u64::MAX,
+            }))
+        } else {
+            Err(Status::not_found("transaction not found"))
         }
     }
 
@@ -230,6 +247,14 @@ where
         let mut address_stream = request.into_inner();
         let mut addresses = Vec::new();
         while let Some(address) = address_stream.message().await? {
+            // Bound the buffered addresses, because the client controls how many
+            // messages it streams.
+            if addresses.len() >= MAX_ADDRESS_STREAM_ADDRESSES {
+                return Err(Status::invalid_argument(format!(
+                    "too many addresses: the limit is {MAX_ADDRESS_STREAM_ADDRESSES}"
+                )));
+            }
+
             addresses.push(address.address);
         }
 
@@ -252,12 +277,15 @@ where
         let compact_txs: Vec<Result<CompactTx, Status>> = transactions
             .iter()
             .filter(|tx| !excluded.contains(&tx.id.mined_id()))
-            .filter(|tx| {
-                tx.transaction.sapling_nullifiers().next().is_some()
-                    || tx.transaction.sapling_outputs().next().is_some()
-                    || tx.transaction.orchard_actions().next().is_some()
+            .filter(|tx| super::has_compact_data(&tx.transaction))
+            .map(|tx| {
+                Ok(CompactTx::from_transaction(
+                    0,
+                    tx.id.mined_id(),
+                    &tx.transaction,
+                    false,
+                ))
             })
-            .map(|tx| Ok(CompactTx::from_transaction(0, &tx.transaction, false)))
             .collect();
 
         Ok(Response::new(Box::pin(futures::stream::iter(compact_txs))))
@@ -281,12 +309,6 @@ where
             // after the stream starts, not when the current tip hasn't been seen.
             latest_chain_tip.mark_best_tip_seen();
 
-            let tip_height = |tip: &Tip| -> u64 {
-                tip.best_tip_height()
-                    .map(|height| height.0.into())
-                    .unwrap_or_default()
-            };
-
             let mut sent_txids: HashSet<transaction::Hash> = HashSet::new();
 
             // Send the current mempool contents.
@@ -299,8 +321,7 @@ where
             };
 
             for tx in transactions {
-                if !send_raw_mempool_tx(&response_sender, &tx, tip_height(&latest_chain_tip)).await
-                {
+                if !send_raw_mempool_tx(&response_sender, &tx).await {
                     return;
                 }
                 sent_txids.insert(tx.id.mined_id());
@@ -312,7 +333,14 @@ where
                 tokio::select! {
                     _ = latest_chain_tip.best_tip_changed() => return,
                     change = mempool_change.recv() => {
-                        let Ok(change) = change else { return };
+                        let change = match change {
+                            Ok(change) => change,
+                            // The receiver can keep receiving after missing some
+                            // changes; any missed transaction is skipped, like a
+                            // transaction added while a mempool query is in flight.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        };
                         if !change.is_added() {
                             continue;
                         }
@@ -328,13 +356,7 @@ where
                             if sent_txids.contains(&tx.id.mined_id()) {
                                 continue;
                             }
-                            if !send_raw_mempool_tx(
-                                &response_sender,
-                                &tx,
-                                tip_height(&latest_chain_tip),
-                            )
-                            .await
-                            {
+                            if !send_raw_mempool_tx(&response_sender, &tx).await {
                                 return;
                             }
                             sent_txids.insert(tx.id.mined_id());
@@ -351,19 +373,11 @@ where
         &self,
         request: Request<BlockId>,
     ) -> Result<Response<TreeState>, Status> {
-        let block_id = request.into_inner();
-        let hash_or_height = if !block_id.hash.is_empty() {
-            let HashOrHeight::Hash(hash) = block_id_to_hash_or_height(block_id)? else {
-                unreachable!("a block id with a non-empty hash converts to a hash");
-            };
-            hash.to_string()
-        } else {
-            block_id.height.to_string()
-        };
+        let hash_or_height = block_id_to_hash_or_height(request.into_inner())?;
 
         let treestate = self
             .rpc
-            .z_get_treestate(hash_or_height)
+            .z_get_treestate(hash_or_height.to_string())
             .await
             .map_err(rpc_error_to_status)?;
 
@@ -563,18 +577,11 @@ async fn compact_block<ReadStateService: ReadState>(
     hash_or_height: HashOrHeight,
     nullifiers_only: bool,
 ) -> Result<CompactBlock, Status> {
-    let block_request = read_state
+    let block = match read_state
         .clone()
-        .oneshot(ReadRequest::Block(hash_or_height));
-    let sapling_request = read_state
-        .clone()
-        .oneshot(ReadRequest::SaplingTree(hash_or_height));
-    let orchard_request = read_state.oneshot(ReadRequest::OrchardTree(hash_or_height));
-
-    let (block_response, sapling_response, orchard_response) =
-        futures::join!(block_request, sapling_request, orchard_request);
-
-    let block = match block_response {
+        .oneshot(ReadRequest::Block(hash_or_height))
+        .await
+    {
         Ok(ReadResponse::Block(Some(block))) => block,
         Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
@@ -584,6 +591,16 @@ async fn compact_block<ReadStateService: ReadState>(
             )));
         }
     };
+
+    // Fetch the trees by the block's hash rather than the caller's hash or height,
+    // so a concurrent reorg can't make the tree sizes inconsistent with the block.
+    let hash = block.hash();
+    let sapling_request = read_state
+        .clone()
+        .oneshot(ReadRequest::SaplingTree(hash.into()));
+    let orchard_request = read_state.oneshot(ReadRequest::OrchardTree(hash.into()));
+
+    let (sapling_response, orchard_response) = futures::join!(sapling_request, orchard_request);
 
     let sapling_tree_size = match sapling_response {
         Ok(ReadResponse::SaplingTree(tree)) => tree.map(|tree| tree.count()).unwrap_or_default(),
@@ -611,7 +628,7 @@ async fn compact_block<ReadStateService: ReadState>(
 
     Ok(CompactBlock::from_block(
         &block,
-        block.hash(),
+        hash,
         height,
         sapling_tree_size,
         orchard_tree_size,
@@ -686,6 +703,11 @@ where
         let Some(block_id) = block_id else {
             return Ok(None);
         };
+        if !block_id.hash.is_empty() {
+            return Err(Status::invalid_argument(
+                "block range must be specified by height",
+            ));
+        }
         let height = u32::try_from(block_id.height).map_err(|_| {
             Status::invalid_argument(format!("block height out of range: {}", block_id.height))
         })?;
@@ -706,7 +728,12 @@ where
 
     tokio::spawn(async move {
         for txid in txids {
-            let response = raw_transaction_by_txid(&read_state, &txid).await;
+            let response = match txid.parse() {
+                Ok(txid) => raw_transaction_by_txid(&read_state, txid).await,
+                Err(_) => Err(Status::internal(
+                    "transaction ids must be valid hex strings",
+                )),
+            };
             let is_err = response.is_err();
 
             if response_sender.send(response).await.is_err() || is_err {
@@ -718,26 +745,18 @@ where
     Ok(Box::pin(response_stream))
 }
 
-/// Fetches a mined transaction from the best chain by its transaction ID, in
-/// big-endian (display) hex format.
+/// Fetches a mined transaction from the best chain by its transaction ID.
 async fn raw_transaction_by_txid<ReadStateService: ReadState>(
     read_state: &ReadStateService,
-    txid: &str,
+    txid: transaction::Hash,
 ) -> Result<RawTransaction, Status> {
-    let txid: transaction::Hash = txid
-        .parse()
-        .map_err(|_| Status::internal("transaction ids must be valid hex strings"))?;
-
     match read_state
         .clone()
         .oneshot(ReadRequest::Transaction(txid))
         .await
     {
         Ok(ReadResponse::Transaction(Some(mined_tx))) => Ok(RawTransaction {
-            data: mined_tx
-                .tx
-                .zcash_serialize_to_vec()
-                .map_err(|_| Status::internal("failed to serialize transaction"))?,
+            data: serialize_transaction(&mined_tx.tx)?,
             height: mined_tx.height.0.into(),
         }),
         Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
@@ -746,6 +765,12 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
             "failed to read transaction: {error}"
         ))),
     }
+}
+
+/// Serializes a transaction into raw bytes for a [`RawTransaction`].
+fn serialize_transaction(tx: &transaction::Transaction) -> Result<Vec<u8>, Status> {
+    tx.zcash_serialize_to_vec()
+        .map_err(|_| Status::internal("failed to serialize transaction"))
 }
 
 /// Fetches the total balance of a list of transparent addresses.
@@ -782,6 +807,7 @@ async fn address_utxos<Rpc: RpcMethods>(
     let max_entries = if args.max_entries == 0 {
         usize::MAX
     } else {
+        // Cast is safe: `usize` is at least 32 bits on all supported platforms.
         args.max_entries as usize
     };
 
@@ -820,18 +846,27 @@ async fn mempool_transactions<Mempool: MempoolService>(
     }
 }
 
-/// Returns the transaction IDs excluded by an `Exclude` list of shortened,
-/// big-endian (display order) transaction ID prefixes.
+/// Returns the transaction IDs excluded by an `Exclude` list of shortened
+/// transaction IDs.
 ///
-/// If a prefix matches more than one transaction, none of the matching transactions
+/// Each entry is a reversed prefix of the big-endian (display order) transaction ID
+/// hex — equivalently, a suffix of the little-endian transaction ID bytes sent in
+/// `CompactTx.hash` — matching lightwalletd, which reverses each entry before
+/// comparing it with big-endian transaction IDs.
+///
+/// If an entry matches more than one transaction, none of the matching transactions
 /// are excluded, following the lightwalletd specification.
 fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<transaction::Hash> {
     let mut excluded = HashSet::new();
 
-    for prefix in exclude {
-        let mut matches = txids
-            .iter()
-            .filter(|txid| txid.bytes_in_display_order().starts_with(prefix));
+    for suffix in exclude {
+        // An empty entry doesn't identify a transaction, and would otherwise
+        // exclude the only transaction in a single-transaction mempool.
+        if suffix.is_empty() {
+            continue;
+        }
+
+        let mut matches = txids.iter().filter(|txid| txid.0.ends_with(suffix));
 
         if let (Some(txid), None) = (matches.next(), matches.next()) {
             excluded.insert(*txid);
@@ -842,11 +877,10 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
 }
 
 /// Sends a mempool transaction to a raw transaction stream, returning false if the
-/// client disconnected or the transaction could not be serialized.
+/// client disconnected or hung, or the transaction could not be serialized.
 async fn send_raw_mempool_tx(
     response_sender: &tokio::sync::mpsc::Sender<Result<RawTransaction, Status>>,
     tx: &transaction::UnminedTx,
-    latest_block_height: u64,
 ) -> bool {
     let Ok(data) = tx.transaction.zcash_serialize_to_vec() else {
         let _ = response_sender
@@ -855,13 +889,18 @@ async fn send_raw_mempool_tx(
         return false;
     };
 
-    response_sender
-        .send(Ok(RawTransaction {
-            data,
-            height: latest_block_height,
-        }))
-        .await
-        .is_ok()
+    // A height of 0 means the transaction is in the mempool. The protocol comment
+    // says `GetMempoolStream` sends the latest block height instead, but that
+    // documentation is wrong and lightwalletd always sends 0:
+    // <https://github.com/zcash/librustzcash/issues/1484>
+    let send = response_sender.send(Ok(RawTransaction { data, height: 0 }));
+
+    // The send is bounded so a hung consumer can't block this task across block
+    // boundaries, which would prevent the stream from closing on a new block.
+    matches!(
+        tokio::time::timeout(STREAM_SEND_TIMEOUT, send).await,
+        Ok(Ok(()))
+    )
 }
 
 /// Converts a [`GetTreestateResponse`] into a lightwalletd [`TreeState`].
@@ -893,6 +932,7 @@ fn rpc_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
 mod tests {
     use super::*;
     use tonic::Code;
+    use zebra_chain::serialization::BytesInDisplayOrder;
 
     fn txid(byte: u8) -> transaction::Hash {
         transaction::Hash::from_bytes_in_display_order(&[byte; 32])
@@ -943,26 +983,38 @@ mod tests {
     }
 
     #[test]
-    fn exclude_list_matches_unique_display_order_prefixes() {
-        let txids = [txid(1), txid(2), txid(3)];
+    fn exclude_list_matches_reversed_display_order_prefixes() {
+        // A txid whose internal (little-endian) bytes are 0, 1, ..., 31,
+        // so its display order is 31, 30, ..., 0.
+        let asymmetric = transaction::Hash(core::array::from_fn(|i| i as u8));
+        let txids = [txid(1), txid(2), asymmetric];
 
-        // A unique prefix excludes its only match.
-        let excluded = excluded_txids(&txids, &[vec![1, 1]]);
-        assert_eq!(excluded, [txid(1)].into_iter().collect());
+        // A shortened txid is a reversed display-order prefix: the client shortens
+        // the display hex "1f1e1d..." to "1f1e", and sends it reversed.
+        let excluded = excluded_txids(&txids, &[vec![30, 31]]);
+        assert_eq!(excluded, [asymmetric].into_iter().collect());
 
-        // A full txid in display order excludes its match.
-        let excluded = excluded_txids(&txids, &[txid(2).bytes_in_display_order().to_vec()]);
-        assert_eq!(excluded, [txid(2)].into_iter().collect());
+        // A display-order (unreversed) prefix must not match.
+        assert!(excluded_txids(&txids, &[vec![31, 30]]).is_empty());
+
+        // A full txid in `CompactTx.hash` (internal) order excludes its match.
+        let excluded = excluded_txids(&txids, &[asymmetric.0.to_vec()]);
+        assert_eq!(excluded, [asymmetric].into_iter().collect());
     }
 
     #[test]
-    fn exclude_list_keeps_transactions_with_ambiguous_or_unknown_prefixes() {
+    fn exclude_list_keeps_transactions_with_ambiguous_or_unknown_entries() {
         let txids = [txid(1), txid(2)];
 
-        // An empty prefix matches every transaction, so none are excluded.
-        assert!(excluded_txids(&txids, &[Vec::new()]).is_empty());
+        // An empty entry doesn't identify a transaction, so nothing is excluded,
+        // even when it is the only transaction.
+        assert!(excluded_txids(&txids[..1], &[Vec::new()]).is_empty());
 
-        // A prefix that matches nothing excludes nothing.
+        // An entry that matches nothing excludes nothing.
         assert!(excluded_txids(&txids, &[vec![9, 9, 9]]).is_empty());
+
+        // An entry that matches more than one transaction excludes nothing.
+        let txids = [txid(7), txid(7)];
+        assert!(excluded_txids(&txids, &[vec![7, 7]]).is_empty());
     }
 }
