@@ -1759,6 +1759,26 @@ download_and_extract() {
   install -D -m 0755 "$source_path" "$destination"
 }
 
+# Errors out unless the zebrad at $1 supports zcashd-compat mode.
+#
+# Released zebrad binaries without the feature reject `[zcashd_compat]` config
+# (and its ZEBRA_ZCASHD_COMPAT__* environment variables) at startup with
+# "unknown field `zcashd_compat`", so catch it here with a clear message
+# instead of printing start commands that cannot run.
+compat_require_zcashd_compat_support() {
+  local zebrad="$1"
+
+  if "$zebrad" start --help 2>/dev/null | grep -q -- '--zcashd-compat'; then
+    return
+  fi
+
+  add_error "zebrad at $zebrad does not support zcashd-compat mode ('zebrad start --help' has no --zcashd-compat flag).
+No Zebra release includes zcashd-compat mode yet: build zebrad from a zcashd-compat branch
+(cargo build --release --bin zebrad) and re-run this installer with --zebrad-path <path> --no-download,
+or use the build-from-source mode."
+  finalize_checks
+}
+
 compat_prepare_binary_paths() {
   local zcashd_url zcashd_sha zcashd_member
 
@@ -1791,6 +1811,7 @@ compat_prepare_binary_paths() {
         [[ -x "$ZCASHD_PATH" ]] || add_error "zcashd binary $ZCASHD_PATH does not exist or is not executable by the current user"
       fi
       finalize_checks
+      [[ -x "$ZEBRAD_PATH" ]] && compat_require_zcashd_compat_support "$ZEBRAD_PATH"
     fi
     return
   fi
@@ -1807,6 +1828,7 @@ compat_prepare_binary_paths() {
       [[ -x "$ZCASHD_PATH" ]] || add_error "zcashd binary $ZCASHD_PATH does not exist or is not executable by the current user"
     fi
     finalize_checks
+    [[ -x "$ZEBRAD_PATH" ]] && compat_require_zcashd_compat_support "$ZEBRAD_PATH"
   fi
 }
 
