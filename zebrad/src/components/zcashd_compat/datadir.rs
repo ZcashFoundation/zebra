@@ -47,7 +47,7 @@ pub fn effective_zcashd_datadir(zcashd_compat: &Config, state_cache_dir: &Path) 
         .unwrap_or_else(|| state_cache_dir.join(DEFAULT_ZCASHD_DATADIR))
 }
 
-/// Applies the first valid `-datadir=<path>` command-line override we can infer.
+/// Applies the last valid `-datadir=<path>` command-line override, like zcashd.
 pub fn resolve_zcashd_datadir_path(datadir: &Path, extra_args: &[String]) -> PathBuf {
     find_datadir_arg(extra_args)
         .map(PathBuf::from)
@@ -201,12 +201,12 @@ fn unique_temp_conf_path(parent: &Path) -> PathBuf {
     parent.join(format!(".zcash.conf.tmp.{}.{}", std::process::id(), nanos))
 }
 
-/// Extracts the first valid `-datadir=<path>` value from Zebra's extra args.
+/// Extracts the last valid `-datadir=<path>` value from Zebra's extra args.
 fn find_datadir_arg(extra_args: &[String]) -> Option<&str> {
-    find_first_path_arg_value(extra_args, "datadir")
+    find_last_path_arg_value(extra_args, "datadir")
 }
 
-/// Resolves the first valid `-conf=<path>` we can infer from extra args.
+/// Resolves the last valid `-conf=<path>` we can infer from extra args.
 ///
 /// Relative config paths are anchored under the selected datadir.
 pub(super) fn resolve_zcashd_conf_path(datadir: &Path, extra_args: &[String]) -> PathBuf {
@@ -221,12 +221,17 @@ pub(super) fn resolve_zcashd_conf_path(datadir: &Path, extra_args: &[String]) ->
     }
 }
 
-/// Extracts the first valid `-conf=<path>` value from Zebra's extra args.
+/// Extracts the last valid `-conf=<path>` value from Zebra's extra args.
 fn find_conf_arg(extra_args: &[String]) -> Option<&str> {
-    find_first_path_arg_value(extra_args, "conf")
+    find_last_path_arg_value(extra_args, "conf")
 }
 
-fn find_first_path_arg_value<'a>(extra_args: &'a [String], name: &str) -> Option<&'a str> {
+/// Extracts the last valid `-<name>=<path>` value from Zebra's extra args.
+///
+/// zcashd takes the *last* occurrence of a single-valued command-line option,
+/// so bootstrap and preflight must resolve duplicates the same way, or Zebra
+/// would prepare one path while zcashd starts in another.
+fn find_last_path_arg_value<'a>(extra_args: &'a [String], name: &str) -> Option<&'a str> {
     let mut value_arg = None;
     let short_equals = format!("-{name}=");
     let long_equals = format!("--{name}=");
@@ -265,11 +270,12 @@ fn record_path_arg_value<'a>(name: &str, value: &'a str, value_arg: &mut Option<
     }
 
     if value_arg.is_some() {
+        // Matches zcashd's own behavior for repeated single-valued options.
         warn!(
             option = %format!("-{name}"),
-            "zcashd-compat found multiple path values in zcashd_extra_args; using the first inferred value for bootstrap"
+            "zcashd-compat found multiple path values in zcashd_extra_args; \
+             using the last value, like zcashd"
         );
-        return;
     }
 
     *value_arg = Some(value);
@@ -457,14 +463,15 @@ mod tests {
     }
 
     #[test]
-    fn resolves_first_conf_arg_and_warns_on_duplicate() {
+    fn resolves_last_conf_arg_and_warns_on_duplicate() {
         let datadir = PathBuf::from("/zcashd-datadir");
         let extra_args = vec!["-conf=old.conf".to_string(), "--conf=new.conf".to_string()];
 
         let logs = capture_logs(|| {
+            // zcashd takes the last occurrence of a single-valued option.
             assert_eq!(
                 resolve_zcashd_conf_path(&datadir, &extra_args),
-                datadir.join("old.conf")
+                datadir.join("new.conf")
             );
         });
 

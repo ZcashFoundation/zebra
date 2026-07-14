@@ -254,8 +254,21 @@ fn download_archive(url: &str, out: &mut fs::File) -> Result<(), Report> {
         }
     }
 
+    // Enforce "redirects must remain HTTPS" on every hop, not just the final
+    // URL: an https→http→https chain would otherwise expose the transfer to a
+    // plaintext man-in-the-middle. (Tests use direct localhost HTTP with no
+    // redirects, so they never reach this policy.)
+    let https_only_redirects = Policy::custom(|attempt| {
+        if attempt.previous().len() > 5 {
+            attempt.error("too many redirects")
+        } else if attempt.url().scheme() != "https" {
+            attempt.error("managed zcashd download redirected to a non-https URL")
+        } else {
+            attempt.follow()
+        }
+    });
     let client = Client::builder()
-        .redirect(Policy::limited(5))
+        .redirect(https_only_redirects)
         .timeout(MANAGED_DOWNLOAD_TIMEOUT)
         .build()
         .map_err(|err| eyre!("failed building managed zcashd HTTP client: {err}"))?;

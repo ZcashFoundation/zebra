@@ -81,8 +81,13 @@ pub struct Config {
     ///
     /// This is a trusted-peer privilege boundary, not just a gossip list.
     /// Inbound peers connecting from these IPs also:
-    /// - get one reserved inbound connection slot (shared across the list),
-    /// - bypass the recent-IP reconnection rate limit, and
+    /// - use a reserved inbound connection pool of one slot per listed IP
+    ///   (shared across the list, without per-IP accounting), reducing the
+    ///   public inbound pool by the same amount; when the reserved pool is
+    ///   full, further connections from listed IPs compete for public slots
+    ///   like any other peer,
+    /// - bypass the recent-IP reconnection rate limit while a reserved slot
+    ///   is free (fallback connections are rate limited normally), and
     /// - are exempt from the `FindBlocks`/`FindHeaders` sync stall detector.
     ///
     /// Only list addresses where every process is trusted, like the loopback

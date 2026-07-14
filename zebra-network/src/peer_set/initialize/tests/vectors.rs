@@ -1888,7 +1888,7 @@ fn drain_accepted_inbound_ips(
 ) -> Vec<Ipv4Addr> {
     let mut accepted_ips = Vec::new();
 
-    while let Ok(Some((ip, peer_connection, peer_tracker))) = peer_tracker_rx.try_next() {
+    while let Ok((ip, peer_connection, peer_tracker)) = peer_tracker_rx.try_recv() {
         let IpAddr::V4(ip) = ip else {
             panic!("zcashd-compat listener tests only use IPv4 peers");
         };
@@ -1905,7 +1905,7 @@ fn drain_accepted_inbound_ips(
 fn drain_discovered_peers(peerset_rx: &mut mpsc::Receiver<DiscoveredPeer>) -> usize {
     let mut peer_count = 0;
 
-    while let Ok(Some(_)) = peerset_rx.try_next() {
+    while peerset_rx.try_recv().is_ok() {
         peer_count += 1;
     }
 

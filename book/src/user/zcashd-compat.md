@@ -203,13 +203,15 @@ peers in block inventory gossip, so zcashd does not depend on random peer
 sampling to learn about new blocks. If `block_gossip_peer_ips` is empty, Zebra
 defaults it to loopback addresses. For an externally managed sidecar that
 connects from another local or private IP, enable zcashd-compat without
-supervision and configure that address explicitly:
+supervision and configure the IP **the sidecar's connections come from**
+(not the loopback default — a sidecar connecting from another container or
+host loses every sidecar privilege if its source IP is not listed):
 
 ```toml
 [zcashd_compat]
 enabled = true
 manage_zcashd = false
-block_gossip_peer_ips = ["127.0.0.1"]
+block_gossip_peer_ips = ["10.0.0.2"]
 ```
 
 > [!WARNING]

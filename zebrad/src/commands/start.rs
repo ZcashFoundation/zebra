@@ -275,6 +275,26 @@ impl StartCmd {
 
         let zcashd_compat_block_gossip_peer_ips = if config.zcashd_compat.enabled {
             if config.zcashd_compat.block_gossip_peer_ips.is_empty() {
+                // The sidecar privileges (pinned gossip, reserved slot, stall
+                // exemption) match on the sidecar's *source* IP. In
+                // cross-container/cross-host topologies that source is not
+                // loopback, so the default list would silently strip the
+                // sidecar of everything this mode provides.
+                if config
+                    .zcashd_compat
+                    .p2p_connect_addr
+                    .is_some_and(|addr| !addr.ip().is_loopback())
+                {
+                    warn!(
+                        p2p_connect_addr = ?config.zcashd_compat.p2p_connect_addr,
+                        "zcashd_compat.p2p_connect_addr is not loopback, but \
+                         zcashd_compat.block_gossip_peer_ips defaults to loopback only; \
+                         if the sidecar connects from a non-loopback IP, set \
+                         block_gossip_peer_ips to that IP or it will not receive \
+                         pinned block gossip"
+                    );
+                }
+
                 Self::zcashd_compat_default_block_gossip_peer_ips()
             } else {
                 config.zcashd_compat.block_gossip_peer_ips.clone()

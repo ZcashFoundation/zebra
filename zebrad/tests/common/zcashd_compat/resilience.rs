@@ -57,7 +57,7 @@ pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
 
     let zcashd_pid = setup.zcashd_pid()?;
 
-    let mut zebrad = setup
+    let zebrad = setup
         .managed
         .take()
         .expect("managed process is present in regtest mode");
