@@ -140,16 +140,11 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
 
     // `--unsafe-low-specs` skips the hardware preflight minimums (550 GiB disk
     // etc.), which regtest doesn't need and CI runners don't have.
-    let mut zebrad = dir.with_config(&mut zebrad_config)?.spawn_child(args![
+    let zebrad = dir.with_config(&mut zebrad_config)?.spawn_child(args![
         "start",
         "--zcashd-compat",
         "--unsafe-low-specs"
     ])?;
-
-    let _ = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
-
-    // Extra stability margin before poking zcashd
-    sleep(LAUNCH_DELAY).await;
 
     let zebra_client = RpcRequestClient::new(zebra_rpc_addr);
     let zcashd_client = ZcashdRpcClient::new(
@@ -158,16 +153,30 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
         ZCASHD_TEST_RPC_PASS,
     );
 
-    wait_for_zcashd_rpc(&zcashd_client).await?;
-
-    Ok(ZcashdCompatSetup {
+    // Construct the setup before the fallible readiness waits: its `Drop`
+    // impl kills the supervised zcashd via its pid file, so a failed wait
+    // cannot leak the sidecar (zebrad itself is killed by `TestChild` drop).
+    let mut setup = ZcashdCompatSetup {
         managed: Some(zebrad),
         zcashd_datadir: Some(compat_cfg.zcashd_datadir),
         zebra_client,
         zcashd_client,
         network: Network::new_regtest(Default::default()),
         zebra_rpc_addr,
-    })
+    };
+
+    let zebrad = setup
+        .managed
+        .as_mut()
+        .expect("managed zebrad child was just spawned");
+    let _ = read_listen_addr_from_logs(zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    // Extra stability margin before poking zcashd
+    sleep(LAUNCH_DELAY).await;
+
+    wait_for_zcashd_rpc(&setup.zcashd_client).await?;
+
+    Ok(setup)
 }
 
 // ── External (mainnet / testnet) mode ─────────────────────────────────────────
@@ -187,10 +196,18 @@ pub async fn connect_to_external_zcashd_compat(kind: NetworkKind) -> Result<Zcas
         .parse()
         .map_err(|e| eyre!("invalid {TEST_ZCASHD_RPC_ADDR}: {e}"))?;
 
-    let zcashd_client = if let Ok(cookie_path) = std::env::var(TEST_ZCASHD_COOKIE_FILE) {
+    // The Make targets export these variables unconditionally, so an empty
+    // value means "unset", not "authenticate with an empty credential".
+    let non_empty_env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+
+    let zcashd_client = if let Some(cookie_path) = non_empty_env(TEST_ZCASHD_COOKIE_FILE) {
         ZcashdRpcClient::from_cookie_file(zcashd_own_rpc_addr, &PathBuf::from(cookie_path))?
     } else {
-        let user = std::env::var(TEST_ZCASHD_RPC_USER).map_err(|_| {
+        let user = non_empty_env(TEST_ZCASHD_RPC_USER).ok_or_else(|| {
             eyre!(
                 "either {TEST_ZCASHD_COOKIE_FILE} or \
                  {TEST_ZCASHD_RPC_USER}/{TEST_ZCASHD_RPC_PASSWORD} must be set"

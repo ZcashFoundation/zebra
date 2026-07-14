@@ -29,9 +29,11 @@ TEST_ZCASHD_COMPAT=1 \
   cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 ```
 
-In CI, the suite runs automatically on every merge to `main` that touches the
-zcashd-compat implementation or test harness — see
+The suite is **opt-in**: every test is `#[ignore]`d and skipped unless
+`TEST_ZCASHD_COMPAT=1` is set. In CI it runs on a weekly schedule and on
+manual dispatch — see
 [`.github/workflows/zcashd-compat-regtest.yml`](../../../../.github/workflows/zcashd-compat-regtest.yml).
+It is not a required PR check yet.
 
 ### Reorg Stress Tests
 
@@ -41,14 +43,10 @@ worker:
 - `zcashd_compat_reorg_basic_depth1` verifies normal depth-1 reorg convergence.
 - `zcashd_compat_reorg_equal_work_race` pins the equal-work, same-height degraded
   state and verifies recovery after Zebra extends its branch.
-- `zcashd_compat_reorg_depth_at_batch_limit` verifies a 33-block replacement
-  branch, matching zcashd's memory-clamped sync batch limit in CI.
-- `zcashd_compat_reorg_large_batch_depth80` verifies an 80-block replacement
-  branch with raised zcashd and Zebra response-size limits.
-- `zcashd_compat_reorg_over_batch_branch_syncs` verifies that a branch longer
-  than one sync batch is fetched in chunks and forward-synced to the Zebra tip.
-- `zcashd_compat_reorg_over_batch_branch_restart_recovers` verifies that the
-  over-batch branch remains healthy after a supervised zcashd restart.
+- `zcashd_compat_reorg_deep_depth33` verifies a 33-block replacement branch.
+- `zcashd_compat_reorg_deep_depth80` verifies an 80-block replacement branch.
+- `zcashd_compat_reorg_deep_restart_recovers` verifies that a deep replacement
+  branch remains healthy after a supervised zcashd restart.
 - `zcashd_compat_reorg_restart_after_reorg` is an opt-in slow probe for zcashd
   supervisor restart and block-index reload after several Zebra-side reorgs.
   Skipped unless `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG=1`.
@@ -150,25 +148,26 @@ error (misconfiguration, not a skip).
 | Test function | Module | Regtest | Mainnet/Testnet |
 |---|---|---|---|
 | `zcashd_compat_both_processes_start` | startup | Full check — asserts `chain == "regtest"` | Full check — asserts `chain == "main"/"test"` |
-| `zcashd_compat_readiness_after_mine` | startup | Mines 5 blocks, asserts `readiness == "ready"` | Checks readiness without mining; asserts not `"failed"` |
+| `zcashd_compat_sidecar_follows_tip` | startup | Mines blocks, asserts zcashd follows Zebra's tip and peers with Zebra alone | Checks the tips agree (no mining) |
+| `zcashd_compat_miner_rpcs_disabled` | startup | Asserts `getblocktemplate` returns method-not-found on the sidecar | Same read-only check |
 | `zcashd_compat_height_and_hash_agree` | chain | Mines 5, asserts count == 5 on both sides | Cross-checks current tip (no mining) |
 | `zcashd_compat_getblock_hash_consistent` | chain | Mines 3, checks heights 1–3 | Checks last 3 blocks at current tip |
-| `zcashd_compat_wallet_address_generation` | wallet | Full check (t-addr + z-addr) | Full check |
-| `zcashd_compat_wallet_initial_balance_zero` | wallet | Asserts zero balance and empty UTXOs | **Skipped** (live wallet may have funds) |
+| `zcashd_compat_wallet_address_generation` | wallet | Transparent `getnewaddress` returns a non-empty address | Same check |
+| `zcashd_compat_wallet_initial_balance_zero` | wallet | Asserts `getbalance` is zero | **Skipped** (live wallet may have funds) |
 | `zcashd_compat_getwalletinfo_fields_present` | wallet | Full check | Full check |
 | `zcashd_compat_transparent_tx_in_mempool` | tx_flow | Mines 200, sends tx, polls zebrad mempool | Validates `getmempoolinfo` structure only |
 | `zcashd_compat_transparent_tx_confirms` | tx_flow | Sends + mines + checks confirmations on both sides | **Skipped** |
-| `zcashd_compat_zebrad_clean_shutdown` | resilience | Mines 3, SIGKILLs zebrad, asserts clean exit | **Skipped** (don't own process) |
+| `zcashd_compat_zebrad_abrupt_kill` | resilience | Mines 3, SIGKILLs zebrad, asserts it was killed; the harness kills the orphaned sidecar | **Skipped** (don't own process) |
+| `zcashd_compat_zebrad_graceful_shutdown_stops_zcashd` | resilience | SIGTERMs zebrad, asserts the supervised zcashd also exits | **Skipped** (unix only; don't own process) |
 | `zcashd_compat_zcashd_restarts_after_exit` | resilience | SIGTERMs zcashd, waits for supervisor restart | **Skipped** (unix only; don't own process) |
 | `zcashd_compat_peer_connectivity` | network | **Skipped** (regtest has no peers) | Asserts at least one peer connected |
 | `zcashd_compat_mempool_info_valid` | network | Structural check only | Structural check (mempool typically non-empty) |
 | `zcashd_compat_historical_block_consistent` | network | **Skipped** (no canonical block 1 on fresh chain) | Block hash at height 1 agrees on both sides |
 | `zcashd_compat_reorg_basic_depth1` | reorg | Depth-1 reorg convergence | **Skipped** |
 | `zcashd_compat_reorg_equal_work_race` | reorg | Equal-work degraded state and recovery | **Skipped** |
-| `zcashd_compat_reorg_depth_at_batch_limit` | reorg | 33-block replacement branch convergence | **Skipped** |
-| `zcashd_compat_reorg_large_batch_depth80` | reorg | 80-block replacement branch convergence with raised response limits | **Skipped** |
-| `zcashd_compat_reorg_over_batch_branch_syncs` | reorg | 34-block replacement branch convergence via chunked fetch + forward sync | **Skipped** |
-| `zcashd_compat_reorg_over_batch_branch_restart_recovers` | reorg | Over-batch replacement branch remains healthy after restart | **Skipped** |
+| `zcashd_compat_reorg_deep_depth33` | reorg | 33-block replacement branch convergence | **Skipped** |
+| `zcashd_compat_reorg_deep_depth80` | reorg | 80-block replacement branch convergence | **Skipped** |
+| `zcashd_compat_reorg_deep_restart_recovers` | reorg | Deep replacement branch remains healthy after restart | **Skipped** |
 | `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** slow supervised zcashd restart after several reorgs | **Skipped** |
 | `zcashd_compat_reorg_restart_cycles` | reorg | **Opt-in:** interleaved reorg-then-restart across three cycles | **Skipped** |
 | `zcashd_compat_reorg_restart_deep_chain` | reorg | **Opt-in:** VerifyDB window on long trusted chain after reorg + restart | **Skipped** |
@@ -205,25 +204,27 @@ zebrad/tests/common/
     │                          read_test_network_kind()
     ├── launch.rs              ZcashdCompatSetup, spawn_zebrad_with_zcashd_compat(),
     │                          connect_to_external_zcashd_compat(), wait_for_zcashd_rpc()
-    ├── startup.rs             both_processes_start, readiness_after_mine, sidecar_follows_tip, miner_rpcs_disabled
+    ├── startup.rs             both_processes_start, sidecar_follows_tip,
+    │                          miner_rpcs_disabled
     ├── chain.rs               height_and_hash_agree, getblock_hash_consistent
     ├── wallet.rs              address_generation, initial_balance_zero,
     │                          getwalletinfo_fields_present
     ├── tx_flow.rs             transparent_tx_in_mempool, transparent_tx_confirms
-    ├── resilience.rs          zebrad_clean_shutdown, zcashd_restarts_after_exit
+    ├── resilience.rs          zebrad_abrupt_kill,
+    │                          zebrad_graceful_shutdown_stops_zcashd,
+    │                          zcashd_restarts_after_exit
     ├── network.rs             peer_connectivity, mempool_info_valid,
     │                          historical_block_consistent
     └── reorg.rs               basic_depth1, equal_work_race,
-                               depth_at_batch_limit, large_batch_depth80,
-                               over_batch_branch_syncs,
-                               over_batch_branch_restart_recovers,
+                               deep_reorg_depth33, deep_reorg_depth80,
+                               deep_reorg_restart_recovers,
                                restart_after_reorg, restart_cycles,
                                restart_deep_chain, zebra_tip_behind_local,
                                reorg_context_zebra_tip_behind_recovers, churn
 ```
 
 Entry points are the `#[tokio::test] #[ignore]` functions in
-`zebrad/tests/acceptance.rs` (all prefixed `zcashd_compat_`).
+`zebrad/tests/integration/zcashd_compat.rs` (all prefixed `zcashd_compat_`).
 
 ## Adding a New Test
 

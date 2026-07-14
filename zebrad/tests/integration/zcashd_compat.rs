@@ -113,13 +113,23 @@ async fn zcashd_compat_transparent_tx_confirms() -> Result<()> {
     common::zcashd_compat::tx_flow::transparent_tx_confirms().await
 }
 
-/// Verifies that zebrad shuts down cleanly while supervising a running zcashd.
+/// Verifies that an abruptly SIGKILLed zebrad exits while supervising a running zcashd.
 ///
-/// See [`common::zcashd_compat::resilience::zebrad_clean_shutdown`] for details.
+/// See [`common::zcashd_compat::resilience::zebrad_abrupt_kill`] for details.
 #[tokio::test]
 #[ignore]
-async fn zcashd_compat_zebrad_clean_shutdown() -> Result<()> {
-    common::zcashd_compat::resilience::zebrad_clean_shutdown().await
+async fn zcashd_compat_zebrad_abrupt_kill() -> Result<()> {
+    common::zcashd_compat::resilience::zebrad_abrupt_kill().await
+}
+
+/// Verifies that zebrad's graceful SIGTERM shutdown also stops the supervised zcashd.
+///
+/// See [`common::zcashd_compat::resilience::zebrad_graceful_shutdown_stops_zcashd`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
+    common::zcashd_compat::resilience::zebrad_graceful_shutdown_stops_zcashd().await
 }
 
 /// Verifies that zcashd restarts after an unexpected exit without corrupting zebrad.

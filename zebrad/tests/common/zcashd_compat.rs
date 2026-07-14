@@ -91,10 +91,20 @@ pub struct ZcashdRpcClient {
 }
 
 impl ZcashdRpcClient {
+    /// The per-request timeout for zcashd RPC calls.
+    ///
+    /// Without one, a single unresponsive RPC endpoint would hang a call
+    /// forever, and the polling helpers' attempt limits would never apply.
+    const RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Creates a new client using explicit username and password credentials.
     pub fn new(addr: SocketAddr, user: impl Into<String>, pass: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Self::RPC_TIMEOUT)
+                .connect_timeout(Self::RPC_TIMEOUT)
+                .build()
+                .expect("building a client with static timeout settings succeeds"),
             addr,
             user: user.into(),
             pass: pass.into(),

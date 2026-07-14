@@ -5,13 +5,18 @@ use std::time::Duration;
 use color_eyre::eyre::{eyre, Result};
 use tokio::time::sleep;
 
-use super::setup_zcashd_compat;
+use super::{launch::send_signal, setup_zcashd_compat};
 
-/// Verifies that zebrad shuts down cleanly while supervising a running zcashd.
+/// Verifies that an abruptly SIGKILLed zebrad exits while supervising a
+/// running zcashd, and that the test harness cleans up the orphaned sidecar.
+///
+/// SIGKILL cannot be handled, so this deliberately skips every zebrad
+/// shutdown path; graceful shutdown is covered by
+/// [`zebrad_graceful_shutdown_stops_zcashd`].
 ///
 /// Only runs in managed (regtest) mode; skipped on external networks where we
 /// do not own the zebrad process.
-pub async fn zebrad_clean_shutdown() -> Result<()> {
+pub async fn zebrad_abrupt_kill() -> Result<()> {
     let Some(mut setup) = setup_zcashd_compat().await? else {
         return Ok(());
     };
@@ -30,6 +35,57 @@ pub async fn zebrad_clean_shutdown() -> Result<()> {
         .wait_with_output()?
         .assert_failure()?
         .assert_was_killed()?;
+
+    // `setup` is dropped here: its `Drop` impl kills the orphaned zcashd.
+    Ok(())
+}
+
+/// Verifies that zebrad's graceful shutdown (SIGTERM) also stops the
+/// supervised zcashd: zebrad's post-runtime cleanup SIGTERMs the child and
+/// waits for it, so a service-manager stop cannot orphan the sidecar.
+///
+/// Only runs in managed (regtest) mode.
+#[cfg(unix)]
+pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
+    let Some(mut setup) = setup_zcashd_compat().await? else {
+        return Ok(());
+    };
+
+    if !setup.can_mutate() {
+        return setup.teardown();
+    }
+
+    let zcashd_pid = setup.zcashd_pid()?;
+
+    let mut zebrad = setup
+        .managed
+        .take()
+        .expect("managed process is present in regtest mode");
+    let zebrad_pid = zebrad
+        .child
+        .as_ref()
+        .expect("zebrad has not been waited on yet")
+        .id();
+
+    send_signal(zebrad_pid, "-TERM")?;
+
+    // zebrad exits, then its post-runtime cleanup terminates zcashd.
+    zebrad.wait_with_output()?;
+
+    let mut zcashd_exited = false;
+    for _ in 0..60u32 {
+        // `kill -0` only checks whether the process still exists.
+        if send_signal(zcashd_pid, "-0").is_err() {
+            zcashd_exited = true;
+            break;
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    assert!(
+        zcashd_exited,
+        "supervised zcashd (pid {zcashd_pid}) should exit within 60 s of zebrad's SIGTERM"
+    );
 
     Ok(())
 }
