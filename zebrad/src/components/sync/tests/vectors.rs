@@ -93,10 +93,13 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             None,
         ))]));
 
-    block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+    // Genesis is hash-checked against the network genesis hash and committed
+    // directly to the state: the semantic verifier's checkpoint gate rejects
+    // blocks at the mandatory floor, so it is never asked.
+    state_service
+        .expect_request(zs::Request::CommitCheckpointVerifiedBlock(block0.into()))
         .await
-        .respond(block0_hash);
+        .respond(zs::Response::Committed(block0_hash));
 
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
@@ -335,10 +338,13 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             None,
         ))]));
 
-    block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+    // Genesis is hash-checked against the network genesis hash and committed
+    // directly to the state: the semantic verifier's checkpoint gate rejects
+    // blocks at the mandatory floor, so it is never asked.
+    state_service
+        .expect_request(zs::Request::CommitCheckpointVerifiedBlock(block0.into()))
         .await
-        .respond(block0_hash);
+        .respond(zs::Response::Committed(block0_hash));
 
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
@@ -635,10 +641,13 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             None,
         ))]));
 
-    block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+    // Genesis is hash-checked against the network genesis hash and committed
+    // directly to the state: the semantic verifier's checkpoint gate rejects
+    // blocks at the mandatory floor, so it is never asked.
+    state_service
+        .expect_request(zs::Request::CommitCheckpointVerifiedBlock(block0.into()))
         .await
-        .respond(block0_hash);
+        .respond(zs::Response::Committed(block0_hash));
 
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.
@@ -808,10 +817,13 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             None,
         ))]));
 
-    block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+    // Genesis is hash-checked against the network genesis hash and committed
+    // directly to the state: the semantic verifier's checkpoint gate rejects
+    // blocks at the mandatory floor, so it is never asked.
+    state_service
+        .expect_request(zs::Request::CommitCheckpointVerifiedBlock(block0.into()))
         .await
-        .respond(block0_hash);
+        .respond(zs::Response::Committed(block0_hash));
 
     // Check that nothing unexpected happened.
     // We expect more requests to the state service, because the syncer keeps on running.

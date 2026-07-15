@@ -679,10 +679,17 @@ impl StartCmd {
         // before driving the legacy syncer.
         //
         // An ephemeral state must never write to the configured cache
-        // directory, so the engine's disk block cache goes to a per-process
-        // temporary directory instead (like the ephemeral database itself).
+        // directory, so the engine's disk block cache goes to a random
+        // temporary directory instead, like the ephemeral database itself
+        // (a predictable name in the shared temp dir could be squatted by
+        // another local user; abandoned dirs are left to the OS temp cleaner,
+        // matching the ephemeral database's behavior).
         let ibd_cache_dir = if config.state.ephemeral {
-            std::env::temp_dir().join(format!("zebrad-ephemeral-{}", std::process::id()))
+            tempfile::Builder::new()
+                .prefix("zebrad-ibd-block-cache-")
+                .tempdir()
+                .expect("temporary directory is created successfully")
+                .keep()
         } else {
             config.state.cache_dir.clone()
         };

@@ -88,11 +88,8 @@ parallel_cpu_threads = 0
 
 [state]
 cache_dir = "cache_dir"
-checkpoint_sync_pipeline_capacity = 1000
-checkpoint_sync_retained_blocks = 1000
 debug_skip_non_finalized_state_backup_task = false
 delete_old_database = true
-disable_wal_during_ibd = false
 ephemeral = false
 should_backup_non_finalized_state = true
 
@@ -100,9 +97,6 @@ should_backup_non_finalized_state = true
 checkpoint_verify_concurrency_limit = 1000
 download_concurrency_limit = 50
 full_verify_concurrency_limit = 20
-known_hash_gap_hedge_secs = 5
-known_hash_lookahead_bytes = 268435456
-known_hash_sync = true
 parallel_cpu_threads = 0
 
 [tracing]

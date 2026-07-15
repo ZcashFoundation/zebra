@@ -1103,6 +1103,11 @@ where
     }
 
     /// Randomly selects one connected peer (ready or unready), if any exist.
+    ///
+    /// Configured zcashd-compat sidecar peers are exempt, like every other
+    /// adversarial-peer policy: they sync *from* this node (never the peer
+    /// withholding newer chain, so evicting one can't cure a stall), and
+    /// dropping one would silently disconnect the wallet.
     fn select_random_peer(&self) -> Option<D::Key> {
         use rand::seq::IteratorRandom;
 
@@ -1110,6 +1115,7 @@ where
         self.ready_services
             .keys()
             .chain(self.cancel_handles.keys())
+            .filter(|key| !self.zcashd_compat_peer_keys.contains(key))
             .copied()
             .choose(&mut rand::thread_rng())
     }

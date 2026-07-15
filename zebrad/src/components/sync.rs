@@ -5,7 +5,7 @@
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},
-    convert,
+    convert, iter,
     path::PathBuf,
     pin::Pin,
     task::Poll,
@@ -1188,8 +1188,8 @@ where
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
-    /// Download and verify the genesis block, if it isn't currently known to
-    /// our node.
+    /// Download the genesis block and commit it directly to the state, if it
+    /// isn't currently known to our node.
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
@@ -1197,36 +1197,25 @@ where
         //  - responses start with the block *after* the requested block, and
         //  - the genesis hash is used as a placeholder for "no matches".
         //
-        // So we just download and verify the genesis block here.
+        // So we just download and commit the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
-            info!("starting genesis block download and verify");
+            info!("starting genesis block download");
 
-            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
-                .await
-                .map_err(Into::into);
+            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once()).await;
 
-            // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
-                Ok(Ok(Ok(response))) => self
-                    .handle_block_response(Ok(response))
-                    .expect("never returns Err for Ok"),
-                // Handle fatal errors
-                Ok(Err(fatal_error)) => Err(fatal_error)?,
-                // Handle timeouts and block errors
-                Err(error) | Ok(Ok(Err(error))) => {
-                    // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
-                    if Self::should_restart_sync(&error) {
-                        warn!(
-                            ?error,
-                            "could not download or verify genesis block, retrying"
-                        );
-                    } else {
-                        info!(
-                            ?error,
-                            "temporary error downloading or verifying genesis block, retrying"
-                        );
-                    }
-
+                Ok(Ok(())) => {}
+                // Handle timeouts and download/commit errors: startup races
+                // (no ready peers yet, a peer without the block) all retry.
+                Err(_elapsed) => {
+                    info!("genesis block download timed out, retrying");
+                    tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
+                }
+                Ok(Err(error)) => {
+                    info!(
+                        ?error,
+                        "could not download or commit genesis block, retrying"
+                    );
                     tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
                 }
             }
@@ -1235,18 +1224,53 @@ where
         Ok(())
     }
 
-    /// Try to download and verify the genesis block once.
+    /// Try once to download the genesis block from a peer, verify it against
+    /// the network's pinned genesis hash, and commit it directly to the state.
     ///
-    /// Fatal errors are returned in the outer result, temporary errors in the inner one.
-    async fn request_genesis_once(
-        &mut self,
-    ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self.downloads.download_and_verify(self.genesis_hash).await;
-        Self::handle_response(response).map_err(|e| eyre!(e))?;
+    /// Blocks at or below the mandatory checkpoint floor never pass the
+    /// semantic verifier's checkpoint gate, so genesis cannot go through the
+    /// regular `downloads` path. Its hash is a network parameter — the same
+    /// pin the removed checkpoint verifier applied — so the hash comparison is
+    /// a complete verification, matching the startup path
+    /// (`ibd::commit_genesis_if_missing`) for networks whose genesis block is
+    /// not hard-coded (e.g. configured testnets with a custom genesis block).
+    async fn request_genesis_once(&mut self) -> Result<(), Report> {
+        let response = self
+            .tip_network
+            .ready()
+            .await
+            .map_err(|error| eyre!(error))?
+            .call(zn::Request::BlocksByHash(
+                iter::once(self.genesis_hash).collect(),
+            ))
+            .await
+            .map_err(|error| eyre!(error))?;
 
-        let response = self.downloads.next().await.expect("downloads is nonempty");
+        let zn::Response::Blocks(mut blocks) = response else {
+            return Err(eyre!("wrong response to a genesis BlocksByHash request"));
+        };
 
-        Ok(response)
+        let (block, _peer) = blocks
+            .pop()
+            .and_then(|inventory_response| inventory_response.available())
+            .ok_or_else(|| eyre!("the peer did not have the genesis block"))?;
+
+        let genesis = zs::CheckpointVerifiedBlock::from(block);
+        if genesis.hash != self.genesis_hash {
+            return Err(eyre!(
+                "the peer served a block that is not the genesis block"
+            ));
+        }
+
+        self.state
+            .ready()
+            .await
+            .map_err(|error| eyre!(error))?
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(genesis))
+            .await
+            .map_err(|error| eyre!("committing the genesis block failed: {error}"))?;
+
+        Ok(())
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.
