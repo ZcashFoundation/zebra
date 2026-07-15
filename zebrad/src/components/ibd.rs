@@ -4,11 +4,11 @@
 //! downloads blocks directly by their pinned hashes instead of discovering
 //! hashes from peers, verifies them against the list, and commits them
 //! straight to the finalized state. When the engine finishes (or declines to
-//! run), the legacy syncer takes over from the real tip.
+//! run), the tip-following syncer takes over from the real tip.
 //!
 //! This module holds the supervisor: it decides whether the engine can run,
 //! owns the engine task, and reports the [`IbdOutcome`] used by startup
-//! wiring to hand off to the legacy syncer.
+//! wiring to hand off to the tip-following syncer.
 //!
 //! The engine is gated behind the `sync.known_hash_sync` config flag, which
 //! defaults to on for Mainnet (enabled in Phase E1). See
@@ -45,6 +45,7 @@ use self::{consume::CfHashSource, engine::HashSource};
 pub mod cache;
 pub mod consume;
 pub mod convert;
+pub mod discovery;
 pub mod engine;
 pub mod fetch;
 pub mod semantic;
@@ -61,7 +62,7 @@ mod tests;
 pub const IBD_RESTART_DELAY: Duration = Duration::from_secs(15);
 
 /// The number of consecutive engine restarts with zero frontier progress
-/// after which the supervisor may degrade to the legacy syncer — only above
+/// after which the supervisor may degrade to the tip-following syncer — only above
 /// the mandatory checkpoint height (design doc §4.1, §4.7).
 ///
 /// Below the mandatory checkpoint the engine restarts forever with alarms:
@@ -77,7 +78,7 @@ pub const IBD_STALL_WARN_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The result of running the known-hash IBD engine.
 ///
-/// Whatever the outcome, the legacy syncer starts afterwards from a block
+/// Whatever the outcome, the tip-following syncer starts afterwards from a block
 /// locator at the real tip; the outcome only determines logging and metrics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IbdOutcome {
@@ -88,13 +89,13 @@ pub enum IbdOutcome {
         final_height: block::Height,
     },
 
-    /// The engine did not run; the legacy syncer starts immediately.
+    /// The engine did not run; the tip-following syncer starts immediately.
     Declined(DeclineReason),
 
     /// The engine gave up above the mandatory checkpoint floor and handed
-    /// its unfinished range to the legacy syncer:
+    /// its unfinished range to the tip-following syncer:
     /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts made
-    /// zero frontier progress, and the legacy syncer is correct, just slower
+    /// zero frontier progress, and the tip-following syncer is correct, just slower
     /// (design doc §4.1, §4.7; degradation is only permitted above the
     /// mandatory checkpoint height — below it the engine restarts forever
     /// with alarms).
@@ -216,24 +217,24 @@ where
     /// counter resets whenever a restart makes frontier progress. Above the
     /// mandatory checkpoint height,
     /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] zero-progress restarts degrade
-    /// to the legacy syncer; below it the engine restarts forever with
+    /// to the tip-following syncer; below it the engine restarts forever with
     /// alarms.
     ///
     /// Returns `Ok(IbdOutcome::Declined(_))` when the engine cannot or should
-    /// not run; the caller starts the legacy syncer either way. Returns an
+    /// not run; the caller starts the tip-following syncer either way. Returns an
     /// error on broken or tampered list assets and on non-retryable engine
     /// failures (list diagnostics, state shutdown), which need operator
     /// attention rather than a silent fallback.
     pub async fn run(self) -> Result<IbdOutcome, BoxError> {
         if !self.config.known_hash_sync {
-            debug!("known-hash sync is disabled by config; using the legacy syncer");
+            debug!("known-hash sync is disabled by config; using the tip-following syncer");
             return Ok(IbdOutcome::Declined(DeclineReason::DisabledByConfig));
         }
 
         let Some(spec) = KnownHashListSpec::for_network(&self.network) else {
             info!(
                 network = %self.network,
-                "no known-hash list is bundled for this network; using the legacy syncer",
+                "no known-hash list is bundled for this network; using the tip-following syncer",
             );
             return Ok(IbdOutcome::Declined(DeclineReason::NoList));
         };
@@ -277,7 +278,7 @@ where
                         ?tip_height,
                         list_max_height = ?spec.max_height,
                         "chain tip is already past the known-hash list; \
-                         using the legacy syncer",
+                         using the tip-following syncer",
                     );
                     IbdOutcome::Declined(DeclineReason::AlreadyPast)
                 } else {
@@ -407,7 +408,7 @@ where
                             ?next_commit,
                             failures_without_progress,
                             "known-hash IBD engine made no progress over repeated restarts \
-                             above the mandatory checkpoint; degrading to the legacy syncer",
+                             above the mandatory checkpoint; degrading to the tip-following syncer",
                         );
                         return Ok(IbdOutcome::Degraded);
                     }
@@ -550,7 +551,7 @@ where
 ///
 /// The genesis block is at or below the mandatory checkpoint floor, so the
 /// semantic verifier's checkpoint gate (`zebra_consensus::checkpoints`) never
-/// commits it, and the legacy syncer's genesis download requires a connected
+/// commits it, and the syncer's genesis download requires a connected
 /// peer that already has it. It is instead committed here as a
 /// checkpoint-verified block: its hash is checked against the network genesis
 /// hash, which is the same pin the deleted checkpoint verifier applied.
@@ -593,9 +594,9 @@ where
     Ok(())
 }
 
-/// Spawns the known-hash IBD engine and the legacy syncer as one combined,
+/// Spawns the known-hash IBD engine and the tip-following syncer as one combined,
 /// supervised task: the engine runs to completion first, then `sync_fut`
-/// (the legacy syncer) takes over from the real tip (design doc §4.7).
+/// (the tip-following syncer) takes over from the real tip (design doc §4.7).
 ///
 /// `ChainSync` is constructed at startup — its status handles feed the
 /// mempool, gossip, and progress tasks — but futures are lazy: `sync_fut`
@@ -605,8 +606,8 @@ where
 ///
 /// Engine errors need operator attention (broken assets, state shutdown), so
 /// the combined task exits with the error instead of silently falling back
-/// to the legacy syncer.
-pub fn spawn_engine_then_legacy_sync<ZN, ZS, ZSTip, F>(
+/// to the tip-following syncer.
+pub fn spawn_engine_then_tip_sync<ZN, ZS, ZSTip, F>(
     engine: IbdEngine<ZN, ZS, ZSTip>,
     sync_fut: F,
 ) -> JoinHandle<Result<(), Report>>
@@ -646,7 +647,7 @@ where
                 Ok(Ok(outcome)) => {
                     info!(
                         ?outcome,
-                        "known-hash IBD engine finished; starting the legacy syncer",
+                        "known-hash IBD engine finished; starting the tip-following syncer",
                     );
                 }
                 Ok(Err(error)) => {

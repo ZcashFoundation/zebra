@@ -1153,10 +1153,13 @@ Planned fields, added together with their implementations:
 §6.3) and `known_hash_cache_write_ahead` (spool every fetched block to the
 cache, §4.5).
 
-The legacy fields are unchanged: `checkpoint_verify_concurrency_limit` still
-sizes the state's UTXO lookahead window (§7.3) and the state's queued-block
-memory limits; `download_concurrency_limit`, `full_verify_concurrency_limit`,
-and `parallel_cpu_threads` still drive the legacy tail and the rayon pool.
+The legacy fields are kept for config compatibility, now as queue-sizing
+knobs: `checkpoint_verify_concurrency_limit` still sizes the state's UTXO
+lookahead window (§7.3) and the state's queued-block memory limits;
+`download_concurrency_limit` sizes the state service buffer;
+`full_verify_concurrency_limit` caps the tip-following engine's commit
+pipeline (the blocks concurrently inside the semantic verifier, §17) and the
+inbound gossip downloader; `parallel_cpu_threads` still drives the rayon pool.
 
 ## 11. Validation gates (before release)
 
@@ -1544,6 +1547,12 @@ node with checkpoint sync disabled) so there is one engine, not the engine plus
 the bespoke `downloads.rs` Hedge/Retry/Timeout download stack. The cut is two
 trait seams; everything else is shared verbatim.
 
+(Terminology: elsewhere in this document "the legacy syncer" names `ChainSync`,
+the component the engine hands off to after `Completed`/`Declined`/`Degraded`.
+That handoff structure (§4.7) is unchanged; this section replaces `ChainSync`'s
+*internals*, so the tail it hands off to is now the same engine over discovered
+hashes — the tip-following syncer.)
+
 ### 17.1 The two seams
 
 - **`CommitStage`** — *what stage-2 does with a fetched block*. It is the tower
@@ -1563,9 +1572,9 @@ trait seams; everything else is shared verbatim.
   (append a discovery round) and `invalidate_above` (a reorg).
   - `KnownHashList` (pinned): fixed, checkpoint-anchored; `extend` /
     `invalidate_above` are no-ops.
-  - A discovery source (later): wraps the `ObtainTips`/`ExtendTips` crawl, which
-    stays where it is and merely *feeds* the source instead of driving its own
-    download loop.
+  - `DiscoverySource` (tip-following): wraps the `ObtainTips`/`ExtendTips`
+    crawl, which stays where it is and merely *feeds* the source instead of
+    driving its own download loop.
 
 ### 17.2 What has landed
 
@@ -1578,43 +1587,60 @@ Phases that each compile, lint, and test green on this branch:
 2. **`HashList` generalized to `HashSource`,** with defaulted `extend` /
    `invalidate_above`, and `run()` re-reading `max_height` each iteration so a
    growing source extends the fetch window automatically.
-3. **`SemanticCommit` added** (additive, not yet wired): the second
-   `CommitStage` implementation, proving the seam drives full validation with
-   the window / fetch / hedge / commit machinery unchanged. Corrupt cached bytes
-   still fail as a verify-stage error before the verifier is reached, reusing the
-   engine's discard-and-refetch path. Covered by isolated `MockService` tests
-   mirroring the known-hash `convert_vectors`.
+3. **`SemanticCommit` added**: the second `CommitStage` implementation, proving
+   the seam drives full validation with the window / fetch / hedge / commit
+   machinery unchanged. Corrupt cached bytes still fail as a verify-stage error
+   before the verifier is reached, reusing the engine's discard-and-refetch
+   path. Covered by isolated `MockService` tests mirroring the known-hash
+   `convert_vectors`. Duplicate-request verifier errors (the block is already
+   committed — a previous run, the gossip downloader, or checkpoint overlap)
+   map to success, the same classification the legacy syncer's
+   `should_restart_sync` applied.
+4. **`DiscoverySource` added and wired.** The crawl feeds tentative hashes to
+   the engine through a `DiscoveryFeed` handle (an unbounded event channel the
+   engine drains each loop pass); a `remaining`-count watch drives
+   `wants_more_hashes`, so the crawl runs just ahead of the fetch frontier
+   (`DISCOVERY_LOW_WATER_MARK`). The source anchors on the state tip hash so
+   the engine's frontier parent pin (`list[base - 1]`) always resolves.
+   Growing-range completion is `HashSource::is_final` + `wait_for_growth`: the
+   run loop treats a drained range as complete only after the crawl calls
+   `finish()` (or drops the feed).
+5. **`ChainSync` internals swapped and `downloads.rs` deleted.** `sync_cycle`
+   runs one crawl-plus-engine round: `obtain_tips` seeds the feed,
+   `Engine::new_semantic` (no tree lookahead or snapshot source; the commit
+   pipeline capped by `full_verify_concurrency_limit`) drives fetch/verify/
+   commit, and `extend_tips` tops the feed up on the low-water signal. What
+   stayed in `sync.rs`, exactly as planned: discovery cadence, genesis
+   bootstrap, `SyncStatus` / `RecentSyncLengths` (mempool activation), and
+   gossip. Cycle-level liveness is a state-tip progress check
+   (`SYNC_PROGRESS_CHECK_INTERVAL`, threshold `BLOCK_VERIFY_TIMEOUT`): a
+   tentative range that cannot drain (fabricated or reorged-away hashes)
+   restarts the cycle from the state tip, exactly as the legacy per-batch
+   verify timeout did. The engine's disk overflow cache is shared with
+   known-hash sync (the two never run concurrently).
 
-### 17.3 What remains (and the honest hard parts)
+Wrong tentative sequences (interleaved forks from two peers) fail contextual
+validation, surface as an engine error, and restart the cycle; restart-based
+recovery is the correctness baseline.
 
-The remaining work rewires the production syncer and so is gated on a full
-genesis→tip sync test (Mainnet and Testnet); it is **not** landed:
+The swap rewires the production syncer, so release sign-off remains gated on a
+full genesis→tip sync run (Mainnet and Testnet) on top of the unit,
+`MockService` flow, and regtest multi-node integration coverage on this branch.
 
-- **Discovery `HashSource`** wrapping `ObtainTips`/`ExtendTips`, feeding tentative
-  hashes via `extend`, and truncating via `invalidate_above` on reorg.
-- **Engine window-reorg op** (deferred from phase 2 deliberately): drop the
+### 17.3 What remains (recorded follow-ups)
+
+- **Engine window-reorg op**: consume `invalidate_above` engine-side — drop the
   window slots above a reorg height, abort their in-flight fetches/hedges, evict
   their cache entries, and roll back the RAM / commit-pipeline byte and block
   accounting — then defer to the non-finalized state for commits already in
-  flight (which it reorgs itself). This mutates five counters and needs an
-  engine test harness (none exists yet — current tests cover `convert`,
-  `SemanticCommit`, and the cache, not a constructed `Engine`), so it lands with
-  its consumer rather than speculatively. The same phase reconciles
-  `restore_cache`, which currently scans the disk tier once against the initial
-  `max_height`: a growing source must rescan against the current range on
-  restart so it neither prunes valid look-ahead nor keeps orphaned heights.
-- **Error classification.** `VerifyAndCommitError` is shaped for the known-hash
-  path (`ConvertError`: fatal list diagnostics vs. peer-attributable corrupt
-  bodies). For discovery, a verifier failure is a peer-attributable *invalid
-  block* that should refetch from a different peer (or abandon the branch), not
-  route through the frontier commit-reset path. `SemanticCommit` currently maps
-  every verifier error to `Commit{..}` as a safe starting point; the real
-  classification is defined alongside the wiring.
-- **Discovery completion.** The pinned engine completes when `base > max_height`;
-  a tip-following source must not "complete" merely by catching up. Completion
-  becomes the syncer's call (it owns `SyncStatus` / `RecentSyncLengths`).
-- **Swap `ChainSync`'s internals** to construct the engine with the discovery
-  source + `SemanticCommit` behind the existing config, then **delete
-  `downloads.rs`**. What stays in `sync.rs`: discovery cadence, genesis
-  bootstrap, `SyncStatus` / `RecentSyncLengths` (mempool activation), and gossip
-  — the syncer becomes discovery + status plumbing around the shared engine.
+  flight (which it reorgs itself). Until it lands, restart-based recovery
+  covers reorgs (correct, occasionally wasteful). The same phase reconciles
+  `restore_cache` against a growing range on restart.
+- **Peer attribution** (D6): classify peer-attributable invalid blocks in
+  `SemanticCommit` and report the implicated copy's source peer (the
+  `Slot::Fetched` `source` field) through the address book updater, restoring
+  the misbehavior scoring the legacy `handle_block_response` performed.
+- **Crawl overlap dedup**: the feed skips only a tail-overlapping prefix; a
+  crawl round that re-returns hashes already deeper in the window appends them
+  at new heights, where they commit as duplicates (mapped to success) — benign
+  but wasteful; full-window dedup is a small follow-up.

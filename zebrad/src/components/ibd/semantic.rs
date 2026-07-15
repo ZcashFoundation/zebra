@@ -12,9 +12,10 @@
 //! Both types implement [`CommitStage`], so the engine drives either one with
 //! its window, weighted-fetch, gap-hedge, and commit-pipeline machinery
 //! unchanged — the payoff of the [`CommitStage`] seam (design doc §17 / the
-//! generic engine unification). This module is the second implementation that
-//! proves the seam; wiring it into `ChainSync` (replacing the bespoke
-//! `downloads.rs` Hedge/Retry/Timeout stack) is a later phase.
+//! generic engine unification). `ChainSync` wires this stage together with a
+//! [`DiscoverySource`](super::discovery::DiscoverySource) through
+//! [`Engine::new_semantic`](super::engine::Engine::new_semantic), replacing
+//! the legacy syncer's bespoke `downloads.rs` Hedge/Retry/Timeout stack.
 //!
 //! [`CommitStage`]: super::convert::CommitStage
 //! [`CommitCheckpointVerifiedBlock`]: zebra_state::Request::CommitCheckpointVerifiedBlock
@@ -33,6 +34,9 @@ use zebra_consensus::spawn_fifo;
 
 use super::convert::{ConvertError, IbdBlock, VerifyAndCommitError};
 use crate::BoxError;
+
+#[cfg(test)]
+mod tests;
 
 /// The full-validation stage-2 service: the semantic block verifier behind the
 /// engine's [`CommitStage`] seam.
@@ -127,31 +131,65 @@ where
             // Full semantic + contextual validation and the non-finalized
             // commit. The verifier owns reorg handling for its own state, so
             // a block that loses a race is reorged there, not here.
-            //
-            // TODO(generic-engine-unification): classify the verifier's error
-            // so invalid (peer-attributable) blocks refetch from a different
-            // peer instead of routing through the frontier commit-reset path.
-            // That needs the discovery error semantics defined alongside the
-            // `ChainSync` wiring; until then everything maps to `Commit`.
-            let committed_hash = verifier
+            let committed_hash = match verifier
                 .oneshot(zebra_consensus::Request::Commit(block))
                 .await
-                .map_err(|error| VerifyAndCommitError::Commit {
-                    height,
-                    hash: expected,
-                    error,
-                })?;
+            {
+                Ok(committed_hash) => {
+                    // The verifier commits the exact block it was handed and
+                    // returns that block's hash, which the fetch layer already
+                    // matched against the assigned `expected` at receipt.
+                    // Assert the parity, matching the known-hash path
+                    // (`VerifyAndCommit`): the engine keys the committed slot
+                    // by the assigned height, so a divergence here would mark
+                    // the wrong block committed.
+                    assert_eq!(
+                        committed_hash, expected,
+                        "the verifier must commit the hash the engine assigned to this height",
+                    );
 
-            // The verifier commits the exact block it was handed and returns
-            // that block's hash, which the fetch layer already matched against
-            // the assigned `expected` at receipt. Assert the parity, matching
-            // the known-hash path (`VerifyAndCommit`): the engine keys the
-            // committed slot by the assigned height, so a divergence here would
-            // mark the wrong block committed.
-            assert_eq!(
-                committed_hash, expected,
-                "the verifier must commit the hash the engine assigned to this height",
-            );
+                    committed_hash
+                }
+
+                // A duplicate-request error means this exact block is already
+                // verified and committed — by a previous sync run, the inbound
+                // gossip downloader, or the known-hash engine's overlap. The
+                // goal state for this height is reached, so report success:
+                // routing it through the engine's frontier commit-reset path
+                // would refetch a block the state already has until the
+                // byte-identical failure limit gave up. This is the same
+                // classification the legacy syncer applied
+                // (`VerifyBlockError::is_duplicate_request`).
+                //
+                // TODO(known-hash-ibd D6): also classify peer-attributable
+                // invalid blocks, reporting the implicated copy's source peer
+                // through the address book updater.
+                Err(error) => match error.downcast::<zebra_consensus::VerifyBlockError>() {
+                    Ok(verify_error) if verify_error.is_duplicate_request() => {
+                        debug!(
+                            height = height.0,
+                            hash = %expected,
+                            "block was already verified and committed, continuing",
+                        );
+
+                        expected
+                    }
+                    Ok(verify_error) => {
+                        return Err(VerifyAndCommitError::Commit {
+                            height,
+                            hash: expected,
+                            error: verify_error,
+                        })
+                    }
+                    Err(error) => {
+                        return Err(VerifyAndCommitError::Commit {
+                            height,
+                            hash: expected,
+                            error,
+                        })
+                    }
+                },
+            };
 
             Ok(committed_hash)
         }

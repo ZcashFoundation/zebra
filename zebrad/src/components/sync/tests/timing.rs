@@ -10,10 +10,7 @@ use std::sync::{
 use futures::future;
 use tokio::time::{timeout, Duration};
 
-use zebra_chain::{
-    block::Height,
-    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
-};
+use zebra_chain::parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING};
 use zebra_network::constants::{
     DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
 };
@@ -21,8 +18,8 @@ use zebra_state::ChainTipSender;
 
 use crate::{
     components::sync::{
-        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+        ChainSync, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT, GENESIS_TIMEOUT_RETRY,
+        SYNC_PROGRESS_CHECK_INTERVAL, SYNC_RESTART_DELAY,
     },
     config::ZebradConfig,
 };
@@ -38,17 +35,10 @@ fn ensure_timeouts_consistent() {
         "Sync restart should allow for pending and buffered requests to complete"
     );
 
-    // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
-    // seconds before retrying.
-    const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
-        2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
-
     // This constraint avoids spurious failures due to block download timeouts
     assert!(
         BLOCK_VERIFY_TIMEOUT.as_secs()
-            > SYNC_RESTART_DELAY.as_secs()
-                + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
-                + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
+            > SYNC_RESTART_DELAY.as_secs() + 2 * BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
         "Block verify should allow for a block timeout, a sync restart, and some block fetches"
     );
 
@@ -68,6 +58,14 @@ fn ensure_timeouts_consistent() {
                 .target_spacing()
                 .num_seconds() as u64,
         "Block verify should allow for at least one new block to be generated and distributed"
+    );
+
+    // The sync cycle's no-progress restart uses `BLOCK_VERIFY_TIMEOUT` as its
+    // threshold, so the checks must run several times within that window for
+    // the elapsed comparison to fire close to the intended timeout.
+    assert!(
+        SYNC_PROGRESS_CHECK_INTERVAL.as_secs() * 4 < BLOCK_VERIFY_TIMEOUT.as_secs(),
+        "progress checks should run several times within the no-progress restart window"
     );
 
     // This constraint makes genesis retries more likely to succeed
@@ -160,15 +158,17 @@ fn request_genesis_is_rate_limited() {
         );
 
     // start the sync
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (_status_tx, peer_set_status) =
+        tokio::sync::watch::channel(zebra_network::PeerSetStatus::default());
+    let cache_dir = tempfile::tempdir().expect("temporary directory is created successfully");
     let (mut chain_sync, _) = ChainSync::new(
         &ZebradConfig::default(),
-        Height(0),
         peer_service,
         verifier_service,
         state_service,
         latest_chain_tip,
-        misbehavior_tx,
+        peer_set_status,
+        cache_dir.path(),
     );
 
     // run `request_genesis()` with a timeout of 13 seconds
@@ -183,9 +183,11 @@ fn request_genesis_is_rate_limited() {
         .await;
     });
 
+    // Each retry makes exactly one state query and one peer request: the
+    // genesis download is a single direct fetch, with no retry middleware.
     let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
     assert!(peer_requests_counter >= RETRIES_TO_RUN);
-    assert!(peer_requests_counter <= RETRIES_TO_RUN * (BLOCK_DOWNLOAD_RETRY_LIMIT as u8) * 2);
+    assert!(peer_requests_counter <= RETRIES_TO_RUN + 1);
     assert_eq!(
         state_requests_counter.load(Ordering::SeqCst),
         RETRIES_TO_RUN

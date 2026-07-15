@@ -295,22 +295,21 @@ fn is_write_task_exited(error: &BoxError) -> bool {
 
 /// The source of the engine's per-height block hashes and size hints.
 ///
-/// The pinned [`KnownHashList`] is the production implementation, and the trait
-/// lets engine tests run against in-memory lists built from real test-vector
-/// blocks instead of the on-disk asset set. It is also the seam that
-/// generalizes the engine beyond a fixed, pre-known list: a *discovery* source
-/// (full-validation sync) would grow over time through
-/// [`extend`](Self::extend) and reorg through
-/// [`invalidate_above`](Self::invalidate_above).
+/// The pinned [`KnownHashList`] is the checkpoint-range implementation, and
+/// the trait lets engine tests run against in-memory lists built from real
+/// test-vector blocks instead of the on-disk asset set. It is also the seam
+/// that generalizes the engine beyond a fixed, pre-known list: the
+/// [`DiscoverySource`](super::discovery::DiscoverySource) used by
+/// tip-following sync grows over time through [`extend`](Self::extend), and
+/// the run loop waits on that growth through
+/// [`wait_for_growth`](Self::wait_for_growth) before treating a drained range
+/// as complete (design doc §17).
 ///
-/// Those two methods define the seam's shape; the engine-side handling that
-/// fully consumes them — the window reorg op, restore-cache rescan, and
-/// growing-range completion semantics — lands together with that discovery
-/// source in a later phase (design doc §17). Today only [`max_height`] growth
-/// is consumed (the run loop re-reads it), and the only implementations are the
-/// fixed pinned list and the test list, for which both methods are no-ops.
-///
-/// [`max_height`]: Self::max_height
+/// [`invalidate_above`](Self::invalidate_above) defines the reorg side of the
+/// seam; the matching engine-side window op (abandoning in-flight blocks for
+/// an orphaned branch) is a recorded follow-up — until it lands, a wrong
+/// tentative range surfaces as an engine error and the syncer restarts its
+/// cycle from the state tip.
 pub trait HashSource: Send + 'static {
     /// The highest height the source currently has a hash for.
     ///
@@ -410,6 +409,26 @@ pub trait HashSource: Send + 'static {
     /// later discovery phase (design doc §17); it does not exist yet, so for now
     /// this is a source-only hook with no engine consumer.
     fn invalidate_above(&mut self, _height: block::Height) {}
+
+    /// Whether the source's range is final: no more hashes will ever be
+    /// appended above [`max_height`](Self::max_height).
+    ///
+    /// The pinned list and the CF-backed snapshot source are always final; a
+    /// discovery source becomes final when its crawl runs out of tips.
+    fn is_final(&self) -> bool {
+        true
+    }
+
+    /// Waits for the source's range to grow past its current maximum height,
+    /// returning `true` when new heights arrived and `false` when the source
+    /// became final without growing (the engine then completes).
+    ///
+    /// The run loop only calls this when every height in the current range is
+    /// committed and [`is_final`](Self::is_final) is `false`, so a final
+    /// source never waits; the default fails safe by reporting no growth.
+    fn wait_for_growth(&mut self) -> Pin<Box<dyn Future<Output = bool> + Send + '_>> {
+        Box::pin(std::future::ready(false))
+    }
 }
 
 impl HashSource for KnownHashList {
@@ -857,6 +876,97 @@ where
     }
 }
 
+/// The full-validation constructor: the engine over the semantic block
+/// verifier ([`SemanticCommit`]) and a growing discovery source, used by the
+/// tip-following syncer (design doc §17).
+impl<ZN, ZV, L> Engine<ZN, super::semantic::SemanticCommit<ZV>, L>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send,
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZV::Future: Send,
+    L: HashSource,
+{
+    /// Returns a new full-validation engine whose window starts at `base`,
+    /// committing each block through the semantic block `verifier` (semantic
+    /// plus contextual validation and a non-finalized commit).
+    ///
+    /// Unlike the known-hash constructor there is no tree lookahead or local
+    /// snapshot source: discovered blocks are always folded and derived
+    /// normally, exactly as the legacy syncer's per-block verification did.
+    ///
+    /// `commit_pipeline_blocks` caps the unresolved stage-2 futures — the
+    /// blocks concurrently inside the semantic verifier. Full validation is
+    /// far more expensive than the known-hash merkle pin, so this is the
+    /// configured full-verify concurrency limit, not
+    /// [`IBD_COMMIT_PIPELINE_BLOCKS`]: flooding the verifier makes large
+    /// blocks time out (see `sync::Config::full_verify_concurrency_limit`).
+    ///
+    /// Must be called within a Tokio runtime (the batched fetch worker is
+    /// spawned onto it).
+    //
+    // Like `Engine::new`: distinct service handles and config values for
+    // different engine stages.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_semantic(
+        peer_set: ZN,
+        verifier: ZV,
+        base: block::Height,
+        list: L,
+        peer_status: watch::Receiver<PeerSetStatus>,
+        cache: BlockCache,
+        lookahead_bytes: usize,
+        commit_pipeline_blocks: usize,
+        gap_hedge_after: Duration,
+    ) -> Self {
+        let batched_fetch = fetch::batched_fetch(peer_set.clone(), IBD_MAX_CONCURRENT_BATCHES);
+        let verify_and_commit = super::semantic::SemanticCommit::new(verifier);
+
+        let now = Instant::now();
+
+        Self {
+            window: VecDeque::new(),
+            base,
+            blocks: FuturesUnordered::new(),
+            peer_set,
+            verify_and_commit,
+            list,
+            batched_fetch,
+            cache,
+            peer_status,
+            // usize values always fit in u64 on supported platforms
+            lookahead_bytes: lookahead_bytes as u64,
+            budget_used: 0,
+            inflight_fetches: 0,
+            commit_blocks: 0,
+            commit_bytes: 0,
+            commit_pipeline_max_blocks: commit_pipeline_blocks,
+            // the constant fits u64 on all supported platforms
+            commit_pipeline_max_bytes: IBD_COMMIT_PIPELINE_BYTES as u64,
+            commit_failures: HashMap::new(),
+            cache_evicted_through: base,
+            gap_hedge_after,
+            tree_lookahead: TreeLookahead::new(),
+            // No tree lookahead: only the snapshot-consume source reports
+            // tree updates, so the margin is never consulted.
+            tree_lookahead_margin: 0,
+            local_snapshot_source: None,
+            fetched_blocks: 0,
+            fetch_watermark: base,
+            frontier_progress_at: now,
+            last_stall_warn: None,
+        }
+    }
+}
+
 impl<ZN, C, L> Engine<ZN, C, L>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
@@ -890,7 +1000,14 @@ where
             end = HashSource::max_height(&self.list);
 
             if self.base > end {
-                // Every height through the end of the list is committed.
+                // Every height in the current range is committed. A final
+                // source (the pinned list, the snapshot source) is complete; a
+                // discovery source may still grow, so wait for the crawl to
+                // feed it more tentative hashes before deciding.
+                if !self.list.is_final() && self.list.wait_for_growth().await {
+                    continue;
+                }
+
                 if let Err(error) = self.cache.remove_all() {
                     warn!(
                         %error,
@@ -901,7 +1018,7 @@ where
                 info!(
                     final_height = ?end,
                     fetched_blocks = self.fetched_blocks,
-                    "known-hash IBD engine committed every block in the list",
+                    "IBD engine committed every block in its range",
                 );
 
                 return Ok(IbdOutcome::Completed { final_height: end });

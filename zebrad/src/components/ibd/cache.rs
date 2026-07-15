@@ -453,8 +453,8 @@ impl BlockCache {
             .collect())
     }
 
-    /// Deletes the entire cache directory, for the `Completed` handoff to
-    /// the legacy syncer.
+    /// Deletes the entire cache directory, for the `Completed` handoff at
+    /// the end of the engine's range.
     ///
     /// The cache remains usable afterwards: the directory is recreated on
     /// the next write.

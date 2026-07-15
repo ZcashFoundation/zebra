@@ -430,7 +430,7 @@ impl StartCmd {
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
 
-        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
+        let (block_verifier_router, tx_verifier, consensus_task_handles, _max_checkpoint_height) =
             zebra_consensus::init(
                 config.consensus.clone(),
                 &config.network.network,
@@ -440,14 +440,33 @@ impl StartCmd {
             .await;
 
         info!("initializing syncer");
+        // The sync engine's disk overflow block cache, shared by known-hash
+        // initial sync and the syncer's tip-following cycles (which never run
+        // concurrently).
+        //
+        // An ephemeral state must never write to the configured cache
+        // directory, so the cache goes to a random temporary directory
+        // instead, like the ephemeral database itself (a predictable name in
+        // the shared temp dir could be squatted by another local user;
+        // abandoned dirs are left to the OS temp cleaner, matching the
+        // ephemeral database's behavior).
+        let ibd_cache_dir = if config.state.ephemeral {
+            tempfile::Builder::new()
+                .prefix("zebrad-ibd-block-cache-")
+                .tempdir()
+                .expect("temporary directory is created successfully")
+                .keep()
+        } else {
+            config.state.cache_dir.clone()
+        };
         let (syncer, sync_status) = ChainSync::new(
             &config,
-            max_checkpoint_height,
             peer_set.clone(),
             block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
-            misbehavior_sender.clone(),
+            peer_set_status.clone(),
+            &ibd_cache_dir,
         );
 
         info!("initializing mempool");
@@ -667,7 +686,7 @@ impl StartCmd {
         // Commit the genesis block directly if the state is empty: the semantic
         // verifier's checkpoint gate never commits blocks at or below the
         // mandatory floor, the known-hash engine only covers networks with a
-        // bundled list, and the legacy syncer's genesis download requires a
+        // bundled list, and the syncer's genesis download requires a
         // connected peer that already has it (which a standalone Regtest node
         // never does). Then run the syncer normally so that multi-hop block
         // propagation works: gossiped blocks that arrive out of order (e.g.
@@ -676,23 +695,7 @@ impl StartCmd {
         ibd::commit_genesis_if_missing(&config.network.network, state.clone()).await?;
 
         // Run the known-hash IBD engine (design doc §4.7) to completion
-        // before driving the legacy syncer.
-        //
-        // An ephemeral state must never write to the configured cache
-        // directory, so the engine's disk block cache goes to a random
-        // temporary directory instead, like the ephemeral database itself
-        // (a predictable name in the shared temp dir could be squatted by
-        // another local user; abandoned dirs are left to the OS temp cleaner,
-        // matching the ephemeral database's behavior).
-        let ibd_cache_dir = if config.state.ephemeral {
-            tempfile::Builder::new()
-                .prefix("zebrad-ibd-block-cache-")
-                .tempdir()
-                .expect("temporary directory is created successfully")
-                .keep()
-        } else {
-            config.state.cache_dir.clone()
-        };
+        // before driving the tip-following syncer.
         let ibd_engine = ibd::IbdEngine::new(
             config.sync.clone(),
             config.network.network.clone(),
@@ -702,7 +705,7 @@ impl StartCmd {
             peer_set_status,
             &ibd_cache_dir,
         );
-        let syncer_task_handle = ibd::spawn_engine_then_legacy_sync(ibd_engine, syncer.sync());
+        let syncer_task_handle = ibd::spawn_engine_then_tip_sync(ibd_engine, syncer.sync());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
