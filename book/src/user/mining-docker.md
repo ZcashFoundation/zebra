@@ -8,7 +8,7 @@ Using docker, you can start mining by running:
 
 ```bash
 docker run -d --name zebra_local \
-  -e MINER_ADDRESS="t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1" \
+  -e ZEBRA_MINING__MINER_ADDRESS="t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1" \
   -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232 \
   -p 8233:8233 \
   -p 8232:8232 \
@@ -22,10 +22,15 @@ connect to your node. If you want to start generating blocks, you need to let
 Zebra sync first.
 
 Note that you must pass the address for your mining rewards via the
-`MINER_ADDRESS` environment variable when you are starting the container, as we
-did with the ZF funding stream address above. The address we used starts with
-the prefix `t1`, meaning it is a Mainnet P2PKH address. Please remember to set
-your own address for the rewards.
+`ZEBRA_MINING__MINER_ADDRESS` environment variable when you are starting the
+container, as we did with the ZF funding stream address above. The address we
+used starts with the prefix `t3`, meaning it is a Mainnet P2SH address. Please
+remember to set your own address for the rewards.
+
+If you'd rather run a complete mining setup with a single command, the
+repository also ships a ready-made compose stack in
+[`docker/mining/`](https://github.com/ZcashFoundation/zebra/tree/main/docker/mining)
+that starts Zebra together with a mining pool and miner.
 
 Instead of listing the environment variables on the command line, you can use
 Docker's `--env-file` flag to specify a file containing the variables. You can
@@ -44,7 +49,7 @@ running
 ```bash
 docker run -d --name zebra_local \
   -e ZEBRA_NETWORK__NETWORK="Testnet" \
-  -e MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v" \
+  -e ZEBRA_MINING__MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v" \
   -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232 \
   -p 18233:18233 \
   -p 18232:18232 \

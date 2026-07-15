@@ -6,7 +6,10 @@ and the [`MetricsSection`][metrics_section] runtime configuration.
 The following steps can be used to send real time Zebra metrics data into a grafana
 front end that you can visualize:
 
-1. Build zebra with `prometheus` feature:
+1. Get a Zebra binary with the `prometheus` feature. The [prebuilt release
+   binaries and Docker images](https://zebra.zfnd.org/user/install.html)
+   already include it, so no rebuild is needed. If you are building from
+   source with a custom feature set, enable it explicitly:
 
    ```bash
    cargo install --features prometheus --locked --git https://github.com/ZcashFoundation/zebra zebrad
@@ -40,7 +43,7 @@ front end that you can visualize:
    sudo docker volume create prometheus-storage
 
    # run prometheus with the included config
-   sudo docker run --detach --network host --volume prometheus-storage:/prometheus --volume /path/to/zebra/prometheus.yaml:/etc/prometheus/prometheus.yml  prom/prometheus
+   sudo docker run --detach --network host --volume prometheus-storage:/prometheus --volume /path/to/zebra/docker/observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml  prom/prometheus
 
    # run grafana
    sudo docker run --detach --network host --env GF_SERVER_HTTP_PORT=3030 --env GF_SERVER_HTTP_ADDR=localhost --volume grafana-storage:/var/lib/grafana grafana/grafana
