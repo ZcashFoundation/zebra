@@ -29,12 +29,13 @@ pub struct ZcashdCompatConfig {
 pub const ZCASHD_TEST_RPC_USER: &str = "zcashd_test";
 pub const ZCASHD_TEST_RPC_PASS: &str = "zebra_test_pass";
 
-/// Deterministic regtest miner keypair (secp256k1 secret key = 1, compressed).
+/// Deterministic regtest miner address (secp256k1 secret key = 1, compressed).
 ///
-/// zebrad mines coinbase to this address; tx-flow tests import the private key
-/// into zcashd's wallet so the mined funds become spendable there.
+/// zebrad mines `generate` coinbase to this address. The sidecar zcashd build
+/// is shielded-first, so wallet tests do not spend these outputs; they fund
+/// the wallet by mining to its account's Sapling receiver via
+/// `generatetoaddress` instead.
 pub const MINER_T_ADDR: &str = "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs";
-pub const MINER_PRIV_WIF: &str = "cMahea7zqjxrtgAbB7LSGbcQUr1uX1ojuat9jZodMN87JcbXMTcA";
 
 /// Builds a regtest zebrad config wired for zcashd-compat testing.
 ///
@@ -58,8 +59,8 @@ pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfi
 
     let mut config = default_test_config(&net).with(MinerAddressType::Transparent);
 
-    // Mine to the deterministic test keypair so tests can spend coinbase
-    // after importing MINER_PRIV_WIF into zcashd's wallet.
+    // A fixed miner address for blocks mined via `generate`. Wallet tests fund
+    // the sidecar wallet separately, via `generatetoaddress`.
     config.mining.miner_address = Some(MINER_T_ADDR.parse().expect("valid miner address"));
 
     // Main RPC: no cookie auth, single-threaded for test determinism
@@ -108,9 +109,6 @@ pub fn build_zcashd_compat_config(work_dir: PathBuf) -> Result<ZcashdCompatConfi
         "-nuparams=f5b9230b:1".to_string(), // Heartwood
         "-nuparams=e9ff75a6:1".to_string(), // Canopy
         "-nuparams=c2d6d0b4:1".to_string(), // NU5
-        // The wallet tests use `getnewaddress`, which is deny-by-default
-        // deprecated in current zcashd.
-        "-allowdeprecated=getnewaddress".to_string(),
         // Regtest blocks mined on top of the 2011 genesis inherit old
         // median-time-past timestamps, which would keep zcashd in initial
         // block download forever and disable its wallet RPCs. 100 years.

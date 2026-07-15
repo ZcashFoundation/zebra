@@ -95,22 +95,22 @@ async fn zcashd_compat_getwalletinfo_fields_present() -> Result<()> {
     common::zcashd_compat::wallet::getwalletinfo_fields_present().await
 }
 
-/// Sends a transparent transaction via zcashd and confirms it appears in zebrad's mempool.
+/// Sends a shielded transaction via zcashd and confirms it appears in zebrad's mempool.
 ///
-/// See [`common::zcashd_compat::tx_flow::transparent_tx_in_mempool`] for details.
+/// See [`common::zcashd_compat::tx_flow::shielded_tx_in_mempool`] for details.
 #[tokio::test]
 #[ignore]
-async fn zcashd_compat_transparent_tx_in_mempool() -> Result<()> {
-    common::zcashd_compat::tx_flow::transparent_tx_in_mempool().await
+async fn zcashd_compat_shielded_tx_in_mempool() -> Result<()> {
+    common::zcashd_compat::tx_flow::shielded_tx_in_mempool().await
 }
 
-/// Sends a transparent transaction via zcashd, mines a block, and confirms it via zebrad.
+/// Sends a shielded transaction via zcashd, mines a block, and confirms it via zebrad.
 ///
-/// See [`common::zcashd_compat::tx_flow::transparent_tx_confirms`] for details.
+/// See [`common::zcashd_compat::tx_flow::shielded_tx_confirms`] for details.
 #[tokio::test]
 #[ignore]
-async fn zcashd_compat_transparent_tx_confirms() -> Result<()> {
-    common::zcashd_compat::tx_flow::transparent_tx_confirms().await
+async fn zcashd_compat_shielded_tx_confirms() -> Result<()> {
+    common::zcashd_compat::tx_flow::shielded_tx_confirms().await
 }
 
 /// Verifies that an abruptly SIGKILLed zebrad exits while supervising a running zcashd.

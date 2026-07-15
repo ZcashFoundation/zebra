@@ -17,10 +17,12 @@ async fn exit_initial_block_download(setup: &ZcashdCompatSetup) -> Result<()> {
     Ok(())
 }
 
-/// Verifies that zcashd can generate a new transparent address.
+/// Verifies that zcashd can create a wallet account and derive a unified
+/// address for it.
 ///
-/// Calls `getnewaddress` on zcashd and asserts the returned value is a
-/// non-empty string.  Works on all networks.
+/// The sidecar zcashd build is shielded-first and disables the legacy
+/// transparent `getnewaddress`, so address generation goes through the
+/// account / unified-address flow.  Works on all networks.
 pub async fn address_generation() -> Result<()> {
     let Some(setup) = setup_zcashd_compat().await? else {
         return Ok(());
@@ -28,15 +30,30 @@ pub async fn address_generation() -> Result<()> {
 
     exit_initial_block_download(&setup).await?;
 
-    let address: String = setup
+    let account: serde_json::Value = setup
         .zcashd_client
-        .json_result_from_call("getnewaddress", "[]")
+        .json_result_from_call("z_getnewaccount", "[]")
         .await
-        .map_err(|e| eyre!("getnewaddress: {e}"))?;
+        .map_err(|e| eyre!("z_getnewaccount: {e}"))?;
+    let account = account["account"]
+        .as_u64()
+        .ok_or_else(|| eyre!("missing `account` in z_getnewaccount response: {account}"))?;
+
+    let response: serde_json::Value = setup
+        .zcashd_client
+        .json_result_from_call(
+            "z_getaddressforaccount",
+            &format!(r#"[{account}, ["p2pkh", "sapling"]]"#),
+        )
+        .await
+        .map_err(|e| eyre!("z_getaddressforaccount: {e}"))?;
+    let address = response["address"]
+        .as_str()
+        .ok_or_else(|| eyre!("missing `address` in z_getaddressforaccount response: {response}"))?;
 
     assert!(
         !address.is_empty(),
-        "getnewaddress returned an empty string"
+        "z_getaddressforaccount returned an empty address"
     );
 
     setup.teardown()

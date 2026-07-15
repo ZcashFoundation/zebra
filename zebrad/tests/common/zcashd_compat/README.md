@@ -152,11 +152,11 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_miner_rpcs_disabled` | startup | Asserts `getblocktemplate` returns method-not-found on the sidecar | Same read-only check |
 | `zcashd_compat_height_and_hash_agree` | chain | Mines 5, asserts count == 5 on both sides | Cross-checks current tip (no mining) |
 | `zcashd_compat_getblock_hash_consistent` | chain | Mines 3, checks heights 1–3 | Checks last 3 blocks at current tip |
-| `zcashd_compat_wallet_address_generation` | wallet | Transparent `getnewaddress` returns a non-empty address | Same check |
+| `zcashd_compat_wallet_address_generation` | wallet | `z_getnewaccount` + `z_getaddressforaccount` return a non-empty unified address | Same check |
 | `zcashd_compat_wallet_initial_balance_zero` | wallet | Asserts `getbalance` is zero | **Skipped** (live wallet may have funds) |
 | `zcashd_compat_getwalletinfo_fields_present` | wallet | Full check | Full check |
-| `zcashd_compat_transparent_tx_in_mempool` | tx_flow | Mines 200, sends tx, polls zebrad mempool | Validates `getmempoolinfo` structure only |
-| `zcashd_compat_transparent_tx_confirms` | tx_flow | Sends + mines + checks confirmations on both sides | **Skipped** |
+| `zcashd_compat_shielded_tx_in_mempool` | tx_flow | Mines coinbase to the account's Sapling receiver, `z_sendmany`s, polls zebrad mempool | Validates `getmempoolinfo` structure only |
+| `zcashd_compat_shielded_tx_confirms` | tx_flow | Shielded send + mines + checks confirmations on both sides | **Skipped** |
 | `zcashd_compat_zebrad_abrupt_kill` | resilience | Mines 3, SIGKILLs zebrad, asserts it was killed; the harness kills the orphaned sidecar | **Skipped** (don't own process) |
 | `zcashd_compat_zebrad_graceful_shutdown_stops_zcashd` | resilience | SIGTERMs zebrad, asserts the supervised zcashd also exits | **Skipped** (unix only; don't own process) |
 | `zcashd_compat_zcashd_restarts_after_exit` | resilience | SIGTERMs zcashd, waits for supervisor restart | **Skipped** (unix only; don't own process) |
@@ -209,7 +209,7 @@ zebrad/tests/common/
     ├── chain.rs               height_and_hash_agree, getblock_hash_consistent
     ├── wallet.rs              address_generation, initial_balance_zero,
     │                          getwalletinfo_fields_present
-    ├── tx_flow.rs             transparent_tx_in_mempool, transparent_tx_confirms
+    ├── tx_flow.rs             shielded_tx_in_mempool, shielded_tx_confirms
     ├── resilience.rs          zebrad_abrupt_kill,
     │                          zebrad_graceful_shutdown_stops_zcashd,
     │                          zcashd_restarts_after_exit
