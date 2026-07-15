@@ -81,7 +81,7 @@ Here we are making changes to create an isolated network version of Zebra. In ad
   ```
 
 - Make fixes needed to compile.
-- Ignore how far we are from the tip in get block template: `zebra-rpc/src/methods/get_block_template_rpcs/get_block_template.rs`
+- Ignore how far we are from the tip in get block template: `zebra-rpc/src/methods/types/get_block_template.rs`
 
 Unclean test commit for Zebra: [Zebra commit](https://github.com/ZcashFoundation/zebra/commit/d05af154c897d4820999fcb968b7b62d10b26aa8)
 
@@ -106,7 +106,6 @@ cache_dir = false
 initial_testnet_peers = [
   "dnsseed.testnet.z.cash:18233",
   "testnet.seeder.zfnd.org:18233",
-  "testnet.is.yolo.money:18233",
 ]
 listen_addr = "0.0.0.0:18233"
 network = "Testnet"

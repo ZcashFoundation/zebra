@@ -39,13 +39,13 @@ zebrad::commands::start: config=ZebradConfig {
     network: Mainnet,
     initial_mainnet_peers: {
       "dnsseed.z.cash:8233",
-      "mainnet.is.yolo.money:8233",
+      "mainnet.seeder.shieldedinfra.net:8233",
       "mainnet.seeder.zfnd.org:8233",
       "dnsseed.str4d.xyz:8233"
     },
     peerset_initial_target_size: 25, ...
   },
-  state: Config { cache_dir: "/home/user/.cache/state/v24/mainnet", ... },
+  state: Config { cache_dir: "/home/user/.cache/state/v28/mainnet", ... },
   rpc: Config { listen_addr: Some(127.0.0.1:8232) }, ...
 }
 ```
@@ -57,7 +57,7 @@ Zebra opens the configured cached state, or creates a new empty state.
 ```text
 zebrad::commands::start: initializing node state
 zebra_state::service::finalized_state::disk_db: the open file limit is high enough for Zebra current_limit=1048576 min_limit=512 ideal_limit=1024
-zebra_state::service::finalized_state::disk_db: Opened Zebra state cache at /home/user/.cache/state/v24/mainnet
+zebra_state::service::finalized_state::disk_db: Opened Zebra state cache at /home/user/.cache/state/v28/mainnet
 zebra_state::service::finalized_state: loaded Zebra state cache tip=None
 zebra_state::service: created new read-only state service
 ...
