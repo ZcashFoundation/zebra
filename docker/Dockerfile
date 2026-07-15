@@ -242,8 +242,11 @@ CMD ["zebrad"]
 # We can add further functionality to this stage for further purposes.
 
 # zcashd-compat runtime image, expects an externally prepared build context named
-# `zcashd_compat` with a Linux executable at /bin/zcashd.
+# `zcashd_compat` with a Linux executable at /bin/zcashd. The context is passed
+# via `docker build --build-context zcashd_compat=<dir>` (see make/zcashd-compat.mk),
+# which hadolint cannot model, so DL3022 is a false positive here.
 FROM runtime AS runtime-zcashd-compat
 
+# hadolint ignore=DL3022
 COPY --link --from=zcashd_compat /bin/zcashd /usr/local/bin/zcashd
 RUN test -x /usr/local/bin/zcashd && /usr/local/bin/zcashd --version

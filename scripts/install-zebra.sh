@@ -2569,7 +2569,7 @@ while (($#)); do
       NETWORK_SET=1
       shift 2
       ;;
-    --zebra-state-dir | --zebra-state-dir)
+    --zebra-state-dir)
       require_value "$1" "${2:-}"
       ZEBRA_STATE_DIR="$2"
       ZEBRA_STATE_DIR_SET=1
@@ -2593,7 +2593,7 @@ while (($#)); do
       CACHE_DIR_SET=1
       shift 2
       ;;
-    --zebra-p2p-addr | --zebra-p2p-addr)
+    --zebra-p2p-addr)
       require_value "$1" "${2:-}"
       ZEBRA_P2P_ADDR="$2"
       shift 2
@@ -2603,7 +2603,7 @@ while (($#)); do
       ZCASHD_CONF="$2"
       shift 2
       ;;
-    --zebrad-path | --zebrad-path)
+    --zebrad-path)
       require_value "$1" "${2:-}"
       ZEBRAD_PATH="$2"
       shift 2

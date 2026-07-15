@@ -11,7 +11,7 @@ The upstream zcashd RPC tests (`qa/rpc-tests/`) assume each node is a
 self-sufficient zcashd that **mines its own blocks** (`node.generate()`) and
 **connects to other nodes in a P2P mesh** (`connect_nodes_bi`). A zcashd-compat
 sidecar can do neither: its miner RPCs are removed, and it hard-locks to a
-single Zebra peer. So the *network layer* has to come from Zebra, while the
+single Zebra peer. So the _network layer_ has to come from Zebra, while the
 sidecar keeps its wallet.
 
 ## Architecture
@@ -26,13 +26,13 @@ sidecar keeps its wallet.
               └──────────┘    └──────────┘    └──────────┘
 ```
 
-* **N sidecars fan into one Zebra.** No P2P mesh between sidecars — Zebra relays,
+- **N sidecars fan into one Zebra.** No P2P mesh between sidecars — Zebra relays,
   so a tx or block on one sidecar reaches the others.
-* **`node[i].generate(n)`** mines `n` regtest blocks on Zebra with the coinbase
+- **`node[i].generate(n)`** mines `n` regtest blocks on Zebra with the coinbase
   paid to node `i`'s own wallet, via Zebra's regtest **`generatetoaddress`** RPC,
   then waits for every sidecar to follow. This reproduces "each node mines its
   own coinbase" without any zcashd mining.
-* Every other RPC passes straight through to the node's sidecar.
+- Every other RPC passes straight through to the node's sidecar.
 
 `generatetoaddress` was added to Zebra for this (regtest-only; it mines to a
 caller-specified address instead of the configured `mining.miner_address`).
@@ -55,17 +55,17 @@ coinbase maturity itself — so spendable (mature) coinbase is queried at
 A few Regtest-specific behaviours are required for a zcashd sidecar to follow a
 Zebra Regtest chain; the corresponding Zebra fixes live on this branch:
 
-* **Fixed difficulty.** Zebra pins every Regtest block to the powLimit (no
+- **Fixed difficulty.** Zebra pins every Regtest block to the powLimit (no
   retargeting), matching zcashd's `fPowNoRetargeting`, so the sidecar accepts
   the headers instead of rejecting them as `bad-diffbits`.
-* **Minimal block-time advance.** Zebra advances Regtest block time minimally
+- **Minimal block-time advance.** Zebra advances Regtest block time minimally
   (just above the median-time-past) instead of clamping `now()` to
   `median-time-past + 90 min`. A fresh chain starts from the 2011-era genesis,
   so clamping to real time would race chain time ~90 min per block and outrun
   the sidecar's block-time window.
-* **`getheaders` always answered.** Zebra replies to `getheaders` with a
+- **`getheaders` always answered.** Zebra replies to `getheaders` with a
   `headers` message even when it has none, so the sidecar's request never hangs.
-* **Frozen-clock tx relay (`setmocktime`).** The sidecar's clock is frozen with
+- **Frozen-clock tx relay (`setmocktime`).** The sidecar's clock is frozen with
   `mocktime` so a genesis-era tip reads as recent (not IBD, wallet enabled). But
   with the clock frozen, zcashd's transaction-relay trickle timer never elapses,
   so it never flushes queued tx invs to Zebra (block invs are sent
@@ -120,20 +120,20 @@ that assume a standalone, mining, mesh-capable zcashd (`start_nodes`,
 `connect_nodes*`, `initialize_chain*`, `stop_nodes`). It can run an upstream
 test **only if that test fits the harness's fixed Regtest configuration**:
 
-* **Shared, fixed network-upgrade schedule.** Zebra mines the blocks the sidecar
+- **Shared, fixed network-upgrade schedule.** Zebra mines the blocks the sidecar
   validates, so both must agree on activation heights. The harness activates
   every upgrade through NU5 at height 1. Tests that pass their own
   `nuparams=...:<height>` via `extra_args` (most wallet tests do) are asking for
-  a *different* schedule and can't be honoured without reconfiguring Zebra's
+  a _different_ schedule and can't be honoured without reconfiguring Zebra's
   Regtest params to match per test.
-* **No deprecated / transparent-only RPCs.** Tests relying on
+- **No deprecated / transparent-only RPCs.** Tests relying on
   `-allowdeprecated=getnewaddress` (or the transparent wallet in general) fail on
   the shielded-first sidecar.
-* **No miner RPCs on the sidecar.** `getblocktemplate` / `submitblock` /
+- **No miner RPCs on the sidecar.** `getblocktemplate` / `submitblock` /
   `generate` are removed by design — mining is Zebra's job.
-* **No forks / reorgs / network splits.** All sidecars follow one Zebra chain, so
+- **No forks / reorgs / network splits.** All sidecars follow one Zebra chain, so
   tests that split the mesh to create competing tips have no equivalent.
-* **No cached-chain assumptions.** `initialize_chain` is a no-op; the harness
+- **No cached-chain assumptions.** `initialize_chain` is a no-op; the harness
   starts every node on an empty Regtest chain, so tests asserting a pre-seeded
   height/UTXO set need to mine that state themselves.
 
@@ -145,11 +145,11 @@ the primary demonstration of the pairing.
 
 Validated end-to-end in the Zebra tree against a live sidecar:
 
-* `wallet_conformance.py` — **PASS.** Zebra mines 105 Regtest blocks paid to the
+- `wallet_conformance.py` — **PASS.** Zebra mines 105 Regtest blocks paid to the
   sidecar's shielded account; the sidecar follows over P2P; coinbase matures;
   a `z_sendmany` shielded spend propagates back to Zebra, is mined, confirms,
   and credits the recipient account.
-* `wallet_multinode.py` — **PASS.** Three sidecars fan into one Zebra, each mines
+- `wallet_multinode.py` — **PASS.** Three sidecars fan into one Zebra, each mines
   its own shielded coinbase, and a shielded transfer moves value node-to-node
   through Zebra.
 
