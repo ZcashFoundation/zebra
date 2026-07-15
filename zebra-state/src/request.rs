@@ -13,12 +13,9 @@ use zebra_chain::{
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
-    orchard,
     parallel::tree::NoteCommitmentTrees,
-    sapling,
     serialization::SerializationError,
-    sprout,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+    subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -35,6 +32,11 @@ use crate::{
     error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
     CommitSemanticallyVerifiedError,
 };
+
+/// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
+/// in the shared import block because they are only referenced under the `indexer` feature.
+#[cfg(feature = "indexer")]
+use zebra_chain::{ironwood, orchard, sapling, sprout};
 
 /// A shielded pool selector for note-commitment-tree snapshot lookups.
 ///
@@ -53,7 +55,7 @@ pub enum ShieldedPool {
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
-/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+/// [`sapling::Nullifier`], [`orchard::Nullifier`], and [`ironwood::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg(feature = "indexer")]
 pub enum Spend {
@@ -65,6 +67,8 @@ pub enum Spend {
     Sapling(sapling::Nullifier),
     /// A spend identified by a [`orchard::Nullifier`].
     Orchard(orchard::Nullifier),
+    /// A spend identified by an [`ironwood::Nullifier`].
+    Ironwood(ironwood::Nullifier),
 }
 
 #[cfg(feature = "indexer")]
@@ -92,6 +96,13 @@ impl From<sapling::Nullifier> for Spend {
 impl From<orchard::Nullifier> for Spend {
     fn from(orchard_nullifier: orchard::Nullifier) -> Self {
         Self::Orchard(orchard_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<ironwood::Nullifier> for Spend {
+    fn from(ironwood_nullifier: ironwood::Nullifier) -> Self {
+        Self::Ironwood(ironwood_nullifier)
     }
 }
 
@@ -362,21 +373,11 @@ pub struct Treestate {
 impl Treestate {
     #[allow(missing_docs)]
     pub(crate) fn new(
-        sprout: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling: Arc<sapling::tree::NoteCommitmentTree>,
-        orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
-        orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+        note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
         Self {
-            note_commitment_trees: NoteCommitmentTrees {
-                sprout,
-                sapling,
-                sapling_subtree,
-                orchard,
-                orchard_subtree,
-            },
+            note_commitment_trees,
             history_tree,
         }
     }
@@ -973,6 +974,10 @@ pub enum Request {
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
+    /// Note: Zebra's local rollback window
+    /// ([`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT)) is now 1000 blocks, larger
+    /// than the 100 quoted from the protocol specification above.
+    ///
     /// # Correctness
     ///
     /// Block commit requests should be wrapped in a timeout, so that
@@ -1448,6 +1453,33 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Finds the fork point between the locator `known_blocks` and the best chain.
+    ///
+    /// `known_blocks` is a block locator. Returns the most recent locator entry that is
+    /// on the best chain (the fork point), or `None` if no entry is on the best chain.
+    /// Returns `None` if the state is empty.
+    ///
+    /// This is intentionally a narrow, best-chain-only query: it reports a single
+    /// locator intersection against the best chain. It does not enumerate side-chain
+    /// tips, branch lengths, or per-tip statuses, so it is not a general
+    /// fork-monitoring API in the style of `getchaintips`. Callers that need to
+    /// observe side chains should use a dedicated request rather than building on this
+    /// one.
+    ///
+    /// The read state service rejects this request with an error if `known_blocks`
+    /// is longer than [`MAX_BLOCK_LOCATOR_LENGTH`](zebra_chain::block::MAX_BLOCK_LOCATOR_LENGTH),
+    /// so an untrusted caller cannot force an unbounded number of lookups. A locator
+    /// built the usual way (one hash per standard block-locator height) is always
+    /// within that bound.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)`](ReadResponse::ForkPoint).
+    FindForkPoint {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1465,6 +1497,15 @@ pub enum ReadRequest {
     ///   if the corresponding block contains a Sapling note commitment tree.
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
+
+    /// Looks up an Ironwood note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::IronwoodTree)
+    ///   if the corresponding block contains an Ironwood note commitment tree.
+    /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
+    IronwoodTree(HashOrHeight),
 
     /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
     /// `start_index`, and returning up to `limit` subtrees.
@@ -1488,6 +1529,20 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::OrchardSubtrees)
     /// * An empty list if there is no subtree at `start_index`.
     OrchardSubtrees {
+        /// The index of the first 2^16-leaf subtree to return.
+        start_index: NoteCommitmentSubtreeIndex,
+        /// The maximum number of subtree values to return.
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    },
+
+    /// Returns a list of Ironwood note commitment subtrees by their indexes, starting at
+    /// `start_index`, and returning up to `limit` subtrees.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::IronwoodSubtrees)
+    /// * An empty list if there is no subtree at `start_index`.
+    IronwoodSubtrees {
         /// The index of the first 2^16-leaf subtree to return.
         start_index: NoteCommitmentSubtreeIndex,
         /// The maximum number of subtree values to return.
@@ -1582,7 +1637,15 @@ pub enum ReadRequest {
 
     /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
     /// allowing the caller to listen for new blocks in the non-finalized state.
-    NonFinalizedBlocksListener,
+    NonFinalizedBlocksListener {
+        /// The hashes of the chain tips the caller already has.
+        ///
+        /// Only blocks that come after these tips are streamed: walking each
+        /// non-finalized chain from its tip downwards, blocks are sent until a
+        /// hash in this set is reached. If empty, every block currently in the
+        /// non-finalized state is sent.
+        known_chain_tips: HashSet<block::Hash>,
+    },
 
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
@@ -1622,10 +1685,13 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
+            ReadRequest::IronwoodTree { .. } => "ironwood_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
+            ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
@@ -1640,7 +1706,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
-            ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
+            ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
             ReadRequest::KnownHashChunk(_) => "known_hash_chunk",
         }

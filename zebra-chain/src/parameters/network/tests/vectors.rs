@@ -538,6 +538,22 @@ fn check_configured_funding_stream_regtest() {
     );
 }
 
+/// Check that `should_allow_unshielded_coinbase_spends` is enabled by default on Regtest,
+/// can be disabled via `RegtestParameters`, and does not change Regtest identity.
+#[test]
+fn check_regtest_should_allow_unshielded_coinbase_spends() {
+    let default_regtest = Network::new_regtest(Default::default());
+    assert!(default_regtest.is_regtest());
+    assert!(default_regtest.should_allow_unshielded_coinbase_spends());
+
+    let shielded_regtest = Network::new_regtest(RegtestParameters {
+        should_allow_unshielded_coinbase_spends: Some(false),
+        ..Default::default()
+    });
+    assert!(shielded_regtest.is_regtest());
+    assert!(!shielded_regtest.should_allow_unshielded_coinbase_spends());
+}
+
 #[test]
 fn sum_of_one_time_lockbox_disbursements_is_correct() {
     let mut configured_activation_heights: ConfiguredActivationHeights =

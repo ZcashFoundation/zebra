@@ -2,6 +2,7 @@
 //! reported protocol version.
 
 use std::{
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
@@ -18,8 +19,8 @@ use zebra_chain::block::Height;
 
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
-    peer::{Client, ConnectionInfo},
-    protocol::external::types::Version,
+    peer::{Client, ConnectedAddr, ConnectionInfo},
+    protocol::external::{canonical_socket_addr, types::Version},
 };
 
 #[cfg(test)]
@@ -112,6 +113,17 @@ impl LoadTrackedClient {
     /// Returns the metadata for the connected peer.
     pub(crate) fn connection_info(&self) -> &Arc<ConnectionInfo> {
         &self.connection_info
+    }
+
+    /// Returns true if this peer connected directly to us from `ip`.
+    pub fn is_inbound_direct_from_ip(&self, ip: &IpAddr) -> bool {
+        let expected_ip = canonical_socket_addr(SocketAddr::new(*ip, 0)).ip();
+
+        matches!(
+            self.connection_info.connected_addr,
+            ConnectedAddr::InboundDirect { addr }
+                if canonical_socket_addr(addr.remove_socket_addr_privacy()).ip() == expected_ip
+        )
     }
 
     /// Returns the peer's current chain height, as far as we can tell.

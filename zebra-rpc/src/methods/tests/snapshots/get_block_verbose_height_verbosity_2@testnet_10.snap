@@ -120,6 +120,14 @@ expression: block
       "monitored": false,
       "valueDelta": 0.0,
       "valueDeltaZat": 0
+    },
+    {
+      "id": "ironwood",
+      "chainValue": 0.0,
+      "chainValueZat": 0,
+      "monitored": false,
+      "valueDelta": 0.0,
+      "valueDeltaZat": 0
     }
   ],
   "trees": {},

@@ -86,7 +86,7 @@ pub async fn run() -> Result<()> {
     }
 
     // Launch zebra with peers and using a predefined zebrad state path.
-    // As this tests are just queries we can have a live chain where blocks are coming.
+    // These tests only make queries, so they can run while new blocks arrive.
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
         network.clone(),
         test_name,

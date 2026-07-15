@@ -88,6 +88,11 @@ pub struct GetTreestateResponse {
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
     orchard: Treestate,
+
+    /// A treestate containing an Ironwood note commitment tree, hex-encoded. Only present from
+    /// NU6.3, so that pre-NU6.3 responses are unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ironwood: Option<Treestate>,
 }
 
 impl GetTreestateResponse {
@@ -120,6 +125,7 @@ impl GetTreestateResponse {
             sprout: None,
             sapling,
             orchard,
+            ironwood: None,
         }
     }
 
@@ -145,6 +151,7 @@ impl Default for GetTreestateResponse {
             sprout: Default::default(),
             sapling: Default::default(),
             orchard: Default::default(),
+            ironwood: None,
         }
     }
 }

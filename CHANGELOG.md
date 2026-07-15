@@ -29,11 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   transaction spam are spent within a few hundred blocks), and the database
   writer may run up to the configured number of blocks behind the in-memory
   commits.
+- New regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase
+  to a caller-specified address, instead of the configured `mining.miner_address`.
+  This lets a test harness fund several wallets from one node; it is used by the
+  zcashd wallet-conformance harness
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+- New zcashd-compat mode (`zebrad start --zcashd-compat` or `[zcashd_compat]`
+  config section) for operators migrating from `zcashd` while keeping its
+  wallet and RPC surface: Zebra faces the Zcash network and always includes
+  the configured sidecar peers in block gossip (reserving them an inbound
+  connection slot), while a hard-locked `zcashd` wallet build runs as a P2P
+  sidecar with a single outbound connection to the local Zebra node. Zebra
+  can optionally download (SHA256-pinned), spawn, and supervise the sidecar
+  (`manage_zcashd = true`). Includes an interactive installer
+  (`scripts/install-zebra.sh`) with binary, Docker, and build-from-source
+  modes, a `runtime-zcashd-compat` Docker image stage, make targets, a
+  sync-check script, and a Zebra Book chapter (`user/zcashd-compat.md`)
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
 
 ### Changed
 
-- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
-  1000 blocks as a defence-in-depth measure against sustained consensus splits.
 - The inbound service now handles peer requests fairly: queued requests are
   processed from the peer with the lowest recent request count first, and when
   the queue is full, the queued request from the peer with the highest recent
@@ -53,6 +68,183 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Fixed a panic when invalidating the only non-finalized chain (the chain was
   removed from the chain set by value, hitting an internal "chain tip hashes
   are unique" assertion); the chain is now removed by tip hash.
+
+## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
+
+### Added
+
+- NU6.3 (Ironwood) now activates on Mainnet at block height 3,428,143, matching
+  `zcash_protocol`. Node operators must upgrade to this release before activation
+  ([#10938](https://github.com/ZcashFoundation/zebra/pull/10938)).
+
+### Changed
+
+- Updated the `zcash_*` and `orchard` crates to their released NU6.3 versions
+  ([#10938](https://github.com/ZcashFoundation/zebra/pull/10938)).
+- Updated `rocksdb` to 0.24. The bundled `librocksdb-sys` now always runs
+  `bindgen` to generate its FFI bindings, so **`libclang` is required at build
+  time** (in addition to `protoc` and a C++ compiler) even when linking a system
+  RocksDB via `ROCKSDB_LIB_DIR`. Install `libclang-dev` (Debian/Ubuntu),
+  `clang` (Arch), or the equivalent for your platform
+  ([#10922](https://github.com/ZcashFoundation/zebra/pull/10922)).
+- Bumped the workspace (libraries) MSRV from 1.85.1 to 1.88. The `zebrad` binary
+  MSRV is unchanged at 1.91. `home` is no longer pinned to 0.5.11, since 0.5.12
+  builds on the new MSRV
+  ([#10927](https://github.com/ZcashFoundation/zebra/pull/10927)).
+
+### Fixed
+
+- Keep the mempool active through transient sync-status noise. Once started, the
+  mempool is no longer cleared and its queued transaction verification is no longer
+  cancelled when a temporary signal (which lower-work forks or stale peers can
+  trigger) reports Zebra is far from the tip; initial activation still waits until
+  Zebra is near the chain tip
+  ([#10929](https://github.com/ZcashFoundation/zebra/pull/10929)).
+- Don't disconnect from peers that return empty `FindBlocks` or `FindHeaders`
+  responses when the local node is at or near the chain tip
+  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+- Fix syncer restarts due to incorrect error downcasting
+  ([#10916](https://github.com/ZcashFoundation/zebra/pull/10916)).
+- Fix a read-state syncer startup hang: a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly
+  instead of syncing, advancing only one block per newly mined block
+  ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
+- Mempool transactions with non-standard transparent inputs are now rejected
+  _before_ script verification, to avoid the more expensive script verification
+  and reduce DoS surface
+  ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
+  Thanks to @ouicate for reporting the issue.
+- Related to the previous item, script verification now runs on the shared Rayon
+  thread pool to avoid blocking the runtime.
+
+## [Zebra 6.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0-rc.0) - 2026-07-02
+
+### Added
+
+- Support for the NU6.3 "Ironwood" shielded pool and v6 transaction format,
+  activating on Testnet at height 4,134,000. The consensus parameters (v6 version
+  group ID, consensus branch ID, and Testnet activation height) match
+  `zcash_protocol`. No Mainnet activation height is set yet.
+- The `z_gettreestate`, `z_getsubtreesbyindex`, and verbose `getblock` RPCs expose the
+  Ironwood note commitment tree and its subtree roots from NU6.3 activation
+  ([#10888](https://github.com/ZcashFoundation/zebra/pull/10888)).
+- Zebra now tags the coinbase input of every block it mines with a `🦓`. The
+  `mining.extra_coinbase_data` option is now limited to 86 bytes (was 94); Zebra
+  refuses to start if it is exceeded.
+- Pre-built `zebrad` binaries are attached to each GitHub release for Linux on
+  `x86_64` and `aarch64`, so operators can run a node without Docker or a source
+  build, also installable with `cargo binstall zebrad`. Each `.tar.gz` carries a
+  SHA-256 checksum, a Sigstore build-provenance attestation, and a Cosign signature
+  over the checksum manifest ([#10799](https://github.com/ZcashFoundation/zebra/pull/10799))
+- Added a Regtest configuration option, `should_allow_unshielded_coinbase_spends`,
+  to forbid spending coinbase outputs into transparent outputs (the inverse of
+  zcashd's `-regtestshieldcoinbase`). It defaults to allowing such spends, preserving
+  existing Regtest behavior ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698))
+- When the indexer RPC is enabled, a co-located read-state consumer can follow the
+  node more efficiently: the non-finalized block subscription resumes from the
+  consumer's known chain tips instead of re-streaming the whole non-finalized state,
+  and a new `GetBlock` indexer method lets the consumer fetch blocks it is missing
+  while its finalized state catches up.
+- New `zebra-state` read request `ReadRequest::FindForkPoint` (with response
+  `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
+  locator that is on the best chain — the fork point — for clients tracking chain
+  reorganizations through a read-only state service.
+- Added a `[notify] block_notify_command` option that runs a command on each best-chain-tip
+  change, with `%s` replaced by the new block hash — Zebra's equivalent of `zcashd`'s
+  `-blocknotify`.
+
+### Changed
+
+- The state database format is bumped to 28.0.0 for the NU6.3 "Ironwood" shielded
+  pool. This is a major-version bump that is restorable in place from the previous
+  major format version (no resync): an in-place migration backfills the genesis
+  Ironwood note commitment tree and anchor, four new (initially empty) `ironwood_*`
+  column families are created, and the chain value pool record is widened to include
+  the Ironwood pool. The `getblockchaininfo` and `getblock` `valuePools` now include
+  the (zero, until NU6.3 activates) `ironwood` pool.
+- Opening a Zebra state read-only (for example, as a secondary instance over a
+  running node's database) now fails with a clear error instead of panicking when
+  the cache directory is missing or unreadable, when no database exists at the
+  configured path, or when an ephemeral database is also configured (a read-only
+  secondary must not delete the primary's files). The read-write open path is
+  unchanged.
+- Upgraded the librustzcash crate cohort to the NU6.3 pre-release wave (`orchard`
+  0.15.0-pre.1, `zcash_address` 0.13.0-pre.0, `zcash_history` 0.5.0-pre.0, `zcash_keys`
+  0.15.0-pre.0, `zcash_primitives` 0.29.0-pre.0, `zcash_proofs` 0.29.0-pre.0,
+  `zcash_protocol` 0.10.0-pre.0, `zcash_transparent` 0.9.0-pre.0) for v6 transaction
+  and Ironwood support ([#10762](https://github.com/ZcashFoundation/zebra/pull/10762)).
+- Bumped `anyhow` to 1.0.103, clearing RUSTSEC-2026-0190
+  ([#10849](https://github.com/ZcashFoundation/zebra/pull/10849)).
+
+### Fixed
+
+- `getblocktemplate` now caches the built coinbase transaction per block, so repeated short-poll
+  requests within the same block no longer rebuild it. This prevents CPU saturation and multi-second
+  template latency when mining to a shielded (Sapling or Orchard) address
+  ([#10847](https://github.com/ZcashFoundation/zebra/pull/10847))
+- Released `zebrad` binaries report their source commit in `zebrad version`
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Handle `invalidateblock` and `reconsiderblock` edge cases (chain-root and
+  same-height sibling-tip invalidation, repeated reconsideration) without panicking
+  ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+- A timeout waiting for a transparent input UTXO during transaction verification is
+  now treated as a missing input instead of an internal error, preventing a sync
+  stall near the chain tip ([#10810](https://github.com/ZcashFoundation/zebra/pull/10810))
+- The co-located read-state syncer (used by indexers like Zaino) no longer drops and
+  re-creates its non-finalized block subscription every second while its view of the
+  finalized state lags the node's
+  ([#10818](https://github.com/ZcashFoundation/zebra/pull/10818))
+
+### Security
+
+- Use constant-time comparison for RPC cookie authentication ([#10567](https://github.com/ZcashFoundation/zebra/pull/10567))
+- Zebra's release Docker images are now reproducible: an independent rebuild of a
+  published `zebrad` from the same commit produces the same binary. The Rust
+  toolchain and the Rust and Debian base images are pinned by exact version and
+  digest, and build paths and file timestamps are normalized, so two independent
+  builds of the same commit produce the same binary. Release images are also built
+  without the shared build cache, so a published image cannot inherit a layer from
+  a lower-trust build
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Release Docker images are signed and carry build provenance and a signed SBOM.
+  Each production release gets a Cosign keyless signature, a signed SLSA provenance
+  attestation, and a signed SBOM, so anyone can confirm an image came from Zebra's CI
+  with `cosign verify` or `gh attestation verify`
+  ([#10798](https://github.com/ZcashFoundation/zebra/pull/10798))
+- Route directly pushed transactions (`tx` messages) through the same per-peer
+  mempool admission accounting as advertised transaction IDs, so a single inbound
+  peer cannot bypass the per-peer download cap by pushing full transactions
+  instead of advertising them
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+  This is the direct-push counterpart of the advertisement-path fix in
+  GHSA-4fc2-h7jh-287c. Thanks to @SuplabsYi for reporting the issue.
+- Fixed a panic in the `getblock` RPC at verbosity 2 for blocks not in the best
+  chain: their transactions' confirmations are negative and were cast to an
+  unsigned type
+  ([GHSA-x6v8-c2xp-928m](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x6v8-c2xp-928m)).
+
+## [Zebra 5.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.2.0) - 2026-06-18
+
+This release increases Zebra's local rollback window as a defence-in-depth measure
+against sustained consensus splits.
+
+### Changed
+
+- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
+  1000 blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
+
+## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
+
+This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
+expected at the end of July 2026, so that nodes running outdated versions stop before
+the upgrade activates.
+
+### Changed
+
+- Reduced the end-of-support period from 105 to 44 days, and updated the estimated
+  release height, ahead of the NU7 network upgrade
+  ([#10710](https://github.com/ZcashFoundation/zebra/pull/10710))
 
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 

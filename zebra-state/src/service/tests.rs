@@ -341,7 +341,7 @@ proptest! {
     /// Test the `Block.check_transaction_network_upgrade()` error inside the legacy check.
     #[test]
     fn at_least_one_transaction_with_inconsistent_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, false, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
         // this test requires that an invalid block is encountered
         // before a valid block (and before the check gives up),
@@ -382,7 +382,7 @@ proptest! {
     /// Test there is at least one transaction with a valid `network_upgrade` in the legacy check.
     #[test]
     fn at_least_one_transaction_with_valid_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
@@ -622,4 +622,75 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
                 non_finalized_blocks.into(),
             )
         })
+}
+
+/// Opening a read-only state against an existing but empty cache directory (no database on
+/// disk) must fail with [`StateInitError::ReadOnlyDatabaseNotFound`] rather than silently
+/// creating a new, empty database.
+#[test]
+fn read_only_open_with_no_database_returns_error() {
+    let network = Network::Mainnet;
+
+    // An existing, readable, but empty cache directory: it contains no database.
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyDatabaseNotFound { .. }) => {}
+        Err(other) => panic!("expected ReadOnlyDatabaseNotFound, got: {other:?}"),
+        Ok(_) => panic!("expected an error when opening a read-only state with no database"),
+    }
+}
+
+/// Opening a read-only state against a missing or unreadable cache directory must fail with a
+/// typed [`StateInitError::ReadOnlyCacheDirUnreadable`] rather than panicking while reading the
+/// on-disk format version.
+#[test]
+fn read_only_open_with_unreadable_cache_dir_returns_error() {
+    let network = Network::Mainnet;
+
+    // A cache directory that does not exist. `read_dir` fails for a missing directory the same way
+    // it does for an unreadable one, without depending on filesystem permissions (which `root`
+    // ignores, so a chmod-based unreadable directory would not be a reliable test under CI).
+    let parent = tempfile::tempdir().expect("creating a temporary directory should succeed");
+    let config = Config {
+        cache_dir: parent.path().join("missing"),
+        ephemeral: false,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyCacheDirUnreadable { .. }) => {}
+        Err(other) => panic!("expected ReadOnlyCacheDirUnreadable, got: {other:?}"),
+        Ok(_) => {
+            panic!("expected an error when opening a read-only state with an unreadable cache dir")
+        }
+    }
+}
+
+/// Opening a read-only state with an ephemeral database configured must fail with
+/// [`StateInitError::ReadOnlyEphemeralConflict`]: a read-only secondary follows another
+/// process's primary database and must never delete it, so it cannot also be ephemeral
+/// (which would delete the primary's files on drop).
+#[test]
+fn read_only_open_with_ephemeral_config_returns_error() {
+    let network = Network::Mainnet;
+
+    let config = Config {
+        ephemeral: true,
+        ..Config::default()
+    };
+
+    match super::init_read_only(config, &network) {
+        Err(crate::StateInitError::ReadOnlyEphemeralConflict) => {}
+        Err(other) => panic!("expected ReadOnlyEphemeralConflict, got: {other:?}"),
+        Ok(_) => {
+            panic!("expected an error when opening a read-only state with an ephemeral config")
+        }
+    }
 }

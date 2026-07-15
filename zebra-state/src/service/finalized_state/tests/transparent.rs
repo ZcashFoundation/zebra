@@ -57,6 +57,7 @@ fn new_ephemeral_zebra_db_with_config(network: &Network, config: &Config) -> Zeb
             .map(ToString::to_string),
         false,
     )
+    .expect("opening an ephemeral database should succeed")
 }
 
 /// Collects the 8-byte on-disk output locations of every unspent transparent

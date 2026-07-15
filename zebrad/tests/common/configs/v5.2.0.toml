@@ -77,6 +77,8 @@ max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 25
 
+[notify]
+
 [rpc]
 cookie_dir = "cache_dir"
 debug_force_finished_sync = false

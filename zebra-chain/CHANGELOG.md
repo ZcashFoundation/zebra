@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [11.1.0] - 2026-07-10
+
+### Added
+
+- NU6.3 (Ironwood) now activates on Mainnet at height 3,428,143, matching `zcash_protocol`
+- `AT_OR_NEAR_TIP_THRESHOLD` constant and `ChainTip::is_at_or_near_network_tip()`
+  method for determining whether the node is within 5 blocks of the estimated network tip
+  ([#10732](https://github.com/ZcashFoundation/zebra/pull/10732))
+
+### Changed
+
+- MSRV is now 1.88
+- Updated `zcash_protocol`, `zcash_primitives`, `zcash_keys`, `zcash_address`,
+  `zcash_transparent`, `zcash_proofs`, `zcash_history`, and `orchard` to their released
+  NU6.3 versions
+
+## [11.0.0] - 2026-07-02
+
+### Added
+
+- `parameters::NetworkUpgrade::Nu6_3`
+- `parameters::constants::activation_heights::testnet::NU6_3`
+- `parameters::testnet::ConfiguredActivationHeights::nu6_3`
+- `parameters::testnet::RegtestParameters::should_allow_unshielded_coinbase_spends`:
+  optional override for whether Regtest allows coinbase outputs to be spent into
+  transparent outputs. Defaults to allowing them, and does not affect
+  `Network::is_regtest()`.
+- `ironwood` module
+- `impl {ZcashSerialize, ZcashDeserialize} for Option<ironwood::ShieldedData>`
+- `impl From<ironwood::Nullifier> for [u8; 32]`
+- `orchard::shielded_data::Flags::ENABLE_CROSS_ADDRESS`
+- `orchard::shielded_data::FlagsV6` (re-exported as `orchard::FlagsV6`).
+- `orchard::shielded_data::ShieldedDataV6::{new, data, data_mut, into_inner}` (re-exported as
+  `orchard::ShieldedDataV6`).
+- `impl ZcashDeserialize for orchard::shielded_data::FlagsV6`
+- `impl {ZcashSerialize, ZcashDeserialize} for Option<orchard::shielded_data::ShieldedDataV6>`
+- `impl From<orchard::shielded_data::FlagsV6> for orchard::shielded_data::Flags`
+- `block::Block::{ironwood_note_commitments, ironwood_nullifiers, ironwood_transactions_count}`
+- `transaction::Transaction`:
+  - `V6 { network_upgrade, lock_time, expiry_height, inputs, outputs, sapling_shielded_data,
+    orchard_shielded_data, ironwood_shielded_data }`
+  - `ironwood_actions`
+  - `ironwood_flags`
+  - `ironwood_shielded_data`
+  - `ironwood_note_commitments`
+  - `ironwood_nullifiers`
+  - `ironwood_value_balance`
+  - `has_ironwood_shielded_data`
+  - `has_enough_ironwood_flags`
+- `transaction::SigHasher::ironwood_bundle`
+- `transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction}`
+- `value_balance::ValueBalance::{from_ironwood_amount, ironwood_amount, set_ironwood_value_balance}`
+- `value_balance::ValueBalanceError::Ironwood`
+- `parallel::tree::NoteCommitmentTrees`:
+  - `ironwood`
+  - `ironwood_subtree`
+  - `update_ironwood_note_commitment_tree`
+- `parallel::tree::NoteCommitmentTreeError::Ironwood`
+- `primitives::zcash_history::V3` (the ZIP-221 Ironwood history node).
+- `impl Version for zcash_history::version::V3`
+- `primitives::zcash_history::Entry::from_raw_bytes_padded`
+- `primitives::zcash_history::BlockCommitmentTreeRoots`, grouping a block's Sapling,
+  Orchard, and Ironwood note commitment tree roots.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.29.0-pre.0` (and the rest of the librustzcash NU6.3
+  pre-release wave: `orchard 0.15.0-pre.1`, `zcash_address 0.13.0-pre.0`,
+  `zcash_history 0.5.0-pre.0`, `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`).
+- Migrated to `strum 0.27`.
+- The following history-tree functions now take a
+  `primitives::zcash_history::BlockCommitmentTreeRoots` struct grouping the Sapling,
+  Orchard, and Ironwood roots by name, instead of separate positional root parameters:
+  - `history_tree::HistoryTree::{from_block, push}`
+  - `history_tree::NonEmptyHistoryTree::{from_block, push, try_extend}`
+  - `primitives::zcash_history::Tree::{append_leaf, new_from_block}`
+  - `primitives::zcash_history::Version::block_to_history_node`
+- `value_balance::ValueBalance<NonNegative>::to_bytes` now returns `[u8; 48]`
+  (was `[u8; 40]`), to include the Ironwood pool balance.
+
+### Removed
+
+- `transaction::Transaction::zip233_amount` (the abandoned ZIP-233 burn amount).
+
+## [10.1.0] - 2026-06-18
+
+### Added
+
+- `parameters::constants::MAX_BLOCK_REORG_HEIGHT`: the maximum chain reorganisation height (1000).
+
 ## [10.0.0] - 2026-06-10
 
 ### Breaking Changes

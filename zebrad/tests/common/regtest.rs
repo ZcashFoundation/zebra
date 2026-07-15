@@ -77,7 +77,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")
+        .wrap_err("Possible port conflict. Are there other zebrad tests running?")
 }
 
 #[allow(dead_code)]

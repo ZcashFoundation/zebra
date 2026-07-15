@@ -508,7 +508,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     let rpc_req = rpc.get_raw_transaction(txid.clone(), Some(0u8), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
-    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=0"), rsp));
+    settings
+        .bind(|| insta::assert_json_snapshot!("getrawtransaction_verbosity=0".to_string(), rsp));
     mempool.expect_no_requests().await;
 
     // `getrawtransaction` verbosity=1
@@ -522,7 +523,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     let rpc_req = rpc.get_raw_transaction(txid, Some(1u8), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
-    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=1"), rsp));
+    settings
+        .bind(|| insta::assert_json_snapshot!("getrawtransaction_verbosity=1".to_string(), rsp));
     mempool.expect_no_requests().await;
 
     // `getrawtransaction` with unknown txid
@@ -537,14 +539,16 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let rpc_req =
         rpc.get_raw_transaction(transaction::Hash::from([0; 32]).encode_hex(), Some(1), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
-    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_unknown_txid"), rsp));
+    settings
+        .bind(|| insta::assert_json_snapshot!("getrawtransaction_unknown_txid".to_string(), rsp));
     mempool.expect_no_requests().await;
 
     // `getrawtransaction` with an invalid TXID
     let rsp = rpc
         .get_raw_transaction("aBadC0de".to_owned(), Some(1), None)
         .await;
-    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_invalid_txid"), rsp));
+    settings
+        .bind(|| insta::assert_json_snapshot!("getrawtransaction_invalid_txid".to_string(), rsp));
     mempool.expect_no_requests().await;
 
     // `getaddresstxids`
@@ -661,7 +665,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Check the response.
     settings.bind(|| {
-        insta::assert_json_snapshot!(format!("z_get_subtrees_by_index_for_sapling"), subtrees)
+        insta::assert_json_snapshot!("z_get_subtrees_by_index_for_sapling".to_string(), subtrees)
     });
 
     // Test the response format from `z_getsubtreesbyindex` for Orchard.
@@ -689,7 +693,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Check the response.
     settings.bind(|| {
-        insta::assert_json_snapshot!(format!("z_get_subtrees_by_index_for_orchard"), subtrees)
+        insta::assert_json_snapshot!("z_get_subtrees_by_index_for_orchard".to_string(), subtrees)
     });
 }
 
@@ -699,7 +703,7 @@ fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
-                assert_eq!(value.as_str().unwrap(), format!("RPC test"));
+                assert_eq!(value.as_str().unwrap(), "RPC test".to_string());
                 // replace with:
                 "[SubVersion]"
             }),

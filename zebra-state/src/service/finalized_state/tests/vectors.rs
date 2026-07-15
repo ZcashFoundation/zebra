@@ -455,7 +455,7 @@ fn sprout_checks(incremental_tree: SproutNoteCommitmentTree, expected_serialized
         deserialized_legacy_tree_as_new.recalculate_root()
     );
 
-    // Check reclaculated and cached roots are the same
+    // Check recalculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
         deserialized_tree
@@ -509,7 +509,7 @@ fn sapling_checks(
         deserialized_legacy_tree_as_new.recalculate_root()
     );
 
-    // Check reclaculated and cached roots are the same
+    // Check recalculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
         deserialized_tree
@@ -585,7 +585,7 @@ fn orchard_checks(
         deserialized_legacy_tree_as_new.recalculate_root()
     );
 
-    // Check reclaculated and cached roots are the same
+    // Check recalculated and cached roots are the same
     assert_eq!(
         incremental_tree.recalculate_root(),
         deserialized_tree

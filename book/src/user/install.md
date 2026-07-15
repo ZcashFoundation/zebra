@@ -3,6 +3,36 @@
 The easiest way to install and run Zebra is to follow the [Getting
 Started](https://zebra.zfnd.org/index.html#getting-started) section.
 
+## Pre-built binaries
+
+Every [GitHub release](https://github.com/ZcashFoundation/zebra/releases) ships
+pre-built `zebrad` binaries for Linux on `x86_64` and `aarch64`, as
+`zebrad-<version>-<target>.tar.gz` archives. They are built on Ubuntu 22.04 and
+need glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023);
+on older or other platforms use the [Docker image](https://hub.docker.com/r/zfnd/zebra)
+or build from source.
+
+Install the latest release with
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall zebrad
+```
+
+Or download an archive, verify it, and extract `zebrad`:
+
+```bash
+gh attestation verify zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz \
+  --repo ZcashFoundation/zebra \
+  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-release-binaries\.yml@' \
+  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+sha256sum --ignore-missing -c SHA256SUMS
+tar xzf zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz
+```
+
 ## Building Zebra
 
 If you want to build Zebra, install the build dependencies as described in the
@@ -58,7 +88,16 @@ If you are having trouble with:
 - **clang:** Install both `libclang` and `clang` - they are usually different
   packages.
 - **libclang:** Check out the [clang-sys
-  documentation](https://github.com/KyleMayes/clang-sys#dependencies).
+  documentation](https://github.com/KyleMayes/clang-sys#dependencies). If the
+  build fails with `couldn't find any valid shared libraries matching:
+  ['libclang.so', 'libclang-*.so']`, libclang is not installed or is not on the
+  search path: install the `libclang-dev` package (Debian/Ubuntu) or set
+  `LIBCLANG_PATH` to the directory that contains `libclang.so`.
+- **shared libraries:** If the build fails with `error while loading shared
+  libraries: libclang-*.so.*: cannot open shared object file`, you have the
+  libclang **dev** files but are missing the matching **runtime** library.
+  Install the runtime package (`libclang1-<version>` on Debian/Ubuntu) or run
+  `sudo ldconfig`.
 - **g++ or MSVC++:** Try using `clang` or `Xcode` instead.
 - **rustc:** Use the latest stable `rustc` and `cargo` versions.
 - **dependencies**: Use `cargo install` without `--locked` to build with the

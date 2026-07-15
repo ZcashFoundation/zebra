@@ -236,7 +236,18 @@ fn difficulty_time_and_history_tree(
         .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
         .expect("a valid block time plus a small constant is in-range");
 
-    let cur_time = cur_time.clamp(min_time, max_time);
+    // On Regtest, real time is far ahead of the chain's median-time-past (a fresh
+    // chain starts from the 2011-era genesis), so clamping `now()` to the valid
+    // range pins every mined block to `max_time` (median-time-past + 90 minutes),
+    // making chain time race ~90 minutes per block. That quickly outruns a
+    // following zcashd sidecar's acceptable block-time window and stalls its sync.
+    // Match zcashd's regtest behaviour by advancing block time minimally instead,
+    // keeping mined timestamps tightly clustered just above the median-time-past.
+    let cur_time = if network.is_regtest() {
+        min_time
+    } else {
+        cur_time.clamp(min_time, max_time)
+    };
 
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(

@@ -24,6 +24,7 @@ use zebra_chain::{
     block,
     parallel::tree::NoteCommitmentTrees,
     parameters::{subsidy::block_subsidy, Network},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     transparent,
 };
 use zebra_db::{
@@ -36,8 +37,8 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::check,
-    Config, ValidateContextError,
+    service::{check, QueuedCheckpointVerified},
+    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
 };
 
 pub mod column_family;
@@ -106,6 +107,12 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "orchard_anchors",
     "orchard_note_commitment_tree",
     "orchard_note_commitment_subtree",
+    // Ironwood (NU6.3). Always registered so the database format is stable across build
+    // flags; these stay empty until NU6.3 transactions appear.
+    "ironwood_nullifiers",
+    "ironwood_anchors",
+    "ironwood_note_commitment_tree",
+    "ironwood_note_commitment_subtree",
     // Chain
     "history_tree",
     "tip_chain_value_pool",
@@ -240,7 +247,7 @@ impl FinalizedState {
         config: &Config,
         network: &Network,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
-    ) -> Self {
+    ) -> Result<Self, StateInitError> {
         Self::new_with_debug(
             config,
             network,
@@ -255,13 +262,14 @@ impl FinalizedState {
     /// If there is no existing database, creates a new database on disk.
     ///
     /// This method is intended for use in tests.
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn new_with_debug(
         config: &Config,
         network: &Network,
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
-    ) -> Self {
+    ) -> Result<Self, StateInitError> {
         #[cfg(feature = "elasticsearch")]
         let elastic_db = if enable_elastic_db {
             use elasticsearch::{
@@ -308,7 +316,7 @@ impl FinalizedState {
             debug_skip_format_upgrades,
             main_column_families.iter().map(ToString::to_string),
             read_only,
-        );
+        )?;
 
         #[cfg(feature = "elasticsearch")]
         let new_state = Self {
@@ -361,7 +369,7 @@ impl FinalizedState {
             }
         }
 
-        new_state
+        Ok(new_state)
     }
 
     /// Returns the configured network for this database.
@@ -550,8 +558,17 @@ impl FinalizedState {
                     let history_tree_mut = Arc::make_mut(&mut history_tree);
                     let sapling_root = note_commitment_trees.sapling.root();
                     let orchard_root = note_commitment_trees.orchard.root();
+                    let ironwood_root = note_commitment_trees.ironwood.root();
                     history_tree_mut
-                        .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
+                        .push(
+                            &self.network(),
+                            block.clone(),
+                            BlockCommitmentTreeRoots {
+                                sapling: &sapling_root,
+                                orchard: &orchard_root,
+                                ironwood: &ironwood_root,
+                            },
+                        )
                         .map_err(Arc::new)
                         .map_err(ValidateContextError::from)?;
 

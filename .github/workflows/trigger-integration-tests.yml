@@ -19,8 +19,15 @@ on:
       - .cargo/config.toml
       - .github/workflows/trigger-integration-tests.yml
 
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to run integration tests against (use for fork PRs)"
+        required: true
+        type: string
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 permissions: {}
@@ -28,8 +35,34 @@ permissions: {}
 jobs:
   trigger-integration:
     name: Trigger integration tests
+    # Fork PRs do not receive repository secrets on pull_request events.
+    # Skip the job on fork PRs; maintainers can still run it manually via
+    # workflow_dispatch with the PR number as input.
+    if: ${{ (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) || (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      # Needed to post a sticky comment on the PR when triggered manually.
+      pull-requests: write
     steps:
+      - name: Resolve target PR details (manual dispatch only)
+        id: pr
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          DATA=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid,body)
+          SHA=$(echo "$DATA" | jq -r .headRefOid)
+          BODY=$(echo "$DATA" | jq -r .body)
+          TEST_SHA=$(echo "$BODY" | sed '/[^ ]ZIT-Revision/!d' | sed -E 's/.*ZIT-Revision: ([^\\]*)\\.*/\1/')
+          # PR body is contributor-controlled; only forward sha-like values.
+          if [[ -n "$TEST_SHA" ]] && ! [[ "$TEST_SHA" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+            echo "::warning::Ignoring invalid ZIT-Revision value"
+            TEST_SHA=""
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "test_sha=$TEST_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Generate app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -52,10 +85,21 @@ jobs:
       - name: Trigger integration tests
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          TEST_SHA: ${{ steps.test-branch.outputs.test_sha }}
+          SHA: ${{ steps.pr.outputs.sha || github.event.pull_request.head.sha || github.sha }}
+          TEST_SHA: ${{ steps.pr.outputs.test_sha || steps.test-branch.outputs.test_sha }}
         run: >
           gh api repos/zcash/integration-tests/dispatches
           --field event_type="zebra-interop-request"
           --field client_payload[sha]="${SHA}"
           --field client_payload[test_sha]="${TEST_SHA}"
+
+      - name: Post sticky comment on PR (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 #v3.0.4
+        with:
+          number: ${{ inputs.pr_number }}
+          header: integration-tests-dispatch
+          message: |
+            🚀 Integration tests dispatched manually against this PR's HEAD (`${{ steps.pr.outputs.sha }}`).
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

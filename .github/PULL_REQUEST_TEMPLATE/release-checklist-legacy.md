@@ -1,6 +1,6 @@
 ---
-name: "Release Checklist Template"
-about: "Checklist to create and publish a Zebra release"
+name: "Legacy Release Checklist Template"
+about: "Manual fallback checklist to create and publish a Zebra release"
 title: "Release Zebra (version)"
 labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
 assignees: ""
@@ -25,7 +25,6 @@ This step can be skipped if there is a large pending dependency upgrade. (For ex
 Here's how we make sure we got everything:
 
 - [ ] Run `cargo update` on the latest `main` branch, and keep the output
-- [ ] Until we bump the workspace MSRV to 1.88 or higher, `home` must be downgraded manually: `cargo update home@0.5.12 --precise 0.5.11`
 - [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
 - [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
 - [ ] Open a separate PR with the changes
@@ -37,22 +36,21 @@ These steps can be done a few days before the release, in the same PR:
 
 ## Change Log
 
-**Important**: Any merge into `main` deletes any edits to the draft changelog.
-Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
+**Important**: This legacy checklist is for manual fallback releases when the
+automated release-plz workflow is not usable. Keep all changelog edits in the
+release branch until the release PR is merged.
 
-We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+Changelog entries are authored and curated per PR in the `[Unreleased]` section
+of `CHANGELOG.md`, so the entries for this release are already written. We follow
+the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
-To create the final change log:
+To finalize the change log:
 
-- [ ] Copy the [**latest** draft
-      changelog](https://github.com/ZcashFoundation/zebra/releases) into
-      `CHANGELOG.md` (there can be multiple draft releases)
-- [ ] Delete any trivial changes
-  - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
-- [ ] Combine duplicate changes
-- [ ] Edit change descriptions so they will make sense to Zebra users
-- [ ] Check the category for each change
-  - Prefer the "Fix" category if you're not sure
+- [ ] Rename the `[Unreleased]` heading to
+      `## [Zebra <version>](https://github.com/ZcashFoundation/zebra/releases/tag/v<version>) - <date>`
+- [ ] Read through the finalized entries and confirm each one reads well for
+      Zebra users and sits in the right category, fixing anything that slipped
+      past per-PR review
 
 ## README
 
@@ -75,7 +73,7 @@ fastmod --fixed-strings '1.58' '1.65'
 
 - [ ] Push the updated changelog and README into a new branch
       for example: `bump-v1.0.0` - this needs to be different to the tag name
-- [ ] Create a release PR by adding `&template=release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist.md)).
+- [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
@@ -104,30 +102,19 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.
 
-Check that the release will work:
+Crate changelog entries are authored per PR in each crate's `CHANGELOG.md`
+`[Unreleased]` section, and breaking changes are declared per PR with a
+conventional-commit `!`. The release level for each crate follows those markers:
+a `!` since the previous release means a major release, a new API means a minor
+release, otherwise a patch release.
 
 - [ ] Determine which crates require release. Run `git diff --stat <previous_tag>`
       and enumerate the crates that had changes.
-- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
-- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
 - [ ] For each crate that requires a release:
-  - [ ] Determine which type of release to make. Run `semver-checks` to list API
-        changes: `cargo semver-checks -p <crate> --default-features`. If there are
-        breaking API changes, do a major release, or try to revert the API change
-        if it was accidental. Otherwise do a minor or patch release depending on
-        whether a new API was added. Note that `semver-checks` won't work
-        if the previous realase was yanked; you will have to determine the
-        type of release manually.
-  - [ ] Update the crate `CHANGELOG.md` listing the API changes or other
-        relevant information for a crate consumer. Use `public-api` to list all
-        API changes: `cargo public-api diff latest -p <crate> -sss`. You can use
-        e.g. copilot to turn it into a human-readable list, e.g. (write the output
-        to `api.txt` beforehand):
-        ```
-        copilot -p "Transform @api.txt which is a API diff into a human-readable description of the API changes. Be terse. Write output api-readable.txt. Use backtick quotes for identifiers. Use '### Breaking Changes' header for changes and removals, and '### Added' for additions. Make each item start with a verb e.g, Added, Changed" --allow-tool write
-        ```
-        It might also make sense to copy entries from the `zebrad` changelog.
-  - [ ] Update crate versions:
+  - [ ] Rename the `[Unreleased]` heading in the crate `CHANGELOG.md` to the new
+        version, and confirm the already-authored entries read correctly for a
+        crate consumer.
+  - [ ] Bump the crate version:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
@@ -137,7 +124,27 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 
 - [ ] Commit and push the above version changes to the release branch.
 
-- [ ] **Major (network upgrade) releases only:** Check that `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in [`zebra-network/src/constants.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs) uses the latest activated network upgrade.
+### Verify the API bump (backstop)
+
+The per-PR cargo-semver-checks CI gate already enforces that breaking API changes
+carry a conventional-commit `!`. Run the manual checks below as a backstop, or
+when the gate could not run (for example, the previous release was yanked, which
+`semver-checks` cannot diff against):
+
+- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
+- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
+- [ ] For each crate, confirm the chosen release level matches the API surface:
+      `cargo semver-checks -p <crate> --default-features`. List the full API diff
+      with `cargo public-api diff latest -p <crate> -sss`, or run
+      [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once to
+      get the per-crate diff plus dependency and (with `--with-values`)
+      const/static value and doc changes in one pass.
+
+## Update Initial Minimum Network Protocol Version
+
+- [ ] If this release should stop connecting to older peers, update
+      `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in
+      `zebra-network/src/constants.rs`.
 
 ## Update End of Support
 
@@ -165,18 +172,17 @@ The end of support height is calculated from the current blockchain height:
 ## Create the GitHub Pre-Release
 
 - [ ] Wait for all the release PRs to be merged
-- [ ] Create a new release using the draft release as a base, by clicking the Edit icon in the [draft release](https://github.com/ZcashFoundation/zebra/releases)
+- [ ] Create a new GitHub release from the [releases page](https://github.com/ZcashFoundation/zebra/releases/new)
 - [ ] Set the tag name to the version tag,
       for example: `v1.0.0`
 - [ ] Set the release to target the `main` branch
 - [ ] Set the release title to `Zebra ` followed by the version tag,
       for example: `Zebra 1.0.0`
-- [ ] Replace the prepopulated draft changelog in the release description with the final changelog you created;
+- [ ] Copy the final changelog you created into the release description;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
       and ending just _before_ the title of the previous release.
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
-- [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
 ## Test the Pre-Release
 

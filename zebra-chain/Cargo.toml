@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "10.0.0"
+version = "11.1.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -53,8 +53,6 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
-tx_v6 = []
-
 [dependencies]
 
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
@@ -98,7 +96,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent = { workspace = true }
-sinsemilla = { version = "0.1" }
+sinsemilla = { workspace = true }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
@@ -119,7 +117,7 @@ serde-big-array = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
-strum = { version = "0.27.2", features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }
 
 # ZF deps
 ed25519-zebra = { workspace = true }
@@ -139,8 +137,8 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "3.0.0", optional = true }
-bounded-vec = { version = "0.9.0", features = ["serde"] }
+zebra-test = { path = "../zebra-test/", version = "4.0.0", optional = true }
+bounded-vec = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 # Benchmarks
@@ -160,7 +158,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "3.0.0" }
+zebra-test = { path = "../zebra-test/", version = "4.0.0" }
 
 [[bench]]
 name = "block"

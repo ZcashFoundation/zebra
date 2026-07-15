@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -22,6 +22,11 @@ keywords = ["tower", "batch"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["algorithms", "asynchronous"]
 
+[features]
+# Implement `RequestWeight` for `tonic::Request<T>`, so gRPC requests can be
+# used as the batch request type without consumer-side newtype wrappers.
+tonic = ["dep:tonic"]
+
 [dependencies]
 futures = { workspace = true }
 futures-core = { workspace = true }
@@ -29,6 +34,7 @@ pin-project = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "tracing", "macros"] }
 tokio-util = { workspace = true }
+tonic = { workspace = true, optional = true }
 tower = { workspace = true, features = ["util", "buffer"] }
 tracing = { workspace = true }
 tracing-futures = { workspace = true }
@@ -40,10 +46,10 @@ rand = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-test = { workspace = true }
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.42" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "3.0.0" }
+zebra-test = { path = "../zebra-test/", version = "4.0.0" }
 
 [lints]
 workspace = true

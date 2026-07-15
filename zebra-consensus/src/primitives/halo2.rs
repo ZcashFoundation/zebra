@@ -5,6 +5,7 @@ use std::{
     future::Future,
     mem,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -50,23 +51,34 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
-// NU6.2 re-enables Orchard actions and ships the *fixed* variable-base
-// scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to be temporarily
-// disabled; see GHSA-jfw5-j458-pfv6). The fix changes the Orchard Action circuit, and therefore
-// its verifying key: a proof produced under one circuit version does not verify under the other
-// key. So we keep BOTH keys, each in its own dedicated verifier, and route each bundle to the
-// correct verifier by the block's network upgrade (see [`verifier_for`]):
+// The Orchard Action circuit — and therefore its verifying key — has changed across upgrades, and
+// a proof produced under one circuit version does not verify under another. We keep one key per
+// circuit version, each in its own dedicated verifier, and route each bundle to the correct one by
+// the block era (network upgrade) it was mined in. The circuit era is a function of the Orchard
+// pool and the block's upgrade, NOT of the transaction version (v5 vs v6): an Orchard-pool bundle
+// mined at NU6.3 commits to the NU6.3 circuit whether it is carried in a v5 or a v6 transaction
+// (see [`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]):
 //
-//   * Orchard bundles mined before NU6.2 (NU5..NU6.2) were produced by the historical, insecure
-//     circuit and only verify under the [`InsecurePreNu6_2`] key. These must keep verifying so
-//     that nodes can re-sync and reindex pre-soft-fork Orchard history.
+//   * Orchard bundles before NU6.2 (NU5..NU6.2) were produced by the historical, insecure circuit
+//     and only verify under the [`InsecurePreNu6_2`] key. These must keep verifying so that nodes
+//     can re-sync and reindex pre-soft-fork Orchard history.
 //
-//   * Orchard bundles mined at NU6.2 onward are produced by the fixed circuit and only verify
-//     under the [`FixedPostNu6_2`] key.
+//   * Orchard bundles from NU6.2 until NU6.3 use the fixed circuit and only verify under the
+//     [`FixedPostNu6_2`] key.
+//
+//   * Every Orchard Action from NU6.3 onward uses the NU6.3 cross-address circuit and only verifies
+//     under the [`PostNu6_3`] key. The NU6.3 circuit extends the fixed circuit with the
+//     `disableCrossAddress` constraint that enforces the Orchard-pool cross-address restriction. Per
+//     ZIP 229 that restriction applies to every Orchard-pool Action "regardless of transaction
+//     version ... so that it cannot be bypassed by using a version 5 transaction", so v5 Orchard
+//     bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles all share this one key.
+//
+// Routing therefore depends on the block era (network upgrade), not the transaction version.
 //
 // NOTE: this deliberately does NOT copy zcashd PR #176's WIP shortcut of validating everything
-// against the fixed key; that is incorrect for re-syncing pre-soft-fork Orchard blocks, whose
-// proofs only verify under the insecure key.
+// against the fixed key; that is incorrect both for re-syncing pre-soft-fork Orchard blocks (whose
+// proofs only verify under the insecure key) and for NU6.3 Orchard Actions (whose cross-address
+// restriction the fixed key cannot enforce).
 lazy_static::lazy_static! {
     /// The Orchard Action verifying key for the **pre-NU6.2** (insecure) circuit.
     ///
@@ -75,25 +87,38 @@ lazy_static::lazy_static! {
     /// MUST be retained to re-verify pre-NU6.2 history on resync. It must never be used to verify
     /// post-NU6.2 bundles.
     pub static ref VERIFYING_KEY_PRE_NU6_2: ItemVerifyingKey =
-        ItemVerifyingKey::build_for_version(OrchardCircuitVersion::InsecurePreNu6_2);
+        ItemVerifyingKey::build(OrchardCircuitVersion::InsecurePreNu6_2);
 
-    /// The Orchard Action verifying key for the **NU6.2+** (fixed) circuit.
+    /// The Orchard Action verifying key for the **NU6.2-until-NU6.3** (fixed) circuit.
     ///
     /// Built from the fixed variable-base scalar-multiplication Orchard Action circuit shipped in
-    /// NU6.2. Bundles mined at or after the NU6.2 activation height commit to this circuit and
-    /// only verify under this key. See [`VERIFYING_KEY_PRE_NU6_2`] for the era split.
-    pub static ref VERIFYING_KEY_POST_NU6_2: ItemVerifyingKey =
-        ItemVerifyingKey::build();
+    /// NU6.2. Orchard bundles mined from the NU6.2 activation height until NU6.3 commit to this
+    /// circuit and only verify under this key. At NU6.3 the Orchard pool moves to
+    /// [`VERIFYING_KEY_NU6_3_ONWARD`]. See [`VERIFYING_KEY_PRE_NU6_2`] for the era split.
+    pub static ref VERIFYING_KEY_NU6_2: ItemVerifyingKey =
+        ItemVerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
+
+    /// The Orchard Action verifying key for the **NU6.3-onward** circuit.
+    ///
+    /// Built from the NU6.3 Action circuit, which extends the fixed circuit with the
+    /// `disableCrossAddress` constraint that enforces the Orchard-pool cross-address restriction.
+    /// Every Orchard Action mined from NU6.3 onward commits to this circuit and only verifies under
+    /// this key: v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles.
+    pub static ref VERIFYING_KEY_NU6_3_ONWARD: ItemVerifyingKey =
+        ItemVerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
 }
 
 /// A Halo2 verification item, used as the request type of the service.
 ///
-/// An [`Item`] is key-agnostic: it carries only the bundle and sighash. The verifying key (pre-
-/// vs post-NU6.2) is supplied by whichever [`Verifier`] processes the item, so an item is always
-/// validated against exactly one key and eras are never mixed within a batch.
+/// An [`Item`] is key-agnostic: it carries only the bundle and sighash. The circuit era's verifying
+/// key is supplied by whichever [`Verifier`] processes the item, so an item is always validated
+/// against exactly one key and eras are never mixed within a batch.
 #[derive(Clone, Debug)]
 pub struct Item {
-    bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+    // `Arc`-wrapped so cloning an `Item` — which `tower-fallback` does eagerly for every request —
+    // shares the bundle instead of deep-copying its actions and multi-KB proof. `add_bundle` only
+    // needs `&Bundle`.
+    bundle: Arc<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>>,
     sighash: SigHash,
 }
 
@@ -109,7 +134,10 @@ impl Item {
         bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
         sighash: SigHash,
     ) -> Self {
-        Self { bundle, sighash }
+        Self {
+            bundle: Arc::new(bundle),
+            sighash,
+        }
     }
 
     /// Perform non-batched verification of this [`Item`] against `vk`.
@@ -118,19 +146,23 @@ impl Item {
     /// fallback logic when batch verification fails. The caller supplies the
     /// verifying key for the item's era.
     pub fn verify_single(self, vk: &ItemVerifyingKey) -> bool {
-        let mut batch = BatchValidator::default();
-        batch.queue(self);
-        batch.validate(vk, thread_rng())
+        let mut batch = BatchValidator::new(vk);
+        // `add_bundle` rejects a bundle whose cross-address restriction is not supported by this
+        // era's verifying key; such an item is invalid under this key.
+        if batch.queue(self).is_err() {
+            return false;
+        }
+        batch.validate(thread_rng())
     }
 }
 
 trait QueueBatchVerify {
-    fn queue(&mut self, item: Item);
+    fn queue(&mut self, item: Item) -> Result<(), orchard::bundle::BatchError>;
 }
 
-impl QueueBatchVerify for BatchValidator {
-    fn queue(&mut self, Item { bundle, sighash }: Item) {
-        self.add_bundle(&bundle, sighash.0);
+impl QueueBatchVerify for BatchValidator<'_> {
+    fn queue(&mut self, Item { bundle, sighash }: Item) -> Result<(), orchard::bundle::BatchError> {
+        self.add_bundle(bundle.as_ref(), sighash.0)
     }
 }
 
@@ -191,10 +223,11 @@ impl Service<Item> for OrchardFallback {
 
 /// The concrete type of a global Halo2 verification service.
 ///
-/// Each Orchard circuit era gets its own instance — see [`VERIFIER_PRE_NU6_2`] and
-/// [`VERIFIER_POST_NU6_2`] — so that batches, fallbacks, and verifying keys are fully separated
-/// per era.
-type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
+/// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
+/// [`VERIFIER_NU6_2`], and [`VERIFIER_NU6_3_ONWARD`] — so that batches, fallbacks, and verifying
+/// keys are fully separated per circuit version. The Orchard verifier routing functions
+/// ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the matching one.
+pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
 
 /// Builds a global Halo2 verifier that validates every item against `vk`.
 ///
@@ -226,32 +259,54 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
 pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
     Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2));
 
-/// Global batch verification context for **NU6.2+** Halo2 Action proofs.
+/// Global batch verification context for **NU6.2-until-NU6.3** Halo2 Action proofs.
 ///
-/// Items routed here are verified against [`VERIFYING_KEY_POST_NU6_2`] (the fixed circuit). This
+/// Items routed here are verified against [`VERIFYING_KEY_NU6_2`] (the fixed circuit). This
 /// service transparently batches contemporaneous proof verifications, handling batch failures by
 /// falling back to individual verification.
 ///
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
-pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_POST_NU6_2));
+pub static VERIFIER_NU6_2: Lazy<VerifierService> =
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2));
 
-/// Returns the global Halo2 verifier for Orchard bundles in blocks at `network_upgrade`.
+/// Global batch verification context for **NU6.3-onward** Halo2 Action proofs.
 ///
-/// The Orchard Action circuit — and therefore its verifying key — changed at NU6.2 (the fixed
-/// variable-base scalar-multiplication circuit; see GHSA-jfw5-j458-pfv6), and a proof produced
-/// under one circuit does not verify under the other key. So each bundle must be checked against
-/// the key for the upgrade of the block it appears in:
+/// Items routed here are verified against [`VERIFYING_KEY_NU6_3_ONWARD`] (the NU6.3 Action circuit, which
+/// adds the `disableCrossAddress` constraint). Every Orchard Action mined from NU6.3 onward routes
+/// here — v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles. This service
+/// transparently batches contemporaneous proof verifications, handling batch failures by falling
+/// back to individual verification.
 ///
-///   * upgrades before NU6.2 are routed to [`VERIFIER_PRE_NU6_2`] (the historical insecure key),
-///     so pre-soft-fork Orchard history still verifies on re-sync;
-///   * NU6.2 and every later upgrade are routed to [`VERIFIER_POST_NU6_2`] (the fixed key).
+/// Note that making a `Service` call requires mutable access to the service, so you should call
+/// `.clone()` on the global handle to create a local, mutable handle.
+pub static VERIFIER_NU6_3_ONWARD: Lazy<VerifierService> =
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD));
+
+/// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
+/// block at `network_upgrade`.
 ///
-/// The mapping is an explicit, exhaustive `match` on every [`NetworkUpgrade`] variant: there is
-/// no version-comparison fallthrough and no default-to-insecure arm, so adding a future upgrade
-/// is a compile error here until it is bound to a key on purpose.
-pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService {
+/// The Orchard Action circuit — and therefore its verifying key — changes with the block era, and
+/// a proof produced under one circuit does not verify under another era's key. The era is a
+/// function of the block's network upgrade, **not** the transaction version, so each v5 Orchard
+/// bundle is checked against the key for the upgrade of the block it appears in:
+///
+///   * upgrades before NU6.2 → [`VERIFIER_PRE_NU6_2`] (the historical insecure key), so
+///     pre-soft-fork Orchard history still verifies on re-sync;
+///   * NU6.2 until NU6.3 → [`VERIFIER_NU6_2`] (the fixed key);
+///   * NU6.3 onward → [`VERIFIER_NU6_3_ONWARD`] (the NU6.3 circuit). The Orchard-pool cross-address
+///     restriction is enforced for every Orchard Action from NU6.3 onward regardless of transaction
+///     version, "so that it cannot be bypassed by using a version 5 transaction" (ZIP 229); that
+///     restriction lives in the NU6.3 circuit, which the NU6.2 fixed key cannot verify. So a v5
+///     Orchard bundle at NU6.3 uses the same key as v6 Orchard and Ironwood bundles.
+///
+/// v6 Orchard and Ironwood bundles use [`orchard_v6_verifier`], which returns that same
+/// NU6.3-onward key.
+///
+/// The mapping is an explicit, exhaustive `match` on every [`NetworkUpgrade`] variant: there is no
+/// version-comparison fallthrough and no default arm, so adding a future upgrade is a compile error
+/// here until it is bound to a key on purpose.
+pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService {
     use NetworkUpgrade::*;
 
     match network_upgrade {
@@ -261,17 +316,33 @@ pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService
         Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5
         | Nu6 | Nu6_1 => &VERIFIER_PRE_NU6_2,
 
-        // NU6.2 ships the fixed circuit, and every upgrade after it inherits that fixed circuit,
-        // so all of them verify under the fixed key.
-        Nu6_2 | Nu7 => &VERIFIER_POST_NU6_2,
+        // NU6.2 ships the fixed circuit and is the only upgrade that uses it: it is active from the
+        // NU6.2 activation height until NU6.3.
+        Nu6_2 => &VERIFIER_NU6_2,
 
-        // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.2
-        // upgrade, so it inherits the fixed circuit and is bound to the fixed key here on purpose
-        // (rather than via a wildcard) to keep this match exhaustive and fail-closed under every
-        // build configuration.
+        // NU6.3 adds the `disableCrossAddress` constraint to the Orchard Action circuit. Every
+        // Orchard Action from NU6.3 onward — including those in v5 transactions — commits to this
+        // circuit, so NU6.3 and later route to the NU6.3-onward key. Per ZIP 229 the cross-address
+        // restriction applies "regardless of transaction version ... so that it cannot be bypassed
+        // by using a version 5 transaction". Verifying these under the NU6.2 fixed key would both
+        // reject honest proofs (different key) and fail to enforce the restriction.
+        Nu6_3 | Nu7 => &VERIFIER_NU6_3_ONWARD,
+
+        // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.3
+        // upgrade, so it inherits the NU6.3 circuit and is bound to the NU6.3-onward key here on
+        // purpose (rather than via a wildcard) to keep this match exhaustive and fail-closed under
+        // every build configuration.
         #[cfg(zcash_unstable = "zfuture")]
-        ZFuture => &VERIFIER_POST_NU6_2,
+        ZFuture => &VERIFIER_NU6_3_ONWARD,
     }
+}
+
+/// Returns the global Halo2 verifier for **v6** Orchard-pool and Ironwood-pool bundles.
+///
+/// v6 Orchard and Ironwood bundles only exist from NU6.3 onward, so they always use the NU6.3
+/// circuit — the same [`VERIFIER_NU6_3_ONWARD`] key that v5 Orchard bundles at NU6.3 route to.
+pub fn orchard_v6_verifier() -> &'static VerifierService {
+    &VERIFIER_NU6_3_ONWARD
 }
 
 /// Halo2 proof verifier implementation
@@ -280,15 +351,17 @@ pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 ///
-/// Each verifier validates against a single, fixed [`ItemVerifyingKey`]; the two Orchard circuit
-/// eras are served by two independent verifiers, so a batch never mixes pre- and post-NU6.2
-/// proofs.
+/// Each verifier validates against a single, fixed [`ItemVerifyingKey`]; the three Orchard circuit
+/// eras (pre-NU6.2, NU6.2-until-NU6.3, and NU6.3-onward) are served by three independent verifiers,
+/// so a batch never mixes proofs from different eras.
 pub struct Verifier {
     /// The verifying key that every batch and fallback from this verifier uses.
     vk: &'static ItemVerifyingKey,
 
     /// The synchronous Halo2 batch validator.
-    batch: BatchValidator,
+    ///
+    /// Borrows `vk` (which is `'static`), so the validator is `BatchValidator<'static>`.
+    batch: BatchValidator<'static>,
 
     /// A channel for broadcasting the result of a batch to the futures for each batch item.
     ///
@@ -303,48 +376,46 @@ impl Verifier {
         let (tx, _) = watch::channel(None);
         Self {
             vk,
-            batch: BatchValidator::default(),
+            batch: BatchValidator::new(vk),
             tx,
         }
     }
 
     /// Returns the batch verifier and channel sender,
     /// replacing the batch and channel with new empty ones.
-    fn take(&mut self) -> (BatchValidator, Sender) {
+    fn take(&mut self) -> (BatchValidator<'static>, Sender) {
         // Use a new verifier and channel for each batch.
-        let batch = mem::take(&mut self.batch);
+        let batch = mem::replace(&mut self.batch, BatchValidator::new(self.vk));
         let (tx, _) = watch::channel(None);
         let tx = mem::replace(&mut self.tx, tx);
 
         (batch, tx)
     }
 
-    /// Synchronously process the batch against `vk`, and send the result using
-    /// the channel sender. This function blocks until the batch is completed.
-    fn verify(batch: BatchValidator, vk: &'static ItemVerifyingKey, tx: Sender) {
-        let result = batch.validate(vk, thread_rng());
+    /// Synchronously process the batch (the verifying key is held by the batch), and send the
+    /// result using the channel sender. This function blocks until the batch is completed.
+    fn verify(batch: BatchValidator<'static>, tx: Sender) {
+        let result = batch.validate(thread_rng());
         let _ = tx.send(Some(result));
     }
 
     /// Flush the batch using a thread pool, sending the result via the channel.
     /// This returns immediately, usually before the batch is completed.
     fn flush_blocking(&mut self) {
-        let vk = self.vk;
         let (batch, tx) = self.take();
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
         // We don't care about execution order here, because this method is only called on drop.
-        tokio::task::block_in_place(|| rayon::spawn_fifo(move || Self::verify(batch, vk, tx)));
+        tokio::task::block_in_place(|| rayon::spawn_fifo(move || Self::verify(batch, tx)));
     }
 
-    /// Flush the batch using a thread pool, validating against `vk` and
-    /// returning the result via the channel. This function returns a future that
-    /// becomes ready when the batch is completed.
-    async fn flush_spawning(batch: BatchValidator, vk: &'static ItemVerifyingKey, tx: Sender) {
+    /// Flush the batch using a thread pool, returning the result via the channel. This function
+    /// returns a future that becomes ready when the batch is completed.
+    async fn flush_spawning(batch: BatchValidator<'static>, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         let start = std::time::Instant::now();
-        let result = spawn_fifo(move || batch.validate(vk, thread_rng())).await;
+        let result = spawn_fifo(move || batch.validate(thread_rng())).await;
         let duration = start.elapsed().as_secs_f64();
 
         let result_label = match &result {
@@ -395,7 +466,23 @@ impl Service<BatchControl<Item>> for Verifier {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
-                self.batch.queue(item);
+                match self.batch.queue(item) {
+                    Ok(()) => {}
+                    // Reject the item on its own without poisoning the rest of the batch. In
+                    // particular `BatchError::RestrictionUnsupportedByKey` should not be reachable
+                    // (it fires only for a bundle with `cross_address_enabled = false` on a key
+                    // that does not support the restriction; `VERIFIER_NU6_3_ONWARD`'s key supports
+                    // it, and the pre-NU6.3 verifiers only ever see v5-format bundles, which always
+                    // report `cross_address_enabled = true`), but failing closed per-item is
+                    // strictly safer than panicking this shared, long-lived verifier service if a
+                    // future routing change or `#[non_exhaustive]` variant ever reaches here.
+                    Err(other) => {
+                        return Box::pin(async move {
+                            metrics::counter!("proofs.halo2.invalid").increment(1);
+                            Err(format!("could not validate halo2 proof: {other}").into())
+                        });
+                    }
+                }
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.changed().await {
@@ -425,10 +512,9 @@ impl Service<BatchControl<Item>> for Verifier {
             BatchControl::Flush => {
                 tracing::trace!("got halo2 flush command");
 
-                let vk = self.vk;
                 let (batch, tx) = self.take();
 
-                Box::pin(Self::flush_spawning(batch, vk, tx).map(|()| Ok(())))
+                Box::pin(Self::flush_spawning(batch, tx).map(|()| Ok(())))
             }
         }
     }

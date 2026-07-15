@@ -916,6 +916,14 @@
             "valueDeltaZat": 0
         },
         {
+            "id": "ironwood",
+            "monitored": true,
+            "chainValue": 126101.76317619,
+            "chainValueZat": 12610176317619,
+            "valueDelta": 0.00000000,
+            "valueDeltaZat": 0
+        },
+        {
             "id": "lockbox",
             "monitored": true,
             "chainValue": 0.00000000,

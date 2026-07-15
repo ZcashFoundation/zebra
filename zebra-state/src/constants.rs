@@ -13,17 +13,10 @@ use crate::{
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
-/// The maximum chain reorganisation height.
-///
-/// This threshold determines the maximum length of the best non-finalized
-/// chain. Once the chain grows past this height, Zebra finalizes its oldest
-/// blocks; deeper reorganisations are outside Zebra's rollback window.
-///
-/// This is a local-only node policy; it is not part of consensus. The window is
-/// sized as a defence-in-depth measure against sustained consensus splits.
-//
-// TODO: change to HeightDiff
-pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
+/// The maximum chain reorganisation height; it bounds the length of the best
+/// non-finalized chain. The value lives in `zebra-chain` so tooling (e.g.
+/// `zebra-checkpoints`) can use it without depending on `zebra-state`.
+pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
@@ -41,7 +34,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 27;
+const DATABASE_FORMAT_VERSION: u64 = 28;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -50,11 +43,20 @@ const DATABASE_FORMAT_VERSION: u64 = 27;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-//
-// Version 27.1.0: added the `known_hash_chunk` column family for P2P known-hash
-// snapshot distribution. New column families are created automatically when the
-// database is opened, and existing column families are preserved, so this is a
-// backward-compatible change.
+///
+/// Version history:
+/// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
+///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
+///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
+///   `zcash_history::Entry` records from 253 to 326 bytes, because NU6.3 adds Ironwood fields to
+///   `zcash_history::NodeData` (read code accepts the legacy 253-byte width and zero-pads it up to
+///   the current width). New CFs are created and the wider records are read in place when the
+///   database is opened, so this is a major bump that is restorable from the previous major
+///   database format version (no resync, no data migration).
+/// - 28.1.0: added the `known_hash_chunk` column family for known-hash snapshot
+///   distribution. New column families are created automatically when the
+///   database is opened, and existing column families are preserved, so this is
+///   a backward-compatible change.
 const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a

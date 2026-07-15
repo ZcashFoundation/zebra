@@ -240,6 +240,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let trees = block.trees();
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
+    let trees_ironwood = trees.ironwood();
     // We already tested that GetBlockHash is readable with `hash`, so we don't
     // bother unpacking it here
     let previous_block_hash = block.previous_block_hash();
@@ -269,7 +270,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         difficulty,
         chain_supply,
         value_pools,
-        GetBlockTrees::new(trees_sapling, trees_orchard),
+        GetBlockTrees::new(trees_sapling, trees_orchard, trees_ironwood),
         previous_block_hash,
         next_block_hash,
     )));
@@ -600,6 +601,7 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         Treestate::new(Commitments::new(sapling_final_root, sapling_final_state)),
         Treestate::new(Commitments::new(orchard_final_root, orchard_final_state)),
+        obj.ironwood().clone(),
     );
 
     assert_eq!(obj, new_obj);
@@ -823,6 +825,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             binding_sig,
         )
     });
+    // Ironwood reuses the Orchard-shaped `Orchard` object, so round-trip it by value.
+    let ironwood = tx.ironwood().clone();
     let binding_sig = tx.binding_sig();
     let joinsplit_pub_key = tx.joinsplit_pub_key();
     let joinsplit_sig = tx.joinsplit_sig();
@@ -855,6 +859,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         joinsplit_pub_key,
         joinsplit_sig,
         orchard,
+        ironwood,
         value_balance,
         value_balance_zat,
         size,

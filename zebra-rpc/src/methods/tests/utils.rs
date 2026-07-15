@@ -5,6 +5,7 @@ use zebra_chain::{
     block::Block,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::Network,
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     sapling::tree::Root,
     serialization::ZcashDeserialize,
 };
@@ -19,8 +20,11 @@ pub fn fake_history_tree(network: &Network) -> Arc<HistoryTree> {
     let history_tree = NonEmptyHistoryTree::from_block(
         &Network::Mainnet,
         block,
-        &first_sapling_root,
-        &Default::default(),
+        BlockCommitmentTreeRoots {
+            sapling: &first_sapling_root,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
     )
     .unwrap();
 

@@ -1,16 +1,63 @@
-//! Testing the end of support feature.
-
-#![allow(clippy::unwrap_in_result)]
-
-use std::time::Duration;
+use std::{fs, path::Path, time::Duration};
 
 use color_eyre::eyre::Result;
 
-use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
-use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
+use zebra_chain::{
+    block::Height,
+    chain_tip::mock::MockChainTip,
+    parameters::{Network, Network::*},
+};
+use zebra_test::{args, prelude::*};
+use zebrad::components::sync::end_of_support::{
+    self, EOS_PANIC_AFTER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
+};
+
+use crate::common::{
+    config::{default_test_config, testdir},
+    launch::ZebradTestDirExt,
+};
 
 // Estimated blocks per day with the current 75 seconds block spacing.
 const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
+
+/// Check that the end of support code is called at least once.
+#[test]
+fn end_of_support_is_checked_at_start() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
+    let mut child = testdir
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(30));
+
+    child.expect_stdout_line_matches("Starting zebrad")?;
+    child.expect_stdout_line_matches("Starting end of support task")?;
+
+    child.kill(false)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    Ok(())
+}
+
+/// Check that Zebra does not depend on any crates from git sources.
+#[test]
+#[ignore]
+fn check_no_git_dependencies() {
+    let workspace_cargo_lock_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("zebrad manifest directory should have a workspace root parent")
+        .join("Cargo.lock");
+    let cargo_lock_contents = fs::read_to_string(workspace_cargo_lock_path)
+        .expect("workspace root should have Cargo.lock file");
+
+    if cargo_lock_contents.contains(r#"source = "git+"#) {
+        panic!("Cargo.lock includes git sources")
+    }
+}
 
 /// Test that the `end_of_support` function is working as expected.
 #[test]
@@ -26,9 +73,8 @@ fn end_of_support_panic() {
 #[test]
 #[tracing_test::traced_test]
 fn end_of_support_function() {
-    // We are away from warn or panic
-    let no_warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY)
-        - (30 * ESTIMATED_BLOCKS_PER_DAY);
+    // One day before the warn range opens
+    let no_warn = ESTIMATED_RELEASE_HEIGHT + ((EOS_WARN_AFTER - 1) * ESTIMATED_BLOCKS_PER_DAY);
 
     end_of_support::check(Height(no_warn), &Network::Mainnet);
     assert!(logs_contain(
@@ -36,8 +82,8 @@ fn end_of_support_function() {
     ));
     assert!(logs_contain("Zebra release is supported"));
 
-    // We are in warn range
-    let warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152) - (3 * ESTIMATED_BLOCKS_PER_DAY);
+    // One day into the warn range
+    let warn = ESTIMATED_RELEASE_HEIGHT + ((EOS_WARN_AFTER + 1) * ESTIMATED_BLOCKS_PER_DAY);
 
     end_of_support::check(Height(warn), &Network::Mainnet);
     assert!(logs_contain(

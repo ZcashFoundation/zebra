@@ -642,6 +642,8 @@ struct DTestnetParameters {
     /// If unset, the default activation height for the network is used; the soft fork
     /// cannot be disabled via configuration.
     temporary_orchard_disabling_soft_fork_height: Option<u32>,
+    /// Regtest only: whether to allow coinbase spends to have transparent outputs.
+    should_allow_unshielded_coinbase_spends: Option<bool>,
 }
 
 /// Network configuration used during deserialization.
@@ -737,6 +739,9 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             temporary_orchard_disabling_soft_fork_height: params
                 .temporary_orchard_disabling_soft_fork_height()
                 .map(|height| height.0),
+            should_allow_unshielded_coinbase_spends: params
+                .is_regtest()
+                .then(|| params.should_allow_unshielded_coinbase_spends()),
         }
     }
 }
@@ -926,7 +931,15 @@ where
         checkpoints,
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
+        should_allow_unshielded_coinbase_spends,
     } = params;
+
+    // This is a Regtest-only consensus knob, so reject it rather than silently ignoring it.
+    if should_allow_unshielded_coinbase_spends.is_some() {
+        return Err(de::Error::custom(
+            "should_allow_unshielded_coinbase_spends is only supported on Regtest",
+        ));
+    }
 
     let mut params_builder = testnet::Parameters::build();
 
@@ -1041,6 +1054,7 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         lockbox_disbursements,
         checkpoints,
         extend_funding_stream_addresses_as_required,
+        should_allow_unshielded_coinbase_spends,
         ..
     } = params;
 
@@ -1060,5 +1074,6 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         lockbox_disbursements,
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
+        should_allow_unshielded_coinbase_spends,
     }
 }
