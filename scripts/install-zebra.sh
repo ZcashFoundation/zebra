@@ -11,12 +11,12 @@ fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 UNITY_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
-ZEBRA_RELEASE_TAG="v6.0.0"
+ZEBRA_RELEASE_TAG="v6.0.0-zcashd-compat.1"
 ZEBRA_VERSION="${ZEBRA_RELEASE_TAG#v}"
 ZEBRA_ARCHIVE="zebrad-${ZEBRA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 ZEBRA_URL="https://github.com/ZcashFoundation/zebra/releases/download/${ZEBRA_RELEASE_TAG}/${ZEBRA_ARCHIVE}"
 # Updated to the archive checksum of each release before publishing.
-ZEBRA_ARCHIVE_SHA256="fe784eb2a8d9ac12bb493273b8b09fdf87e261f42ee10fae26bb99d149a87835"
+ZEBRA_ARCHIVE_SHA256="942bbcf03eecb5488b9852aa6dc60a10795444f1d85a4f723b1cdb6f7c6c96a0"
 ZEBRA_MEMBER="zebrad"
 ZEBRA_DOCKER_IMAGE="zfnd/zebra:${ZEBRA_VERSION}"
 ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:zcashd-compat-${ZEBRA_VERSION}"
