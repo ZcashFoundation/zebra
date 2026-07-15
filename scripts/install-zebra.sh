@@ -16,7 +16,7 @@ ZEBRA_VERSION="${ZEBRA_RELEASE_TAG#v}"
 ZEBRA_ARCHIVE="zebrad-${ZEBRA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 ZEBRA_URL="https://github.com/ZcashFoundation/zebra/releases/download/${ZEBRA_RELEASE_TAG}/${ZEBRA_ARCHIVE}"
 # Updated to the archive checksum of each release before publishing.
-ZEBRA_ARCHIVE_SHA256="7534b10d0fce3e782dc8670a094b8923da24ce120c80a44558f4dec74dada68f"
+ZEBRA_ARCHIVE_SHA256="942bbcf03eecb5488b9852aa6dc60a10795444f1d85a4f723b1cdb6f7c6c96a0"
 ZEBRA_MEMBER="zebrad"
 ZEBRA_DOCKER_IMAGE="zfnd/zebra:${ZEBRA_VERSION}"
 ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:zcashd-compat-${ZEBRA_VERSION}"
