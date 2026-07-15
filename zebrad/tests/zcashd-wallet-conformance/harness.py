@@ -59,6 +59,12 @@ RPC_TIMEOUT = 30
 STARTUP_TIMEOUT = 120
 SYNC_TIMEOUT = 120
 
+# How far to advance a sidecar's frozen clock per step to drive zcashd's
+# transaction-relay trickle (see `ZcashdSidecar.advance_clock`). Comfortably
+# larger than zcashd's INVENTORY_BROADCAST_INTERVAL so each step elapses the
+# trickle timer, and small enough to stay inside the tip's recent-time window.
+CLOCK_ADVANCE = 120
+
 
 class JSONRPCError(Exception):
     """A JSON-RPC call returned an error object."""
@@ -153,7 +159,9 @@ class ZebradRegtest:
         self.rpc_port = _free_port()
         self.p2p_port = _free_port()
         self.p2p_addr = f"127.0.0.1:{self.p2p_port}"
-        self.rpc = RpcClient(f"http://127.0.0.1:{self.rpc_port}")
+        # Mining many regtest blocks in one `generate` call is slow (each block
+        # builds a template and commits state), so allow a generous timeout.
+        self.rpc = RpcClient(f"http://127.0.0.1:{self.rpc_port}", timeout=600)
         self._process = None
 
     def _config_toml(self):
@@ -181,7 +189,16 @@ enable_cookie_auth = false
 enabled = true
 manage_zcashd = false
 block_gossip_peer_ips = ["127.0.0.1"]
+{self._tracing_toml()}
 """
+
+    def _tracing_toml(self):
+        # Not prefixed `ZEBRA_`: zebrad treats `ZEBRA_*` env vars as config-field
+        # overrides and fatal-errors on an unknown field.
+        filter_ = os.environ.get("HARNESS_TRACING_FILTER")
+        if not filter_:
+            return ""
+        return f'[tracing]\nfilter = "{filter_}"\n'
 
     def start(self):
         config_path = os.path.join(self.workdir, "zebrad.toml")
@@ -238,11 +255,19 @@ class ZcashdSidecar:
     harness can read a funding address from it before Zebra starts mining.
     """
 
-    def __init__(self, workdir, zcashd_bin, zebra_p2p_addr):
+    def __init__(self, workdir, zcashd_bin, zebra_p2p_addr, mocktime):
         self.datadir = os.path.join(workdir, "zcashd-datadir")
         os.makedirs(self.datadir, exist_ok=True)
         self.zcashd_bin = zcashd_bin
         self.zebra_p2p_addr = zebra_p2p_addr
+        # Zebra mines regtest blocks with genesis-era (2011) timestamps, clamped
+        # by the median-time rule, so a real-clock node would see the tip as
+        # ancient and never leave IBD (disabling the wallet). Freeze the node's
+        # clock near the chain's time — as zcashd's own test framework does —
+        # so the tip reads as recent. The offset keeps the tip inside zcashd's
+        # [mocktime - 24h, mocktime + 2h] recent-and-not-too-new window across a
+        # few hundred mined blocks.
+        self.mocktime = mocktime
         self.rpc_port = _free_port()
         self.rpc_user = "conformance"
         self.rpc_password = "conformance"
@@ -271,6 +296,17 @@ class ZcashdSidecar:
                 "listen=0\n"
                 "dnsseed=0\n"
                 "discover=0\n"
+                # Match Zebra's regtest network-upgrade schedule: Zebra activates
+                # every upgrade through NU5 at height 1, so the sidecar must too,
+                # or it rejects Zebra's height-1 v5 coinbase ("overwinter is not
+                # active yet"). Branch IDs are the consensus branch identifiers.
+                "nuparams=5ba81b19:1\n"  # Overwinter
+                "nuparams=76b809bb:1\n"  # Sapling
+                "nuparams=2bb40e60:1\n"  # Blossom
+                "nuparams=f5b9230b:1\n"  # Heartwood
+                "nuparams=e9ff75a6:1\n"  # Canopy
+                "nuparams=c2d6d0b4:1\n"  # NU5
+                f"mocktime={self.mocktime}\n"
             )
 
     def start(self):
@@ -289,6 +325,21 @@ class ZcashdSidecar:
             "zcashd sidecar wallet RPC",
         )
         return self
+
+    def advance_clock(self, delta=CLOCK_ADVANCE):
+        """Advances this sidecar's frozen clock (`setmocktime`) by `delta`.
+
+        With `mocktime` frozen, zcashd's transaction-relay trickle timer
+        (`nNextInvSend`) can never elapse, so `fSendTrickle` stays false and the
+        node never flushes queued transaction invs to its peer. (Block invs are
+        sent unconditionally, so block sync is unaffected.) Real-clock nodes
+        don't hit this; regtest must advance the clock to drive tx relay, as
+        zcashd's own test framework does. Kept well inside the tip's recent
+        window so blocks stay valid and the wallet stays enabled.
+        """
+        self.mocktime += delta
+        self.rpc.setmocktime(self.mocktime)
+        return self.mocktime
 
     def stop(self):
         if self._process is not None:
@@ -317,15 +368,55 @@ class SidecarNode:
         self._sidecar = sidecar
         self._zebra = zebra
         self._all_sidecars = all_sidecars
-        # Cached coinbase-funding address in this node's own wallet. Mining
+        # Cached wallet account and its unified-address receivers. Mining
         # several blocks to one wallet address credits the wallet the same as
         # zcashd mining to a fresh address per block.
-        self._funding_address = None
+        self._account = None
+        self._unified_address = None
+        self._receivers = None
+
+    def _ensure_account(self):
+        """Creates this node's wallet account and unified address once.
+
+        This zcashd build disables the legacy transparent `getnewaddress`, so
+        the wallet is account/unified-address based: create an account and a
+        unified address with transparent + Sapling receivers.
+        """
+        if self._account is None:
+            self._account = self._sidecar.rpc.z_getnewaccount()["account"]
+            self._unified_address = self._sidecar.rpc.z_getaddressforaccount(
+                self._account, ["p2pkh", "sapling"]
+            )["address"]
+            self._receivers = self._sidecar.rpc.z_listunifiedreceivers(
+                self._unified_address
+            )
+        return self._account
+
+    @property
+    def account(self):
+        self._ensure_account()
+        return self._account
+
+    @property
+    def unified_address(self):
+        self._ensure_account()
+        return self._unified_address
+
+    def sapling_address(self):
+        """Returns this node's Sapling receiver."""
+        self._ensure_account()
+        return self._receivers["sapling"]
+
+    def transparent_address(self):
+        """Returns this node's transparent (t-addr) receiver."""
+        self._ensure_account()
+        return self._receivers["p2pkh"]
 
     def _fund_address(self):
-        if self._funding_address is None:
-            self._funding_address = self._sidecar.rpc.getnewaddress()
-        return self._funding_address
+        # Mine coinbase to the Sapling receiver: modern zcashd is shielded-first
+        # and tracks shielded coinbase in the account balance, whereas a
+        # transparent coinbase to a unified-address receiver is not credited.
+        return self.sapling_address()
 
     def generate(self, num_blocks):
         target = self._zebra.block_count() + num_blocks
@@ -353,6 +444,26 @@ class SidecarNode:
             SYNC_TIMEOUT,
             f"tx {txid} to appear in the sidecar mempool",
         )
+
+    def wait_for_miner_mempool(self, txid):
+        """Wait for Zebra (the miner) to accept the tx into its own mempool.
+
+        A wallet tx is created on the sidecar and relayed to Zebra over P2P;
+        Zebra must have it in its mempool before the next mined block can
+        include it, otherwise `generate` produces an empty block. Each step
+        advances the sidecars' frozen clocks so zcashd's transaction-relay
+        trickle fires (see `ZcashdSidecar.advance_clock`); a couple of steps is
+        normally enough. The cadence is deliberately slower than the generic
+        poll loop so the advancing clock stays well inside the recent window.
+        """
+        deadline = time.monotonic() + SYNC_TIMEOUT
+        while time.monotonic() < deadline:
+            for sidecar in self._all_sidecars:
+                sidecar.advance_clock()
+            if txid in self._zebra.rpc.getrawmempool():
+                return
+            time.sleep(2)
+        raise TimeoutError(f"timed out waiting for tx {txid} to appear in Zebra's mempool")
 
     def __getattr__(self, method):
         # Everything else is a plain wallet/chain RPC on this node's sidecar.
@@ -389,12 +500,22 @@ class ZcashdCompatHarness:
             #    block is mined via generatetoaddress to a node's own wallet.
             self._zebra = ZebradRegtest(self._workdir, self.zebrad_bin).start()
 
+            # Freeze each sidecar's clock 12h ahead of Zebra's genesis time, so
+            # the genesis-era tip reads as recent (not IBD) while leaving room
+            # for a few hundred blocks of median-time advance before the tip
+            # would look too new.
+            genesis_time = self._zebra.rpc.getblock(self._zebra.rpc.getblockhash(0), 1)[
+                "time"
+            ]
+            mocktime = int(genesis_time) + 12 * 3600
+
             # 2. Start N sidecars, each pinned to the one Zebra.
             for i in range(self.num_nodes):
                 sidecar = ZcashdSidecar(
                     os.path.join(self._workdir, f"node{i}"),
                     self.zcashd_bin,
                     self._zebra.p2p_addr,
+                    mocktime,
                 ).start()
                 self._sidecars.append(sidecar)
 

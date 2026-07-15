@@ -5,10 +5,14 @@
 
 """zcashd wallet RPC conformance against a Zebra + zcashd-sidecar pairing.
 
-This is the Phase 1 proof for the wallet-conformance effort: it exercises the
-single-wallet assertions from zcashd's `qa/rpc-tests/wallet.py` against the
-real pairing, where Zebra is the miner and network and the zcashd sidecar keeps
-its wallet.
+Exercises the modern (account / unified-address / shielded) wallet RPC surface
+against the real pairing, where Zebra is the miner and network and the zcashd
+sidecar keeps its wallet: account creation, mined shielded coinbase, account
+balance, a shielded z_sendmany spend, and confirmation.
+
+This zcashd build is shielded-first (the legacy transparent `getnewaddress` is
+disabled and transparent coinbase to a unified-address receiver is not
+credited), so the wallet is exercised through the z_* RPCs.
 
 Run:
     ZEBRAD_BIN=/path/to/zebrad ZCASHD_BIN=/path/to/sidecar/zcashd \\
@@ -18,6 +22,7 @@ Exits 0 on success, non-zero on the first failed assertion.
 """
 
 import sys
+import time
 from decimal import Decimal
 
 from harness import COINBASE_MATURITY, ZcashdCompatHarness
@@ -33,80 +38,127 @@ def assert_true(condition, context):
         raise AssertionError(f"failed: {context}")
 
 
-def matured_blocks(height):
-    """Number of coinbase blocks that are spendable at `height`.
+def account_balance(node, account, minconf=1):
+    """Total account balance across pools at `minconf` confirmations, in ZEC.
 
-    A coinbase needs COINBASE_MATURITY confirmations, so a block at height `h`
-    is spendable once the tip is at `h + COINBASE_MATURITY`.
+    `z_getbalanceforaccount` is purely confirmation-gated: it sums notes with at
+    least `minconf` confirmations and does not apply coinbase maturity itself.
     """
-    return max(0, height - COINBASE_MATURITY)
+    pools = node.z_getbalanceforaccount(account, minconf)["pools"]
+    return sum(
+        Decimal(pool["valueZat"]) / Decimal(100000000) for pool in pools.values()
+    )
+
+
+def spendable_balance(node, account):
+    """Mature, spendable coinbase balance for an account, in ZEC.
+
+    A coinbase mined at height `h` may be spent once the tip reaches
+    `h + COINBASE_MATURITY`, i.e. once it has `COINBASE_MATURITY + 1`
+    confirmations, so spendable coinbase is exactly the balance at that minconf.
+    """
+    return account_balance(node, account, COINBASE_MATURITY + 1)
+
+
+def wait_for_balance(node, account, expected, context, minconf=1, timeout=60):
+    """Poll an account balance until it matches, tolerating wallet-scan lag.
+
+    Block sync can land a block on the sidecar slightly before its wallet has
+    scanned the block's shielded notes, so a freshly credited balance may take a
+    moment to appear.
+    """
+    deadline = time.monotonic() + timeout
+    balance = account_balance(node, account, minconf)
+    while balance != expected and time.monotonic() < deadline:
+        time.sleep(1)
+        balance = account_balance(node, account, minconf)
+    assert_equal(balance, expected, context)
 
 
 def run(node):
-    # The wallet starts empty.
-    walletinfo = node.getwalletinfo()
-    assert_equal(Decimal(walletinfo["balance"]), Decimal("0"), "initial balance")
-    assert_equal(
-        Decimal(walletinfo["immature_balance"]), Decimal("0"), "initial immature balance"
-    )
+    account = node.account
+    print(f"account {account}, unified address {node.unified_address[:24]}...")
 
-    # Zebra mines coinbase to this wallet's address; the sidecar follows over P2P.
-    print("Mining 4 blocks on Zebra, paid to the sidecar wallet...")
-    node.generate(4)
+    # The account starts empty.
+    assert_equal(account_balance(node, account, 0), Decimal("0"), "initial balance")
 
-    height = node.getblockcount()
-    assert_equal(height, 4, "sidecar height after mining 4 blocks")
-
-    # Determine the per-block coinbase subsidy from the sidecar itself, rather
-    # than hard-coding a schedule, so the test is robust across parameters.
     subsidy = Decimal(node.getblocksubsidy(1)["miner"])
     print(f"Regtest coinbase subsidy: {subsidy} ZEC/block")
 
-    # All 4 coinbases are immature (fewer than COINBASE_MATURITY confirmations).
-    walletinfo = node.getwalletinfo()
-    assert_equal(
-        Decimal(walletinfo["immature_balance"]),
-        subsidy * 4,
-        "immature balance after 4 blocks",
-    )
-    assert_equal(Decimal(walletinfo["balance"]), Decimal("0"), "balance after 4 blocks")
+    # Zebra mines shielded coinbase to this account; the sidecar follows over P2P.
+    print("Mining 4 blocks on Zebra, paid to the sidecar wallet...")
+    node.generate(4)
+    assert_equal(node.getblockcount(), 4, "sidecar height after mining 4 blocks")
 
-    blockchaininfo = node.getblockchaininfo()
-    assert_equal(blockchaininfo["blocks"], 4, "sidecar blockchaininfo height")
+    # All 4 coinbases are immature (fewer than COINBASE_MATURITY confirmations),
+    # so none is spendable yet.
+    assert_equal(spendable_balance(node, account), Decimal("0"), "spendable at 4 blocks")
 
     # Mine past coinbase maturity so the early coinbases become spendable.
-    print(f"Mining {COINBASE_MATURITY + 1} more blocks to mature coinbase...")
-    node.generate(COINBASE_MATURITY + 1)
+    print(f"Mining {COINBASE_MATURITY} more blocks to mature coinbase...")
+    node.generate(COINBASE_MATURITY)
     height = node.getblockcount()
+    assert_equal(height, 4 + COINBASE_MATURITY, "height after maturing coinbase")
 
-    expected_spendable = subsidy * matured_blocks(height)
-    balance = Decimal(node.getbalance())
+    # Coinbases at heights 1..(height - COINBASE_MATURITY) are now mature.
+    matured = height - COINBASE_MATURITY
+    expected_spendable = subsidy * matured
+    balance = spendable_balance(node, account)
     assert_equal(balance, expected_spendable, "spendable balance after maturity")
     assert_true(balance > Decimal("0"), "wallet has spendable coinbase")
 
-    # New transparent addresses are usable.
-    recipient = node.getnewaddress()
-    assert_true(isinstance(recipient, str) and len(recipient) > 0, "getnewaddress")
+    # A fresh account can receive a shielded spend.
+    recipient_account = node.z_getnewaccount()["account"]
+    recipient_ua = node.z_getaddressforaccount(recipient_account, ["p2pkh", "sapling"])[
+        "address"
+    ]
 
-    # Spend from the matured coinbase to another address in this wallet.
-    send_amount = subsidy  # one block's worth, comfortably within the balance
-    print(f"Sending {send_amount} ZEC transparently within the wallet...")
-    txid = node.sendtoaddress(recipient, send_amount)
-    assert_true(isinstance(txid, str) and len(txid) == 64, "sendtoaddress returns a txid")
+    # Shielded send from the mined account to the new account.
+    send_amount = subsidy
+    print(f"Sending {send_amount} ZEC shielded via z_sendmany...")
+    opid = node.z_sendmany(
+        node.unified_address,
+        [{"address": recipient_ua, "amount": float(send_amount)}],
+        1,
+        None,
+        "AllowRevealedAmounts",
+    )
+
+    # Wait for the async operation to finish and produce a txid.
+    txid = None
+    for _ in range(60):
+        status = node.z_getoperationstatus([opid])[0]
+        if status["status"] == "success":
+            txid = status["result"]["txid"]
+            break
+        if status["status"] == "failed":
+            raise AssertionError(f"z_sendmany failed: {status.get('error')}")
+        time.sleep(1)
+    assert_true(txid is not None, "z_sendmany produced a txid")
 
     # The transaction reaches Zebra and comes back to the sidecar mempool.
     node.wait_for_mempool(txid)
-    assert_true(txid in node.getrawmempool(), "tx is in the sidecar mempool")
 
-    # Zebra mines the transaction; the sidecar sees it confirmed.
+    # Zebra must have the tx in its own mempool before it can mine it into a
+    # block, otherwise the confirming `generate` produces an empty block.
+    node.wait_for_miner_mempool(txid)
+
+    # Zebra mines the transaction; the recipient account receives the funds.
+    # The received note is an ordinary (non-coinbase) output, spendable at one
+    # confirmation, but the wallet may take a moment to scan the mined block.
     node.generate(1)
-    tx = node.gettransaction(txid)
-    assert_true(tx["confirmations"] >= 1, "tx confirmed after mining")
-
-    # getwalletinfo exposes the fields integrations depend on.
-    walletinfo = node.getwalletinfo()
-    for field in ("walletversion", "balance", "immature_balance", "txcount"):
-        assert_true(field in walletinfo, f"getwalletinfo has field {field!r}")
+    deadline = time.monotonic() + 30
+    while node.gettransaction(txid)["confirmations"] < 1 and time.monotonic() < deadline:
+        time.sleep(1)
+    assert_true(
+        node.gettransaction(txid)["confirmations"] >= 1, "tx confirmed after mining"
+    )
+    wait_for_balance(
+        node,
+        recipient_account,
+        send_amount,
+        "recipient account received the shielded funds",
+    )
 
     print("PASS: zcashd wallet RPC conformance against the Zebra + sidecar pairing")
 
