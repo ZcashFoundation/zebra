@@ -330,7 +330,7 @@ pub async fn run_sweep<S: BlockSource>(
         }
 
         completed += 1;
-        if completed % PROGRESS_INTERVAL == 0 {
+        if completed.is_multiple_of(PROGRESS_INTERVAL) {
             // Casting to f64 can lose precision on huge counts, which is fine
             // for a progress rate display.
             let rate = completed as f64 / started.elapsed().as_secs_f64();

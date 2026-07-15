@@ -19,7 +19,7 @@ use color_eyre::{
     eyre::{ensure, eyre, Result},
     Help,
 };
-use structopt::StructOpt;
+use clap::Parser;
 
 use zebra_chain::{block, parameters::Network};
 use zebra_utils::init_tracing;
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     init_tracing();
     color_eyre::install()?;
 
-    let args = Args::from_args();
+    let args = Args::parse();
     let network = &args.network;
 
     // The emitted asset file name prefix (the spec's `file_prefix` field);
