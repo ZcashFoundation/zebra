@@ -210,7 +210,7 @@ ENV HOME=${HOME}
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
     adduser=3.152 \
-    curl=8.14.1-2+deb13u3 \
+    curl=8.14.1-2+deb13u4 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
