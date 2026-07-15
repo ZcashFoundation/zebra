@@ -120,6 +120,15 @@ pub struct EmitSnapshotCmd {
     )]
     emit_files: bool,
 
+    /// Print the per-height appended-note distribution for each shielded pool,
+    /// and how many frontiers the current `TREE_FRONTIER_MIN_NOTES` threshold
+    /// ships vs folds, to tune the threshold before a release pins the hashes.
+    #[clap(
+        long,
+        help = "print the appended-note distribution and shipped-vs-folded frontier stats"
+    )]
+    tree_stats: bool,
+
     /// Output directory for the `--emit-files` artifact set.
     #[clap(long, short, help = "directory for the --emit-files artifact set")]
     out_dir: Option<PathBuf>,
@@ -200,6 +209,10 @@ impl EmitSnapshotCmd {
             for change in &changes {
                 println!("{change}");
             }
+        }
+
+        if self.tree_stats {
+            print_tree_stats(&db);
         }
 
         if self.emit_files {
@@ -462,21 +475,29 @@ impl EmitSnapshotCmd {
         std::fs::create_dir_all(&out_dir)?;
 
         let chunks = emit_chunk_files(db, &out_dir, tip_height)?;
+
+        // Emit the tree records for exactly the heights the generated chunks
+        // record (the threshold-selected heights that append at least
+        // `TREE_FRONTIER_MIN_NOTES` notes): the engine's tree lookahead
+        // schedules reads off the chunk lists, so deriving the shipped records
+        // from the chunks guarantees the two can never disagree. All other
+        // updating heights are folded by the consuming engine.
+        let (sapling_heights, orchard_heights) = chunk_recorded_tree_heights(db, chunks)?;
         let sapling_trees = emit_tree_records(
             &out_dir.join(SAPLING_TREES_FILE),
-            db.sapling_tree_by_height_range(..).map(|(height, _tree)| {
+            sapling_heights.into_iter().map(|height| {
                 let bytes =
                     zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Sapling, height)
-                        .expect("a tree exists at a height the range yielded");
+                        .expect("a tree exists at a height a chunk records");
                 (height.0, bytes)
             }),
         )?;
         let orchard_trees = emit_tree_records(
             &out_dir.join(ORCHARD_TREES_FILE),
-            db.orchard_tree_by_height_range(..).map(|(height, _tree)| {
+            orchard_heights.into_iter().map(|height| {
                 let bytes =
                     zebra_state::note_commitment_tree_bytes(db, ShieldedPool::Orchard, height)
-                        .expect("a tree exists at a height the range yielded");
+                        .expect("a tree exists at a height a chunk records");
                 (height.0, bytes)
             }),
         )?;
@@ -560,6 +581,120 @@ impl NetworkConsts {
                  Mainnet and the default Testnet"
             )),
         }
+    }
+}
+
+/// Returns the absolute heights whose sapling / orchard tree frontiers the
+/// generated chunks record — the threshold-selected heights that append at
+/// least `TREE_FRONTIER_MIN_NOTES` notes — in ascending order per pool.
+///
+/// Re-parses the deterministic chunk bytes (from the stored CF or on-demand
+/// generation), so the shipped tree records always agree with the chunk lists
+/// the consuming engine schedules from.
+fn chunk_recorded_tree_heights(db: &ZebraDb, chunks: u64) -> Result<(Vec<Height>, Vec<Height>)> {
+    use zebra_chain::parameters::known_hashes::chunk_v2::ParsedChunk;
+
+    let mut sapling_heights = Vec::new();
+    let mut orchard_heights = Vec::new();
+
+    // `chunks` counts the generated chunk files, so every index generates.
+    // The index fits a u32 (far below the chunk count cap).
+    for index in 0..chunks as u32 {
+        let bytes = zebra_state::known_hash_chunk_bytes(db, index)
+            .ok_or_else(|| eyre!("chunk {index} did not regenerate"))?;
+        let parsed = ParsedChunk::parse(&bytes)
+            .map_err(|error| eyre!("chunk {index} is invalid: {error}"))?;
+
+        // `span_base + rel_height` is a real block height, far below u32::MAX.
+        let span_base = index * HASHES_PER_CHUNK;
+        sapling_heights.extend(
+            parsed
+                .sapling_roots()
+                .into_iter()
+                .map(|record| Height(span_base + record.rel_height)),
+        );
+        orchard_heights.extend(
+            parsed
+                .orchard_roots()
+                .into_iter()
+                .map(|record| Height(span_base + record.rel_height)),
+        );
+    }
+
+    Ok((sapling_heights, orchard_heights))
+}
+
+/// Prints the appended-note distribution for each shielded pool over the whole
+/// finalized state, and the shipped-vs-folded frontier split under the current
+/// [`TREE_FRONTIER_MIN_NOTES`] threshold.
+///
+/// This is the static analysis for tuning the threshold: run it against a
+/// synced state to see how many frontiers the artifact set would ship (bytes)
+/// vs how many notes the consuming engine would fold (CPU), then adjust the
+/// constant before a release pins the chunk hashes.
+#[allow(clippy::print_stdout)]
+fn print_tree_stats(db: &ZebraDb) {
+    use zebra_chain::parameters::known_hashes::TREE_FRONTIER_MIN_NOTES;
+
+    /// Appended-note histogram bucket upper bounds (inclusive), by powers of
+    /// two around the threshold's useful range.
+    const BUCKETS: [u64; 8] = [1, 4, 16, 64, 256, 1024, 4096, u64::MAX];
+
+    println!("appended-note distribution (TREE_FRONTIER_MIN_NOTES = {TREE_FRONTIER_MIN_NOTES}):");
+
+    let sapling_counts: Vec<u64> = db
+        .sapling_tree_by_height_range(..)
+        .map(|(_, tree)| tree.count())
+        .collect();
+    let orchard_counts: Vec<u64> = db
+        .orchard_tree_by_height_range(..)
+        .map(|(_, tree)| tree.count())
+        .collect();
+
+    for (pool, counts) in [("sapling", sapling_counts), ("orchard", orchard_counts)] {
+        let mut histogram = [0u64; BUCKETS.len()];
+        let mut shipped = 0u64;
+        let mut folded_notes = 0u64;
+        let mut prev = 0u64;
+
+        for count in counts {
+            let appended = count.saturating_sub(prev);
+            prev = count;
+            if appended == 0 {
+                continue;
+            }
+
+            let bucket = BUCKETS
+                .iter()
+                .position(|&max| appended <= max)
+                .expect("the last bucket is unbounded");
+            histogram[bucket] += 1;
+
+            if appended >= TREE_FRONTIER_MIN_NOTES {
+                shipped += 1;
+            } else {
+                folded_notes += appended;
+            }
+        }
+
+        println!("  {pool}:");
+        let mut lower = 1u64;
+        for (bucket, &upper) in BUCKETS.iter().enumerate() {
+            if histogram[bucket] > 0 {
+                if upper == u64::MAX {
+                    println!("    {lower}+ notes: {} heights", histogram[bucket]);
+                } else {
+                    println!("    {lower}-{upper} notes: {} heights", histogram[bucket]);
+                }
+            }
+            lower = upper.saturating_add(1);
+        }
+        println!(
+            "    shipped frontiers: {shipped} (~{} KiB of tree records), \
+             folded notes below threshold: {folded_notes}",
+            // ~1.2 KiB per frontier record, rounded per the artifact layout.
+            shipped.saturating_mul(12) / 10,
+        );
     }
 }
 

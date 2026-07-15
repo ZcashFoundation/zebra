@@ -17,10 +17,11 @@
 use bincode::Options;
 
 use zebra_chain::{
+    block::Height,
     orchard,
     parameters::known_hashes::{
         chunk_v2::{self, TreeRoot},
-        HASHES_PER_CHUNK,
+        HASHES_PER_CHUNK, TREE_FRONTIER_MIN_NOTES,
     },
     sapling,
 };
@@ -145,35 +146,76 @@ fn size_hint(size: usize) -> u8 {
     quantized.min(chunk_v2::DEFAULT_SIZE_HINT as u64) as u8
 }
 
-/// Collects the sapling tree-root update records for the span
-/// `[span_base, span_last]`, as relative heights with the tree root at each
-/// height that records a new tree, in ascending order.
+/// Collects the sapling tree-root records for the span
+/// `[span_base, span_last]`: the relative height and tree root of each height
+/// that appends at least [`TREE_FRONTIER_MIN_NOTES`] notes, in ascending
+/// order.
+///
+/// Heights that update the tree by fewer notes are omitted: the consuming
+/// engine folds those blocks' notes itself, and only downloads a frontier
+/// where the fold is expensive enough to be worth the artifact bytes (the
+/// per-block threshold trade-off is documented on the constant).
 fn sapling_tree_roots(db: &ZebraDb, span_base: u32, span_last: u32) -> Vec<TreeRoot> {
-    use zebra_chain::block::Height;
+    // The baseline note count just below the span, so the first in-span
+    // updating height's appended-note delta is correct. `*_tree_by_height`
+    // searches at-or-before, covering non-updating baseline heights.
+    let baseline = span_base
+        .checked_sub(1)
+        .and_then(|below| db.sapling_tree_by_height(&Height(below)))
+        .map_or(0, |tree| tree.count());
 
-    let mut roots = Vec::new();
-    for (height, tree) in db.sapling_tree_by_height_range(Height(span_base)..=Height(span_last)) {
-        // `height >= span_base` because the range starts at `span_base`, so the
-        // subtraction does not underflow.
-        let rel_height = height.0 - span_base;
-        let root: [u8; 32] = (&tree.root()).into();
-        roots.push(TreeRoot { rel_height, root });
-    }
-    roots
+    threshold_tree_roots(
+        baseline,
+        db.sapling_tree_by_height_range(Height(span_base)..=Height(span_last))
+            .map(|(height, tree)| {
+                // `height >= span_base` because the range starts at
+                // `span_base`, so the subtraction does not underflow.
+                (height.0 - span_base, tree.count(), (&tree.root()).into())
+            }),
+    )
 }
 
-/// Collects the orchard tree-root update records for the span
+/// Collects the orchard tree-root records for the span
 /// `[span_base, span_last]`, like [`sapling_tree_roots`].
 fn orchard_tree_roots(db: &ZebraDb, span_base: u32, span_last: u32) -> Vec<TreeRoot> {
-    use zebra_chain::block::Height;
+    let baseline = span_base
+        .checked_sub(1)
+        .and_then(|below| db.orchard_tree_by_height(&Height(below)))
+        .map_or(0, |tree| tree.count());
 
+    threshold_tree_roots(
+        baseline,
+        db.orchard_tree_by_height_range(Height(span_base)..=Height(span_last))
+            .map(|(height, tree)| {
+                // `height >= span_base`, as in `sapling_tree_roots`.
+                (height.0 - span_base, tree.count(), (&tree.root()).into())
+            }),
+    )
+}
+
+/// Filters `(rel_height, tree note count, root)` records, in ascending height
+/// order starting from a tree of `baseline` notes, down to the heights that
+/// append at least [`TREE_FRONTIER_MIN_NOTES`] notes.
+///
+/// The delta at each height is measured against the previous *updating*
+/// height's count (not the previous shipped height's), so it is exactly the
+/// number of notes the block at that height appended.
+fn threshold_tree_roots(
+    baseline: u64,
+    updates: impl Iterator<Item = (u32, u64, [u8; 32])>,
+) -> Vec<TreeRoot> {
+    let mut prev_count = baseline;
     let mut roots = Vec::new();
-    for (height, tree) in db.orchard_tree_by_height_range(Height(span_base)..=Height(span_last)) {
-        // `height >= span_base`, as in `sapling_tree_roots`.
-        let rel_height = height.0 - span_base;
-        let root: [u8; 32] = (&tree.root()).into();
-        roots.push(TreeRoot { rel_height, root });
+
+    for (rel_height, count, root) in updates {
+        let appended = count.saturating_sub(prev_count);
+        prev_count = count;
+
+        if appended >= TREE_FRONTIER_MIN_NOTES {
+            roots.push(TreeRoot { rel_height, root });
+        }
     }
+
     roots
 }
 
@@ -422,6 +464,46 @@ mod tests {
             None,
             "an overflowing chunk index returns None",
         );
+    }
+
+    /// The threshold filter ships exactly the heights that append at least
+    /// `TREE_FRONTIER_MIN_NOTES` notes, measuring each height's delta against
+    /// the previous updating height (not the previous shipped height).
+    #[test]
+    fn threshold_tree_roots_ships_only_big_appends() {
+        let _init_guard = zebra_test::init();
+
+        let min = TREE_FRONTIER_MIN_NOTES;
+        let root = |n: u8| [n; 32];
+
+        // Baseline 10 notes. Height 1 appends min (shipped), height 5 appends
+        // 1 (folded), height 9 appends min + 1 measured against height 5's
+        // count (shipped), height 12 appends min - 1 (folded).
+        let updates = vec![
+            (1, 10 + min, root(1)),
+            (5, 10 + min + 1, root(2)),
+            (9, 10 + 2 * min + 2, root(3)),
+            (12, 10 + 3 * min + 1, root(4)),
+        ];
+
+        let shipped = threshold_tree_roots(10, updates.into_iter());
+        assert_eq!(
+            shipped,
+            vec![
+                TreeRoot {
+                    rel_height: 1,
+                    root: root(1),
+                },
+                TreeRoot {
+                    rel_height: 9,
+                    root: root(3),
+                },
+            ],
+            "only heights appending >= TREE_FRONTIER_MIN_NOTES notes are shipped",
+        );
+
+        // An empty update list ships nothing.
+        assert!(threshold_tree_roots(0, std::iter::empty()).is_empty());
     }
 
     /// Note commitment trees serialize deterministically and round-trip back to a

@@ -174,16 +174,30 @@ or a subtree-completing height all fall back to folding (correctness), and a
 contradicting Sapling root is a fatal commit error. See §8.2 item 1 for the
 subtree handling.
 
+**Frontier selection.** Not every updating height ships a frontier: a height
+is recorded in the chunk (and its frontier shipped in the artifact set) only
+when the block appends at least `TREE_FRONTIER_MIN_NOTES` notes to that pool
+(`zebra-chain`, currently 64). Below the threshold the consuming engine folds
+the block's few notes itself — cheaper than the artifact bytes — while above
+it (for example, Orchard blocks during the 2022–2023 transaction spam append
+hundreds to thousands of notes each) loading the ~1.2 KiB frontier wins. The
+threshold is part of the deterministic chunk generation, so tuning it means
+re-emission; `emit-snapshot --tree-stats` prints the appended-note
+distribution and the shipped-vs-folded split from a synced state to pick the
+value before a release pins the hashes. The emitted tree records are derived
+from the generated chunks' root lists, so the shipped artifacts and the
+engine's schedule can never disagree.
+
 **Tree lookahead.** Trees must be read *ahead of* the block download — a
 deeper lookahead window for the per-height tree reads than for blocks — so
 that by the time a block reaches the commit stage its tree is already read
 and verified, and the state's "tree supplied by download" path is taken on the
 common path. If a tree has not arrived yet, the commit falls back to folding
 (correct, just slower), so the lookahead is a throughput optimization, not a
-correctness requirement. Only the *updating* heights need a tree (trees update
-at ~7% of heights); the lookahead scheduler keys tree requests off the chunk's
-sparse tree-root list (`*_root_at_or_before`), requesting the tree at each
-updating height a configurable margin ahead of the commit frontier.
+correctness requirement. Only the *shipped* heights need a tree; the lookahead
+scheduler keys tree requests off the chunk's sparse tree-root list
+(`*_root_at_or_before`), requesting the tree at each recorded height a
+configurable margin ahead of the commit frontier.
 
 ### 3.3 Address balances + survivor UTXOs at `H_max`
 

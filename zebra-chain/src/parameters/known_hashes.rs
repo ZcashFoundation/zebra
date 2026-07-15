@@ -58,6 +58,23 @@ const _: () = assert!(255 * SIZE_HINT_UNIT as u64 >= crate::block::MAX_BLOCK_BYT
 /// against, so the two can't disagree.
 pub const HASHES_PER_CHUNK: u32 = 150_000;
 
+/// The minimum number of notes a block must append to a shielded pool's note
+/// commitment tree for that height's frontier to be recorded in the v2 chunks
+/// and shipped in the snapshot artifact set.
+///
+/// Below the threshold the consuming engine folds the block's notes into the
+/// frontier itself, which is cheap for a handful of notes; at or above it,
+/// loading the ~1.2 KiB downloaded frontier is cheaper than folding (for
+/// example, Orchard blocks during the 2022–2023 transaction spam append
+/// hundreds to thousands of notes each). The value trades artifact size
+/// against fold CPU during the initial sync.
+///
+/// This threshold is part of the deterministic chunk generation, so changing
+/// it changes the pinned `chunk_hashes` and requires re-emission.
+/// `emit-snapshot --tree-stats` reports the shipped-vs-folded distribution
+/// from a synced state, to tune the value before a release pins the hashes.
+pub const TREE_FRONTIER_MIN_NOTES: u64 = 64;
+
 /// Returns the chunk file name for `file_prefix` and chunk `index`:
 /// `<file_prefix>-NN.bin` (e.g. `main-known-hashes-00.bin`).
 ///
