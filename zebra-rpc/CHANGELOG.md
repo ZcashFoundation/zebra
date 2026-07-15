@@ -5,18 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- The indexer gRPC service has a new unary `GetBlock` method that returns a block
-  from the best chain by hash or height.
-- The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
-  tip hashes and streams only the blocks above them, so a re-subscribing consumer
-  resumes instead of being sent the entire non-finalized state again.
+## [11.1.0] - 2026-07-10
 
 ### Changed
 
+- MSRV is now 1.88
+
+### Fixed
+
+- A read-state syncer startup hang where a co-located consumer whose finalized state
+  had caught up past the node's non-finalized root would re-subscribe endlessly instead
+  of syncing ([#10841](https://github.com/ZcashFoundation/zebra/pull/10841))
+
+## [11.0.0] - 2026-07-02
+
+### Added
+
+- `client::GetBlockchainInfoBalance::ironwood`, exposing the Ironwood value pool
+  in `getblockchaininfo`.
+- `client::TransactionObject::ironwood`, exposing a v6 transaction's Ironwood bundle
+  in verbose `getrawtransaction`/`getblock` output.
+- `client::GetTreestateResponse::ironwood`, exposing the Ironwood treestate in
+  `z_gettreestate` from NU6.3 activation.
+- `methods::IronwoodTrees`
+- `methods::GetBlockTrees::ironwood`, exposing the Ironwood note commitment tree size
+  in verbose `getblock` output. The `ironwood` pool is also served by
+  `z_getsubtreesbyindex`.
+- The indexer gRPC service has a new unary `GetBlock` method that returns a block
+  from the best chain by hash or height (`indexer::BlockRequest`,
+  `indexer::indexer_server::Indexer::get_block`,
+  `indexer::indexer_client::IndexerClient::get_block`).
+- The indexer `NonFinalizedStateChange` subscription accepts the caller's known chain
+  tip hashes and streams only the blocks above them, so a re-subscribing consumer
+  resumes instead of being sent the entire non-finalized state again. The method now
+  takes the new `indexer::NonFinalizedStateChangeRequest` message (was `Empty`).
+- `config::mining::ExtraCoinbaseData` and `config::mining::ExtraCoinbaseDataTooLong`.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.29.0-pre.0` (and the rest of the librustzcash NU6.3
+  pre-release wave: `orchard 0.15.0-pre.1`, `zcash_address 0.13.0-pre.0`,
+  `zcash_keys 0.15.0-pre.0`, `zcash_proofs 0.29.0-pre.0`, `zcash_protocol 0.10.0-pre.0`,
+  `zcash_transparent 0.9.0-pre.0`).
+- `methods::BlockchainValuePoolBalances` is now `[GetBlockchainInfoBalance; 6]`
+  (was `; 5`), and `GetBlockchainInfoBalance::{value_pools, zero_pools}` were
+  updated for the added Ironwood pool.
+- `client::TransactionObject::confirmations` is now `Option<i64>` (was `Option<u32>`), so
+  side-chain blocks report negative confirmations instead of panicking; the
+  `confirmations` parameter of `client::TransactionObject::{new, from_transaction}` changed
+  accordingly
+  ([GHSA-x6v8-c2xp-928m](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x6v8-c2xp-928m)).
+- The following constructors take the new Ironwood fields as additional parameters:
+  - `client::GetTreestateResponse::new` (`ironwood: Option<Treestate>`)
+  - `client::TransactionObject::new` (`ironwood: Option<Orchard>`)
+  - `methods::GetBlockTrees::new` (`ironwood: u64`)
+- Zebra now prepends a `🦓` marker to the coinbase input of every block it builds.
+- `config::mining::Config::extra_coinbase_data` is now `Option<ExtraCoinbaseData>` (was
+  `Option<String>`), limited to 86 bytes (was 94) and validated on construction.
 - The read-state syncer (`TrustedChainSync`) applies backpressure to the non-finalized
   block stream instead of dropping blocks for a slow consumer, bridges the gap between
   a lagging finalized tip and the streamed non-finalized chain by fetching the missing
@@ -25,10 +70,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `getblocktemplate` now caches the built coinbase transaction per `(height, fees)`, so repeated
+  short-poll requests within a block no longer rebuild it. This avoids re-running the
+  Sapling/Orchard proof on every request when mining to a shielded address, which otherwise pegged
+  the CPU and made each template take seconds.
 - `TrustedChainSync` no longer busy-loops and saturates logs when a block repeatedly
   fails to commit to the non-finalized state: it now backs off before re-subscribing
   and only logs the warning on transitions.
   ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `TrustedChainSync` no longer races the finalized-tip catch-up task while its secondary
+  database lags the primary, which failed commits as duplicates and caused per-second
+  re-subscribe churn.
+  ([#10818](https://github.com/ZcashFoundation/zebra/pull/10818))
 
 ## [10.0.1] - 2026-06-18
 

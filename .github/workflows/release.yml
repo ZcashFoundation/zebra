@@ -121,6 +121,8 @@ jobs:
         run: |
           echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
+      - name: Install libclang for librocksdb-sys bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Publish crates and create tags
         id: release-plz
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
@@ -228,6 +230,10 @@ jobs:
         uses: anthropics/claude-code-action@11ba60486e4aec9ddfeafcf4bb3f00b028ac2c16 # v1.0.142
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Distills the summary and a brief update-priority line from the GitHub Release Format in
+          # book/src/dev/changelog-guidelines.md; How to Upgrade and Compatibility are added at release time.
           prompt: |
             Rewrite the changelog section below into operator-facing GitHub Release
             notes for Zebra ${{ steps.zebrad-release.outputs.tag }}.
@@ -244,7 +250,7 @@ jobs:
             ${{ steps.notes.outputs.section }}
           claude_args: |
             --json-schema '{"type":"object","properties":{"notes":{"type":"string"}},"required":["notes"],"additionalProperties":false}'
-            --max-turns 1
+            --max-turns 5
 
       - name: Select release notes
         if: steps.zebrad-release.outputs.released == 'true'

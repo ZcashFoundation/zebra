@@ -150,12 +150,18 @@ compat-zcashd-status:
 		exit 1; \
 	fi
 	@echo "Checking zcashd peer pinning..."
-	@peers="$$( "$(ZCASH_CLI_BIN)" -conf="$(ZCASHD_CONF)" -datadir="$(ZCASHD_DATADIR)" getconnectioncount )"; \
+	@if ! peers="$$( "$(ZCASH_CLI_BIN)" -conf="$(ZCASHD_CONF)" -datadir="$(ZCASHD_DATADIR)" getconnectioncount )"; then \
+			echo "ERROR: zcashd RPC getconnectioncount failed"; \
+			exit 1; \
+		fi; \
 		echo "zcashd connections: $$peers (expected: 1, the Zebra node)"; \
 		if [ "$$peers" != "1" ]; then \
 			echo "WARNING: sidecar zcashd should have exactly one peer"; \
 		fi
-	@zcashd_height="$$( "$(ZCASH_CLI_BIN)" -conf="$(ZCASHD_CONF)" -datadir="$(ZCASHD_DATADIR)" getblockcount )"; \
+	@if ! zcashd_height="$$( "$(ZCASH_CLI_BIN)" -conf="$(ZCASHD_CONF)" -datadir="$(ZCASHD_DATADIR)" getblockcount )"; then \
+			echo "ERROR: zcashd RPC getblockcount failed"; \
+			exit 1; \
+		fi; \
 		echo "zcashd height: $$zcashd_height"
 
 compat-status-sync:

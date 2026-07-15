@@ -93,6 +93,11 @@ pub struct Config {
     /// Only list addresses where every process is trusted, like the loopback
     /// addresses of a host that runs nothing but Zebra and its sidecar.
     /// Never list IPs that untrusted machines can connect from.
+    ///
+    /// Because environment values cannot express TOML arrays, this also accepts
+    /// a JSON array string, e.g.
+    /// `ZEBRA_ZCASHD_COMPAT__BLOCK_GOSSIP_PEER_IPS='["10.0.0.5"]'`.
+    #[serde(default, deserialize_with = "deserialize_block_gossip_peer_ips")]
     pub block_gossip_peer_ips: Vec<IpAddr>,
 
     /// Delay before the first `zcashd` spawn attempt.
@@ -166,6 +171,31 @@ where
                 ))
             })
         }
+    }
+}
+
+/// Deserializes `block_gossip_peer_ips` from either a sequence or a JSON-array
+/// string, so it can be set through the environment (which cannot express TOML
+/// arrays) in cross-container deployments where the sidecar's source IP is not
+/// loopback.
+fn deserialize_block_gossip_peer_ips<'de, D>(deserializer: D) -> Result<Vec<IpAddr>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PeerIpsField {
+        Sequence(Vec<IpAddr>),
+        JsonString(String),
+    }
+
+    match PeerIpsField::deserialize(deserializer)? {
+        PeerIpsField::Sequence(ips) => Ok(ips),
+        PeerIpsField::JsonString(ips) => serde_json::from_str(&ips).map_err(|error| {
+            D::Error::custom(format!(
+                "block_gossip_peer_ips must be a sequence or a JSON string array, got: {ips:?}. parse error: {error}"
+            ))
+        }),
     }
 }
 

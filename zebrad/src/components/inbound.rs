@@ -524,10 +524,20 @@ impl Service<zn::Request> for Inbound {
                 })
                     .boxed()
             }
-            zn::Request::PushTransaction(transaction) => {
+            zn::Request::PushTransaction(transaction, sender) => {
+                // Tag a directly pushed transaction with the sending peer so the
+                // mempool downloader can enforce a per-peer queue cap, mirroring
+                // the advertisement path below. See `GHSA-m9xx-8rcj-vmgp`.
+                let request = match sender {
+                    Some(peer_addr) => mempool::Request::QueueFromPeer {
+                        candidates: vec![transaction.into()],
+                        source: *peer_addr,
+                    },
+                    None => mempool::Request::Queue(vec![transaction.into()]),
+                };
                 mempool
                     .clone()
-                    .oneshot(mempool::Request::Queue(vec![transaction.into()]))
+                    .oneshot(request)
                     // The response just indicates if processing was queued or not; ignore it
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()
@@ -538,7 +548,7 @@ impl Service<zn::Request> for Inbound {
                 // See `GHSA-4fc2-h7jh-287c`.
                 let request = match advertiser {
                     Some(peer_addr) => mempool::Request::QueueFromPeer {
-                        txids: transactions,
+                        candidates: transactions.into_iter().map(Into::into).collect(),
                         source: *peer_addr,
                     },
                     None => mempool::Request::Queue(

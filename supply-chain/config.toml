@@ -113,7 +113,7 @@ version = "3.0.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.anyhow]]
-version = "1.0.102"
+version = "1.0.103"
 criteria = "safe-to-deploy"
 
 [[exemptions.arc-swap]]
@@ -885,10 +885,6 @@ criteria = "safe-to-deploy"
 version = "0.2.19"
 criteria = "safe-to-deploy"
 
-[[exemptions.lazycell]]
-version = "1.3.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.libc]]
 version = "0.2.186"
 criteria = "safe-to-deploy"
@@ -910,7 +906,7 @@ version = "0.1.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.librocksdb-sys]]
-version = "0.16.0+8.10.0"
+version = "0.17.3+10.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
@@ -1017,10 +1013,6 @@ criteria = "safe-to-deploy"
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.objc2-core-graphics]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.objc2-core-image]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
@@ -1088,7 +1080,7 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.orchard]]
-version = "0.14.0"
+version = "0.15.0-pre.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-map]]
@@ -1392,7 +1384,7 @@ version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rocksdb]]
-version = "0.22.0"
+version = "0.24.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ron]]
@@ -2112,7 +2104,7 @@ version = "0.10.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_address]]
-version = "0.12.0"
+version = "0.13.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_encoding]]
@@ -2120,23 +2112,23 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_history]]
-version = "0.4.0"
+version = "0.5.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_keys]]
-version = "0.14.0"
+version = "0.15.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_primitives]]
-version = "0.28.0"
+version = "0.29.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_proofs]]
-version = "0.28.0"
+version = "0.29.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_protocol]]
-version = "0.9.0"
+version = "0.10.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_script]]
@@ -2148,7 +2140,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_transparent]]
-version = "0.8.0"
+version = "0.9.0-pre.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-test]]

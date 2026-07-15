@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [10.1.0] - 2026-07-10
+
+### Changed
+
+- MSRV is now 1.88
+
+## [10.0.0] - 2026-07-02
+
+### Breaking Changes
+
+- `Request::PushTransaction` now carries the sending peer's address as a second field
+  (`Option<PeerSocketAddr>`), so directly pushed transactions are attributed to the
+  sending peer and subject to the same per-peer mempool admission cap as advertised
+  transaction IDs
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
 
 ### Added
 

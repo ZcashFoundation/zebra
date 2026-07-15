@@ -1674,6 +1674,14 @@ compat_collect_source_checks() {
     add_error "zebrad binary $ZEBRAD_PATH exists but is not executable by the current user"
   fi
 
+  # If a built zebrad is already present, verify it supports zcashd-compat: a
+  # stale binary from a non-compat branch would otherwise be used by the
+  # printed start commands and fail at startup with "unknown field
+  # zcashd_compat". A missing binary is fine here (it is about to be built).
+  if [[ -x "$ZEBRAD_PATH" ]]; then
+    compat_require_zcashd_compat_support "$ZEBRAD_PATH"
+  fi
+
   if [[ -e "$ZCASHD_PATH" && ! -x "$ZCASHD_PATH" ]]; then
     add_error "zcashd binary $ZCASHD_PATH exists but is not executable by the current user"
   fi
@@ -1752,9 +1760,12 @@ download_and_extract() {
   fi
   curl -fsSL "$url" -o "$archive_path"
 
-  if [[ -n "$sha256" ]]; then
-    printf '%s  %s\n' "$sha256" "$archive_path" | sha256sum -c -
+  # Fail closed on a missing checksum: never install an unverified archive.
+  if [[ -z "$sha256" ]]; then
+    add_error "refusing to install $name: no SHA256 checksum available to verify $url"
+    finalize_checks
   fi
+  printf '%s  %s\n' "$sha256" "$archive_path" | sha256sum -c -
 
   rm -rf "$extract_dir"
   mkdir -p "$extract_dir"

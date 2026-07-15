@@ -645,3 +645,6 @@ where
         metrics::gauge!("mempool.currently.queued.transactions").set(0 as f64);
     }
 }
+
+#[cfg(test)]
+mod tests;

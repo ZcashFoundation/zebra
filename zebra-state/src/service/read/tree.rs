@@ -113,6 +113,51 @@ where
     )
 }
 
+/// Returns the Ironwood
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
+///
+/// Ironwood reuses the Orchard note commitment tree type, in a separate tree.
+pub fn ironwood_tree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<orchard::tree::NoteCommitmentTree>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since Ironwood treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chain` is always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .and_then(|chain| chain.as_ref().ironwood_tree(hash_or_height))
+        .or_else(|| db.ironwood_tree_by_hash_or_height(hash_or_height))
+}
+
+/// Returns a list of Ironwood [`NoteCommitmentSubtree`]s with indexes in the provided range.
+///
+/// If there is no subtree at the first index in the range, the returned list is empty.
+/// Otherwise, subtrees are continuous up to the finalized tip.
+///
+/// See [`subtrees`] for more details.
+pub fn ironwood_subtrees<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
+) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>
+where
+    C: AsRef<Chain>,
+{
+    subtrees(
+        chain,
+        range,
+        |chain, range| chain.ironwood_subtrees_in_range(range),
+        |range| db.ironwood_subtree_list_by_index_range(range),
+    )
+}
+
 /// Returns a list of [`NoteCommitmentSubtree`]s in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.

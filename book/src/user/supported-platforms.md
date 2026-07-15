@@ -43,8 +43,6 @@ For the full requirements, see [Tier 2 platform policy](target-tier-policies.md#
 | -------------------------- | ----------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------ | --------- |
 | `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
 | `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit beta | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
-| `x86_64-apple-darwin`      | [GitHub macos-latest](https://github.com/actions/virtual-environments#available-environments)   | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
-| `x86_64-pc-windows-msvc`   | [GitHub windows-latest](https://github.com/actions/virtual-environments#available-environments) | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
 
 > **Note:** Linux is tested on both stable and beta Rust to catch potential regressions early.
 
@@ -56,6 +54,8 @@ work. Official builds are not available.
 
 For the full requirements, see [Tier 3 platform policy](target-tier-policies.md#tier-3-platform-policy) in the Platform Tier Policy.
 
-| platform               | os           | notes                  | rust                                                                | artifacts |
-| ---------------------- | ------------ | ---------------------- | ------------------------------------------------------------------- | --------- |
-| `aarch64-apple-darwin` | latest macOS | 64-bit, Apple M1 or M2 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
+| platform                 | os             | notes                  | rust                                                                | artifacts |
+| ------------------------ | -------------- | ---------------------- | ------------------------------------------------------------------- | --------- |
+| `x86_64-apple-darwin`    | latest macOS   | 64-bit                 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
+| `aarch64-apple-darwin`   | latest macOS   | 64-bit, Apple M1 or M2 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
+| `x86_64-pc-windows-msvc` | latest Windows | 64-bit                 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |

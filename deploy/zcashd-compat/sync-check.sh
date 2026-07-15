@@ -104,6 +104,17 @@ require_uint() {
     fi
 }
 
+require_positive_uint() {
+    local name="$1"
+    local value="$2"
+
+    require_uint "$name" "$value"
+    if [[ "$value" -lt 1 ]]; then
+        echo "$name must be at least 1, got: $value" >&2
+        exit 2
+    fi
+}
+
 check_once() {
     local zebra_height
     local zcashd_height
@@ -168,9 +179,12 @@ main() {
 
     require_uint HEIGHT_MAX_DRIFT "$HEIGHT_MAX_DRIFT"
     require_uint SYNC_CHECK_TIMEOUT "$SYNC_CHECK_TIMEOUT"
-    require_uint SYNC_CHECK_INTERVAL "$SYNC_CHECK_INTERVAL"
-    require_uint RPC_CONNECT_TIMEOUT "$RPC_CONNECT_TIMEOUT"
-    require_uint RPC_MAX_TIME "$RPC_MAX_TIME"
+    # These must be non-zero: curl treats --max-time 0 / --connect-timeout 0 as
+    # "no timeout", and a zero interval turns the retry into a busy loop, either
+    # of which would defeat SYNC_CHECK_TIMEOUT.
+    require_positive_uint SYNC_CHECK_INTERVAL "$SYNC_CHECK_INTERVAL"
+    require_positive_uint RPC_CONNECT_TIMEOUT "$RPC_CONNECT_TIMEOUT"
+    require_positive_uint RPC_MAX_TIME "$RPC_MAX_TIME"
 
     start_time="$(date +%s)"
 

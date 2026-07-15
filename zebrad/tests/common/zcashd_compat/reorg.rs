@@ -463,7 +463,7 @@ async fn restart_zcashd_and_wait_for_tips(setup: &ZcashdCompatSetup) -> Result<(
     wait_for_tips_match(setup, STANDARD_SYNC_TIMEOUT).await
 }
 
-async fn wait_for_restarted_zcashd_rpc(
+pub(super) async fn wait_for_restarted_zcashd_rpc(
     setup: &ZcashdCompatSetup,
     old_pid: u32,
     timeout: Duration,

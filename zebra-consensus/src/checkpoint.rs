@@ -1025,6 +1025,12 @@ impl VerifyCheckpointError {
             // TODO: make this duplicate-incomplete
             VerifyCheckpointError::NewerRequest { .. } => true,
             VerifyCheckpointError::VerifyBlock(block_error) => block_error.is_duplicate_request(),
+            // The state boxes commit errors as `zs::CommitCheckpointVerifiedError`,
+            // a newtype around `zs::CommitBlockError`, so the wrapper must be
+            // unwrapped to classify duplicate blocks as benign.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .is_some_and(|commit_err| commit_err.inner().is_duplicate_request()),
             _ => false,
         }
     }

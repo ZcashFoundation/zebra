@@ -761,16 +761,24 @@ where
                         continue;
                     }
 
+                    // Classify sidecars before the per-IP cap: a trusted sidecar
+                    // reconnecting from a new ephemeral port must not be blocked
+                    // by its own not-yet-swept dead connection still counting
+                    // against `max_conns_per_ip` (which defaults to 1), or the
+                    // wallet would silently stop following the chain.
+                    let is_sidecar = self.is_zcashd_compat_peer(&svc);
+
                     // # Security
                     //
                     // drop the new peer if there are already `max_conns_per_ip` peers with
-                    // the same IP address in the peer set.
-                    if self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
+                    // the same IP address in the peer set. Sidecars are exempt: they
+                    // are trusted, and the listener already caps their inbound slots.
+                    if !is_sidecar && self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
                         std::mem::drop(svc);
                         continue;
                     }
 
-                    if self.is_zcashd_compat_peer(&svc) {
+                    if is_sidecar {
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
@@ -996,6 +1004,25 @@ where
             .any(|ip| service.is_inbound_direct_from_ip(ip))
     }
 
+    /// Forgets sidecar keys whose peer has disconnected.
+    ///
+    /// A connected peer is either ready or unready with a registered cancel
+    /// handle; a key in neither map belongs to a dropped connection. Sidecars
+    /// reconnect from new ephemeral ports, and services are dropped on many
+    /// paths (bans, version downgrades, cancelled requests), so this runs every
+    /// poll cycle to keep the set from accumulating stale keys — otherwise a
+    /// reused port could inherit a stale sidecar's stall-tracking exemption.
+    fn prune_disconnected_sidecar_keys(&mut self) {
+        if self.zcashd_compat_peer_keys.is_empty() {
+            return;
+        }
+
+        let ready_services = &self.ready_services;
+        let cancel_handles = &self.cancel_handles;
+        self.zcashd_compat_peer_keys
+            .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
+    }
+
     /// Accesses a ready endpoint by `key` and returns its current load.
     ///
     /// Returns `None` if the service is not in the ready service list.
@@ -1013,10 +1040,20 @@ where
                 .take_ready_service(&p2c_key)
                 .expect("selected peer must be ready");
 
-            let track_stalls = matches!(
+            let is_find_request = matches!(
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
-            ) && !self.zcashd_compat_peer_keys.contains(&p2c_key);
+            );
+            let is_syncing = || {
+                !self
+                    .minimum_peer_version
+                    .chain_tip()
+                    .is_at_or_near_network_tip(&self.network)
+            };
+            // zcashd-compat sidecars are exempt: they sync *from* this node,
+            // so they can legitimately trail it without being stalled peers.
+            let track_stalls =
+                is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
 
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
@@ -1201,12 +1238,7 @@ where
     /// it is queued and delivered by [`Self::send_queued_sidecar_block_broadcast`]
     /// as soon as they are ready again.
     fn route_block_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Forget sidecar peers that have disconnected: connected peers are
-        // either ready, or unready with a registered cancel handle.
-        let ready_services = &self.ready_services;
-        let cancel_handles = &self.cancel_handles;
-        self.zcashd_compat_peer_keys
-            .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
+        self.prune_disconnected_sidecar_keys();
 
         let selected_peers = self.select_block_broadcast_peers(self.number_of_peers_to_broadcast());
 
@@ -1534,6 +1566,7 @@ where
             return Poll::Pending;
         }
 
+        self.prune_disconnected_sidecar_keys();
         self.broadcast_all_queued();
         self.send_queued_sidecar_block_broadcast();
 

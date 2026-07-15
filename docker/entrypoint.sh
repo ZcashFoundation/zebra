@@ -69,10 +69,27 @@ create_owned_directory() {
   fi
 }
 
+# Prepares a zcashd datadir mount without a recursive chown.
+#
+# The datadir can be a large pre-synced tree (blocks/chainstate), so chowning
+# it recursively on every start would be slow and would re-own files a host
+# zcashd may still use. Only the top-level directory is chowned so zcashd can
+# create its files, and a failure (e.g. a read-only inspection mount) warns
+# instead of aborting the container — zcashd surfaces a real error if it truly
+# cannot write.
+create_owned_zcashd_datadir() {
+  local dir="$1"
+  [[ -z ${dir} ]] && return
+
+  mkdir -p "${dir}" || exit_error "Failed to create zcashd datadir: ${dir}"
+  chown "${UID}:${GID}" "${dir}" 2>/dev/null ||
+    echo "WARNING: could not chown zcashd datadir ${dir}; relying on existing permissions" >&2
+}
+
 # Create and own cache and config directories based on ZEBRA_* environment variables
 [[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
 [[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
-[[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_directory "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
+[[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_zcashd_datadir "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
 [[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
 
 # --- Optional config file support ---

@@ -23,7 +23,7 @@ use zebra_network::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
     },
     types::{MetaAddr, PeerServices},
-    AddressBook, InventoryResponse, Request, Response,
+    AddressBook, InventoryResponse, PeerSocketAddr, Request, Response,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -154,9 +154,10 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     ) = setup(false).await;
 
     // Test `Request::PushTransaction`
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         let transaction = responder
@@ -220,6 +221,118 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     assert!(
         tx_gossip_result.is_none(),
         "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
+    );
+
+    Ok(())
+}
+
+/// The inbound service must route a directly pushed transaction that carries a
+/// sending peer through the per-peer-capped mempool path
+/// ([`mempool::Request::QueueFromPeer`]), and only fall back to the uncapped
+/// [`mempool::Request::Queue`] path for a source-less local/internal push.
+///
+/// Routing a peer push through `Queue` was the actual bypass: it dropped the
+/// peer address, so the downloader's per-peer cap never applied. The downloader
+/// already enforced the cap for source-tagged candidates before this fix, so the
+/// regression lives in this routing decision, not in the downloader.
+///
+/// Regression test for `GHSA-m9xx-8rcj-vmgp`.
+#[tokio::test(flavor = "multi_thread")]
+async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let consensus_config = ConsensusConfig::default();
+    let state_config = StateConfig::ephemeral();
+
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    let address_book = Arc::new(std::sync::Mutex::new(address_book));
+
+    // The push path only touches the mempool; the state and block verifier are
+    // wired up because `Inbound` requires them, but are never driven here.
+    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(state_config, &network, Height::MAX, 0).await;
+    let state_service = ServiceBuilder::new().buffer(1).service(state);
+
+    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
+        zebra_consensus::router::init_test(consensus_config, &network, state_service.clone()).await;
+
+    let peer_set = MockService::build()
+        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .for_unit_tests();
+    let buffered_peer_set = Buffer::new(BoxService::new(peer_set), 10);
+
+    // Keep a handle to the mock mempool so we can assert on the request the
+    // inbound service routes to it.
+    let mut mempool_service: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+        MockService::build()
+            .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+            .for_unit_tests();
+    let buffered_mempool = Buffer::new(BoxService::new(mempool_service.clone()), 10);
+
+    let (setup_tx, setup_rx) = oneshot::channel();
+    let inbound_service = ServiceBuilder::new()
+        .load_shed()
+        .service(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
+    let inbound_service = BoxService::new(inbound_service);
+    let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
+
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let setup_data = InboundSetupData {
+        address_book,
+        block_download_peer_set: buffered_peer_set,
+        block_verifier,
+        mempool: buffered_mempool,
+        state: state_service,
+        latest_chain_tip,
+        misbehavior_sender,
+    };
+    let r = setup_tx.send(setup_data);
+    // We can't expect or unwrap because the returned Result does not implement Debug.
+    assert!(r.is_ok(), "unexpected setup channel send failure");
+
+    // A non-coinbase transaction to push.
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+    let unmined_tx: UnminedTx = block.transactions[1].clone().into();
+
+    // A push tagged with a sending peer is routed through the per-peer-capped path.
+    let peer = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(unmined_tx.clone(), Some(peer)));
+    let expected = mempool_service
+        .expect_request(mempool::Request::QueueFromPeer {
+            candidates: vec![mempool::Gossip::Tx(unmined_tx.clone())],
+            source: *peer,
+        })
+        .map(|responder| responder.respond(mempool::Response::Queued(vec![])));
+    let (push_response, _) = futures::join!(request, expected);
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "a peer-sourced push must be accepted and routed to `QueueFromPeer`",
+    );
+
+    // A source-less push (local/internal) stays on the uncapped `Queue` path.
+    let request = inbound_service
+        .clone()
+        .oneshot(Request::PushTransaction(unmined_tx.clone(), None));
+    let expected = mempool_service
+        .expect_request(mempool::Request::Queue(vec![mempool::Gossip::Tx(
+            unmined_tx,
+        )]))
+        .map(|responder| responder.respond(mempool::Response::Queued(vec![])));
+    let (push_response, _) = futures::join!(request, expected);
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "a source-less push must be accepted and routed to `Queue`",
     );
 
     Ok(())
@@ -367,9 +480,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     ) = setup(false).await;
 
     // Push test transaction
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx1.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx1.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx1_id = responder.request().tx_id();
@@ -508,9 +622,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .respond(Response::Nil);
 
     // Push a second transaction to trigger `remove_expired_transactions()`
-    let request = inbound_service
-        .clone()
-        .oneshot(Request::PushTransaction(tx2.clone().into()));
+    let request = inbound_service.clone().oneshot(Request::PushTransaction(
+        tx2.clone().into(),
+        Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
+    ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
         tx2_id = responder.request().tx_id();

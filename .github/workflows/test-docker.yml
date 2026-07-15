@@ -111,7 +111,7 @@ jobs:
           - id: custom-conf
             name: Custom config
             env_vars: -v $GITHUB_WORKSPACE/zebrad/tests/common/configs/custom-conf.toml:/tmp/custom-conf.toml:ro -e CONFIG_FILE_PATH=/tmp/custom-conf.toml
-            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"Do you even shield\\?\\\"\\)"
+            grep_patterns: -e "extra_coinbase_data:\\sSome\\(ExtraCoinbaseData\\(\\\"Do you even shield\\?\\\"\\)\\)"
 
           # RPC configuration tests
           - id: rpc-conf

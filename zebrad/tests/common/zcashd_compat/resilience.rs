@@ -25,18 +25,29 @@ pub async fn zebrad_abrupt_kill() -> Result<()> {
         return setup.teardown();
     }
 
+    // Read the sidecar pid before killing zebrad: `wait_with_output()` consumes
+    // the zebrad `TestChild` and deletes the testdir that holds the pid file,
+    // which would disarm the `Drop` backstop, so the orphaned sidecar must be
+    // killed here rather than relying on `Drop`.
+    let zcashd_pid = setup.zcashd_pid().ok();
+
     let mut zebrad = setup
         .managed
         .take()
         .expect("managed process is present in regtest mode");
 
     zebrad.kill(false)?;
+
+    // Kill the orphaned sidecar before consuming the testdir.
+    if let Some(pid) = zcashd_pid {
+        let _ = send_signal(pid, "-KILL");
+    }
+
     zebrad
         .wait_with_output()?
         .assert_failure()?
         .assert_was_killed()?;
 
-    // `setup` is dropped here: its `Drop` impl kills the orphaned zcashd.
     Ok(())
 }
 
@@ -82,6 +93,13 @@ pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
         sleep(Duration::from_secs(1)).await;
     }
 
+    // If the product bug is present, zcashd is still running here. Kill it
+    // before the assert so a failing test never leaks the sidecar (zebrad's
+    // testdir is already gone, so the Drop backstop cannot).
+    if !zcashd_exited {
+        let _ = send_signal(zcashd_pid, "-KILL");
+    }
+
     assert!(
         zcashd_exited,
         "supervised zcashd (pid {zcashd_pid}) should exit within 60 s of zebrad's SIGTERM"
@@ -94,7 +112,9 @@ pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
 /// zebrad's supervisor is running.
 ///
 /// Triggers a clean zcashd shutdown via its own `stop` RPC, waits for the
-/// supervisor to restart it, then verifies zcashd is responsive again.
+/// supervisor to restart it, then verifies zcashd is responsive again **from a
+/// new pid** — a response from the old, still-shutting-down zcashd RPC must not
+/// count as recovery.
 ///
 /// Only runs in managed (regtest) mode.
 pub async fn zcashd_restarts_after_exit() -> Result<()> {
@@ -106,6 +126,8 @@ pub async fn zcashd_restarts_after_exit() -> Result<()> {
         return setup.teardown();
     }
 
+    let old_pid = setup.zcashd_pid()?;
+
     // Ask zcashd to stop gracefully; the zebrad supervisor should restart it.
     let _: serde_json::Value = setup
         .zcashd_client
@@ -113,27 +135,12 @@ pub async fn zcashd_restarts_after_exit() -> Result<()> {
         .await
         .map_err(|e| eyre!("zcashd stop: {e}"))?;
 
-    // Wait for zcashd to exit and the supervisor to restart it (up to 30 s).
-    let mut recovered = false;
-    for attempt in 1..=30u32 {
-        sleep(Duration::from_secs(1)).await;
-        let result = setup
-            .zcashd_client
-            .json_result_from_call::<serde_json::Value>("getblockchaininfo", "[]")
-            .await;
-        if result.is_ok() {
-            recovered = true;
-            break;
-        }
-        if attempt == 30 {
-            break;
-        }
-    }
+    // Recovery requires the RPC to answer from a *different* pid than the one
+    // we stopped, so a lingering response from the old process cannot false-pass.
+    let restart_result =
+        super::reorg::wait_for_restarted_zcashd_rpc(&setup, old_pid, Duration::from_secs(60)).await;
 
-    assert!(
-        recovered,
-        "zcashd did not come back up within 30 s after stop"
-    );
-
-    setup.teardown()
+    // Tear down before surfacing the result, so a failure never leaks the sidecar.
+    setup.teardown()?;
+    restart_result
 }

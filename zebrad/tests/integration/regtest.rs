@@ -83,7 +83,10 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
 
     tokio::time::sleep(LAUNCH_DELAY).await;
 
-    let client = RpcRequestClient::new(rpc_address);
+    // Use a longer timeout because generating MAX_BLOCK_REORG_HEIGHT + 10 blocks
+    // in a single RPC call takes ~400s at ~400ms per block.
+    let client =
+        RpcRequestClient::new_with_timeout(rpc_address, std::time::Duration::from_secs(15 * 60));
 
     // Mine enough blocks to push the first few blocks into the finalized state.
     // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT (= 1002).
@@ -370,8 +373,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_params,
         Amount::zero(),
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -437,8 +438,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_params,
         Amount::zero(),
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -508,10 +507,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 /// Test successful block template submission as a block proposal.
 ///
 /// This test can be run locally with:
-/// `RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --package zebrad --test zebrad-tests --features tx_v6 -- nu7_nsm_transactions --exact --show-output`
+/// `cargo test --package zebrad --test zebrad-tests -- nu6_3_block_template_proposal --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-async fn nu7_nsm_transactions() -> Result<()> {
+async fn nu6_3_block_template_proposal() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
@@ -525,8 +523,8 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     use zebra_rpc::{
         client::{
-            BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-            GetBlockTemplateResponse, SubmitBlockResponse,
+            GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+            SubmitBlockResponse,
         },
         methods::{RpcImpl, RpcServer},
         proposal_block_from_template, SubmitBlockChannel,
@@ -534,7 +532,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    tracing::info!("running nu7_nsm_transactions test");
+    tracing::info!("running nu6_3_block_template_proposal test");
 
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
@@ -548,7 +546,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
         .with_slow_start_interval(Height::MIN)
         .with_lockbox_disbursements(vec![])
         .with_activation_heights(ConfiguredActivationHeights {
-            nu7: Some(1),
+            nu6_3: Some(1),
             ..Default::default()
         });
 

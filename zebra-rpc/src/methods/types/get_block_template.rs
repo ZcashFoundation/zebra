@@ -10,7 +10,7 @@ mod tests;
 
 use std::{
     fmt::{self},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use derive_getters::Getters;
@@ -23,12 +23,7 @@ use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 
-use zcash_script::{
-    opcode::{Evaluable, PushValue},
-    pv::push_value,
-};
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::amount::{Amount, NonNegative};
+use zcash_script::{opcode::PushValue, pv::push_value};
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::{
@@ -50,10 +45,12 @@ use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
-    config,
+    config::{
+        self,
+        mining::{ZEBRA_COINBASE_MARKER, ZEBRA_COINBASE_SEPARATOR},
+    },
     methods::types::{
-        default_roots::DefaultRoots, get_block_template::constants::MAX_MINER_DATA_LEN,
-        long_poll::LongPollId, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::OkOrError,
     SubmitBlockChannel,
@@ -275,15 +272,13 @@ impl BlockTemplateResponse {
     pub(crate) fn new_internal(
         net: &Network,
         precomputed_coinbase: Option<TransactionTemplate<amount::NegativeOrZero>>,
+        coinbase_cache: Option<CoinbaseCache>,
         miner_params: &MinerParams,
         chain_info: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-            Amount<NonNegative>,
-        >,
     ) -> Self {
         // Determine the next block height.
         let height = chain_info
@@ -333,17 +328,26 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        let coinbase_txn = precomputed_coinbase.unwrap_or_else(|| {
-            TransactionTemplate::new_coinbase(
-                net,
-                height,
-                miner_params,
-                txs_fee,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                zip233_amount,
-            )
-            .expect("valid coinbase tx")
-        });
+        // Prefer the long-poll precomputed coinbase, then the per-block cache, and only build (and
+        // re-prove, for a shielded address) as a last resort — caching the result so subsequent
+        // short-poll requests for the same height and fees reuse it.
+        let coinbase_txn = precomputed_coinbase
+            .or_else(|| {
+                coinbase_cache
+                    .as_ref()
+                    .and_then(|cache| cache.get(height, txs_fee))
+            })
+            .unwrap_or_else(|| {
+                let coinbase_txn =
+                    TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
+                        .expect("valid coinbase tx");
+
+                if let Some(cache) = &coinbase_cache {
+                    cache.store(height, txs_fee, coinbase_txn.clone());
+                }
+
+                coinbase_txn
+            });
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
@@ -457,24 +461,37 @@ pub struct MinerParams {
     memo: Option<MemoBytes>,
 }
 
+/// Builds the coinbase input data for a block Zebra constructs: the [`ZEBRA_COINBASE_MARKER`],
+/// followed by the [`ZEBRA_COINBASE_SEPARATOR`] and `extra` when `extra` is non-empty.
+fn coinbase_data(extra: &[u8]) -> Vec<u8> {
+    let mut bytes = ZEBRA_COINBASE_MARKER.as_bytes().to_vec();
+    if !extra.is_empty() {
+        bytes.extend_from_slice(ZEBRA_COINBASE_SEPARATOR.as_bytes());
+        bytes.extend_from_slice(extra);
+    }
+    bytes
+}
+
 impl MinerParams {
     /// Creates a new instance of [`MinerParams`].
+    // The `push_value` below `expect`s a type-guaranteed invariant (`extra_coinbase_data` is
+    // length-validated), not a recoverable error.
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(net: &Network, conf: config::mining::Config) -> Result<Self, MinerParamsError> {
         let addr = conf
             .miner_address
             .map(|addr| Address::try_from_zcash_address(net, addr))
             .ok_or(MinerParamsError::MissingAddr)??;
 
-        let data = conf
-            .extra_coinbase_data
-            .map(|s| {
-                let data = push_value(s.as_bytes()).ok_or(MinerParamsError::OversizedData)?;
-
-                (data.byte_len() <= MAX_MINER_DATA_LEN)
-                    .then_some(data)
-                    .ok_or(MinerParamsError::OversizedData)
-            })
-            .transpose()?;
+        // Always tag the coinbase with the Zebra marker, even without configured
+        // `extra_coinbase_data`, so every block Zebra builds is identifiable. The type of
+        // `extra_coinbase_data` bounds its length, so the marker, separator, and data always fit in
+        // a single push.
+        let user_data = conf.extra_coinbase_data.as_deref().unwrap_or_default();
+        let data = Some(
+            push_value(&coinbase_data(user_data.as_bytes()))
+                .expect("coinbase data fits in a push: extra_coinbase_data is length-validated"),
+        );
 
         let memo = conf
             .miner_memo
@@ -506,11 +523,11 @@ impl MinerParams {
         self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
     }
 
-    /// Randomizes the miner data.
+    /// Randomizes the miner data, keeping the `🦓` marker prefix and separator.
     pub fn randomize_data(&mut self) {
         let mut random = [0u8; 32];
         OsRng.fill_bytes(&mut random);
-        self.data = push_value(&random);
+        self.data = push_value(&coinbase_data(&random));
     }
 }
 
@@ -531,8 +548,6 @@ pub enum MinerParamsError {
     MissingAddr,
     #[error("Invalid miner address: {0}")]
     InvalidAddr(zcash_address::ConversionError<&'static str>),
-    #[error("Miner data exceeds {MAX_MINER_DATA_LEN} bytes")]
-    OversizedData,
     #[error(transparent)]
     InvalidMemo(#[from] zcash_protocol::memo::Error),
 }
@@ -540,6 +555,69 @@ pub enum MinerParamsError {
 impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     fn from(err: zcash_address::ConversionError<&'static str>) -> Self {
         Self::InvalidAddr(err)
+    }
+}
+
+/// Caches the most recently built coinbase transaction for the next block, keyed on its height and
+/// total transaction fees.
+///
+/// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
+/// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
+/// depends on `(height, fees)` for a given miner configuration, so repeated requests within the
+/// same block can reuse the cached transaction instead of re-proving it on every call.
+#[derive(Clone, Default)]
+pub(crate) struct CoinbaseCache(
+    Arc<
+        Mutex<
+            Option<(
+                block::Height,
+                Amount<NonNegative>,
+                TransactionTemplate<amount::NegativeOrZero>,
+            )>,
+        >,
+    >,
+);
+
+impl CoinbaseCache {
+    /// Returns the cached coinbase transaction if it was built for `height` and `fee`.
+    fn get(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+    ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
+        let cache = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match &*cache {
+            Some((cached_height, cached_fee, coinbase))
+                if *cached_height == height && *cached_fee == fee =>
+            {
+                Some(coinbase.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Stores `coinbase` as the cached transaction for `height` and `fee`.
+    fn store(
+        &self,
+        height: block::Height,
+        fee: Amount<NonNegative>,
+        coinbase: TransactionTemplate<amount::NegativeOrZero>,
+    ) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((height, fee, coinbase));
+    }
+
+    /// Discards the cached coinbase, forcing the next request to rebuild it.
+    fn clear(&self) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }
 
@@ -562,6 +640,10 @@ where
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+
+    /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
+    /// the shielded-coinbase proof on every request within a block.
+    coinbase_cache: CoinbaseCache,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -583,12 +665,18 @@ where
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(SubmitBlockChannel::default().sender()),
+            coinbase_cache: CoinbaseCache::default(),
         }
     }
 
     /// Returns the miner parameters, including the address, data, and memo.
     pub fn miner_params(&self) -> Option<&MinerParams> {
         self.miner_params.as_ref()
+    }
+
+    /// Returns a handle to the coinbase transaction cache.
+    pub(crate) fn coinbase_cache(&self) -> CoinbaseCache {
+        self.coinbase_cache.clone()
     }
 
     /// Returns the sync status.
@@ -615,6 +703,8 @@ where
         if let Some(miner_params) = &mut self.miner_params {
             miner_params.randomize_data();
             miner_params.randomize_memo();
+            // The cached coinbase was built with the previous data, so it's now stale.
+            self.coinbase_cache.clear();
         }
     }
 }

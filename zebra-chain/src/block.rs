@@ -8,7 +8,7 @@ use crate::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
-    orchard,
+    ironwood, orchard,
     parameters::{Network, NetworkUpgrade},
     sapling,
     serialization::TrustedPreallocate,
@@ -161,6 +161,13 @@ impl Block {
             .flat_map(|transaction| transaction.orchard_nullifiers())
     }
 
+    /// Access the [`ironwood::Nullifier`]s from all transactions in this block.
+    pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = ironwood::Nullifier> + '_ {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.ironwood_nullifiers())
+    }
+
     /// Access the [`sprout::NoteCommitment`]s from all transactions in this block.
     pub fn sprout_note_commitments(&self) -> impl Iterator<Item = &sprout::NoteCommitment> {
         self.transactions
@@ -185,6 +192,13 @@ impl Block {
             .flat_map(|transaction| transaction.orchard_note_commitments())
     }
 
+    /// Access the [ironwood note commitments](pallas::Base) from all transactions in this block.
+    pub fn ironwood_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+        self.transactions
+            .iter()
+            .flat_map(|transaction| transaction.ironwood_note_commitments())
+    }
+
     /// Count how many Sapling transactions exist in a block,
     /// i.e. transactions "where either of vSpendsSapling or vOutputsSapling is non-empty"
     /// <https://zips.z.cash/zip-0221#tree-node-specification>.
@@ -204,6 +218,17 @@ impl Block {
         self.transactions
             .iter()
             .filter(|tx| tx.has_orchard_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
+    }
+
+    /// Count how many Ironwood transactions exist in a block,
+    /// i.e. transactions where the Ironwood bundle is non-empty (NU6.3 onward).
+    pub fn ironwood_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_ironwood_shielded_data())
             .count()
             .try_into()
             .expect("number of transactions must fit u64")

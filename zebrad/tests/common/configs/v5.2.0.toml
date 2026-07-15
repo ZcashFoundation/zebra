@@ -77,6 +77,8 @@ max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 25
 
+[notify]
+
 [rpc]
 cookie_dir = "cache_dir"
 debug_force_finished_sync = false
@@ -103,14 +105,3 @@ force_use_color = false
 use_color = true
 use_journald = false
 
-[zcashd_compat]
-block_gossip_peer_ips = []
-enabled = false
-manage_zcashd = false
-restart_backoff = "2s"
-restart_backoff_max = "5m"
-restart_reset_after = "1h"
-shutdown_grace_period = "5m"
-startup_delay = "1s"
-zcashd_extra_args = []
-zcashd_source = "path"

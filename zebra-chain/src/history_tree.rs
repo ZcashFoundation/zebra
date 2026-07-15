@@ -15,10 +15,11 @@ use thiserror::Error;
 use crate::{
     block::{Block, ChainHistoryMmrRootHash, Height},
     fmt::SummaryDebug,
-    orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::{Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward},
-    sapling,
+    primitives::zcash_history::{
+        BlockCommitmentTreeRoots, Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward,
+        V3 as IronwoodOnward,
+    },
 };
 
 /// An error describing why a history tree operation failed.
@@ -49,8 +50,10 @@ impl Eq for HistoryTreeError {}
 enum InnerHistoryTree {
     /// A pre-Orchard tree.
     PreOrchard(Tree<PreOrchard>),
-    /// An Orchard-onward tree.
+    /// An Orchard-onward tree (NU5 to pre-NU6.3).
     OrchardOnward(Tree<OrchardOnward>),
+    /// An Ironwood-onward tree (NU6.3 onward), which also commits to the Ironwood pool.
+    IronwoodOnward(Tree<IronwoodOnward>),
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
@@ -105,8 +108,7 @@ impl NonEmptyHistoryTree {
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2
-            | NetworkUpgrade::Nu7 => {
+            | NetworkUpgrade::Nu6_2 => {
                 let tree = Tree::<OrchardOnward>::new_from_cache(
                     network,
                     network_upgrade,
@@ -116,17 +118,27 @@ impl NonEmptyHistoryTree {
                 )?;
                 InnerHistoryTree::OrchardOnward(tree)
             }
-
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => {
-                let tree = Tree::<OrchardOnward>::new_from_cache(
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => {
+                let tree = Tree::<IronwoodOnward>::new_from_cache(
                     network,
                     network_upgrade,
                     size,
                     &peaks,
                     &Default::default(),
                 )?;
-                InnerHistoryTree::OrchardOnward(tree)
+                InnerHistoryTree::IronwoodOnward(tree)
+            }
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => {
+                let tree = Tree::<IronwoodOnward>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::IronwoodOnward(tree)
             }
         };
         Ok(Self {
@@ -141,15 +153,13 @@ impl NonEmptyHistoryTree {
 
     /// Create a new history tree with a single block.
     ///
-    /// `sapling_root` is the root of the Sapling note commitment tree of the block.
-    /// `orchard_root` is the root of the Orchard note commitment tree of the block;
-    ///  (ignored for pre-Orchard blocks).
+    /// The Orchard root in `roots` is ignored for pre-Orchard blocks, and the Ironwood root for
+    /// pre-NU6.3 blocks; each inner tree version only reads the roots it commits to.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
         network: &Network,
         block: Arc<Block>,
-        sapling_root: &sapling::tree::Root,
-        orchard_root: &orchard::tree::Root,
+        roots: BlockCommitmentTreeRoots,
     ) -> Result<Self, HistoryTreeError> {
         let height = block
             .coinbase_height()
@@ -164,37 +174,25 @@ impl NonEmptyHistoryTree {
                 panic!("HistoryTree does not exist for pre-Heartwood upgrades")
             }
             NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
-                let (tree, entry) = Tree::<PreOrchard>::new_from_block(
-                    network,
-                    block,
-                    sapling_root,
-                    &Default::default(),
-                )?;
+                let (tree, entry) = Tree::<PreOrchard>::new_from_block(network, block, roots)?;
                 (InnerHistoryTree::PreOrchard(tree), entry)
             }
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2
-            | NetworkUpgrade::Nu7 => {
-                let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
-                    network,
-                    block,
-                    sapling_root,
-                    orchard_root,
-                )?;
+            | NetworkUpgrade::Nu6_2 => {
+                let (tree, entry) = Tree::<OrchardOnward>::new_from_block(network, block, roots)?;
                 (InnerHistoryTree::OrchardOnward(tree), entry)
+            }
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => {
+                let (tree, entry) = Tree::<IronwoodOnward>::new_from_block(network, block, roots)?;
+                (InnerHistoryTree::IronwoodOnward(tree), entry)
             }
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => {
-                let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
-                    network,
-                    block,
-                    sapling_root,
-                    orchard_root,
-                )?;
-                (InnerHistoryTree::OrchardOnward(tree), entry)
+                let (tree, entry) = Tree::<IronwoodOnward>::new_from_block(network, block, roots)?;
+                (InnerHistoryTree::IronwoodOnward(tree), entry)
             }
         };
         let mut peaks = BTreeMap::new();
@@ -211,9 +209,8 @@ impl NonEmptyHistoryTree {
 
     /// Add block data to the tree.
     ///
-    /// `sapling_root` is the root of the Sapling note commitment tree of the block.
-    /// `orchard_root` is the root of the Orchard note commitment tree of the block;
-    ///  (ignored for pre-Orchard blocks).
+    /// The Orchard root in `roots` is ignored for pre-Orchard blocks, and the Ironwood root for
+    /// pre-NU6.3 blocks.
     ///
     /// # Panics
     ///
@@ -222,8 +219,7 @@ impl NonEmptyHistoryTree {
     pub fn push(
         &mut self,
         block: Arc<Block>,
-        sapling_root: &sapling::tree::Root,
-        orchard_root: &orchard::tree::Root,
+        roots: BlockCommitmentTreeRoots,
     ) -> Result<(), HistoryTreeError> {
         // Check if the block has the expected height.
         // librustzcash assumes the heights are correct and corrupts the tree if they are wrong,
@@ -243,7 +239,7 @@ impl NonEmptyHistoryTree {
         if network_upgrade != self.network_upgrade {
             // This is the activation block of a network upgrade.
             // Create a new tree.
-            let new_tree = Self::from_block(&self.network, block, sapling_root, orchard_root)?;
+            let new_tree = Self::from_block(&self.network, block, roots)?;
             // Replaces self with the new tree
             *self = new_tree;
             assert_eq!(self.network_upgrade, network_upgrade);
@@ -252,10 +248,13 @@ impl NonEmptyHistoryTree {
 
         let new_entries = match &mut self.inner {
             InnerHistoryTree::PreOrchard(tree) => tree
-                .append_leaf(block, sapling_root, orchard_root)
+                .append_leaf(block, roots)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
             InnerHistoryTree::OrchardOnward(tree) => tree
-                .append_leaf(block, sapling_root, orchard_root)
+                .append_leaf(block, roots)
+                .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
+            InnerHistoryTree::IronwoodOnward(tree) => tree
+                .append_leaf(block, roots)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
         };
         for entry in new_entries {
@@ -269,15 +268,12 @@ impl NonEmptyHistoryTree {
     }
 
     /// Extend the history tree with the given blocks.
-    pub fn try_extend<
-        'a,
-        T: IntoIterator<Item = (Arc<Block>, &'a sapling::tree::Root, &'a orchard::tree::Root)>,
-    >(
+    pub fn try_extend<'a, T: IntoIterator<Item = (Arc<Block>, BlockCommitmentTreeRoots<'a>)>>(
         &mut self,
         iter: T,
     ) -> Result<(), HistoryTreeError> {
-        for (block, sapling_root, orchard_root) in iter {
-            self.push(block, sapling_root, orchard_root)?;
+        for (block, roots) in iter {
+            self.push(block, roots)?;
         }
         Ok(())
     }
@@ -356,7 +352,16 @@ impl NonEmptyHistoryTree {
         // Remove all non-peak entries
         self.peaks.retain(|k, _| peak_pos_set.contains(k));
         // Rebuild tree
-        self.inner = match self.inner {
+        self.inner = self.rebuilt_inner()?;
+        Ok(())
+    }
+
+    /// Rebuilds the inner tree from the cached `network`, `network_upgrade`, `size`, and `peaks`.
+    ///
+    /// Shared by [`Self::prune`] and the [`Clone`] impl, which reconstruct the inner tree
+    /// identically and differ only in how they handle the (practically impossible) rebuild error.
+    fn rebuilt_inner(&self) -> Result<InnerHistoryTree, io::Error> {
+        Ok(match &self.inner {
             InnerHistoryTree::PreOrchard(_) => {
                 InnerHistoryTree::PreOrchard(Tree::<PreOrchard>::new_from_cache(
                     &self.network,
@@ -375,8 +380,16 @@ impl NonEmptyHistoryTree {
                     &Default::default(),
                 )?)
             }
-        };
-        Ok(())
+            InnerHistoryTree::IronwoodOnward(_) => {
+                InnerHistoryTree::IronwoodOnward(Tree::<IronwoodOnward>::new_from_cache(
+                    &self.network,
+                    self.network_upgrade,
+                    self.size,
+                    &self.peaks,
+                    &Default::default(),
+                )?)
+            }
+        })
     }
 
     /// Return the hash of the tree root.
@@ -384,6 +397,7 @@ impl NonEmptyHistoryTree {
         match &self.inner {
             InnerHistoryTree::PreOrchard(tree) => tree.hash(),
             InnerHistoryTree::OrchardOnward(tree) => tree.hash(),
+            InnerHistoryTree::IronwoodOnward(tree) => tree.hash(),
         }
     }
 
@@ -410,28 +424,9 @@ impl NonEmptyHistoryTree {
 
 impl Clone for NonEmptyHistoryTree {
     fn clone(&self) -> Self {
-        let tree = match self.inner {
-            InnerHistoryTree::PreOrchard(_) => InnerHistoryTree::PreOrchard(
-                Tree::<PreOrchard>::new_from_cache(
-                    &self.network,
-                    self.network_upgrade,
-                    self.size,
-                    &self.peaks,
-                    &Default::default(),
-                )
-                .expect("rebuilding an existing tree should always work"),
-            ),
-            InnerHistoryTree::OrchardOnward(_) => InnerHistoryTree::OrchardOnward(
-                Tree::<OrchardOnward>::new_from_cache(
-                    &self.network,
-                    self.network_upgrade,
-                    self.size,
-                    &self.peaks,
-                    &Default::default(),
-                )
-                .expect("rebuilding an existing tree should always work"),
-            ),
-        };
+        let tree = self
+            .rebuilt_inner()
+            .expect("rebuilding an existing tree should always work");
         NonEmptyHistoryTree {
             network: self.network.clone(),
             network_upgrade: self.network_upgrade,
@@ -456,8 +451,7 @@ impl HistoryTree {
     pub fn from_block(
         network: &Network,
         block: Arc<Block>,
-        sapling_root: &sapling::tree::Root,
-        orchard_root: &orchard::tree::Root,
+        roots: BlockCommitmentTreeRoots,
     ) -> Result<Self, HistoryTreeError> {
         let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) else {
             // Return early if there is no Heartwood activation height.
@@ -470,9 +464,7 @@ impl HistoryTree {
             .cmp(&heartwood_height)
         {
             std::cmp::Ordering::Less => Ok(HistoryTree(None)),
-            _ => Ok(
-                NonEmptyHistoryTree::from_block(network, block, sapling_root, orchard_root)?.into(),
-            ),
+            _ => Ok(NonEmptyHistoryTree::from_block(network, block, roots)?.into()),
         }
     }
 
@@ -485,8 +477,7 @@ impl HistoryTree {
         &mut self,
         network: &Network,
         block: Arc<Block>,
-        sapling_root: &sapling::tree::Root,
-        orchard_root: &orchard::tree::Root,
+        roots: BlockCommitmentTreeRoots,
     ) -> Result<(), HistoryTreeError> {
         let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) else {
             assert!(
@@ -509,12 +500,7 @@ impl HistoryTree {
                 );
             }
             std::cmp::Ordering::Equal => {
-                let tree = Some(NonEmptyHistoryTree::from_block(
-                    network,
-                    block,
-                    sapling_root,
-                    orchard_root,
-                )?);
+                let tree = Some(NonEmptyHistoryTree::from_block(network, block, roots)?);
                 // Replace the current object with the new tree
                 *self = HistoryTree(tree);
             }
@@ -522,7 +508,7 @@ impl HistoryTree {
                 self.0
                     .as_mut()
                     .expect("history tree must exist Heartwood-onward")
-                    .push(block.clone(), sapling_root, orchard_root)?;
+                    .push(block.clone(), roots)?;
             }
         };
         Ok(())

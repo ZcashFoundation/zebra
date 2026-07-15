@@ -149,6 +149,13 @@ impl SigHasher {
         self.precomputed_tx_data.orchard_bundle()
     }
 
+    /// Returns the Ironwood bundle in the precomputed transaction data (NU6.3 onward).
+    pub fn ironwood_bundle(
+        &self,
+    ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.ironwood_bundle()
+    }
+
     /// Returns the Sapling bundle in the precomputed transaction data.
     pub fn sapling_bundle(
         &self,

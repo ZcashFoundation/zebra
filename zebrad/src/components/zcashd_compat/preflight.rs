@@ -191,15 +191,28 @@ fn run_linux_preflight(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<
     .then_some(zcashd_datadir.as_path());
 
     let mut summary = PreflightSummary::default();
-    check_permissions(&mut summary, config, &zcashd_datadir)?;
-    check_cpu(&mut summary)?;
-    check_memory(&mut summary)?;
-    check_disk(
-        &mut summary,
-        &config.network.network,
-        &config.state.cache_dir,
-        zcashd_datadir_for_disk_check,
-    )?;
+
+    // A check that errors at the I/O level (unreadable cgroup file, statvfs
+    // failure on a network mount, a datadir path Zebra cannot probe) must be
+    // overridable by `--unsafe-low-specs`, just like a failed minimum. Collect
+    // these errors into the summary instead of propagating them, so the bypass
+    // flag can downgrade them to warnings.
+    let check_results = [
+        check_permissions(&mut summary, config, &zcashd_datadir),
+        check_cpu(&mut summary),
+        check_memory(&mut summary),
+        check_disk(
+            &mut summary,
+            &config.network.network,
+            &config.state.cache_dir,
+            zcashd_datadir_for_disk_check,
+        ),
+    ];
+    for error in check_results.into_iter().filter_map(Result::err) {
+        summary
+            .errors
+            .push(format!("preflight check could not run: {error}"));
+    }
 
     for warning in finalize_preflight(summary, unsafe_low_specs)? {
         warn!("{warning}");
@@ -556,10 +569,13 @@ fn evaluate_disk_thresholds(
     grouped_filesystems: &HashMap<u64, FilesystemRequirements>,
     recommended_combined_bytes: u64,
 ) {
+    // Saturate rather than risk a debug-build overflow panic on a broken
+    // statvfs that reports a near-`u64::MAX` capacity, matching the per-entry
+    // accumulation elsewhere in this module.
     let combined_provisioned_capacity = grouped_filesystems
         .values()
         .map(|filesystem| filesystem.provisioned_bytes)
-        .sum::<u64>();
+        .fold(0u64, u64::saturating_add);
 
     for filesystem in grouped_filesystems.values() {
         if filesystem.provisioned_bytes < filesystem.min_provisioned_sum_bytes {

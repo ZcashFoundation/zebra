@@ -1304,6 +1304,8 @@ where
                 transactions_request,
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                // Ironwood trees
+                zebra_state::ReadRequest::IronwoodTree(hash_or_height),
                 // Block info
                 zebra_state::ReadRequest::BlockInfo(previous_block_hash.into()),
                 zebra_state::ReadRequest::BlockInfo(hash_or_height),
@@ -1328,27 +1330,24 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-                    let transactions =
-                        block
-                            .transactions
-                            .iter()
-                            .map(|tx| {
-                                GetBlockTransaction::Object(Box::new(
-                                    TransactionObject::from_transaction(
-                                        tx.clone(),
-                                        Some(height),
-                                        Some(confirmations.try_into().expect(
-                                            "should be less than max block height, i32::MAX",
-                                        )),
-                                        &network,
-                                        Some(block_time),
-                                        Some(hash),
-                                        Some(true),
-                                        tx.hash(),
-                                    ),
-                                ))
-                            })
-                            .collect();
+                    let transactions = block
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            GetBlockTransaction::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    Some(confirmations),
+                                    &network,
+                                    Some(block_time),
+                                    Some(hash),
+                                    Some(true),
+                                    tx.hash(),
+                                ),
+                            ))
+                        })
+                        .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -1382,7 +1381,25 @@ where
                 size: orchard_tree_size,
             };
 
-            let trees = GetBlockTrees { sapling, orchard };
+            let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
+                ironwood_tree_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to an IronwoodTree request");
+            };
+
+            // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
+            // Ironwood tree is empty (size 0).
+            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
+            let ironwood = IronwoodTrees {
+                size: ironwood_tree.count(),
+            };
+
+            let trees = GetBlockTrees {
+                sapling,
+                orchard,
+                ironwood,
+            };
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
@@ -1791,7 +1808,7 @@ where
                         AnyTx::Mined(mined) if in_best_chain => (
                             mined.tx.clone(),
                             Some(mined.height),
-                            Some(mined.confirmations),
+                            Some(mined.confirmations.into()),
                             Some(mined.block_time),
                         ),
                         _ => {
@@ -1834,7 +1851,7 @@ where
                                 TransactionObject::from_transaction(
                                     tx.tx.clone(),
                                     Some(tx.height),
-                                    Some(tx.confirmations),
+                                    Some(tx.confirmations.into()),
                                     &self.network,
                                     // TODO: Performance gain:
                                     // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
@@ -1959,6 +1976,27 @@ where
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
+        let ironwood = if network.is_nu_active(consensus::NetworkUpgrade::Nu6_3, height.into()) {
+            match read_state
+                .ready()
+                .and_then(|service| {
+                    service.call(zebra_state::ReadRequest::IronwoodTree(hash.into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::IronwoodTree(tree) => {
+                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
+                }
+                _ => unreachable!("unmatched response to an Ironwood tree request"),
+            }
+        } else {
+            None
+        };
+        // Only present from NU6.3, so pre-NU6.3 responses keep the sprout/sapling/orchard shape.
+        let ironwood = ironwood
+            .map(|(tree, root)| Treestate::new(trees::Commitments::new(Some(root), Some(tree))));
+
         Ok(GetTreestateResponse::new(
             hash,
             height,
@@ -1968,6 +2006,7 @@ where
             None,
             Treestate::new(trees::Commitments::new(sapling_root, sapling_tree)),
             Treestate::new(trees::Commitments::new(orchard_root, orchard_tree)),
+            ironwood,
         ))
     }
 
@@ -1979,7 +2018,7 @@ where
     ) -> Result<GetSubtreesByIndexResponse> {
         let mut read_state = self.read_state.clone();
 
-        const POOL_LIST: &[&str] = &["sapling", "orchard"];
+        const POOL_LIST: &[&str] = &["sapling", "orchard", "ironwood"];
 
         if pool == "sapling" {
             let request = zebra_state::ReadRequest::SaplingSubtrees { start_index, limit };
@@ -2020,6 +2059,33 @@ where
                 _ => unreachable!("unmatched response to a subtrees request"),
             };
 
+            let subtrees = subtrees
+                .values()
+                .map(|subtree| SubtreeRpcData {
+                    root: subtree.root.encode_hex(),
+                    end_height: subtree.end_height,
+                })
+                .collect();
+
+            Ok(GetSubtreesByIndexResponse {
+                pool,
+                start_index,
+                subtrees,
+            })
+        } else if pool == "ironwood" {
+            let request = zebra_state::ReadRequest::IronwoodSubtrees { start_index, limit };
+            let response = read_state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_misc_error()?;
+
+            let subtrees = match response {
+                zebra_state::ReadResponse::IronwoodSubtrees(subtrees) => subtrees,
+                _ => unreachable!("unmatched response to a subtrees request"),
+            };
+
+            // Ironwood reuses the Orchard note type, so the subtree root is encoded like Orchard's.
             let subtrees = subtrees
                 .values()
                 .map(|subtree| SubtreeRpcData {
@@ -2464,6 +2530,7 @@ where
                     return Ok(BlockTemplateResponse::new_internal(
                         &self.network,
                         precomputed_coinbase,
+                        None,
                         miner_params,
                         &chain_info,
                         server_long_poll_id,
@@ -2507,14 +2574,14 @@ where
         let height = chain_info.tip_height.next().map_misc_error()?;
 
         // Randomly select some mempool transactions.
+        let coinbase_cache = self.gbt.coinbase_cache();
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
             miner_params,
             mempool_txs,
             mempool_tx_deps,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            None,
+            Some(&coinbase_cache),
         );
 
         tracing::debug!(
@@ -2530,13 +2597,12 @@ where
         Ok(BlockTemplateResponse::new_internal(
             &self.network,
             None,
+            Some(self.gbt.coinbase_cache()),
             miner_params,
             &chain_info,
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            None,
         )
         .into())
     }
@@ -3354,7 +3420,7 @@ impl GetInfoResponse {
 }
 
 /// Type alias for the array of `GetBlockchainInfoBalance` objects
-pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 5];
+pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 6];
 
 /// Response to a `getblockchaininfo` RPC request.
 ///
@@ -4372,6 +4438,10 @@ pub struct GetBlockTrees {
     sapling: SaplingTrees,
     #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
     orchard: OrchardTrees,
+    // `default` so responses and fixtures from before Ironwood (which have no `ironwood` field)
+    // still deserialize, as the empty tree.
+    #[serde(default, skip_serializing_if = "IronwoodTrees::is_empty")]
+    ironwood: IronwoodTrees,
 }
 
 impl Default for GetBlockTrees {
@@ -4379,16 +4449,18 @@ impl Default for GetBlockTrees {
         GetBlockTrees {
             sapling: SaplingTrees { size: 0 },
             orchard: OrchardTrees { size: 0 },
+            ironwood: IronwoodTrees { size: 0 },
         }
     }
 }
 
 impl GetBlockTrees {
     /// Constructs a new instance of ['GetBlockTrees'].
-    pub fn new(sapling: u64, orchard: u64) -> Self {
+    pub fn new(sapling: u64, orchard: u64, ironwood: u64) -> Self {
         GetBlockTrees {
             sapling: SaplingTrees { size: sapling },
             orchard: OrchardTrees { size: orchard },
+            ironwood: IronwoodTrees { size: ironwood },
         }
     }
 
@@ -4400,6 +4472,11 @@ impl GetBlockTrees {
     /// Returns orchard data held by ['GetBlockTrees'].
     pub fn orchard(self) -> u64 {
         self.orchard.size
+    }
+
+    /// Returns ironwood data held by ['GetBlockTrees'].
+    pub fn ironwood(self) -> u64 {
+        self.ironwood.size
     }
 }
 
@@ -4422,6 +4499,18 @@ pub struct OrchardTrees {
 }
 
 impl OrchardTrees {
+    fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
+
+/// Ironwood note commitment tree information. Ironwood reuses the Orchard tree type.
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct IronwoodTrees {
+    size: u64,
+}
+
+impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }

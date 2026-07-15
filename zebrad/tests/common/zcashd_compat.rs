@@ -174,21 +174,26 @@ impl ZcashdRpcClient {
 /// zcashd learns about newly mined blocks from zebrad over legacy P2P block
 /// gossip, so tests that mine must wait for it to catch up before cross-checking.
 pub async fn wait_for_zcashd_height(client: &ZcashdRpcClient, height: u64) -> Result<()> {
-    let mut last_seen = None;
+    // Track the last height *or error* so a crashed sidecar is diagnosed as an
+    // RPC failure rather than a misleading "did not reach height (last seen: None)".
+    let mut last_seen = "no successful RPC yet".to_string();
     for _ in 0..60u32 {
-        if let Ok(count) = client
+        match client
             .json_result_from_call::<u64>("getblockcount", "[]")
             .await
         {
-            if count >= height {
-                return Ok(());
+            Ok(count) => {
+                if count >= height {
+                    return Ok(());
+                }
+                last_seen = format!("height {count}");
             }
-            last_seen = Some(count);
+            Err(error) => last_seen = format!("RPC error: {error}"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Err(eyre!(
-        "zcashd did not reach height {height} within 60 s (last seen: {last_seen:?})"
+        "zcashd did not reach height {height} within 60 s (last seen: {last_seen})"
     ))
 }
 
