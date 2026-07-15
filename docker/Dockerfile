@@ -41,7 +41,7 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     libclang-dev=1:19.0-63 \
-    protobuf-compiler=3.21.12-11 \
+    protobuf-compiler=3.21.12-11+deb13u1 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 # Build arguments and variables
