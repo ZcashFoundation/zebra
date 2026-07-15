@@ -392,7 +392,7 @@ pub enum VerifyAndCommitError {
 
 /// Pre-fetched, verified note commitment tree serializations for one block's
 /// height, supplied by the tree-fetch lookahead in snapshot-consume mode
-/// (design doc `p2p-snapshot-distribution.md` §3.2).
+/// (design doc `snapshot-distribution.md` §3.2).
 ///
 /// Each blob is the canonical sapling/orchard frontier serialization, already
 /// verified against the chunk's recorded root by the lookahead. When present,
@@ -551,7 +551,7 @@ where
 
         // The tree-fetch lookahead supplied a verified tree for this height: take
         // the "tree supplied by download" path instead of folding the block's note
-        // commitments (design doc `p2p-snapshot-distribution.md` §3.2, finding
+        // commitments (design doc `snapshot-distribution.md` §3.2, finding
         // #10).
         //
         // The supplied sapling/orchard frontier blobs (each already verified

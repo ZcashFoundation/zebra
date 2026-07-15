@@ -118,15 +118,6 @@ pub enum Response {
     /// verified chunk bytes were persisted to the `known_hash_chunk` column
     /// family.
     WroteKnownHashChunk,
-
-    /// Response to [`Request::NoteCommitmentTreeBytes`] with the serialized tree
-    /// bytes, or `None` if the height is above the finalized tip.
-    NoteCommitmentTreeBytes(Option<Vec<u8>>),
-
-    /// Response to [`Request::UnspentOutputsRange`] and
-    /// [`Request::AddressBalancesRange`] with the requested snapshot byte range,
-    /// or `None` if the request is malformed, over-limit, or out of bounds.
-    SnapshotRange(Option<Vec<u8>>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -475,16 +466,6 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::KnownHashChunk`] with the generated chunk
     /// bytes, or `None` if the chunk index is entirely above the finalized tip.
     KnownHashChunk(Option<Vec<u8>>),
-
-    /// Response to [`ReadRequest::NoteCommitmentTreeBytes`] with the serialized
-    /// tree bytes, or `None` if the height is above the finalized tip.
-    NoteCommitmentTreeBytes(Option<Vec<u8>>),
-
-    /// Response to [`ReadRequest::UnspentOutputsRange`] and
-    /// [`ReadRequest::AddressBalancesRange`] with the requested snapshot byte
-    /// range, or `None` if the request is malformed, over-limit, or out of
-    /// bounds.
-    SnapshotRange(Option<Vec<u8>>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -590,10 +571,6 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             ReadResponse::KnownHashChunk(bytes) => Ok(Response::KnownHashChunk(bytes)),
-            ReadResponse::NoteCommitmentTreeBytes(bytes) => {
-                Ok(Response::NoteCommitmentTreeBytes(bytes))
-            }
-            ReadResponse::SnapshotRange(bytes) => Ok(Response::SnapshotRange(bytes)),
 
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")

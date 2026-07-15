@@ -41,8 +41,8 @@ use zebra_chain::{
     parameters::{known_hashes::KnownHashList, Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashSerialize,
 };
-use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr, ShieldedPool};
-use zebra_state as zs;
+use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr};
+use zebra_state::{self as zs, ShieldedPool};
 
 use super::{
     cache::BlockCache,
@@ -55,7 +55,7 @@ use super::{
         FetchedBlock, DEFAULT_SIZE_HINT,
     },
     tree::{HeightTrees, TreeFetch, TreeLookahead, TREE_LOOKAHEAD_MAX},
-    IbdOutcome, IBD_STALL_WARN_INTERVAL, SNAPSHOT_FETCH_ATTEMPTS,
+    IbdOutcome, IBD_STALL_WARN_INTERVAL,
 };
 use crate::BoxError;
 
@@ -245,6 +245,13 @@ pub enum EngineError {
     #[error("known-hash list read failed: {0}")]
     List(#[source] BoxError),
 
+    /// The snapshot artifact directory cannot supply a verified artifact: a
+    /// missing, corrupt, oversized, or hash-mismatched file. The directory is
+    /// read-only, so a restart re-reads the same bytes; the operator must fix
+    /// or re-download the artifacts (design doc `snapshot-distribution.md`).
+    #[error("fatal snapshot artifact diagnostic: {0}")]
+    ArtifactDiagnostic(#[source] BoxError),
+
     /// An engine invariant was broken, or a transient subsystem failed.
     #[error("known-hash IBD engine error: {0}")]
     Internal(String),
@@ -356,7 +363,7 @@ pub trait HashSource: Send + 'static {
     /// `(height, pool)` order.
     ///
     /// Drives the tree-fetch lookahead (design doc
-    /// `p2p-snapshot-distribution.md` §3.2): trees update at only ~7% of heights,
+    /// `snapshot-distribution.md` §3.2): trees update at only ~7% of heights,
     /// and the engine schedules a fetch only at heights this method reports, so
     /// non-updating heights cost nothing.
     ///
@@ -381,7 +388,7 @@ pub trait HashSource: Send + 'static {
     /// this value before buffering it. The default is `None`: a source with no
     /// per-height tree-root data never reports an updating height, so the
     /// lookahead never asks.
-    fn tree_root(&mut self, _pool: zn::ShieldedPool, _height: block::Height) -> Option<[u8; 32]> {
+    fn tree_root(&mut self, _pool: ShieldedPool, _height: block::Height) -> Option<[u8; 32]> {
         None
     }
 
@@ -453,8 +460,8 @@ pub type FetchOutcome = Result<FetchedBlock, FetchFailureKind>;
 pub type CommitOutcome = Result<block::Hash, VerifyAndCommitError>;
 
 /// The result of a tree-fetch future (design doc
-/// `p2p-snapshot-distribution.md` §3.2): the verified tree bytes, or `None`
-/// when no peer served a verifying tree after the allowed attempts.
+/// `snapshot-distribution.md` §3.2): the verified tree bytes, or `None`
+/// when the artifact directory did not supply a verifying tree.
 ///
 /// A tree failure is never fatal: the lookahead clears the in-flight marker and
 /// the block falls back to folding when it commits, so this is `Option`, not
@@ -706,7 +713,7 @@ where
 
     /// The note-commitment-tree fetch lookahead: the bounded buffer of
     /// fetched+verified trees keyed by height, and the set of in-flight tree
-    /// fetches (design doc `p2p-snapshot-distribution.md` §3.2).
+    /// fetches (design doc `snapshot-distribution.md` §3.2).
     ///
     /// Empty and idle unless the [`HashSource`] reports tree updates (only the
     /// CF-backed snapshot-consume source does); the bundled `.bin` list folds
@@ -720,13 +727,14 @@ where
     /// commits.
     tree_lookahead_margin: u32,
 
-    /// An optional local-file source for note commitment trees
-    /// (`sync.known_hash_local_source_dir`). When set, the tree-fetch stage reads
-    /// each tree from a local file instead of issuing the P2P
-    /// `NoteCommitmentTree` request, verifying against the same recorded chunk
-    /// root (the single tree-fetch dispatch point, mirroring
-    /// [`super::consume::SnapshotSource`] for chunks/sets). `None` keeps the P2P
-    /// tree path unchanged. Blocks always fetch over P2P regardless.
+    /// The local-file source for note commitment trees
+    /// (`sync.known_hash_local_source_dir`): the artifact directory the
+    /// installer downloaded (or `emit-snapshot --emit-files` wrote). The
+    /// tree-fetch stage reads each selected height's tree from it, verifying
+    /// against the recorded chunk root (the single tree-fetch dispatch point,
+    /// mirroring [`super::consume::SnapshotSource`] for chunks). `None` outside
+    /// snapshot-consume mode, where no tree updates are ever scheduled. Blocks
+    /// always fetch over P2P regardless.
     local_snapshot_source: Option<super::consume::LocalSnapshotSource>,
 
     /// The total number of blocks fetched into the window (memory or disk),
@@ -1005,8 +1013,9 @@ where
     /// the tree-fetch margin — so both the block hashes and the tree roots the
     /// upcoming refill and tree-scheduling steps need are resident. For the
     /// bundled `.bin` list this is a no-op; for the CF-backed snapshot-consume
-    /// source it fetches+verifies+persists the covering chunk(s), which keeps the
-    /// lookups working across chunk boundaries. A failure is retryable.
+    /// source it reads+verifies+persists the covering chunk(s), which keeps the
+    /// lookups working across chunk boundaries. A transient failure is
+    /// retryable; a deterministic artifact failure is a fatal diagnostic.
     async fn ensure_source_coverage(&mut self, end: block::Height) -> Result<(), EngineError> {
         // `IBD_WINDOW_MAX_BLOCKS` fits a u32; the tree margin is already clamped
         // to `TREE_LOOKAHEAD_MAX`. `base + lookahead` cannot overflow a real
@@ -1017,7 +1026,19 @@ where
         self.list
             .ensure_covers(self.base, cover_end)
             .await
-            .map_err(EngineError::List)
+            .map_err(|error| {
+                // A deterministic snapshot-artifact failure (a missing, corrupt,
+                // or hash-mismatched file) re-reads the same read-only directory
+                // on every restart, so it is a fatal diagnostic; anything else
+                // stays retryable.
+                match error.downcast::<super::consume::ConsumeError>() {
+                    Ok(consume_error) if consume_error.is_deterministic() => {
+                        EngineError::ArtifactDiagnostic(consume_error)
+                    }
+                    Ok(consume_error) => EngineError::List(consume_error),
+                    Err(error) => EngineError::List(error),
+                }
+            })
     }
 
     /// Refills the window, lowest-missing-first, with auto-scaled lookahead
@@ -1475,7 +1496,7 @@ where
     }
 
     /// Schedules note-commitment-tree fetches a configurable margin ahead of the
-    /// commit frontier (design doc `p2p-snapshot-distribution.md` §3.2).
+    /// commit frontier (design doc `snapshot-distribution.md` §3.2).
     ///
     /// The lookahead window is `[base, min(base + margin, end)]` — deeper than
     /// the block fetch-ahead in large-block eras, so a height's tree is already
@@ -1525,20 +1546,17 @@ where
     /// Pushes a single tree-fetch future for `fetch` into the staged-future
     /// collection.
     ///
-    /// A single-request `NoteCommitmentTree` through the plain peer set gets
-    /// inventory-aware routing for free (like the gap hedge), tries
-    /// [`SNAPSHOT_FETCH_ATTEMPTS`] peers, and verifies each candidate's
-    /// `.root()` against `expected_root` before accepting it. A tree no peer can
-    /// serve resolves to `None`: never fatal, the block folds when it commits.
+    /// The tree is read from the local artifact directory and its deserialized
+    /// `.root()` is verified against `expected_root` before it is accepted. A
+    /// tree the source cannot supply resolves to `None`: never fatal, the block
+    /// folds when it commits.
     fn push_tree_fetch(&mut self, fetch: TreeFetch, expected_root: [u8; 32]) {
-        let peer_set = self.peer_set.clone();
         let local_source = self.local_snapshot_source.clone();
         let TreeFetch { height, pool } = fetch;
 
         self.blocks.push(
             async move {
-                let outcome =
-                    tree_fetch_stage(peer_set, local_source, pool, height, expected_root).await;
+                let outcome = tree_fetch_stage(local_source, pool, height, expected_root).await;
                 (height, StageOutcome::Tree { pool, outcome })
             }
             .boxed(),
@@ -2210,73 +2228,52 @@ where
     }
 }
 
-/// The tree-fetch future body (design doc `p2p-snapshot-distribution.md` §3.2):
-/// fetches a `pool` note commitment tree as of `height` from the configured
-/// source and verifies its deserialized `.root()` against `expected_root` (the
-/// root the known-hash chunk records for that height).
+/// The tree-fetch future body (design doc `snapshot-distribution.md` §3.2):
+/// reads a `pool` note commitment tree as of `height` from the local artifact
+/// directory and verifies its deserialized `.root()` against `expected_root`
+/// (the root the known-hash chunk records for that height).
 ///
-/// When `local_source` is set, the tree is read from a local file (the solo-sync
-/// test path) and verified identically; otherwise the tree is fetched over P2P,
-/// trying [`SNAPSHOT_FETCH_ATTEMPTS`] peers — a single-request `NoteCommitmentTree`
-/// through the plain peer set gets inventory-aware routing for free (like the gap
-/// hedge). This is the single tree-fetch dispatch point. Returns the verified
-/// bytes, ready to hand to the state's supplied-tree commit path, or `None` when
-/// no source served a tree whose root matches: never fatal, the block folds.
-async fn tree_fetch_stage<ZN>(
-    peer_set: ZN,
+/// A missing local record (a height the artifact omits), a tree that does not
+/// deserialize, or a root mismatch returns `None` so the block folds — never
+/// fatal. The read runs on a blocking thread: the source parses the whole
+/// records file on the first read (per-height reads afterwards are cached map
+/// lookups), and a multi-MiB parse must not stall the engine's block futures.
+///
+/// `local_source` is only `None` outside snapshot-consume mode, where no tree
+/// fetch is ever scheduled: a scheduled fetch without a source is a wiring bug
+/// (loud in debug builds), and folds in release builds so it degrades
+/// throughput rather than correctness.
+pub(crate) async fn tree_fetch_stage(
     local_source: Option<super::consume::LocalSnapshotSource>,
     pool: ShieldedPool,
     height: block::Height,
     expected_root: [u8; 32],
-) -> TreeOutcome
-where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
-{
-    let zs_pool = match pool {
-        ShieldedPool::Sapling => zs::ShieldedPool::Sapling,
-        ShieldedPool::Orchard => zs::ShieldedPool::Orchard,
+) -> TreeOutcome {
+    let Some(local) = local_source else {
+        debug_assert!(
+            false,
+            "tree fetches are only scheduled in snapshot-consume mode, \
+             which always constructs the engine with a local artifact source",
+        );
+        return None;
     };
 
-    // Local-file path: read the tree once and verify its root identically to the
-    // P2P path. A missing local record (a non-updating height the file omits) or
-    // a root mismatch returns `None` so the block folds, exactly like a P2P miss.
-    if let Some(local) = local_source {
-        return match local.read_tree(pool, height.0) {
-            Ok(Some(bytes)) => match zs::note_commitment_tree_root_from_bytes(zs_pool, &bytes) {
-                Some(actual) if actual == expected_root => Some(bytes),
-                _ => None,
-            },
-            Ok(None) => None,
-            Err(error) => {
-                debug!(%error, ?pool, ?height, "reading a local snapshot tree failed; folding");
-                None
-            }
-        };
-    }
+    let read = tokio::task::spawn_blocking(move || local.read_tree(pool, height.0)).await;
 
-    for _ in 0..SNAPSHOT_FETCH_ATTEMPTS {
-        let response = peer_set
-            .clone()
-            .oneshot(zn::Request::NoteCommitmentTree { pool, height })
-            .await;
-
-        let bytes = match response {
-            Ok(zn::Response::NoteCommitmentTree(bytes)) => bytes.to_vec(),
-            // The peer lacks the tree, answered unexpectedly, or the request
-            // failed: try another peer.
-            Ok(_) => continue,
-            Err(_error) => continue,
-        };
-
-        // Verify the downloaded tree's recomputed root against the chunk's
-        // recorded root before trusting it (content-addressed). A tree that
-        // doesn't deserialize, or whose root disagrees, is from a corrupt or
-        // adversarial peer: discard and try another.
-        match zs::note_commitment_tree_root_from_bytes(zs_pool, &bytes) {
-            Some(actual) if actual == expected_root => return Some(bytes),
-            _ => continue,
+    match read {
+        Ok(Ok(Some(bytes))) => match zs::note_commitment_tree_root_from_bytes(pool, &bytes) {
+            Some(actual) if actual == expected_root => Some(bytes),
+            _ => None,
+        },
+        Ok(Ok(None)) => None,
+        Ok(Err(error)) => {
+            debug!(%error, ?pool, ?height, "reading a local snapshot tree failed; folding");
+            None
+        }
+        // Shutdown or a panicked read task: fold, like any other miss.
+        Err(error) => {
+            debug!(%error, ?pool, ?height, "a tree read task failed; folding");
+            None
         }
     }
-
-    None
 }

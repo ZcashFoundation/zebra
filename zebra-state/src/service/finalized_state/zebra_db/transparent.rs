@@ -288,62 +288,6 @@ impl ZebraDb {
         }
     }
 
-    /// Streams up to `take` unspent-output-location records, in ascending order,
-    /// starting from the `skip`-th record (0-based), to `f`.
-    ///
-    /// Returns:
-    /// - `None` if the iterator stopped early because the `take`-record window
-    ///   filled (so the request was in-bounds; the total set size is not needed
-    ///   and not computed), or
-    /// - `Some(total)` if the iterator reached the end of the set before filling
-    ///   the window, where `total` is the full record count — the caller uses it
-    ///   to tell an in-bounds short/empty final range (`skip <= total`) from an
-    ///   out-of-bounds start (`skip > total`).
-    ///
-    /// # Performance
-    ///
-    /// `OutputLocation` keys are not dense indexes, so a record at a given index
-    /// cannot be seeked directly; this advances the RocksDB iterator `skip` times
-    /// to reach the window start (an `O(skip)` walk, not the full `O(N)` set). It
-    /// stops as soon as `take` records are emitted, so the rest of the set is
-    /// never scanned. Streaming the whole set in `MAX_SNAPSHOT_RANGE_BYTES` ranges
-    /// is therefore `O(N² / range)`, which is acceptable for the
-    /// snapshot-distribution serve path (one untrusted range per request, the
-    /// per-request limit caps the work) and documented as the cost of indexing a
-    /// non-dense key space by record offset.
-    // The `cf_handle().unwrap()` relies on the column family always existing,
-    // which is an open-time invariant, not a hidden error path.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn for_each_unspent_output_location_bytes_range(
-        &self,
-        skip: u64,
-        take: u64,
-        mut f: impl FnMut(&[u8]),
-    ) -> Option<u64> {
-        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
-
-        let mut index: u64 = 0;
-        for (output_location, _output) in self
-            .db
-            .zs_forward_range_iter::<_, OutputLocation, transparent::Output, _>(
-                &utxo_by_out_loc,
-                ..,
-            )
-        {
-            if index >= skip {
-                if index - skip >= take {
-                    // The window is full: the request was in-bounds, so the
-                    // total count is not needed.
-                    return None;
-                }
-                f(output_location.as_bytes().as_ref());
-            }
-            index += 1;
-        }
-        // Reached the end of the set: `index` is the total record count.
-        Some(index)
-    }
-
     /// Streams the canonical on-disk bytes of every address-balance record to
     /// `f`, in ascending address (key) order: the 21-byte
     /// [`transparent::Address`] key, then its 32-byte [`AddressBalanceLocation`]
@@ -351,9 +295,8 @@ impl ZebraDb {
     ///
     /// The `balance_by_transparent_addr` column family holds exactly one record
     /// per address that has ever received funds, keyed by address, so its live
-    /// entries are the address-balance set at the finalized tip. Used by the IBD
-    /// P2P snapshot server to serve byte ranges of that set, and by the snapshot
-    /// emitter to hash the whole set.
+    /// entries are the address-balance set at the finalized tip. Used by the
+    /// snapshot emitter to hash the whole set and write the set artifact.
     ///
     /// Streams rather than collecting: the set is millions of entries. The bytes
     /// are deterministic ([`IntoDisk`] serialization), so every honest node
@@ -373,45 +316,6 @@ impl ZebraDb {
         {
             f(&address_bytes, &value_bytes);
         }
-    }
-
-    /// Streams up to `take` address-balance records, in ascending key order,
-    /// starting from the `skip`-th record (0-based), to `f` as
-    /// `(address_bytes, value_bytes)`.
-    ///
-    /// Returns `None` when the `take`-record window filled (in-bounds), or
-    /// `Some(total)` with the full record count when the iterator reached the end
-    /// first; see
-    /// [`for_each_unspent_output_location_bytes_range`](Self::for_each_unspent_output_location_bytes_range)
-    /// for the return-value contract and the `O(skip)` cost.
-    pub fn for_each_address_balance_bytes_range(
-        &self,
-        skip: u64,
-        take: u64,
-        mut f: impl FnMut(&[u8], &[u8]),
-    ) -> Option<u64> {
-        // The `balance_by_transparent_addr` column family lives in the RPC index
-        // database when the split is on, so iterate that database, not `self.db`:
-        // a RocksDB column-family handle is bound to the database it came from.
-        // `address_balance_cf` and `rpc_index_or_self` both resolve to that same
-        // database, keeping the handle and the iterator consistent.
-        let rpc_db = self.rpc_index_or_self();
-        let balance_by_transparent_addr = self.address_balance_cf();
-
-        let mut index: u64 = 0;
-        for (address_bytes, value_bytes) in rpc_db
-            .db
-            .zs_forward_full_bytes_iter(balance_by_transparent_addr)
-        {
-            if index >= skip {
-                if index - skip >= take {
-                    return None;
-                }
-                f(&address_bytes, &value_bytes);
-            }
-            index += 1;
-        }
-        Some(index)
     }
 
     /// Bulk-loads a verified address-balance set into

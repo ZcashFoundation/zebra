@@ -347,25 +347,24 @@ pub struct Config {
     /// tree, in that order.
     pub known_hash_list_dir: Option<PathBuf>,
 
-    /// A directory of **local snapshot-consume artifacts** to read instead of
-    /// fetching them over P2P.
+    /// The directory of **local snapshot-consume artifacts**: the directory the
+    /// installer downloaded from the release assets, or one written locally by
+    /// `emit-snapshot --emit-files`.
     ///
-    /// **Experimental; defaults to `None`, leaving P2P fetch unchanged.**
+    /// **Experimental; defaults to `None`.**
     ///
-    /// Only used when [`snapshot_consume_sync`](Self::snapshot_consume_sync) is
-    /// also enabled. When set, the engine reads each snapshot artifact (the
-    /// known-hash chunks, the per-height note commitment trees, the
-    /// unspent-output set, the address-balance set, and the chain value pools)
-    /// from this directory instead of issuing the P2P request — verifying each
-    /// against the *same* pinned SHA-256 constants. This lets a single node drive
-    /// a full snapshot-consume sync without any peer speaking the P2P
-    /// snapshot-distribution extension (the solo-sync test path); blocks
+    /// Required when [`snapshot_consume_sync`](Self::snapshot_consume_sync) is
+    /// enabled. The engine reads each snapshot artifact (the known-hash chunks
+    /// and the per-height note commitment trees; the unspent-output set, the
+    /// address-balance set, and the chain value pools are loaded by the state)
+    /// from this directory — verifying each against the pinned SHA-256
+    /// constants, so a tampered or corrupt download is rejected. Blocks
     /// themselves still come over normal P2P.
     ///
     /// The directory layout is the one written by
     /// `emit-snapshot --emit-files --out-dir <dir>`; see
     /// [`crate::components::ibd::consume::local`] and
-    /// `docs/design/p2p-snapshot-distribution.md`.
+    /// `docs/design/snapshot-distribution.md`.
     pub known_hash_local_source_dir: Option<PathBuf>,
 
     /// Enable snapshot-consume (assumeUTXO-style) initial sync.
@@ -373,17 +372,18 @@ pub struct Config {
     /// **Experimental; defaults to `false`, leaving normal sync unchanged.**
     ///
     /// When enabled together with [`known_hash_sync`](Self::known_hash_sync),
-    /// the engine fetches the known-hash chunks, per-height note commitment
-    /// trees, the unspent-output set, and the address-balance set over P2P and
-    /// hands the downloaded snapshot to the state instead of deriving it from
-    /// the blocks. The downloaded artifacts are content-addressed: each is
-    /// verified against a pinned SHA-256 constant before it is trusted. See
-    /// `docs/design/p2p-snapshot-distribution.md` and
+    /// the engine reads the known-hash chunks and per-height note commitment
+    /// trees from the artifact directory named by
+    /// [`known_hash_local_source_dir`](Self::known_hash_local_source_dir)
+    /// (which must also be set) and hands the snapshot to the state instead of
+    /// deriving it from the blocks. The artifacts are content-addressed: each
+    /// is verified against a pinned SHA-256 constant before it is trusted. See
+    /// `docs/design/snapshot-distribution.md` and
     /// `docs/design/utxo-elision.md`.
     ///
     /// The state-side consume behaviours (direct tree writes, bulk balance
     /// loading, address-index elision) are configured separately under
-    /// `[state] snapshot_consume`; this flag enables the engine-side fetch and
+    /// `[state] snapshot_consume`; this flag enables the engine-side read and
     /// verification of the snapshot artifacts.
     pub snapshot_consume_sync: bool,
 }
@@ -433,7 +433,8 @@ impl Default for Config {
             // Use the layered asset search by default.
             known_hash_list_dir: None,
 
-            // No local snapshot source by default: artifacts come over P2P.
+            // No artifact directory by default; snapshot-consume sync requires
+            // one (downloaded by the installer or emitted locally).
             known_hash_local_source_dir: None,
 
             // Experimental snapshot-consume sync is off by default, so normal

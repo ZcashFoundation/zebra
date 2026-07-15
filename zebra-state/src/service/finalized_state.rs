@@ -402,7 +402,7 @@ impl FinalizedState {
     /// design-intended verification (against the chunk's recorded per-height
     /// roots) is the way to safely accept them later; until those roots are
     /// threaded to this layer, refusing-and-folding is the safe behaviour. See
-    /// finding #27 and `docs/design/p2p-snapshot-distribution.md` §3.2.
+    /// finding #27 and `docs/design/snapshot-distribution.md` §3.2.
     fn supplied_trees_are_verifiable(
         block: &Arc<block::Block>,
         supplied: &NoteCommitmentTrees,

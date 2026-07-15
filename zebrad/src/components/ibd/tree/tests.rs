@@ -5,7 +5,7 @@
 //! or peers: the lookahead is bookkeeping over heights and byte counts.
 
 use zebra_chain::block::Height;
-use zebra_network::ShieldedPool;
+use zebra_state::ShieldedPool;
 
 use super::*;
 

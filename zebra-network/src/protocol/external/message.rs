@@ -9,7 +9,7 @@ use zebra_chain::{
     transaction::UnminedTx,
 };
 
-use crate::{meta_addr::MetaAddr, protocol::internal::ShieldedPool, BoxError};
+use crate::{meta_addr::MetaAddr, BoxError};
 
 use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
 
@@ -295,98 +295,6 @@ pub enum Message {
     ///
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterClear,
-
-    /// A `getkhchunk` message: request a byte range of a known-hash chunk.
-    ///
-    /// This is a Zebra-specific extension for P2P distribution of known-hash
-    /// snapshot data. See `docs/design/p2p-snapshot-distribution.md`.
-    ///
-    /// A full v2 chunk exceeds `MAX_PROTOCOL_MESSAGE_LEN`, so chunks are
-    /// transferred in `≤ 1 MiB` ranges over the deterministic chunk bytes. The
-    /// peer responds with a [`Self::Snapshot`] message carrying the range bytes
-    /// (a chunk range is a content-addressed byte range, like the snapshot sets),
-    /// or with [`Self::SnapshotNotFound`] if the range is unavailable.
-    GetKnownHashChunk {
-        /// The chunk index to fetch.
-        index: u32,
-        /// The byte offset into the deterministic chunk bytes.
-        offset: u64,
-        /// The number of bytes to return.
-        len: u32,
-    },
-
-    /// A `getnctree` message: request the serialized note commitment tree of a
-    /// shielded pool, as of a block height.
-    ///
-    /// This is a Zebra-specific extension. See
-    /// `docs/design/p2p-snapshot-distribution.md`.
-    ///
-    /// The peer responds with a [`Self::NoteCommitmentTree`] message, or with
-    /// [`Self::SnapshotNotFound`] if the tree is unavailable.
-    GetNoteCommitmentTree {
-        /// The shielded pool whose tree is requested.
-        pool: ShieldedPool,
-        /// The block height at which to snapshot the tree.
-        height: block::Height,
-    },
-
-    /// An `nctree` message: the serialized note commitment tree bytes.
-    ///
-    /// Length-delimited; the byte count is bounded by `MAX_PROTOCOL_MESSAGE_LEN`.
-    NoteCommitmentTree {
-        /// The serialized tree bytes.
-        bytes: Vec<u8>,
-    },
-
-    /// A `getsnap` message: request a byte range of a snapshot set (the
-    /// unspent-output set or the address-balance set) at the max checkpoint
-    /// height.
-    ///
-    /// This is a Zebra-specific extension. See
-    /// `docs/design/p2p-snapshot-distribution.md`.
-    ///
-    /// The peer responds with a [`Self::Snapshot`] message carrying the range
-    /// bytes, or with [`Self::SnapshotNotFound`] if the range is out of bounds
-    /// or exceeds the per-request limit.
-    GetSnapshot {
-        /// Which snapshot set the range belongs to.
-        set: SnapshotSet,
-        /// The byte offset into the set.
-        offset: u64,
-        /// The number of bytes to return.
-        len: u32,
-    },
-
-    /// A `snap` message: a byte range of a snapshot set.
-    ///
-    /// Length-delimited; the byte count is bounded by `MAX_PROTOCOL_MESSAGE_LEN`.
-    Snapshot {
-        /// The snapshot range bytes.
-        bytes: Vec<u8>,
-    },
-
-    /// A `snapnf` message: a requested snapshot artifact is unavailable.
-    ///
-    /// Sent in response to a [`Self::GetKnownHashChunk`],
-    /// [`Self::GetNoteCommitmentTree`], or [`Self::GetSnapshot`] request that the
-    /// peer cannot satisfy. This is a normal negative answer, not a protocol
-    /// error.
-    SnapshotNotFound,
-}
-
-/// Selects which snapshot set a [`Message::GetSnapshot`] range request targets.
-///
-/// Both sets are served as opaque content-addressed byte ranges; this
-/// discriminator tells the serving peer which set to read from.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-#[repr(u8)]
-pub enum SnapshotSet {
-    /// The unspent transparent output set at the max checkpoint height.
-    UnspentOutputs = 0,
-
-    /// The address-balance set at the max checkpoint height.
-    AddressBalances = 1,
 }
 
 /// The maximum size of the user agent string.
@@ -616,21 +524,6 @@ impl fmt::Display for Message {
             Message::FilterLoad { .. } => "filterload".to_string(),
             Message::FilterAdd { .. } => "filteradd".to_string(),
             Message::FilterClear => "filterclear".to_string(),
-
-            Message::GetKnownHashChunk { index, offset, len } => {
-                format!("getkhchunk {{ index: {index}, offset: {offset}, len: {len} }}")
-            }
-            Message::GetNoteCommitmentTree { pool, height } => {
-                format!("getnctree {{ pool: {pool:?}, height: {} }}", height.0)
-            }
-            Message::NoteCommitmentTree { bytes } => {
-                format!("nctree {{ bytes: {} }}", bytes.len())
-            }
-            Message::GetSnapshot { set, offset, len } => {
-                format!("getsnap {{ set: {set:?}, offset: {offset}, len: {len} }}")
-            }
-            Message::Snapshot { bytes } => format!("snap {{ bytes: {} }}", bytes.len()),
-            Message::SnapshotNotFound => "snapnf".to_string(),
         })
     }
 }
@@ -658,12 +551,6 @@ impl Message {
             Message::FilterLoad { .. } => "filterload",
             Message::FilterAdd { .. } => "filteradd",
             Message::FilterClear => "filterclear",
-            Message::GetKnownHashChunk { .. } => "getkhchunk",
-            Message::GetNoteCommitmentTree { .. } => "getnctree",
-            Message::NoteCommitmentTree { .. } => "nctree",
-            Message::GetSnapshot { .. } => "getsnap",
-            Message::Snapshot { .. } => "snap",
-            Message::SnapshotNotFound => "snapnf",
         }
     }
 }

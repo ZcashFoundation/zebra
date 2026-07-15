@@ -204,7 +204,7 @@ impl ZebraDb {
     /// `H_max`. Per-block `block_info` value pools *below* the tip remain
     /// placeholders for the consume phase (their deltas were never resolved) —
     /// the already-accepted assumeUTXO intermediate-RPC divergence
-    /// (`docs/design/p2p-snapshot-distribution.md` §3.3).
+    /// (`docs/design/snapshot-distribution.md` §3.3).
     pub fn bulk_load_chain_value_pools(
         &self,
         value_pool: ValueBalance<NonNegative>,
@@ -356,7 +356,7 @@ impl DiskWriteBatch {
     /// the column family — so this records the correct block **size** with a zero
     /// value pool. The intermediate-height per-block value-pool RPC delta is
     /// therefore incomplete during the consume phase, which is the already-accepted
-    /// assumeUTXO RPC divergence (`docs/design/p2p-snapshot-distribution.md` §3.3).
+    /// assumeUTXO RPC divergence (`docs/design/snapshot-distribution.md` §3.3).
     ///
     /// The batch is modified by this method and written by the caller.
     pub fn prepare_block_info_only_batch(&mut self, db: &ZebraDb, finalized: &FinalizedBlock) {

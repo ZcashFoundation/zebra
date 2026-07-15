@@ -1,16 +1,14 @@
 //! A local-file source for the snapshot-consume artifacts.
 //!
-//! In snapshot-consume mode the engine normally fetches each artifact (known-hash
-//! chunks, note commitment trees, the unspent-output set, the address-balance
-//! set, and the chain value pools) from peers over the P2P snapshot-distribution
-//! extension. This module is the **local-file alternative**: when
-//! [`sync.known_hash_local_source_dir`](crate::components::sync::Config::known_hash_local_source_dir)
-//! is set, the consumer reads each artifact from a directory laid out by
-//! `emit-snapshot --emit-files` instead of issuing the P2P request, and verifies
-//! it against the *same* pinned SHA-256 constants. This lets a single node drive a
-//! full snapshot-consume sync without any peer speaking the P2P extension — the
-//! solo test path for `docs/design/p2p-snapshot-distribution.md`. Blocks
-//! themselves still come over normal P2P / known-hash.
+//! In snapshot-consume mode the engine reads each artifact (known-hash chunks,
+//! note commitment trees, the unspent-output set, the address-balance set, and
+//! the chain value pools) from a local directory named by
+//! [`sync.known_hash_local_source_dir`](crate::components::sync::Config::known_hash_local_source_dir):
+//! the directory the installer downloaded from the release assets, or one laid
+//! out locally by `emit-snapshot --emit-files`. Every artifact is verified
+//! against the pinned SHA-256 constants regardless of where the directory came
+//! from (`docs/design/snapshot-distribution.md`). Blocks themselves still come
+//! over normal P2P / known-hash.
 //!
 //! # File layout
 //!
@@ -32,26 +30,26 @@
 //!
 //! The chunk files hold the **exact** `chunk_v2` bytes whose SHA-256 is the pinned
 //! `chunk_hashes[index]` constant, so a chunk read from a file verifies through
-//! the identical [`verify_chunk_bytes`](super::verify_chunk_bytes) gate the P2P
-//! path uses. The tree records hold the canonical `tree.as_bytes()` serialization
-//! (the same bytes the P2P `NoteCommitmentTree` response carries), so the
-//! consumer's recomputed `.root()` matches the chunk's recorded root. The two set
-//! files hold the same sorted bytes the P2P range serve returns, so the assembled
-//! SHA-256 matches the pinned set hash. The value-pool file holds the 40-byte
-//! `ValueBalance::to_bytes` encoding.
+//! the [`verify_chunk_bytes`](super::verify_chunk_bytes) gate. The tree records
+//! hold the canonical `tree.as_bytes()` serialization, so the consumer's
+//! recomputed `.root()` matches the chunk's recorded root. The two set files
+//! hold the sorted set bytes whose SHA-256 matches the pinned set hash. The
+//! value-pool file holds the 40-byte `ValueBalance::to_bytes` encoding.
 //!
 //! See [`SnapshotSource`](super::SnapshotSource) for the single dispatch point
-//! that selects P2P vs local files.
+//! the chunk reads go through.
 
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
 };
 
 use thiserror::Error;
 
-use zebra_network::ShieldedPool;
+use zebra_chain::parameters::known_hashes::HASHES_PER_CHUNK;
+use zebra_state::ShieldedPool;
 
 /// The sub-directory under the local source dir holding the per-index chunk
 /// files.
@@ -83,6 +81,22 @@ pub const CHAIN_VALUE_POOLS_FILE: &str = "chain-value-pools.bin";
 pub fn chunk_file_name(index: u32) -> String {
     format!("chunk-{index:05}.bin")
 }
+
+/// The maximum serialized size of a v2 known-hash chunk, used to refuse an
+/// oversized chunk artifact file before reading it into memory.
+///
+/// A full chunk holds `HASHES_PER_CHUNK` blocks. The v2 layout is the 16-byte
+/// header, `n × 32` hashes, `n × 1` size hints, then two tree-root sections.
+/// Each tree section has at most one record per height (`4 + 32` bytes), giving a
+/// generous upper bound of `16 + n × (32 + 1) + 2 × (4 + n × 36)`. An honest
+/// chunk always fits; a corrupt or wrong file cannot grow the read past it.
+pub const MAX_V2_CHUNK_BYTES: u64 = 16
+    + HASHES_PER_CHUNK as u64 * (HASH_BYTES_U64 + 1)
+    + 2 * (4 + HASHES_PER_CHUNK as u64 * (4 + HASH_BYTES_U64));
+
+/// The byte length of a single 32-byte hash, as a `u64`, for the
+/// [`MAX_V2_CHUNK_BYTES`] bound.
+const HASH_BYTES_U64: u64 = 32;
 
 /// Errors reading a snapshot artifact from the local-file source.
 #[derive(Debug, Error)]
@@ -119,26 +133,57 @@ pub enum LocalSourceError {
         /// Why the file is malformed.
         reason: String,
     },
+
+    /// An artifact file is larger than any valid instance of its artifact could
+    /// be, so it is refused before it is read into memory.
+    #[error(
+        "the local snapshot {artifact} file at {} is {len} bytes, over the {cap}-byte \
+         maximum for a valid artifact; refusing to read it",
+        path.display()
+    )]
+    Oversized {
+        /// A short description of the artifact (`chunk 3`).
+        artifact: String,
+        /// The path of the oversized file.
+        path: PathBuf,
+        /// The file's reported length.
+        len: u64,
+        /// The maximum valid length.
+        cap: u64,
+    },
 }
 
 /// A read-only view over a directory of snapshot artifacts laid out by
-/// `emit-snapshot --emit-files`.
+/// `emit-snapshot --emit-files` (and downloaded by the installer).
 ///
-/// Cloning is cheap (just the directory path). All reads are synchronous file
-/// I/O; the consumer wraps each read in `spawn_blocking` where it matters.
-/// Verification against the pinned hashes is the caller's job — this type only
-/// reads the raw bytes, exactly as the P2P path delivers raw bytes before
-/// verification.
+/// Cloning is cheap (the directory path plus shared tree caches), and clones
+/// share the parsed tree caches. All reads are synchronous file I/O; the
+/// consumers wrap each read in `spawn_blocking` (the engine's tree-fetch stage
+/// and the chunk source both do). Verification against the pinned hashes is the
+/// caller's job — this type only reads the raw bytes.
 #[derive(Clone, Debug)]
 pub struct LocalSnapshotSource {
     /// The root directory of the local artifact set.
     dir: PathBuf,
+
+    /// The parsed sapling tree records, shared across clones and parsed at most
+    /// once: the engine reads one tree per updating height, so re-parsing the
+    /// whole records file per read would be quadratic in the record count.
+    sapling_trees: Arc<OnceLock<Arc<BTreeMap<u32, Vec<u8>>>>>,
+
+    /// The parsed orchard tree records, like
+    /// [`sapling_trees`](Self::sapling_trees).
+    orchard_trees: Arc<OnceLock<Arc<BTreeMap<u32, Vec<u8>>>>>,
 }
 
 impl LocalSnapshotSource {
     /// Returns a local source rooted at `dir`.
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            dir: dir.into(),
+            sapling_trees: Arc::new(OnceLock::new()),
+            orchard_trees: Arc::new(OnceLock::new()),
+        }
     }
 
     /// The root directory of this source.
@@ -148,31 +193,71 @@ impl LocalSnapshotSource {
 
     /// Reads the raw v2 chunk bytes for `index` from `chunks/chunk-<index>.bin`.
     ///
-    /// Returns the exact bytes written by the emitter, suitable for the identical
-    /// [`verify_chunk_bytes`](super::verify_chunk_bytes) gate the P2P path uses
-    /// (SHA-256 vs the pinned `chunk_hashes[index]`). A missing file is an error,
-    /// not a silent miss: a configured local source that lacks a needed chunk is a
-    /// misconfiguration the operator must fix.
+    /// Returns the exact bytes written by the emitter, suitable for the
+    /// [`verify_chunk_bytes`](super::verify_chunk_bytes) gate (SHA-256 vs the
+    /// pinned `chunk_hashes[index]`). A missing file is an error, not a silent
+    /// miss: a configured local source that lacks a needed chunk is a
+    /// misconfiguration the operator must fix. A file over
+    /// [`MAX_V2_CHUNK_BYTES`] is refused before it is read into memory: no
+    /// valid chunk is that large, so the bound only rejects wrong or corrupt
+    /// files.
     pub fn read_chunk(&self, index: u32) -> Result<Vec<u8>, LocalSourceError> {
         let path = self.dir.join(CHUNKS_SUBDIR).join(chunk_file_name(index));
+
+        if let Ok(metadata) = fs::metadata(&path) {
+            if metadata.len() > MAX_V2_CHUNK_BYTES {
+                return Err(LocalSourceError::Oversized {
+                    artifact: format!("chunk {index}"),
+                    path,
+                    len: metadata.len(),
+                    cap: MAX_V2_CHUNK_BYTES,
+                });
+            }
+        }
+
         read_file(&path, || format!("chunk {index}"))
     }
 
-    /// Reads the canonical note-commitment-tree frontier bytes for `pool` as of
-    /// `height` from the relevant `*-trees.bin` records file.
+    /// Returns the canonical note-commitment-tree frontier bytes for `pool` as
+    /// of `height`, from the relevant `*-trees.bin` records file.
     ///
-    /// The records are `(height u32 LE, len u32 LE, frontier-bytes)` sorted by
-    /// height; this loads (and caches nothing — the caller batches by parsing the
-    /// whole file once via [`read_all_trees`](Self::read_all_trees) when it needs
-    /// many). Returns `None` if no record for `height` exists (a non-updating
-    /// height the chunk records no root for, so the engine folds instead).
+    /// The records file is read and parsed at most once per pool (via
+    /// [`read_all_trees`](Self::read_all_trees)); the parsed map is cached and
+    /// shared across clones, so per-height reads are map lookups. Returns
+    /// `None` if no record for `height` exists (a height the artifact ships no
+    /// frontier for, so the engine folds instead).
     pub fn read_tree(
         &self,
         pool: ShieldedPool,
         height: u32,
     ) -> Result<Option<Vec<u8>>, LocalSourceError> {
-        let trees = self.read_all_trees(pool)?;
+        let trees = self.all_trees_cached(pool)?;
         Ok(trees.get(&height).cloned())
+    }
+
+    /// Returns the shared parsed tree map for `pool`, parsing the records file
+    /// on the first call.
+    ///
+    /// A parse or read failure is returned each call rather than cached: the
+    /// error path stays slow, but a fixed file works on the next attempt. If
+    /// two callers race the first parse, the first `set` wins and the loser's
+    /// identical map is dropped (the file is read-only, so both parses agree).
+    fn all_trees_cached(
+        &self,
+        pool: ShieldedPool,
+    ) -> Result<Arc<BTreeMap<u32, Vec<u8>>>, LocalSourceError> {
+        let cell = match pool {
+            ShieldedPool::Sapling => &self.sapling_trees,
+            ShieldedPool::Orchard => &self.orchard_trees,
+        };
+
+        if let Some(trees) = cell.get() {
+            return Ok(trees.clone());
+        }
+
+        let trees = Arc::new(self.read_all_trees(pool)?);
+        let _ = cell.set(trees.clone());
+        Ok(cell.get().cloned().unwrap_or(trees))
     }
 
     /// Parses the whole `*-trees.bin` records file for `pool` into a map from
@@ -234,36 +319,15 @@ impl LocalSnapshotSource {
         Ok(trees)
     }
 
-    /// Reads a byte range `[offset, offset + len)` of a snapshot set file (the
-    /// unspent-output or address-balance set), clamped to the file end.
+    /// Reads a whole snapshot set file (the unspent-output or address-balance
+    /// set).
     ///
-    /// `file` is one of [`UNSPENT_OUTPUTS_FILE`] / [`ADDRESS_BALANCES_FILE`]. The
-    /// returned bytes are the exact sorted set bytes the P2P range serve returns,
-    /// so the assembled set's SHA-256 matches the pinned set hash. A range
-    /// starting at or past the file end returns an empty slice (the assembly
-    /// loop's end marker).
-    pub fn read_set_range(
-        &self,
-        file: &str,
-        offset: u64,
-        len: u32,
-    ) -> Result<Vec<u8>, LocalSourceError> {
+    /// `file` is one of [`UNSPENT_OUTPUTS_FILE`] / [`ADDRESS_BALANCES_FILE`].
+    /// The returned bytes are the exact sorted set bytes whose SHA-256 matches
+    /// the pinned set hash.
+    pub fn read_set(&self, file: &str) -> Result<Vec<u8>, LocalSourceError> {
         let path = self.dir.join(file);
-        let bytes = read_file(&path, || file.to_string())?;
-
-        let file_len = bytes.len() as u64;
-        if offset >= file_len {
-            return Ok(Vec::new());
-        }
-        // `offset < file_len <= usize::MAX` on every supported (>= 32-bit)
-        // platform, so the cast is exact.
-        let start = offset as usize;
-        let end = offset
-            .saturating_add(u64::from(len))
-            .min(file_len)
-            // The clamped end is `<= file_len <= usize::MAX`, so the cast is exact.
-            as usize;
-        Ok(bytes[start..end].to_vec())
+        read_file(&path, || file.to_string())
     }
 
     /// Reads the whole `chain-value-pools.bin` file (the 40-byte H_max

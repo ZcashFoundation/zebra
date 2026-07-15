@@ -341,7 +341,7 @@ impl SnapshotConsumeState {
     /// evidence that it is a non-survivor — it just was not yet created. Eliding
     /// it would drop a live output that sync continuing past `H_max` must keep,
     /// so elision must be refused for these heights. See finding #6 /
-    /// `docs/design/p2p-snapshot-distribution.md` §3.3.
+    /// `docs/design/snapshot-distribution.md` §3.3.
     fn created_above_h_max(&self, loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> bool {
         Self::output_location_height(loc_bytes) > self.h_max.0
     }

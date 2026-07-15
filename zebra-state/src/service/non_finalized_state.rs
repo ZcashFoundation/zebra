@@ -609,7 +609,7 @@ impl NonFinalizedState {
         // In snapshot-consume (assumeUTXO) mode, write the pre-fetched, verified
         // note commitment trees directly instead of folding the block's note
         // commitments — the throughput win of the snapshot path
-        // (`docs/design/p2p-snapshot-distribution.md` §3.2). The supplied trees
+        // (`docs/design/snapshot-distribution.md` §3.2). The supplied trees
         // are only consulted when the finalized state is in snapshot-consume mode
         // (so a normal sync always folds), and `push_with_supplied_trees` itself
         // falls back to folding whenever the trees are absent, unverifiable

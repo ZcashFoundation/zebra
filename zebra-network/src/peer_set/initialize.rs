@@ -195,12 +195,7 @@ where
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
-            // Advertise the known-hash snapshot-distribution capability so other
-            // Zebra peers know they can request known-hash chunks, note commitment
-            // trees, and snapshot ranges from us. `zcashd` peers ignore this bit.
-            .with_advertised_services(
-                PeerServices::NODE_NETWORK | PeerServices::NODE_KNOWN_HASH_SNAPSHOT,
-            )
+            .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)

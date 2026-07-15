@@ -225,7 +225,7 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
 /// the known-hash IBD engine in snapshot-consume (assumeUTXO) mode is verifiable
 /// against `block`'s header, and may therefore be written directly instead of
 /// folding the block's note commitments
-/// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+/// (`docs/design/snapshot-distribution.md` §3.2).
 ///
 /// Returns:
 /// - `Ok(true)` when the block header directly pins the supplied trees (the

@@ -339,7 +339,7 @@ impl Chain {
     /// Like [`Self::push`], but in snapshot-consume (assumeUTXO) mode optionally
     /// uses a pre-fetched, verified note commitment tree set supplied by the
     /// known-hash IBD engine instead of folding the block's note commitments
-    /// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+    /// (`docs/design/snapshot-distribution.md` §3.2).
     ///
     /// The supplied frontiers are only used when they verify against the block
     /// header (Sapling/Blossom era, where the header pins the Sapling root);
@@ -1482,7 +1482,7 @@ impl Chain {
     /// Tries to apply pre-fetched, verified `supplied` note commitment trees to
     /// `nct` for `contextually_valid`'s commit, instead of folding the block's
     /// note commitments (the snapshot-consume "tree supplied by download" path,
-    /// `docs/design/p2p-snapshot-distribution.md` §3.2).
+    /// `docs/design/snapshot-distribution.md` §3.2).
     ///
     /// Returns `Ok(true)` when the supplied sapling/orchard frontiers were
     /// written into `nct` and the caller may skip the fold, or `Ok(false)` when
@@ -1578,7 +1578,7 @@ impl Chain {
     ///
     /// In snapshot-consume (assumeUTXO) mode, `supplied_trees` may carry a
     /// pre-fetched, verified note commitment tree set from the known-hash IBD
-    /// engine (`docs/design/p2p-snapshot-distribution.md` §3.2). When present and
+    /// engine (`docs/design/snapshot-distribution.md` §3.2). When present and
     /// verifiable against the block header, the supplied sapling/orchard frontiers
     /// are written directly instead of folding the block's note commitments — the
     /// throughput win of the snapshot path. Outside snapshot-consume mode it is

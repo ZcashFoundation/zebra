@@ -15,9 +15,9 @@
 //! The byte layout is a deterministic function of the chain: any synced node
 //! regenerates a byte-identical chunk `N`, so `SHA-256(chunk N)` matches the
 //! pinned `chunk_hashes[N]` constant in [`KnownHashListSpec`](super::KnownHashListSpec).
-//! This is the trust root for P2P distribution (see
-//! `docs/design/p2p-snapshot-distribution.md`): peers regenerate chunks from
-//! their own finalized state, and downloaders verify them content-addressed
+//! This is the trust root for snapshot distribution (see
+//! `docs/design/snapshot-distribution.md`): `emit-snapshot` regenerates chunks
+//! from a synced finalized state, and downloaders verify them content-addressed
 //! against the pinned hashes.
 //!
 //! # Byte layout
@@ -111,7 +111,7 @@ pub struct TreeRoot {
 /// when it is `false` neither section is written and the lists are ignored.
 ///
 /// Used by the snapshot emitter (release-time constants updater) and by
-/// on-demand P2P serving, which must produce byte-identical output for the same
+/// on-demand regeneration, which must produce byte-identical output for the same
 /// inputs so the chunk SHA-256 is stable.
 ///
 /// # Panics

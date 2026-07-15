@@ -6,7 +6,7 @@
   validation is sync-test-gated.
 - Base: branch `ibd-engine`.
 - Related: `docs/design/known-hash-ibd.md` §7.3 (the any-order write pipeline),
-  `docs/design/p2p-snapshot-distribution.md` §1.1 (the RPC-only artifacts).
+  `docs/design/snapshot-distribution.md` §1.1 (the RPC-only artifacts).
 
 ## 1. Motivation
 
@@ -162,7 +162,7 @@ The RPC index DB **trails** the consensus DB, so after a crash it may be behind
 - Readers **tolerate trailing**: a read for an address whose most recent
   activity is above `rpc_index_tip` returns best-effort (the indexed prefix)
   rather than blocking. This is the same staleness RPC already accepts during
-  IBD (`docs/design/p2p-snapshot-distribution.md` §3.3). The non-finalized
+  IBD (`docs/design/snapshot-distribution.md` §3.3). The non-finalized
   overlay on top of the read is unchanged.
 
 ## 6. Config flag

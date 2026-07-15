@@ -2,8 +2,8 @@
 //!
 //! This column family stores known-hash chunks (the v2 chunk byte format defined
 //! in [`zebra_chain::parameters::known_hashes::chunk_v2`]) that have been
-//! downloaded from a peer and verified against the SHA-256 constants pinned in
-//! `zebra-chain`. See `docs/design/p2p-snapshot-distribution.md` for the overall
+//! read from the snapshot artifact directory and verified against the SHA-256 constants pinned in
+//! `zebra-chain`. See `docs/design/snapshot-distribution.md` for the overall
 //! architecture: the chunk *hashes* stay in `zebra-chain` as the trust root, but
 //! the verified chunk *bytes* live here in the state database rather than in
 //! shipped asset files.

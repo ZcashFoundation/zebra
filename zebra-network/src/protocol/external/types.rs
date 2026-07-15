@@ -147,18 +147,6 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
-
-        /// NODE_KNOWN_HASH_SNAPSHOT means that the node can serve the Zebra-specific
-        /// known-hash snapshot-distribution messages: known-hash chunks by index,
-        /// note commitment trees by height, and the unspent-output / address-balance
-        /// snapshot sets by range. See `docs/design/p2p-snapshot-distribution.md`.
-        ///
-        /// This uses bit 24, which is in the range (bits 24-31) reserved for
-        /// temporary experiments, so it does not need a ZIP allocation. `zcashd`
-        /// peers never set this bit, so Zebra only ever sends the custom messages
-        /// to peers that advertise it; the codec drops the unknown commands inbound
-        /// for any peer that does not understand them.
-        const NODE_KNOWN_HASH_SNAPSHOT = 1 << 24;
     }
 }
 

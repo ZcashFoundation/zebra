@@ -1,20 +1,18 @@
-//! Reading code for the P2P snapshot-distribution artifacts.
+//! Reading code for the snapshot-distribution artifacts.
 //!
 //! These functions generate, on demand and from the finalized state, the
-//! deterministic byte artifacts served over P2P by the inbound service:
+//! deterministic byte artifacts that `emit-snapshot` writes as release assets
+//! and that the snapshot-consume IBD engine verifies and loads:
 //!
 //! - **known-hash chunks** ([`known_hash_chunk_bytes`]): a `chunk_v2` encoding
 //!   of a 150,000-block span (block hashes, size hints, and the sapling/orchard
 //!   tree roots that update within the span);
 //! - **note commitment trees** ([`note_commitment_tree_bytes`]): the canonical
-//!   on-disk serialization of a sapling/orchard tree frontier as of a height;
-//! - **snapshot ranges** ([`unspent_outputs_range`], [`address_balances_range`]):
-//!   a byte range of the sorted unspent-output-location set or the sorted
-//!   address-balance set at the finalized tip.
+//!   on-disk serialization of a sapling/orchard tree frontier as of a height.
 //!
 //! Every artifact is a deterministic function of the chain, so every honest node
 //! produces byte-identical output that hashes to the pinned SHA-256 constants in
-//! `zebra-chain`. See `docs/design/p2p-snapshot-distribution.md`.
+//! `zebra-chain`. See `docs/design/snapshot-distribution.md`.
 
 use bincode::Options;
 
@@ -60,68 +58,6 @@ pub const ADDRESS_BALANCE_KEY_LEN: u64 = 21;
 /// first-output-location + 8-byte received total).
 pub const ADDRESS_BALANCE_VALUE_LEN: u64 = 24;
 
-/// The maximum number of bytes a single snapshot range request may return.
-///
-/// This keeps each [`Response::SnapshotRange`](crate::response::Response) well
-/// under the 2 MiB protocol frame, and bounds the work and memory a single
-/// untrusted request can cost the server.
-pub const MAX_SNAPSHOT_RANGE_BYTES: u64 = 1024 * 1024;
-
-/// Returns the requested byte range of the deterministic `chunk_v2` bytes for
-/// known-hash chunk `index`, or `None` if the request is malformed, over-limit,
-/// or out of bounds.
-///
-/// A full v2 chunk is up to ~4.72 MiB (150,000 blocks), which exceeds the 2 MiB
-/// `MAX_PROTOCOL_MESSAGE_LEN`, so a chunk can never be served in one message.
-/// Like the snapshot sets, chunks are served as `≤ MAX_SNAPSHOT_RANGE_BYTES`
-/// ranges over the deterministic chunk bytes; the consuming node reassembles the
-/// full chunk and verifies its SHA-256 against the pinned `chunk_hashes[index]`
-/// constant.
-///
-/// The full chunk bytes come from [`known_hash_chunk_bytes`] (the stored CF
-/// bytes if present, else generated on demand). Returns `None` when:
-///
-/// - `len` exceeds [`MAX_SNAPSHOT_RANGE_BYTES`] (bounds the work and memory one
-///   untrusted request can cost the server), or
-/// - the chunk has no blocks yet (`known_hash_chunk_bytes` is `None`), or
-/// - `offset` is at or past the end of the chunk (nothing to serve),
-///
-/// so the caller answers `NotFound` rather than dropping the peer. A range that
-/// begins inside the chunk but runs past the end returns a short final range
-/// (the reassembled chunk is verified by its total SHA-256).
-pub fn known_hash_chunk_range(db: &ZebraDb, index: u32, offset: u64, len: u32) -> Option<Vec<u8>> {
-    if u64::from(len) > MAX_SNAPSHOT_RANGE_BYTES {
-        return None;
-    }
-
-    let chunk = known_hash_chunk_bytes(db, index)?;
-
-    // A range starting exactly at the end of the chunk returns an empty range:
-    // the consumer's reassembly loop reads this short (empty) range as the chunk's
-    // end marker and stops, then verifies the reassembled bytes' total SHA-256. A
-    // range starting strictly past the end is out of bounds → `None` (NotFound).
-    let chunk_len = chunk.len() as u64;
-    if offset > chunk_len {
-        return None;
-    }
-    if offset == chunk_len {
-        return Some(Vec::new());
-    }
-
-    // The slice is bounded by the chunk length; `start` fits a usize because
-    // `offset < chunk_len <= usize::MAX` on every supported (>= 32-bit) platform.
-    let start = offset as usize;
-    // `offset + len` may run past the chunk end; clamp to the chunk length so the
-    // final range is short rather than out of bounds.
-    let end = offset
-        .saturating_add(u64::from(len))
-        .min(chunk_len)
-        // The clamped end is `<= chunk_len <= usize::MAX`, so the cast is exact.
-        as usize;
-
-    Some(chunk[start..end].to_vec())
-}
-
 /// Returns the `chunk_v2` bytes for known-hash chunk `index`, or `None` if the
 /// span has no blocks.
 ///
@@ -136,13 +72,9 @@ pub fn known_hash_chunk_range(db: &ZebraDb, index: u32, offset: u64, len: u32) -
 /// content-addressed requester verifies their SHA-256 against the pinned
 /// `chunk_hashes[index]` constant.
 ///
-/// This generates the *whole* chunk (up to ~4.72 MiB); the P2P serve path slices
-/// a `≤ MAX_SNAPSHOT_RANGE_BYTES` range out of it via [`known_hash_chunk_range`]
-/// to stay under the 2 MiB protocol frame.
-///
 /// Returns `None` when the span base is above the finalized tip (the chunk is
-/// entirely in the future), so the caller answers `NotFound` instead of an empty
-/// chunk that could never match a pinned hash.
+/// entirely in the future), so the caller reports the chunk as unavailable
+/// instead of producing an empty chunk that could never match a pinned hash.
 pub fn known_hash_chunk_bytes(db: &ZebraDb, index: u32) -> Option<Vec<u8>> {
     // Prefer the stored, already-verified chunk if it is resident in the CF.
     if let Some(stored) = db.known_hash_chunk(index) {
@@ -266,12 +198,12 @@ pub fn note_commitment_tree_bytes(
     }
 }
 
-/// Deserializes peer-supplied `pool` note-commitment-tree `bytes` and returns
+/// Deserializes source-supplied `pool` note-commitment-tree `bytes` and returns
 /// the tree's `.root()` as a 32-byte array, or `None` if the bytes do not
 /// deserialize.
 ///
 /// This is the inverse of [`note_commitment_tree_bytes`] for the
-/// snapshot-consume path: the bytes come from an untrusted peer, so unlike the
+/// snapshot-consume path: the bytes come from an untrusted artifact file, so unlike the
 /// state's internal `FromDisk` (which `expect`s a self-produced encoding), this
 /// returns `None` on a malformed encoding rather than panicking. The caller
 /// checks the returned root against the root recorded in the relevant
@@ -279,7 +211,7 @@ pub fn note_commitment_tree_bytes(
 ///
 /// The encoding is the same `bincode::DefaultOptions` serialization that
 /// [`note_commitment_tree_bytes`] produces (`tree.as_bytes()`), so an honest
-/// peer's bytes round-trip to a tree with the recorded root.
+/// artifact's bytes round-trip to a tree with the recorded root.
 pub fn note_commitment_tree_root_from_bytes(pool: ShieldedPool, bytes: &[u8]) -> Option<[u8; 32]> {
     let options = bincode::DefaultOptions::new();
     match pool {
@@ -294,13 +226,13 @@ pub fn note_commitment_tree_root_from_bytes(pool: ShieldedPool, bytes: &[u8]) ->
     }
 }
 
-/// Deserializes the optional peer-supplied sapling and orchard note-commitment-tree
+/// Deserializes the optional source-supplied sapling and orchard note-commitment-tree
 /// frontier `bytes` into a [`NoteCommitmentTrees`] for the snapshot-consume
 /// "tree supplied by download" commit path
-/// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+/// (`docs/design/snapshot-distribution.md` §3.2).
 ///
 /// Returns `None` when neither pool's bytes are supplied, or when any supplied
-/// bytes fail to deserialize (a corrupt or adversarial peer): the caller then
+/// bytes fail to deserialize (a corrupt or tampered artifact): the caller then
 /// falls back to folding. A missing pool keeps its default (empty) tree — the
 /// per-pool roots were already verified against the chunk's recorded roots by the
 /// IBD engine's tree-fetch lookahead before these bytes were buffered, and the
@@ -336,99 +268,6 @@ pub fn supplied_note_commitment_trees_from_bytes(
     }
 
     Some(trees)
-}
-
-/// Returns the requested byte range of the sorted unspent-output-location set at
-/// the finalized tip, or `None` if the request is malformed or out of bounds.
-///
-/// The set is the ascending concatenation of fixed-size
-/// [`UNSPENT_OUTPUT_RECORD_LEN`]-byte records. Returns `None` when `len` exceeds
-/// [`MAX_SNAPSHOT_RANGE_BYTES`], or when `offset`/`len` are not record-aligned,
-/// or when the requested range starts past the end of the set, so the caller
-/// answers `NotFound` rather than dropping the peer.
-pub fn unspent_outputs_range(db: &ZebraDb, offset: u64, len: u32) -> Option<Vec<u8>> {
-    let len = u64::from(len);
-    if len > MAX_SNAPSHOT_RANGE_BYTES
-        || offset % UNSPENT_OUTPUT_RECORD_LEN != 0
-        || len % UNSPENT_OUTPUT_RECORD_LEN != 0
-    {
-        return None;
-    }
-
-    let start_record = offset / UNSPENT_OUTPUT_RECORD_LEN;
-    let wanted_records = len / UNSPENT_OUTPUT_RECORD_LEN;
-
-    // Stream only the requested window: the helper advances to `start_record`,
-    // copies up to `wanted_records`, and stops — it never materializes or scans
-    // the multi-million-entry set past the window.
-    let mut out: Vec<u8> = Vec::with_capacity(len as usize);
-    let total =
-        db.for_each_unspent_output_location_bytes_range(start_record, wanted_records, |record| {
-            out.extend_from_slice(record)
-        });
-
-    // `None` ⇒ the window filled, so the request was in-bounds. `Some(total)` ⇒
-    // the iterator reached the end first. A range that starts strictly past the
-    // last record (`start_record > total`) is out of bounds: answer `NotFound`
-    // rather than dropping the peer. A range starting exactly at the end
-    // (`start_record == total`) returns an empty range, and one starting inside
-    // the set but running past the end returns a short final range (the
-    // reassembled set is verified by its total SHA-256).
-    if let Some(total) = total {
-        if start_record > total {
-            return None;
-        }
-    }
-
-    Some(out)
-}
-
-/// Returns the requested byte range of the sorted address-balance set at the
-/// finalized tip, or `None` if the request is malformed or out of bounds.
-///
-/// The set is the ascending-by-address concatenation of fixed-size
-/// [`ADDRESS_BALANCE_RECORD_LEN`]-byte records (21-byte address + 32-byte
-/// balance-location value). Bounds are enforced exactly as in
-/// [`unspent_outputs_range`].
-pub fn address_balances_range(db: &ZebraDb, offset: u64, len: u32) -> Option<Vec<u8>> {
-    let len = u64::from(len);
-    if len > MAX_SNAPSHOT_RANGE_BYTES
-        || offset % ADDRESS_BALANCE_RECORD_LEN != 0
-        || len % ADDRESS_BALANCE_RECORD_LEN != 0
-    {
-        return None;
-    }
-
-    let start_record = offset / ADDRESS_BALANCE_RECORD_LEN;
-    let wanted_records = len / ADDRESS_BALANCE_RECORD_LEN;
-
-    let mut out: Vec<u8> = Vec::with_capacity(len as usize);
-    let total = db.for_each_address_balance_bytes_range(
-        start_record,
-        wanted_records,
-        |address_bytes, value_bytes| {
-            // Each record is a fixed 21-byte key + 24-byte value; the on-disk
-            // encoding guarantees those lengths (ADDRESS_BALANCE_KEY_LEN /
-            // ADDRESS_BALANCE_VALUE_LEN), so the concatenation stays
-            // record-aligned. Skip any record whose lengths disagree so a future
-            // format change can't silently desync the framing.
-            if address_bytes.len() as u64 == ADDRESS_BALANCE_KEY_LEN
-                && value_bytes.len() as u64 == ADDRESS_BALANCE_VALUE_LEN
-            {
-                out.extend_from_slice(address_bytes);
-                out.extend_from_slice(value_bytes);
-            }
-        },
-    );
-
-    // Out-of-bounds / short-final-range handling matches `unspent_outputs_range`.
-    if let Some(total) = total {
-        if start_record > total {
-            return None;
-        }
-    }
-
-    Some(out)
 }
 
 #[cfg(test)]
@@ -510,67 +349,9 @@ mod tests {
         assert_eq!(bytes, bytes_again, "chunk generation is deterministic");
     }
 
-    /// Fetching a chunk in `MAX_SNAPSHOT_RANGE_BYTES` ranges and reassembling
-    /// them reproduces the whole chunk, and the end-of-chunk semantics
-    /// (empty range at the exact end, `None` strictly past it) hold.
-    #[test]
-    fn known_hash_chunk_range_reassembles_whole_chunk() {
-        let _init_guard = zebra_test::init();
-
-        let state = populated_mainnet_state();
-        let db = &state.db;
-
-        let whole = known_hash_chunk_bytes(db, 0).expect("chunk 0 is generated");
-
-        // Reassemble the whole chunk from small (4-byte) ranges, exercising the
-        // ranged transfer path's offset arithmetic and short-final-range stop.
-        let step = 4u32;
-        let mut assembled = Vec::new();
-        let mut offset = 0u64;
-        loop {
-            let range = known_hash_chunk_range(db, 0, offset, step)
-                .expect("an in-bounds chunk range is served");
-            if range.is_empty() {
-                break;
-            }
-            offset += range.len() as u64;
-            assembled.extend_from_slice(&range);
-        }
-        assert_eq!(assembled, whole, "ranged transfer reassembles the chunk");
-
-        // A range starting exactly at the end returns an empty range (the end
-        // marker); strictly past the end is out of bounds (`None`).
-        let end = whole.len() as u64;
-        assert_eq!(
-            known_hash_chunk_range(db, 0, end, step),
-            Some(Vec::new()),
-            "a range at the exact end is an empty end marker",
-        );
-        assert_eq!(
-            known_hash_chunk_range(db, 0, end + 1, step),
-            None,
-            "a range past the end is out of bounds",
-        );
-
-        // An over-limit range length is rejected.
-        let over_limit = (MAX_SNAPSHOT_RANGE_BYTES + 1) as u32;
-        assert_eq!(
-            known_hash_chunk_range(db, 0, 0, over_limit),
-            None,
-            "an over-limit chunk range is rejected",
-        );
-
-        // A chunk index above the tip is `None`, like the whole-chunk serve.
-        assert_eq!(
-            known_hash_chunk_range(db, u32::MAX, 0, step),
-            None,
-            "an above-tip chunk range is None",
-        );
-    }
-
-    /// The address-balance serve emits fixed 45-byte records (21-byte key +
-    /// 24-byte value), matching `ADDRESS_BALANCE_RECORD_LEN`, so the ranged
-    /// framing stays record-aligned.
+    /// The address-balance set emits fixed 45-byte records (21-byte key +
+    /// 24-byte value), matching `ADDRESS_BALANCE_RECORD_LEN`, so the emitted
+    /// set file and the consume-side framing stay record-aligned.
     #[test]
     fn address_balance_record_length_matches_emitted_bytes() {
         let _init_guard = zebra_test::init();
@@ -583,7 +364,6 @@ mod tests {
         let state = populated_mainnet_state();
         let db = &state.db;
 
-        let mut records = 0u64;
         db.for_each_address_balance_bytes(|key, value| {
             assert_eq!(
                 key.len() as u64,
@@ -595,27 +375,7 @@ mod tests {
                 ADDRESS_BALANCE_VALUE_LEN,
                 "balance value is exactly ADDRESS_BALANCE_VALUE_LEN bytes",
             );
-            records += 1;
         });
-
-        // The full set served from offset 0 is record-aligned to the 45-byte
-        // record length. The request length must itself be record-aligned (the
-        // serve rejects misaligned lengths), and the largest such length under
-        // the per-request limit covers the whole small genesis-era set.
-        let aligned_len = (MAX_SNAPSHOT_RANGE_BYTES / ADDRESS_BALANCE_RECORD_LEN
-            * ADDRESS_BALANCE_RECORD_LEN) as u32;
-        let full = address_balances_range(db, 0, aligned_len)
-            .expect("an in-bounds address-balance range is served");
-        assert_eq!(
-            full.len() as u64 % ADDRESS_BALANCE_RECORD_LEN,
-            0,
-            "served address-balance bytes are record aligned",
-        );
-        assert_eq!(
-            full.len() as u64,
-            records * ADDRESS_BALANCE_RECORD_LEN,
-            "the served bytes hold exactly `records` fixed-size records",
-        );
     }
 
     /// A chunk that has been written into the `known_hash_chunk` column family is
@@ -639,8 +399,8 @@ mod tests {
         );
     }
 
-    /// A chunk index entirely above the finalized tip returns `None`, so the
-    /// inbound handler answers `NotFound` rather than an unmatchable empty chunk.
+    /// A chunk index entirely above the finalized tip returns `None`, rather
+    /// than an unmatchable empty chunk.
     #[test]
     fn known_hash_chunk_serve_above_tip_is_none() {
         let _init_guard = zebra_test::init();
@@ -660,51 +420,6 @@ mod tests {
             known_hash_chunk_bytes(db, u32::MAX),
             None,
             "an overflowing chunk index returns None",
-        );
-    }
-
-    /// Snapshot range requests enforce their size and alignment bounds, returning
-    /// `None` (so the peer is never dropped) for malformed or over-limit ranges.
-    #[test]
-    fn snapshot_range_bounds_are_enforced() {
-        let _init_guard = zebra_test::init();
-
-        let state = populated_mainnet_state();
-        let db = &state.db;
-
-        // Over the per-request byte limit.
-        let over_limit = (MAX_SNAPSHOT_RANGE_BYTES + UNSPENT_OUTPUT_RECORD_LEN) as u32;
-        assert_eq!(
-            unspent_outputs_range(db, 0, over_limit),
-            None,
-            "an over-limit unspent-output range is rejected",
-        );
-        assert_eq!(
-            address_balances_range(db, 0, over_limit),
-            None,
-            "an over-limit address-balance range is rejected",
-        );
-
-        // Misaligned offset / length (not a record multiple).
-        assert_eq!(
-            unspent_outputs_range(db, 1, UNSPENT_OUTPUT_RECORD_LEN as u32),
-            None,
-            "a misaligned unspent-output offset is rejected",
-        );
-        assert_eq!(
-            unspent_outputs_range(db, 0, 3),
-            None,
-            "a misaligned unspent-output length is rejected",
-        );
-
-        // A well-formed, in-bounds request from offset 0 succeeds and is record
-        // aligned (it may be empty if the genesis blocks left no unspent outputs).
-        let range = unspent_outputs_range(db, 0, MAX_SNAPSHOT_RANGE_BYTES as u32)
-            .expect("an in-bounds unspent-output range is served");
-        assert_eq!(
-            range.len() as u64 % UNSPENT_OUTPUT_RECORD_LEN,
-            0,
-            "served unspent-output bytes are record aligned",
         );
     }
 
@@ -735,7 +450,7 @@ mod tests {
     /// The served tree bytes deserialize back to a root matching the one the
     /// state records in the known-hash chunk for the same height, so a consuming
     /// node's `note_commitment_tree_root_from_bytes` check passes for an honest
-    /// peer's bytes and fails for garbage.
+    /// artifact's bytes and fails for garbage.
     #[test]
     fn served_tree_root_matches_chunk_record() {
         let _init_guard = zebra_test::init();

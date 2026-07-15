@@ -50,11 +50,6 @@ pub mod fetch;
 pub mod semantic;
 pub mod tree;
 
-/// The number of peers asked for a snapshot artifact (chunk, tree, or range)
-/// before giving up. Generous: deep-history artifacts are servable by any synced
-/// peer, and a transient miss should not abort the engine.
-pub(crate) const SNAPSHOT_FETCH_ATTEMPTS: u32 = 8;
-
 #[cfg(test)]
 mod tests;
 
@@ -245,6 +240,27 @@ where
 
         let mandatory_floor = self.network.mandatory_checkpoint_height();
 
+        // Snapshot-consume sync reads every artifact from the local artifact
+        // directory, so the pairing is validated up front — before peers
+        // connect or any asset set is opened and hashed.
+        let local_source_dir = if self.config.snapshot_consume_sync {
+            let Some(dir) = self.config.known_hash_local_source_dir.clone() else {
+                // Without the artifact directory there is nothing to consume
+                // from: a misconfiguration, not a retryable engine failure.
+                return Err(eyre!(
+                    "sync.snapshot_consume_sync is enabled, but \
+                     sync.known_hash_local_source_dir is not set; point it at the \
+                     snapshot artifact directory downloaded by the installer \
+                     (or emitted by `zebrad emit-snapshot --emit-files`), \
+                     or disable snapshot_consume_sync",
+                )
+                .into());
+            };
+            Some(dir)
+        } else {
+            None
+        };
+
         let mut restarts: u32 = 0;
         let mut failures_without_progress: u32 = 0;
         let mut last_start_height: Option<block::Height> = None;
@@ -273,38 +289,6 @@ where
                 });
             }
 
-            // Re-opened on every restart: the engine consumes the list, and
-            // restarts are rare enough that re-verifying the assets is
-            // cheaper than holding a second copy across the whole run.
-            //
-            // Opening reads and hashes the full asset set (~103 MB on
-            // Mainnet), so it runs on a blocking thread instead of stalling
-            // the async runtime.
-            let open_result = tokio::task::spawn_blocking({
-                let network = self.network.clone();
-                let list_dir = self.config.known_hash_list_dir.clone();
-                move || KnownHashList::open(&network, list_dir.as_deref())
-            })
-            .await?;
-
-            let list = match open_result {
-                Ok(Some(list)) => list,
-                // Unreachable: `for_network()` returned a spec just above, and
-                // `open()` only returns `None` when there is no spec.
-                Ok(None) => return Ok(IbdOutcome::Declined(DeclineReason::NoList)),
-                Err(error @ KnownHashError::AssetsNotFound { .. }) => {
-                    // With the checkpoint verifier removed, the engine is the
-                    // only path that can commit blocks at or below the
-                    // mandatory floor: a missing asset set is a hard,
-                    // actionable error, never a silent fallback (design doc
-                    // §6.3).
-                    return Err(error.into());
-                }
-                // Corrupt, tampered, or unreadable assets: surface the error
-                // instead of silently syncing without the engine.
-                Err(error) => return Err(error.into()),
-            };
-
             // Every (re)start re-derives the first uncommitted height from
             // the state tip (design doc §4.7).
             let next_commit = tip_height.map_or(block::Height(0), |tip| {
@@ -320,37 +304,26 @@ where
 
             info!(
                 ?next_commit,
-                list_max_height = ?list.max_height(),
+                list_max_height = ?spec.max_height,
                 restarts,
                 snapshot_consume = self.config.snapshot_consume_sync,
                 "starting the known-hash IBD engine",
             );
 
             // In snapshot-consume mode the engine reads hashes from the
-            // `known_hash_chunk` column family (fetching missing chunks from
-            // peers and verifying them against the pinned hashes), and bootstraps
-            // the downloaded snapshot sets before syncing. Otherwise it reads the
-            // bundled `.bin` list directly. Both paths run the same generic
-            // engine over a `HashSource`.
-            let run_result = if self.config.snapshot_consume_sync {
-                // The CF-backed source fetches chunks through the snapshot source
-                // (P2P peers, or local files when `known_hash_local_source_dir`
-                // is set) and reads/persists them through the state; it has no v1
-                // `.bin` fallback (the `list` opened above is unused in this mode
-                // — it carries no per-height tree roots and could silently
-                // disagree with the v2 chunks).
-                let _ = list;
-                let snapshot_source = match self.config.known_hash_local_source_dir.clone() {
-                    Some(dir) => {
-                        info!(
-                            local_source = %dir.display(),
-                            "snapshot-consume sync is reading artifacts from local files \
-                             instead of P2P (solo-sync test path)",
-                        );
-                        consume::SnapshotSource::local_files(dir, self.peer_set.clone())
-                    }
-                    None => consume::SnapshotSource::p2p(self.peer_set.clone()),
-                };
+            // `known_hash_chunk` column family (reading missing chunks from the
+            // artifact directory and verifying them against the pinned hashes),
+            // and the bundled v1 `.bin` list is never opened — it carries no
+            // per-height tree roots and could silently disagree with the v2
+            // chunks. Otherwise it reads the bundled `.bin` list directly. Both
+            // paths run the same generic engine over a `HashSource`.
+            let run_result = if let Some(dir) = &local_source_dir {
+                info!(
+                    local_source = %dir.display(),
+                    "snapshot-consume sync is reading artifacts from the local \
+                     artifact directory",
+                );
+                let snapshot_source = consume::LocalSnapshotSource::new(dir.clone());
                 let source = CfHashSource::new(spec, snapshot_source, self.state.clone());
                 Self::bootstrap_and_run_engine(
                     self.network.clone(),
@@ -364,6 +337,38 @@ where
                 )
                 .await
             } else {
+                // Re-opened on every restart: the engine consumes the list, and
+                // restarts are rare enough that re-verifying the assets is
+                // cheaper than holding a second copy across the whole run.
+                //
+                // Opening reads and hashes the full asset set (~103 MB on
+                // Mainnet), so it runs on a blocking thread instead of stalling
+                // the async runtime.
+                let open_result = tokio::task::spawn_blocking({
+                    let network = self.network.clone();
+                    let list_dir = self.config.known_hash_list_dir.clone();
+                    move || KnownHashList::open(&network, list_dir.as_deref())
+                })
+                .await?;
+
+                let list = match open_result {
+                    Ok(Some(list)) => list,
+                    // Unreachable: `for_network()` returned a spec just above,
+                    // and `open()` only returns `None` when there is no spec.
+                    Ok(None) => return Ok(IbdOutcome::Declined(DeclineReason::NoList)),
+                    Err(error @ KnownHashError::AssetsNotFound { .. }) => {
+                        // With the checkpoint verifier removed, the engine is
+                        // the only path that can commit blocks at or below the
+                        // mandatory floor: a missing asset set is a hard,
+                        // actionable error, never a silent fallback (design doc
+                        // §6.3).
+                        return Err(error.into());
+                    }
+                    // Corrupt, tampered, or unreadable assets: surface the
+                    // error instead of silently syncing without the engine.
+                    Err(error) => return Err(error.into()),
+                };
+
                 Self::build_and_run_engine(
                     self.network.clone(),
                     self.peer_set.clone(),
@@ -435,10 +440,10 @@ where
     where
         L: HashSource,
     {
-        // In snapshot-consume mode with a configured local source, the engine
-        // reads note commitment trees from local files too (the single tree-fetch
-        // dispatch point); otherwise trees fetch over P2P. The local source only
-        // applies when snapshot-consume sync is enabled.
+        // In snapshot-consume mode the engine reads note commitment trees from
+        // the artifact directory too (the single tree-fetch dispatch point).
+        // The local source only applies when snapshot-consume sync is enabled;
+        // outside it no tree fetch is ever scheduled.
         let local_snapshot_source = config
             .snapshot_consume_sync
             .then(|| config.known_hash_local_source_dir.clone())
@@ -466,13 +471,14 @@ where
 
     /// Primes the snapshot-consume source and runs the engine.
     ///
-    /// Before syncing, fetches and verifies the known-hash chunk(s) covering the
+    /// Before syncing, reads and verifies the known-hash chunk(s) covering the
     /// first window (so the engine has hashes, size hints, and tree roots for the
     /// heights it is about to fetch). Each chunk is content-addressed against its
     /// pinned SHA-256 and persisted to the `known_hash_chunk` column family
-    /// (design doc `p2p-snapshot-distribution.md`); a chunk that no peer can
-    /// serve, or that fails verification, surfaces as a retryable error so the
-    /// supervisor restarts the bootstrap.
+    /// (design doc `snapshot-distribution.md`). A deterministic artifact failure
+    /// (a missing, corrupt, or hash-mismatched file) surfaces as a fatal
+    /// diagnostic — re-reading the same artifact directory can never cure it —
+    /// while a transient state-service failure stays retryable.
     ///
     /// As the commit frontier advances, the engine re-primes the covering chunks
     /// itself through [`HashSource::ensure_covers`](engine::HashSource::ensure_covers)
@@ -493,7 +499,7 @@ where
         cache_dir: PathBuf,
         config: Config,
         next_commit: block::Height,
-        mut source: CfHashSource<ZN, ZS>,
+        mut source: CfHashSource<ZS>,
     ) -> Result<IbdOutcome, engine::EngineError> {
         // Prime the chunk(s) covering the first uncommitted height, so the
         // engine's first window has hashes before any block fetch is issued. The
@@ -501,12 +507,21 @@ where
         // covers from `next_commit` through the next chunk's first height.
         let cover_end = block::Height(next_commit.0.saturating_add(HASHES_PER_CHUNK));
 
-        if let Err(error) = source
-            .ensure_covers(next_commit, cover_end, SNAPSHOT_FETCH_ATTEMPTS)
-            .await
-        {
-            // A chunk we cannot fetch or verify is retryable: a peer may serve it
-            // on a later restart.
+        if let Err(error) = source.ensure_covers(next_commit, cover_end).await {
+            // A missing, corrupt, or hash-mismatched artifact file fails the
+            // same way on every read: surface it as a fatal diagnostic the
+            // operator must act on, instead of restart-looping. Only a
+            // transient state-service failure is worth a restart.
+            if error.is_deterministic() {
+                warn!(
+                    %error,
+                    ?next_commit,
+                    "the snapshot artifact directory cannot supply a verified \
+                     known-hash chunk; fix or re-download the artifacts",
+                );
+                return Err(engine::EngineError::ArtifactDiagnostic(Box::new(error)));
+            }
+
             warn!(
                 %error,
                 ?next_commit,

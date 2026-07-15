@@ -93,9 +93,9 @@ const DEV_KNOWN_HASHES_DIR: &str =
 /// - **v2** ([`chunk_v2`](super::chunk_v2)): a `ZKH2`-prefixed framing carrying
 ///   the block hashes, optional per-block size hints, and the sparse
 ///   sapling/orchard tree-root updates. This is the **content-addressing trust
-///   root** for P2P distribution — peers regenerate v2 chunks from their state
+///   root** for snapshot distribution — `emit-snapshot` regenerates v2 chunks from state
 ///   and downloaders verify them against `chunk_hashes`
-///   (`docs/design/p2p-snapshot-distribution.md`). The `emit-snapshot` command
+///   (`docs/design/snapshot-distribution.md`). The `emit-snapshot` command
 ///   re-emits both the bundled chunk files and `chunk_hashes` in v2 at release.
 /// - **v1** (legacy): a bare `n × 32` bytes (one internal-order block hash per
 ///   block), or `n × 33` bytes (the `n` hashes followed by one size-hint byte
@@ -120,7 +120,7 @@ pub struct KnownHashListSpec {
     /// SHA-256 of each chunk's bytes, as lowercase hex, in chunk order.
     ///
     /// The content-addressing trust root: the loader hashes the raw chunk file
-    /// (v1 or v2) and the P2P serve/consume path hashes the regenerated v2 chunk
+    /// (v1 or v2) and the snapshot emit/consume path hashes the regenerated v2 chunk
     /// bytes, both comparing against this constant. At release `emit-snapshot`
     /// re-emits these as the SHA-256 of the **v2** chunk bytes (see the type-level
     /// "Chunk file format" docs).
@@ -135,7 +135,7 @@ pub struct KnownHashListSpec {
     ///
     /// Used by snapshot-consume sync to content-address-verify the
     /// unspent-output set assembled from peer range responses
-    /// (`docs/design/p2p-snapshot-distribution.md`). `None` means the snapshot
+    /// (`docs/design/snapshot-distribution.md`). `None` means the snapshot
     /// hash has not yet been reviewed into source, so snapshot-consume sync
     /// cannot verify the set and must not run.
     pub unspent_outputs_hash: Option<&'static str>,
@@ -180,7 +180,7 @@ pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
         "651f6924710b43b9e161186ba81bdfddc12f2217d18f4c53eae9cdeb05c1a07a",
     ],
     // Pinned by the snapshot constants-updater at release time; not yet
-    // reviewed into source (`docs/design/p2p-snapshot-distribution.md`).
+    // reviewed into source (`docs/design/snapshot-distribution.md`).
     unspent_outputs_hash: None,
     address_balances_hash: None,
 };
@@ -222,7 +222,7 @@ pub const TESTNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
         "9206a3a1653b3d1725c221139908b8fc34998b22b99d56316a7b3e81079969ba",
     ],
     // Pinned by the snapshot constants-updater at release time; not yet
-    // reviewed into source (`docs/design/p2p-snapshot-distribution.md`).
+    // reviewed into source (`docs/design/snapshot-distribution.md`).
     unspent_outputs_hash: None,
     address_balances_hash: None,
 };

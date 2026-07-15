@@ -1,29 +1,35 @@
-# P2P Distribution of Known-Hash Chunks, Note Commitment Trees, and the Unspent-Output Set
+# Distribution of Known-Hash Chunks, Note Commitment Trees, and the Unspent-Output Set
 
-Status: **IMPLEMENTED (snapshot-consume path dormant pending v2 asset
-re-emission).** Base: branch `ibd-engine`. See §8 for what landed, the remaining
-work, and how to manually test.
+Status: **IMPLEMENTED (installer-based distribution; snapshot-consume path
+dormant pending v2 asset re-emission).** Base: branch `ibd-engine`. See §8 for
+what landed, the remaining work, and how to manually test.
 
 ## 0. The architecture decision
 
-The known-hash chunks, the note commitment trees, and the set of unspent
-transparent output locations at the max checkpoint height (`H_max`) are **not
-shipped as release assets**. Instead:
+The known-hash chunks, the selected note commitment tree frontiers, and the set
+of unspent transparent output locations at the max checkpoint height (`H_max`)
+are **shipped as release artifacts** (on zfnd.org or the GitHub releases) and
+**downloaded by the installer** into a local artifact directory:
 
 1. **Zebra source pins their hashes** (SHA-256) as reviewed constants — the
    trust root.
-2. **Any synced node serves the data over P2P, generated on demand from its own
-   finalized state** (each artifact is a deterministic function of the chain, so
-   every honest node produces byte-identical output).
-3. **Downloading nodes fetch from peers and verify against the pinned hashes.**
+2. **`emit-snapshot --emit-files`, run against a synced node at release time,
+   emits the artifact set** (each artifact is a deterministic function of the
+   chain, so every release manager produces byte-identical output) and, as the
+   constants-updater, recomputes the hashes and edits the Zebra source
+   constants.
+3. **The installer downloads the artifacts from the release assets; the
+   consuming node reads them from the local directory and verifies every
+   artifact against the pinned hashes** before trusting it, so a corrupt or
+   tampered download is rejected exactly as a corrupt peer would have been.
 
-The `emit-snapshot` command becomes a **release-time constants-updater**: run
-against a synced node, it recomputes the hashes and edits the Zebra source
-constants (the last known-hash chunk hash / a new chunk hash; the max checkpoint
-height; the unspent-output-set hash). It ships no asset files.
-
-This removes ~107–240 MB of vendored assets from the repo/release and makes the
-dataset grow by P2P, gated only by the small reviewed hash constants.
+An earlier revision of this design distributed the artifacts over a P2P
+network-protocol extension (new `getkhchunk`/`getnctree`/`getsnapshot`
+messages, serve-from-state inbound handlers, and a capability bit). That
+extension is **deferred to a future PR** — this PR ships no network protocol
+changes; the artifact downloads are the installer's job, and the node consumes
+local files only. The verification model is unchanged: the pinned constants
+remain the trust root regardless of how the bytes arrive.
 
 ## 1. Components and the shared contract
 
@@ -33,13 +39,16 @@ Four components, which must agree on three shared artifacts:
   deterministic byte layout of a chunk, now carrying per-block hash, approximate
   size hint, and the sapling/orchard tree roots at the heights in the span that
   update each tree.
-- **B — Constants-updater** (`zebrad/src/commands/emit_snapshot.rs`): regenerate
-  artifacts from state, hash them, edit the source constants.
-- **C — P2P serve/request** (`zebra-network` + `zebrad/src/components/inbound.rs`):
-  new messages to fetch chunks by index, trees by height, and the unspent-output
-  set by range; content-addressed verification.
-- **D — Consume** (`zebrad/src/components/ibd/`): the engine fetches + verifies
-  chunks/trees/utxo-set from peers instead of reading shipped assets / folding.
+- **B — Emitter / constants-updater** (`zebrad/src/commands/emit_snapshot.rs`):
+  regenerate artifacts from state, hash them, edit the source constants, and
+  write the release artifact set (`--emit-files`).
+- **C — Distribution**: the artifact set is published as release assets
+  (zfnd.org / GitHub releases) and downloaded by the **installer** into the
+  local artifact directory. (An earlier revision served the artifacts over a
+  P2P protocol extension; that is deferred to a future PR — see §0.)
+- **D — Consume** (`zebrad/src/components/ibd/`): the engine reads + verifies
+  chunks/trees from the artifact directory instead of folding; the state loads
+  the sets at open.
 
 ### 1.1 Shared artifacts (the contract every component obeys)
 
@@ -68,15 +77,14 @@ Four components, which must agree on three shared artifacts:
 3. **Unspent-output-set bytes**: the sorted concatenation of 8-byte
    `OutputLocation`s from `ZebraDb::for_each_unspent_output_location_bytes` at
    `H_max`. Its SHA-256 is a new pinned constant
-   (`MAINNET_UNSPENT_OUTPUTS_HASH` / `TESTNET_…`). Served ranged into ≤1 MiB
-   sub-chunks (2 MiB `MAX_PROTOCOL_MESSAGE_LEN`), each verifiable by re-hashing
-   the whole set after assembly (or per-range Merkle — see C).
+   (`MAINNET_UNSPENT_OUTPUTS_HASH` / `TESTNET_…`), verifiable by re-hashing the
+   whole artifact file.
 
 4. **Address-balance-set bytes at `H_max`**: the sorted concatenation of
    `(transparent::Address, AddressBalanceLocation)` from
    `balance_by_transparent_addr` at `H_max` (24-byte value: balance + received +
    first-output-location). Its SHA-256 is a new pinned constant
-   (`MAINNET_ADDRESS_BALANCES_HASH` / `TESTNET_…`). Served and verified like the
+   (`MAINNET_ADDRESS_BALANCES_HASH` / `TESTNET_…`), verified like the
    unspent-output set. Loading the *final* balances sidesteps the elision
    "received-total divergence" entirely (we never recompute balances during
    sync; we load the correct final values at `H_max`).
@@ -95,49 +103,37 @@ each block only by its pinned hash and does NOT derive state**:
 - it does **not** write non-survivor UTXOs — only outputs in the `H_max`
   survivor set are inserted into `utxo_by_out_loc` (elision);
 - the known-hash chunks themselves are **stored in a RocksDB column family** as
-  they are downloaded and verified — not read from `.bin` asset files.
+  they are read and verified — not read from `.bin` asset files on every run.
 
 At `H_max` the finalized state (trees + balances + survivor UTXOs + value pools)
 is byte-identical to a normally-synced node, but it was *downloaded and written*
 rather than *derived* — removing the entire state-derivation bottleneck.
 
-## 2. P2P protocol (component C)
+## 2. Distribution (component C)
 
-Anchored in the real enums/codec:
+The emitted artifact set (§9.2) is published with each release — on zfnd.org or
+as GitHub release assets — and the **installer** downloads it into the local
+artifact directory (`sync.known_hash_local_source_dir`) before the node's first
+start. The node never fetches snapshot artifacts over the network itself; every
+artifact is verified against the pinned constants as it is read, so the
+installer's transport (HTTPS) does not extend the trust model.
 
-- **Internal `Request`** (`zebra-network/src/protocol/internal/request.rs:35`):
-  add `KnownHashChunk(u32)`, `NoteCommitmentTree { pool: ShieldedPool, height:
-  block::Height }`, `UnspentOutputs { offset: u64, len: u32 }`.
-- **Internal `Response`** (`.../response.rs:20`): add `KnownHashChunk(Bytes)`,
-  `NoteCommitmentTree(Bytes)`, `UnspentOutputs(Bytes)`, and a `NotAvailable`
-  signal for not-yet-synced/over-limit.
-- **External `Message`** (`.../external/message.rs:40`) + **codec command
-  strings** (`.../external/codec.rs:154`): one 12-byte command per message,
-  e.g. `getkhchunk`/`khchunk`, `getnctree`/`nctree`, `getunspent`/`unspent`.
-- **Wiring** (`zebra-network/src/peer/connection.rs`): request→message and
-  message→response, mirroring `BlocksByHash`/`GetData`.
-- **Inbound serve** (`zebrad/src/components/inbound.rs:407`, the
-  `match zn::Request` block): each new request is served by reading from
-  `zebra_state` (chunk regenerated from state; tree by height; utxo-set range)
-  and bounding the response under the 2 MiB frame.
-- **Capability negotiation** (`PeerServices`, `peer/handshake.rs`): advertise
-  support via a **reserved service bit** so the messages are only ever sent to
-  Zebra peers that set it; zcashd peers (which don't) are never asked, and the
-  codec already drops unknown commands. (Fallback if a spare bit is contentious:
-  a user-agent substring marker.)
-- **DoS bounds**: one chunk / one tree / one ≤1 MiB utxo range per request;
-  frame-size check vs 2 MiB; the existing inbound rate limiter; unknown or
-  above-tip heights return `NotAvailable`, never an error that drops the peer.
+A P2P network-protocol extension for fetching the same artifacts from peers
+(new request/response messages, serve-from-state inbound handlers, a capability
+bit) was implemented in an earlier revision of this branch and is **deferred to
+a future PR**: it is a strict superset of the installer flow (the same emitted
+bytes, the same verification), so it can be layered back on without changing
+the artifact contract.
 
 ## 3. Consume (component D) — wiring it up everywhere
 
 ### 3.1 Known-hash chunks resident in RocksDB (not `.bin`)
 
 A new finalized-state column family, **`known_hash_chunk`** (key: `u32` chunk
-index → value: verified chunk bytes), holds the chunks. As the engine downloads
-a chunk from a peer and verifies SHA-256 == the pinned `chunk_hashes[s]`, it
-writes it to this CF. The loader reads hashes/sizes/tree-roots from the CF, not
-from asset files. Consequences:
+index → value: verified chunk bytes), holds the chunks. As the engine reads a
+chunk from the artifact directory and verifies SHA-256 == the pinned
+`chunk_hashes[s]`, it writes it to this CF. The loader reads
+hashes/sizes/tree-roots from the CF, not from asset files. Consequences:
 
 - The hash-source seam (`HashSource`, the generic engine's hash trait) is backed
   by the CF instead of `KnownHashList`'s file reads; the pinned `chunk_hashes`
@@ -146,15 +142,16 @@ from asset files. Consequences:
   (`DiskWriteBatch::write_known_hash_chunk`) are added.
 - Chunk residency/eviction is RocksDB's job; the windowed two-chunk RAM cache in
   `KnownHashList` is replaced by CF reads (page-cache-backed).
-- Bundled/pinned-HTTPS fallback remains for cold-start before any peer serves
-  them; a fetched-and-verified fallback chunk is written to the CF identically.
+- Cold-start reads come from the installer-downloaded artifact directory; a
+  read-and-verified chunk is written to the CF so later runs never re-read the
+  directory.
 
 ### 3.2 Note commitment trees written directly (no folding)
 
-For a checkpoint block below `H_max`, the engine fetches the sapling/orchard
-tree **as of that height** from a peer, verifies its `.root()` against the
-chunk's recorded root for that height, and the commit **writes the downloaded
-tree directly** into `sapling_note_commitment_tree` /
+For a checkpoint block below `H_max`, the engine reads the sapling/orchard
+tree **as of that height** from the artifact directory, verifies its `.root()`
+against the chunk's recorded root for that height, and the commit **writes the
+supplied tree directly** into `sapling_note_commitment_tree` /
 `orchard_note_commitment_tree` instead of folding notes. The plug-in point is the
 in-memory checkpoint commit's tree update (`Chain`'s
 `update_chain_tip_with_block_parallel`, the worker-thread fold this branch
@@ -166,9 +163,9 @@ or a subtree-completing height all fall back to folding (correctness), and a
 contradicting Sapling root is a fatal commit error. See §8.2 item 1 for the
 subtree handling.
 
-**Tree lookahead.** Trees must be fetched *ahead of* the block download — a
-deeper lookahead window for the per-height tree requests than for blocks — so
-that by the time a block reaches the commit stage its tree is already downloaded
+**Tree lookahead.** Trees must be read *ahead of* the block download — a
+deeper lookahead window for the per-height tree reads than for blocks — so
+that by the time a block reaches the commit stage its tree is already read
 and verified, and the state's "tree supplied by download" path is taken on the
 common path. If a tree has not arrived yet, the commit falls back to folding
 (correct, just slower), so the lookahead is a throughput optimization, not a
@@ -186,7 +183,7 @@ updating height a configurable margin ahead of the commit frontier.
   measured "address calc + balance GET" bottleneck. Intermediate-height address
   RPC is incomplete during IBD (already accepted), and the final balances are
   exactly correct because they are the downloaded snapshot, not a derivation.
-- **Survivor UTXOs:** the `H_max` unspent-output set is fetched + verified at
+- **Survivor UTXOs:** the `H_max` unspent-output set is loaded + verified at
   startup into a memory-mapped sorted slice (`is_survivor(loc)` = binary
   search). The finalized write path inserts into `utxo_by_out_loc` **only** when
   `is_survivor(loc)` (elision). Crash-safety: because trees and balances are no
@@ -199,11 +196,11 @@ updating height a configurable margin ahead of the commit frontier.
 
 ### 3.4 Bootstrap sequencing
 
-Peer discovery → fetch+verify the chunk(s) covering the active window (so the
-engine has hashes/sizes/tree-roots) → fetch blocks + per-height trees in
-parallel → at `H_max`, load balances + finalize the survivor UTXO set. The
-generic engine already sequences peer readiness and per-height fetch; chunk and
-tree fetches slot onto the same weighted-fetch rails as block fetches.
+Installer download → read+verify the chunk(s) covering the active window (so
+the engine has hashes/sizes/tree-roots) → fetch blocks over P2P + read
+per-height trees in parallel → at `H_max`, load balances + finalize the
+survivor UTXO set. The generic engine already sequences peer readiness and
+per-height fetch; chunk and tree reads slot in ahead of the commit frontier.
 
 ## 4. Build order (dependency-first)
 
@@ -215,49 +212,49 @@ tree fetches slot onto the same weighted-fetch rails as block fetches.
    and updates the source constants (marker-anchored edits) + prints a review
    diff. Validate the regenerated v1-equivalent chunk SHAs match the existing
    pinned hashes (a correctness gate).
-3. **C**: protocol messages + codec + connection wiring + inbound serve handlers
-   (chunk-by-index, tree-by-height, unspent-set-range, balance-set-range) +
-   capability bit. Codec round-trip + inbound-handler unit tests.
+3. **C**: publish the emitted artifact set with the release; the installer
+   downloads it into the artifact directory. (The P2P serve/fetch protocol is
+   deferred to a future PR.)
 4. **D-storage**: the `known_hash_chunk` RocksDB CF + read/write accessors;
    switch the hash source from `.bin` files to the CF. Unit-testable.
-5. **D-consume**: loader P2P-fetch-into-CF source; tree-load-instead-of-fold in
-   the commit path; skip per-block balance derivation + load balances at
-   `H_max`; survivor-only `utxo_by_out_loc` writes. Integration/sync-test-gated.
+5. **D-consume**: loader read-into-CF source over the artifact directory;
+   tree-load-instead-of-fold in the commit path; skip per-block balance
+   derivation + load balances at `H_max`; survivor-only `utxo_by_out_loc`
+   writes. Integration/sync-test-gated.
 
 ### 4.1 First end-to-end slice (smallest working vertical)
 
-**Serve + fetch a known-hash chunk by index, content-addressed.** It exercises
-A (chunk bytes), a slice of B (compute one chunk's SHA), and C (one message pair
-+ inbound serve + verify), and is fully unit-testable between two in-process
-peers without a live chain. Build this first, then fan out trees and the utxo
-set along the same rails.
+**Emit + read back a known-hash chunk by index, content-addressed.** It
+exercises A (chunk bytes), a slice of B (compute one chunk's SHA + emit the
+file), and D (read the file, verify, persist to the CF), and is fully
+unit-testable against a temp directory without a live chain. Build this first,
+then fan out trees and the sets along the same rails.
 
 ## 5. Testability
 
 - Unit: chunk v2 round-trip; constants-updater idempotency + SHA match vs
-  existing chunks; codec round-trip; inbound handler against a fake state;
-  two-peer message exchange + verify.
+  existing chunks; emit → local-source read-back byte parity; wrong-hash /
+  wrong-root artifact rejection.
 - Integration / sync-test-gated (the user runs these): full from-scratch sync
-  fetching chunks/trees/utxo-set over P2P; throughput vs the asset-shipped
+  consuming a downloaded artifact set; throughput vs the asset-shipped
   baseline; tree-load-vs-fold timing; elision UTXO-set-at-H_max parity.
 
 ## 6. Open questions (genuinely need the user)
 
-- A spare `PeerServices` bit vs a user-agent marker for capability.
-- Whether to also keep a bundled/HTTPS fallback for the chunks, or P2P-only.
+- Where the release artifacts live (zfnd.org vs GitHub release assets) and
+  how the installer names/versions them.
 - Tree-load-instead-of-fold changes the commit path's trust model (the tree is
-  fetched, not derived) — acceptable for checkpoint-verified blocks below
+  supplied, not derived) — acceptable for checkpoint-verified blocks below
   `H_max`, but the injection point needs review.
 
 ## 8. Implementation status, remaining work, and manual testing
 
 ### 8.1 What landed (branch `ibd-engine`, committed, build + clippy + tests green)
-- **Network protocol** (`zebra-network`): `ShieldedPool`; internal
-  `Request`/`Response` + external `Message`/codec for ranged known-hash chunks
-  (`KnownHashChunkRange{index,offset,len}`), `NoteCommitmentTree{pool,height}`,
-  and `GetSnapshot` ranges (unspent-output + address-balance sets), all under the
-  2 MiB frame; `connection.rs` wiring; a `PeerServices` capability bit so only
-  supporting Zebra peers are asked; size-checked responses.
+- **Network protocol**: none — the P2P snapshot-distribution extension that an
+  earlier revision of this branch implemented (ranged chunk / tree / set
+  request-response messages, inbound serve handlers, a capability bit) was
+  removed in favour of installer-downloaded release artifacts, and is deferred
+  to a future PR.
 - **State** (`zebra-state`): the `known_hash_chunk` rocksdb CF; chunk-v2 format
   (`ZKH2`, deterministic-from-state, sparse updating-height roots) + parser; the
   snapshot-consume write path (`SurvivorSet`, survivor-only `utxo_by_out_loc`
@@ -265,15 +262,17 @@ set along the same rails.
   direct supplied-tree write arm in the disk writer); the checkpoint
   spend-validation lookup + `PrunedChain` removed; the gated consensus/RPC
   write-thread split into a second DB.
-- **IBD** (`zebrad`): the engine's `CfHashSource` (chunk fetch → verify SHA vs
-  pinned hash → persist to CF), tree fetch-by-height + root verification +
-  lookahead ahead of the block frontier, snapshot bootstrap; `emit-snapshot` is
-  the release-time constants-updater. All snapshot-consume behavior is gated
-  (default off).
+- **IBD** (`zebrad`): the engine's `CfHashSource` (chunk read from the
+  artifact directory → verify SHA vs pinned hash → persist to CF), tree
+  read-by-height + root verification + lookahead ahead of the block frontier,
+  snapshot bootstrap; `emit-snapshot` is the release-time constants-updater and
+  artifact emitter. All snapshot-consume behavior is gated (default off) and
+  requires `sync.known_hash_local_source_dir` (the installer's download
+  directory).
 
 ### 8.2 Remaining work
 1. **Supplied-tree write-through (#10) — DONE (the throughput win is active).**
-   Trees are fetched, verified, buffered, threaded to the commit, and now
+   Trees are read, verified, buffered, threaded to the commit, and now
    **written through** instead of folded. The implementation took refined design
    (a): the in-memory checkpoint commit
    (`NonFinalizedState::commit_checkpoint_block` →
@@ -297,9 +296,9 @@ set along the same rails.
    heights across the whole chain) **falls back to a full fold**, the canonical
    path that produces the byte-identical subtree. This keeps the throughput win on
    the overwhelming common case while never diverging on subtree roots. A
-   supplied-tree fetch that is absent, undeserializable, or unverifiable against
+   supplied-tree read that is absent, undeserializable, or unverifiable against
    the header also folds (correctness fallback), and a supplied Sapling root that
-   *contradicts* the header pin is a fatal commit error (the engine refetches).
+   *contradicts* the header pin is a fatal commit error (the engine re-reads).
    The behaviour is observable via the `state.checkpoint.tree.{supplied,folded}`
    and `ibd.tree.{supplied,folded}` counters, and covered by H_max tree-parity,
    fold-skip, subtree-fallback, gating, and reject-on-mismatch tests in
@@ -311,8 +310,9 @@ set along the same rails.
    `UNSPENT_OUTPUTS_HASH` / `ADDRESS_BALANCES_HASH` (and a value-pool-set hash)
    constants likewise do not exist until emitted. Until then snapshot-consume is
    dormant (it is gated on those hashes being `Some`).
-3. Sync-test-gated items: full multi-node P2P sync, split-on RPC parity at scale,
-   and the tree-load-vs-fold / elision throughput comparison.
+3. Sync-test-gated items: a full sync consuming a downloaded artifact set,
+   split-on RPC parity at scale, and the tree-load-vs-fold / elision throughput
+   comparison.
 
 ### 8.3 How to manually test
 - **Default path (unchanged):** a normal known-hash sync (`sync.known_hash_sync`)
@@ -322,43 +322,46 @@ set along the same rails.
   state in `~/.cache/zebra` to recompute + edit the pinned constants (it edits
   source in place, idempotent, prints a diff). This exercises the chunk
   regeneration + the unspent/balance set hashing end to end against real state.
-- **P2P serve/request + snapshot-consume:** needs (2) above (re-emit so the
-  hashes are `Some`) plus at least one peer serving and a fresh-DB consumer with
-  `state.snapshot_consume` configured; correctness will hold but the tree-load
-  speedup waits on (1).
+- **Snapshot-consume sync:** needs (2) above (re-emit so the hashes are
+  `Some`) plus an artifact directory (from the installer, or emitted locally
+  with `--emit-files`) and a fresh-DB consumer with
+  `sync.known_hash_local_source_dir` + `state.snapshot_consume` configured.
 
-## 9. Local-file source (solo snapshot-consume sync, the test path)
+## 9. The local-file source (the artifact directory)
 
-A snapshot-consume node normally fetches the new artifacts (known-hash chunks,
-note commitment trees, the unspent-output set, the address-balance set, the chain
-value pools) from peers over the P2P extension above. To make the whole pipeline
-testable on a **single node with no peer speaking the extension**, the consumer
-can read those artifacts from **local files** instead. Blocks themselves still
-come over normal P2P / known-hash; only the new artifacts come from files.
+A snapshot-consume node reads the artifacts (known-hash chunks, note commitment
+trees, the unspent-output set, the address-balance set, the chain value pools)
+from **local files**: the directory the installer downloaded, or one emitted
+locally by `emit-snapshot --emit-files` (which also makes the whole pipeline
+testable on a single node). Blocks themselves still come over normal P2P /
+known-hash; only the snapshot artifacts come from files.
 
 ### 9.1 The single dispatch point
 
-The fetch is factored so P2P-vs-file is one decision: `SnapshotSource`
-(`zebrad/src/components/ibd/consume.rs`) has a `P2p` variant and a `LocalFiles`
-variant, each exposing the same three raw-byte fetches — `chunk_range`,
-`tree_bytes`, `set_range`. Everything downstream (the SHA-256 chunk check, the
-tree-root-vs-chunk check, the set-SHA-256 check) is applied **identically**
-regardless of source, so the local-file path and the P2P path verify against the
-*same* pinned constants and are byte-for-byte equivalent. The CF-backed
-`CfHashSource` holds a `SnapshotSource` for chunk fetches; the engine's
-`tree_fetch_stage` holds an optional `LocalSnapshotSource` for trees (the single
-tree-fetch dispatch point); `fetch_and_verify_set` takes a `SnapshotSource` for
-sets. With the default config (`sync.known_hash_local_source_dir = None`) every
-variant is `P2p` and behaviour is unchanged.
+The reads are factored through single dispatch points so the verification is
+one code path: `LocalSnapshotSource` (`zebrad/src/components/ibd/consume/local.rs`)
+wraps the artifact directory; the CF-backed `CfHashSource` reads whole chunk
+files through it (bounded by the maximum valid chunk size) and SHA-256-checks
+them against the pinned hashes; the engine's `tree_fetch_stage` reads trees
+through it (the records file is parsed once and cached; each tree is
+root-checked against the chunk); the state loads and applies the sets at open
+(`[state] snapshot_consume`). Everything downstream is applied **identically**
+no matter where the directory came from, so a tampered download is rejected by
+the same pinned constants. A deterministic artifact failure (a missing,
+corrupt, or hash-mismatched file) is a fatal diagnostic the operator must act
+on — the directory is read-only, so restarting can never cure it. With the
+default config (`sync.known_hash_local_source_dir = None`) snapshot-consume
+sync is unavailable and normal sync is unchanged.
 
 ### 9.2 Emitting the artifact set
 
-`emit-snapshot --emit-files --out-dir <dir>` writes the complete v2 artifact set
-into `<dir>`, all bytes byte-identical to what the P2P serve path returns (the
-chunk bytes come from the same `zebra_state::known_hash_chunk_bytes`; the tree
-records hold the same `note_commitment_tree_bytes` serialization; the set files
-hold the same sorted bytes; the value pools file holds the 40-byte
-`ValueBalance::to_bytes`). Layout (also written as `MANIFEST.txt`):
+`emit-snapshot --emit-files --out-dir <dir>` writes the complete v2 artifact
+set into `<dir>`, deterministically from the finalized state (the chunk bytes
+come from `zebra_state::known_hash_chunk_bytes`; the tree records hold the
+`note_commitment_tree_bytes` serialization; the set files hold the sorted set
+bytes; the value pools file holds the 40-byte `ValueBalance::to_bytes`), so
+every release manager emits byte-identical assets. Layout (also written as
+`MANIFEST.txt`):
 
 ```text
 <dir>/
@@ -386,11 +389,11 @@ known_hash_local_source_dir = "/path/to/<dir>"
 # see the `[state] snapshot_consume` config and docs/design/utxo-elision.md.
 ```
 
-With this set on a fresh DB, the engine reads each artifact from `<dir>` instead
-of issuing the P2P request, verifying each against the identical pinned hashes
-(chunk SHA vs `chunk_hashes[index]`; set SHA vs the pinned set hash; tree root vs
-the chunk's recorded root). A wrong-hash file is rejected exactly as a corrupt
-peer would be. This is the path the round-trip tests exercise
+With this set on a fresh DB, the engine reads each artifact from `<dir>`,
+verifying each against the pinned hashes (chunk SHA vs `chunk_hashes[index]`;
+set SHA vs the pinned set hash; tree root vs the chunk's recorded root). A
+wrong-hash file is rejected regardless of how it got into the directory. This is
+the path the round-trip tests exercise
 (`zebrad/src/components/ibd/consume/tests.rs` and the emit round-trip in
 `zebrad/src/commands/emit_snapshot.rs`).
 
@@ -399,7 +402,7 @@ peer would be. This is the path the round-trip tests exercise
 Applying v2 constants via `emit-snapshot` makes the **bundled v1 `.bin` known-hash
 assets stale**: a v2 chunk embeds the sapling/orchard tree roots a v1 chunk lacks,
 so the v1 file's SHA-256 no longer equals the v2 pinned `chunk_hashes[index]`. The
-local-file source (and the P2P source) supersede the bundled v1 `.bin` assets for
+artifact-directory source supersedes the bundled v1 `.bin` assets for
 snapshot-consume sync — the CF-backed `CfHashSource` has **no v1 fallback** by
 design (a v1/v2 disagreement at a chunk boundary would be invisible to the
 synchronous lookups). So:
@@ -409,5 +412,5 @@ synchronous lookups). So:
 - For a **solo snapshot-consume test**, point `known_hash_local_source_dir` at a
   directory emitted by `emit-snapshot --emit-files` against a node synced to the
   same `H_max` the v2 constants pin. Then v2 constants + v2 files + the local
-  source are mutually consistent, and the node drives the known-hash sync from the
-  local v2 chunks with no peer serving the extension.
+  source are mutually consistent, and the node drives the known-hash sync from
+  the local v2 chunks.

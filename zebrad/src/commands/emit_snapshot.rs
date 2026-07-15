@@ -1,12 +1,13 @@
-//! `emit-snapshot` subcommand - the release-time constants-updater for the
-//! P2P-distributed IBD snapshot artifacts.
+//! `emit-snapshot` subcommand - the release-time constants-updater and artifact
+//! emitter for the IBD snapshot release assets.
 //!
 //! Run against a synced, read-only finalized state, this command regenerates the
 //! three deterministic snapshot artifacts from the chain, hashes them, and edits
 //! the pinned Zebra source constants in place so a release ships an updated trust
-//! root (`docs/design/p2p-snapshot-distribution.md`). It writes **no asset
-//! files** by default — the artifacts themselves are served over P2P and
-//! verified against these constants. The artifacts are:
+//! root (`docs/design/snapshot-distribution.md`). By default it only updates the
+//! constants; `--emit-files` also writes the artifact set that is published with
+//! the release (and downloaded by the installer), verified against these
+//! constants. The artifacts are:
 //!
 //! - the **known-hash chunks**: for every 150,000-block span up to the finalized
 //!   tip, the deterministic `chunk_v2` bytes (block hashes, size hints, and the
@@ -17,9 +18,9 @@
 //! - the **address-balance set**: the sorted address-balance records at the tip,
 //!   SHA-256ed into `MAINNET/TESTNET_ADDRESS_BALANCES_HASH`.
 //!
-//! The chunk bytes are regenerated through the *same* read-service function the
-//! P2P serve path uses ([`zebra_state::known_hash_chunk_bytes`]), so the emitted
-//! hashes and the served bytes can never disagree.
+//! The chunk bytes are regenerated through the *same* read-service function
+//! ([`zebra_state::known_hash_chunk_bytes`]) the consume path stores and reads,
+//! so the emitted hashes and the consumed bytes can never disagree.
 //!
 //! The command is **idempotent**: re-running it against a state whose constants
 //! are already current changes nothing and prints "already current". The
@@ -36,21 +37,19 @@
 //!   same bytes whose SHA-256 is the pinned `chunk_hashes[index]`);
 //! - `sapling-trees.bin` / `orchard-trees.bin`: the note-commitment-tree frontier
 //!   at every updating height, as `(height u32 LE, len u32 LE, frontier-bytes)`
-//!   records sorted by height (the same canonical serialization the P2P
-//!   `NoteCommitmentTree` response uses, via
+//!   records sorted by height (the canonical serialization from
 //!   [`zebra_state::note_commitment_tree_bytes`]);
 //! - `unspent-output-locations.bin` / `address-balances.bin`: the sorted sets,
-//!   the same bytes the P2P range serve returns / whose SHA-256 is the pinned set
-//!   hashes;
+//!   whose SHA-256s are the pinned set hashes;
 //! - `chain-value-pools.bin`: the 40-byte `H_max` chain value pools, for the
 //!   state's bulk value-pool load;
 //! - `MANIFEST.txt`: documents the layout and provenance (network, `H_max`).
 //!
 //! A node configured with `sync.known_hash_local_source_dir = <dir>` then drives
-//! a full snapshot-consume sync from these files alone — no peer need speak the
-//! P2P extension. The bytes are byte-identical to the P2P-served bytes, so they
+//! a full snapshot-consume sync from these files alone. The emission is
+//! deterministic, so every release manager produces byte-identical assets that
 //! verify against the same pinned constants. See
-//! `docs/design/p2p-snapshot-distribution.md`.
+//! `docs/design/snapshot-distribution.md`.
 
 mod editor;
 
@@ -111,10 +110,10 @@ pub struct EmitSnapshotCmd {
     src_root: Option<PathBuf>,
 
     /// Also write the complete v2 snapshot-consume artifact set into `--out-dir`.
-    /// The release pipeline does not need these (the artifacts are served over
-    /// P2P and verified against the edited constants), but a node configured with
-    /// `sync.known_hash_local_source_dir = <out-dir>` can drive a full
-    /// snapshot-consume sync from them alone (the solo-sync test path).
+    /// This is the artifact set published with the release (and downloaded by
+    /// the installer); a node configured with
+    /// `sync.known_hash_local_source_dir = <out-dir>` drives a full
+    /// snapshot-consume sync from it.
     #[clap(
         long,
         help = "ALSO write the complete local artifact set into --out-dir"
@@ -242,7 +241,7 @@ impl EmitSnapshotCmd {
 
     /// Verifies that chunk generation is **deterministic**: each chunk is
     /// regenerated a second time and its SHA-256 must be byte-identical to the
-    /// first generation. A non-deterministic chunk would make peers produce
+    /// first generation. A non-deterministic chunk would make release runs produce
     /// different bytes for the same span, breaking content-addressing, so the run
     /// aborts rather than pinning an unstable hash.
     ///
@@ -250,7 +249,7 @@ impl EmitSnapshotCmd {
     /// currently-pinned `chunk_hashes` constants: those are the chunk **bytes'**
     /// SHA-256 in whatever format is shipped, and this command's whole purpose is
     /// to (re-)emit them in the v2 format
-    /// (`docs/design/p2p-snapshot-distribution.md`). The pinned constants may
+    /// (`docs/design/snapshot-distribution.md`). The pinned constants may
     /// still be the legacy v1 SHA-256, against which the v2 recomputation would
     /// always mismatch; comparing like-for-v1-vs-v2 would falsely block the very
     /// migration this command performs. Determinism is the property that must
@@ -331,9 +330,9 @@ impl EmitSnapshotCmd {
                 "SHA-256 of the sorted unspent-transparent-output-location set at the \
                  {} finalized tip ({}), as lowercase hex.\n\
                  \n\
-                 The trust root for the P2P-distributed unspent-output snapshot: a \
-                 downloading node fetches the set over P2P and verifies it against this \
-                 hash (see `docs/design/p2p-snapshot-distribution.md`). Regenerated by the \
+                 The trust root for the unspent-output snapshot release artifact: a \
+                 consuming node verifies the downloaded set against this hash (see \
+                 `docs/design/snapshot-distribution.md`). Regenerated by the \
                  `emit-snapshot` command at every release.",
                 self.network, net.display,
             ),
@@ -350,9 +349,9 @@ impl EmitSnapshotCmd {
                 "SHA-256 of the sorted address-balance set at the {} finalized tip ({}), \
                  as lowercase hex.\n\
                  \n\
-                 The trust root for the P2P-distributed address-balance snapshot, loaded at \
-                 `H_max` so balances are never recomputed during sync (see \
-                 `docs/design/p2p-snapshot-distribution.md`). Regenerated by the \
+                 The trust root for the address-balance snapshot release artifact, loaded \
+                 at `H_max` so balances are never recomputed during sync (see \
+                 `docs/design/snapshot-distribution.md`). Regenerated by the \
                  `emit-snapshot` command at every release.",
                 self.network, net.display,
             ),
@@ -446,7 +445,7 @@ impl EmitSnapshotCmd {
     /// The layout (documented in [`crate::components::ibd::consume::local`]) is
     /// what a node configured with `sync.known_hash_local_source_dir` reads to
     /// drive a full solo snapshot-consume sync. Every artifact is byte-identical
-    /// to what the P2P serve path returns (the chunk bytes come from the same
+    /// to what the consume path verifies (the chunk bytes come from the same
     /// [`zebra_state::known_hash_chunk_bytes`] function; the tree records hold the
     /// same [`zebra_state::note_commitment_tree_bytes`] serialization; the set
     /// files hold the same sorted bytes; the value-pool file holds the 40-byte
@@ -565,9 +564,9 @@ impl NetworkConsts {
 /// Streams the sorted unspent-output-location set through a SHA-256 hasher,
 /// returning `(lowercase_hex_hash, record_count)`.
 ///
-/// Uses the same byte source the P2P serve path ranges over
+/// Uses the same byte source the set-hash constants cover
 /// ([`ZebraDb::for_each_unspent_output_location_bytes`]), so the hash covers the
-/// exact bytes peers serve.
+/// exact bytes the release artifact holds.
 fn hash_unspent_outputs(db: &ZebraDb) -> (String, u64) {
     let mut hasher = Sha256::new();
     let mut count: u64 = 0;
@@ -581,7 +580,7 @@ fn hash_unspent_outputs(db: &ZebraDb) -> (String, u64) {
 /// Streams the sorted address-balance set through a SHA-256 hasher, returning
 /// `(lowercase_hex_hash, record_count)`.
 ///
-/// Concatenates each record's `(address_bytes, value_bytes)` exactly as the P2P
+/// Concatenates each record's `(address_bytes, value_bytes)` exactly as the
 /// serve path does ([`ZebraDb::for_each_address_balance_bytes`]).
 fn hash_address_balances(db: &ZebraDb) -> (String, u64) {
     let mut hasher = Sha256::new();
@@ -624,8 +623,8 @@ fn read_standalone_height(source: &str, name: &str) -> Result<u32> {
 /// SHA-256 is the pinned `chunk_hashes[index]`). Returns the chunk count.
 ///
 /// The bytes come from [`zebra_state::known_hash_chunk_bytes`], the *same*
-/// function the P2P serve path and the constants-updater use, so a local chunk
-/// file and the P2P-served chunk are byte-identical.
+/// function the constants-updater hashes, so a local chunk file always matches
+/// its pinned hash.
 fn emit_chunk_files(db: &ZebraDb, out_dir: &Path, tip_height: Height) -> Result<u64> {
     let chunks_dir = out_dir.join(CHUNKS_SUBDIR);
     std::fs::create_dir_all(&chunks_dir)?;
@@ -655,7 +654,7 @@ fn emit_chunk_files(db: &ZebraDb, out_dir: &Path, tip_height: Height) -> Result<
 ///
 /// Each record is `(height u32 LE, len u32 LE, len-byte frontier)`. The frontier
 /// bytes are the canonical [`zebra_state::note_commitment_tree_bytes`]
-/// serialization the P2P `NoteCommitmentTree` response carries, so the consumer's
+/// serialization the state stores, so the consumer's
 /// recomputed `.root()` matches the chunk's recorded root.
 fn emit_tree_records(path: &Path, records: impl Iterator<Item = (u32, Vec<u8>)>) -> Result<u64> {
     let mut writer = BufWriter::new(File::create(path)?);
@@ -676,7 +675,7 @@ fn emit_tree_records(path: &Path, records: impl Iterator<Item = (u32, Vec<u8>)>)
 }
 
 /// Streams the sorted unspent-output-location set to `unspent-output-locations.bin`,
-/// the same bytes the P2P range serve returns. Returns the record count.
+/// the same bytes the pinned set hash covers. Returns the record count.
 fn emit_unspent_output_locations(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
     let path = out_dir.join(UNSPENT_OUTPUTS_FILE);
     let mut writer = BufWriter::new(File::create(&path)?);
@@ -703,7 +702,7 @@ fn emit_unspent_output_locations(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
 }
 
 /// Streams the sorted address-balance set to `address-balances.bin`, the same
-/// bytes the P2P range serve returns (per record: 21-byte address key + 24-byte
+/// bytes the pinned set hash covers (per record: 21-byte address key + 24-byte
 /// balance value). Returns the record count.
 fn emit_address_balances(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
     let path = out_dir.join(ADDRESS_BALANCES_FILE);
@@ -762,9 +761,9 @@ fn write_manifest(
          # Written by `emit-snapshot --emit-files`. A node configured with\n\
          # `sync.known_hash_local_source_dir = <this dir>` and\n\
          # `sync.snapshot_consume_sync = true` drives a full snapshot-consume\n\
-         # sync from these files instead of P2P. Every artifact is byte-identical\n\
-         # to the P2P-served bytes and verifies against the same pinned SHA-256\n\
-         # constants. See docs/design/p2p-snapshot-distribution.md.\n\
+         # sync from these files. Every artifact is deterministic and verifies\n\
+         # against the pinned SHA-256\n\
+         # constants. See docs/design/snapshot-distribution.md.\n\
          #\n\
          network = {network}\n\
          h_max = {h_max}\n\
@@ -807,7 +806,6 @@ mod tests {
     use tempfile::TempDir;
 
     use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
-    use zebra_network::ShieldedPool as NetworkShieldedPool;
     use zebra_state::{Config as StateConfig, FinalizedState};
 
     use crate::components::ibd::consume::local::LocalSnapshotSource;
@@ -839,9 +837,9 @@ mod tests {
         state
     }
 
-    /// The emit helpers write exactly the bytes the P2P serve path produces, and
+    /// The emit helpers write exactly the bytes the pinned constants cover, and
     /// the local source reads them back byte-for-byte — so a local artifact set
-    /// and a P2P fetch deliver identical bytes that pass the same content-addressed
+    /// every emission deliver identical bytes that pass the same content-addressed
     /// checks. This is the emit-side half of the solo-sync round trip.
     #[test]
     fn emit_local_artifact_set_round_trips_through_local_source() {
@@ -895,7 +893,7 @@ mod tests {
         .expect("manifest writes");
 
         // Read each artifact back through the local source and assert byte parity
-        // with the P2P serve path's bytes.
+        // with the state's canonical bytes.
         let local = LocalSnapshotSource::new(out_dir);
 
         // Chunk: the file's bytes equal the on-demand-generated chunk bytes (whose
@@ -905,14 +903,11 @@ mod tests {
             zebra_state::known_hash_chunk_bytes(db, 0).expect("chunk 0 generates");
         assert_eq!(
             chunk_from_file, chunk_from_state,
-            "the emitted chunk file is byte-identical to the P2P-served chunk",
+            "the emitted chunk file is byte-identical to the state-generated chunk",
         );
 
-        // Trees: each record equals the P2P NoteCommitmentTree serialization.
-        for (pool, net_pool) in [
-            (ShieldedPool::Sapling, NetworkShieldedPool::Sapling),
-            (ShieldedPool::Orchard, NetworkShieldedPool::Orchard),
-        ] {
+        // Trees: each record equals the canonical tree serialization.
+        for pool in [ShieldedPool::Sapling, ShieldedPool::Orchard] {
             let heights: Vec<_> = match pool {
                 ShieldedPool::Sapling => db
                     .sapling_tree_by_height_range(..)
@@ -925,14 +920,14 @@ mod tests {
             };
             for height in heights {
                 let from_file = local
-                    .read_tree(net_pool, height.0)
+                    .read_tree(pool, height.0)
                     .expect("the tree file parses")
                     .expect("a record exists at this updating height");
                 let from_state = zebra_state::note_commitment_tree_bytes(db, pool, height)
                     .expect("the state serves this tree");
                 assert_eq!(
                     from_file, from_state,
-                    "the emitted {pool:?} tree at {height:?} matches the P2P-served tree",
+                    "the emitted {pool:?} tree at {height:?} matches the state's tree bytes",
                 );
             }
         }
@@ -941,11 +936,11 @@ mod tests {
         let mut streamed_unspent = Vec::new();
         db.for_each_unspent_output_location_bytes(|b| streamed_unspent.extend_from_slice(b));
         let unspent_from_file = local
-            .read_set_range(UNSPENT_OUTPUTS_FILE, 0, u32::MAX)
+            .read_set(UNSPENT_OUTPUTS_FILE)
             .expect("the unspent set file reads");
         assert_eq!(
             unspent_from_file, streamed_unspent,
-            "the emitted unspent-output set matches the P2P-served set bytes",
+            "the emitted unspent-output set matches the state's set bytes",
         );
 
         // Address-balance set: the whole file equals the streamed set bytes.
@@ -955,11 +950,11 @@ mod tests {
             streamed_balances.extend_from_slice(v);
         });
         let balances_from_file = local
-            .read_set_range(ADDRESS_BALANCES_FILE, 0, u32::MAX)
+            .read_set(ADDRESS_BALANCES_FILE)
             .expect("the balance set file reads");
         assert_eq!(
             balances_from_file, streamed_balances,
-            "the emitted address-balance set matches the P2P-served set bytes",
+            "the emitted address-balance set matches the state's set bytes",
         );
 
         // Chain value pools: the file equals the finalized value pool encoding.

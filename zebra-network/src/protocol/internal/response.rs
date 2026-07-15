@@ -2,8 +2,6 @@
 
 use std::{fmt, sync::Arc, time::Duration};
 
-use bytes::Bytes;
-
 use zebra_chain::{
     block::{self, Block},
     transaction::{UnminedTx, UnminedTxId},
@@ -15,17 +13,6 @@ use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse, PeerSock
 use proptest_derive::Arbitrary;
 
 use InventoryResponse::*;
-
-/// A proptest strategy that produces an arbitrary [`Bytes`] buffer.
-///
-/// `bytes::Bytes` does not implement [`proptest::arbitrary::Arbitrary`], so the
-/// derived `Arbitrary` impl for [`Response`] needs an explicit strategy for its
-/// byte-carrying variants.
-#[cfg(any(test, feature = "proptest-impl"))]
-fn arbitrary_bytes() -> impl proptest::strategy::Strategy<Value = Bytes> {
-    use proptest::prelude::*;
-    proptest::collection::vec(any::<u8>(), 0..512).prop_map(Bytes::from)
-}
 
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -93,47 +80,6 @@ pub enum Response {
     //
     // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
     Transactions(Vec<InventoryResponse<(UnminedTx, Option<PeerSocketAddr>), UnminedTxId>>),
-
-    /// The serialized note commitment tree for a shielded pool at a height, in
-    /// response to [`Request::NoteCommitmentTree`](super::Request::NoteCommitmentTree).
-    ///
-    /// The requester deserializes the tree and checks its `.root()` against the
-    /// root recorded in the relevant known-hash chunk.
-    NoteCommitmentTree(
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "arbitrary_bytes()")
-        )]
-        Bytes,
-    ),
-
-    /// A content-addressed byte range, in response to any of the ranged
-    /// snapshot-distribution requests:
-    /// [`Request::KnownHashChunkRange`](super::Request::KnownHashChunkRange),
-    /// [`Request::UnspentOutputs`](super::Request::UnspentOutputs), or
-    /// [`Request::AddressBalances`](super::Request::AddressBalances).
-    ///
-    /// This single variant serves all three because each is an opaque
-    /// content-addressed byte range from the requester's point of view; the
-    /// request type determines which artifact the bytes belong to. The requester
-    /// reassembles the ranges and verifies the whole artifact's SHA-256 against
-    /// its pinned constant.
-    SnapshotRange(
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "arbitrary_bytes()")
-        )]
-        Bytes,
-    ),
-
-    /// The requested snapshot artifact is unavailable.
-    ///
-    /// Sent in response to a known-hash chunk, note-commitment-tree, or snapshot
-    /// range request that the peer cannot satisfy: the index/height is unknown
-    /// or above the peer's tip, or the requested range exceeds the per-request
-    /// limit. This is a normal negative answer, not a protocol error, so it must
-    /// never cause the peer to be dropped.
-    NotFound,
 }
 
 impl fmt::Display for Response {
@@ -178,14 +124,6 @@ impl fmt::Display for Response {
                 transactions.iter().filter(|r| r.is_available()).count(),
                 transactions.iter().filter(|r| r.is_missing()).count()
             ),
-
-            Response::NoteCommitmentTree(bytes) => {
-                format!("NoteCommitmentTree {{ bytes: {} }}", bytes.len())
-            }
-            Response::SnapshotRange(bytes) => {
-                format!("SnapshotRange {{ bytes: {} }}", bytes.len())
-            }
-            Response::NotFound => "NotFound".to_string(),
         })
     }
 }
@@ -206,10 +144,6 @@ impl Response {
 
             Response::Blocks(_) => "Blocks",
             Response::Transactions(_) => "Transactions",
-
-            Response::NoteCommitmentTree(_) => "NoteCommitmentTree",
-            Response::SnapshotRange(_) => "SnapshotRange",
-            Response::NotFound => "NotFound",
         }
     }
 

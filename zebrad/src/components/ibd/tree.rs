@@ -4,7 +4,7 @@
 //! commitments; instead it downloads each updating height's sapling/orchard
 //! tree frontier, verifies it against the chunk's recorded root, and hands it
 //! to the state's "tree supplied by download" commit path (design doc
-//! `p2p-snapshot-distribution.md` §3.2).
+//! `snapshot-distribution.md` §3.2).
 //!
 //! Trees must arrive *before* their block reaches the commit stage, so the
 //! lookahead window for trees is deeper than the block-fetch window: this
@@ -30,7 +30,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zebra_chain::block;
-use zebra_network::ShieldedPool;
+use zebra_state::ShieldedPool;
 
 /// The hard ceiling on how many heights ahead of the commit frontier the tree
 /// lookahead schedules fetches, regardless of the configured margin.

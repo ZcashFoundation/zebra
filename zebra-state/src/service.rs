@@ -82,9 +82,8 @@ mod tests;
 
 pub use finalized_state::{OutputLocation, TransactionIndex, TransactionLocation};
 pub use read::snapshot::{
-    address_balances_range, known_hash_chunk_bytes, note_commitment_tree_bytes,
-    note_commitment_tree_root_from_bytes, supplied_note_commitment_trees_from_bytes,
-    unspent_outputs_range, ADDRESS_BALANCE_RECORD_LEN, MAX_SNAPSHOT_RANGE_BYTES,
+    known_hash_chunk_bytes, note_commitment_tree_bytes, note_commitment_tree_root_from_bytes,
+    supplied_note_commitment_trees_from_bytes, ADDRESS_BALANCE_RECORD_LEN,
     UNSPENT_OUTPUT_RECORD_LEN,
 };
 use write::WriteMessage;
@@ -1354,11 +1353,7 @@ impl Service<Request> for StateService {
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_)
             | Request::CheckBlockProposalValidity(_)
-            | Request::KnownHashChunk(_)
-            | Request::KnownHashChunkRange { .. }
-            | Request::NoteCommitmentTreeBytes { .. }
-            | Request::UnspentOutputsRange { .. }
-            | Request::AddressBalancesRange { .. } => {
+            | Request::KnownHashChunk(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1827,29 +1822,9 @@ impl Service<ReadRequest> for ReadStateService {
                 Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
             }
 
-            // Used by the IBD P2P snapshot server (the inbound service).
+            // Used by the snapshot-consume IBD engine's chunk source.
             ReadRequest::KnownHashChunk(index) => Ok(ReadResponse::KnownHashChunk(
                 read::known_hash_chunk_bytes(&state.db, index),
-            )),
-
-            ReadRequest::KnownHashChunkRange { index, offset, len } => {
-                Ok(ReadResponse::SnapshotRange(read::known_hash_chunk_range(
-                    &state.db, index, offset, len,
-                )))
-            }
-
-            ReadRequest::NoteCommitmentTreeBytes { pool, height } => {
-                Ok(ReadResponse::NoteCommitmentTreeBytes(
-                    read::note_commitment_tree_bytes(&state.db, pool, height),
-                ))
-            }
-
-            ReadRequest::UnspentOutputsRange { offset, len } => Ok(ReadResponse::SnapshotRange(
-                read::unspent_outputs_range(&state.db, offset, len),
-            )),
-
-            ReadRequest::AddressBalancesRange { offset, len } => Ok(ReadResponse::SnapshotRange(
-                read::address_balances_range(&state.db, offset, len),
             )),
         };
 
