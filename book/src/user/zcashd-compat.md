@@ -88,8 +88,11 @@ See `install-zebra.sh --help` for the full list, including `--dry-run`.
 ## The sidecar zcashd build
 
 Use the sidecar `zcashd` build from
-[valargroup/zcashd](https://github.com/valargroup/zcashd). The installer and Zebra's embedded download both pin its release archives by
-SHA256. It differs from stock `zcash/zcash` in three ways:
+[ZcashFoundation/zcashd](https://github.com/ZcashFoundation/zcashd) (the
+`zcashd-compat` branch, forked from
+[valargroup/zcashd](https://github.com/valargroup/zcashd)). The installer and
+Zebra's embedded download both pin its release archives by SHA256. It differs
+from stock `zcash/zcash` in three ways:
 
 1. **P2P sidecar mode is hard-locked.** The binary refuses to start unless
    exactly one `-connect=<zebra-address>` peer is configured. It never opens a
@@ -156,12 +159,12 @@ Zebra's embedded release manifest; use `zcashd_source = "path"` plus
 `zcashd_path` to run a binary you provide.)
 
 > [!WARNING]
-> The `embedded` source is **experimental**: it downloads a third-party
-> `zcashd` build from [valargroup/zcashd](https://github.com/valargroup/zcashd)
-> releases, which the Zcash Foundation does not build or audit. Until a
-> provenance decision is made for sidecar binaries, production deployments
-> should build the sidecar from source (or otherwise verify it) and use
-> `zcashd_source = "path"`.
+> The `embedded` source is **experimental**: it downloads a pinned `zcashd`
+> build from [ZcashFoundation/zcashd](https://github.com/ZcashFoundation/zcashd)
+> releases. The current `zebra-compat-v1.0.0` artifact is re-hosted from
+> valargroup's build and has not yet been rebuilt by the foundation's own CI.
+> Until then, production deployments should build the sidecar from source (or
+> otherwise verify it) and use `zcashd_source = "path"`.
 
 On start, Zebra:
 

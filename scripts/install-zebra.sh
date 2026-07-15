@@ -27,10 +27,10 @@ ZEBRA_DOCKER_RUNTIME_GID=10001
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
-ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/valargroup/zcashd/releases/download/v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz"
 ZCASHD_RUNTIME_ARCHIVE_SHA256="b861ea94215647a69a944ded7c9d6c7c3dfd836e54e3e194103242935e6879f2"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
-ZCASHD_DEFAULT_DOCKER_IMAGE="valargroup/zcashd:v1.0.0"
+ZCASHD_DEFAULT_DOCKER_IMAGE="zfnd/zcashd:zebra-compat-v1.0.0"
 
 INSTALL_PROFILE=""
 MODE=""
@@ -1219,7 +1219,7 @@ install_zcashd_source() {
     printf 'Cloning sidecar zcashd source into %s...\n' "$dest"
   fi
 
-  git clone --branch zcashd-compat -- https://github.com/valargroup/zcashd.git "$dest"
+  git clone --branch zcashd-compat -- https://github.com/ZcashFoundation/zcashd.git "$dest"
   [[ -x "$dest/zcutil/build.sh" ]]
 }
 
@@ -1295,7 +1295,7 @@ EOF
   if ((MISSING_ZCASHD_SOURCE)); then
     cat <<EOF
 Clone sidecar zcashd source:
-  git clone --branch zcashd-compat https://github.com/valargroup/zcashd.git $(shell_quote "$UNITY_ROOT/zcashd")
+  git clone --branch zcashd-compat https://github.com/ZcashFoundation/zcashd.git $(shell_quote "$UNITY_ROOT/zcashd")
 EOF
   fi
 
@@ -1627,7 +1627,7 @@ compat_collect_disk_checks() {
   fi
 }
 
-# The zcashd repo is `valargroup/zcashd`, so a plain `git clone` lands in
+# The zcashd repo is `ZcashFoundation/zcashd` (zcashd-compat branch), so a plain `git clone` lands in
 # `zcashd/`. Older instructions cloned it as `zcash/`. Accept either.
 resolve_zcash_src_dir() {
   local candidate
@@ -2164,7 +2164,7 @@ EOF
 compat_print_source_commands() {
   cat <<EOF
 git clone https://github.com/ZcashFoundation/zebra.git
-git clone https://github.com/valargroup/zcashd.git
+git clone https://github.com/ZcashFoundation/zcashd.git
 
 cd $(shell_quote "$REPO_ROOT") && cargo build --release --bin zebrad
 cd $(shell_quote "$ZCASH_SRC_DIR") && ./zcutil/build.sh -j"\$(nproc)"

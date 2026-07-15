@@ -262,17 +262,15 @@ class ZcashdSidecar:
                 f"rpcuser={self.rpc_user}\n"
                 f"rpcpassword={self.rpc_password}\n"
                 f"rpcport={self.rpc_port}\n"
+                # Bind RPC to loopback explicitly: the default all-interfaces
+                # bind can fail in restricted network sandboxes.
+                "rpcbind=127.0.0.1\n"
                 "rpcallowip=127.0.0.1\n"
                 # The P2P sidecar shield: one outbound peer (Zebra), no listener.
                 f"connect={self.zebra_p2p_addr}\n"
                 "listen=0\n"
                 "dnsseed=0\n"
                 "discover=0\n"
-                # zcashd needs a wallet address type; allow legacy calls the
-                # conformance tests use.
-                "allowdeprecated=getnewaddress\n"
-                "allowdeprecated=z_getbalance\n"
-                "allowdeprecated=legacy_privacy\n"
             )
 
     def start(self):
