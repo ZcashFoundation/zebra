@@ -333,7 +333,8 @@ fn finalized_write_phase_pauses_compaction_for_real_db_commits() {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     let db = state.db.clone();
 
     assert!(!db.auto_compaction_disabled());
@@ -388,7 +389,8 @@ fn finalized_write_phase_skips_wal_with_config_opt_in() {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     let db = state.db.clone();
 
     let mut phase = FinalizedWritePhase::new(db.clone(), db.config().disable_wal_during_ibd);
@@ -475,7 +477,8 @@ fn wal_skip_crash_recovers_to_last_atomic_flush() {
         &Network::Mainnet,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
 
     // Recovery lands exactly on the flushed height: the flushed blocks are
     // durable, and the unflushed post-flush blocks are gone.
@@ -528,7 +531,8 @@ fn wal_skip_crash_writer() {
         &Network::Mainnet,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     let db = state.db.clone();
 
     // Activate the bulk-write phase: WAL skipping on (the config opted in).

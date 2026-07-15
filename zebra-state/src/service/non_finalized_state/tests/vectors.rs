@@ -1196,7 +1196,8 @@ fn empty_checkpoint_test_states(
         network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
 
     // Re-root a real pre-Heartwood block onto the empty database's tip so the

@@ -29,10 +29,10 @@ pub const MAX_CHECKPOINT_BYTE_COUNT: u64 = 32 * 1024 * 1024;
 /// checkpoint lists are regenerated: the
 /// `max_checkpoint_height_constants_match_lists` test fails until this
 /// matches the list file.
-pub const MAINNET_MAX_CHECKPOINT_HEIGHT: Height = Height(3_373_206);
+pub const MAINNET_MAX_CHECKPOINT_HEIGHT: Height = Height(3_406_406);
 
 /// The maximum height in the bundled (default) Testnet checkpoint list
 /// (`test-checkpoints.txt`).
 ///
 /// See [`MAINNET_MAX_CHECKPOINT_HEIGHT`] for the update rule.
-pub const TESTNET_MAX_CHECKPOINT_HEIGHT: Height = Height(4_057_200);
+pub const TESTNET_MAX_CHECKPOINT_HEIGHT: Height = Height(4_156_800);

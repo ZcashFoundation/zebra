@@ -545,31 +545,36 @@ where
     }
 }
 
-/// Commits the Regtest genesis block directly to the state, if the state
+/// Commits the network's genesis block directly to the state, if the state
 /// doesn't already contain it.
 ///
-/// In Regtest, the legacy syncer's genesis download requires a connected
-/// peer, which a standalone Regtest node doesn't have. Genesis is below the
-/// checkpoint gate (`zebra_consensus::checkpoints`), so it is committed as a
-/// checkpoint-verified block: its hash is checked against the network
-/// genesis hash, which is the same pin the deleted checkpoint verifier
-/// applied.
-pub async fn commit_regtest_genesis_if_missing<ZS>(
-    network: &Network,
-    state: ZS,
-) -> Result<(), Report>
+/// The genesis block is at or below the mandatory checkpoint floor, so the
+/// semantic verifier's checkpoint gate (`zebra_consensus::checkpoints`) never
+/// commits it, and the legacy syncer's genesis download requires a connected
+/// peer that already has it. It is instead committed here as a
+/// checkpoint-verified block: its hash is checked against the network genesis
+/// hash, which is the same pin the deleted checkpoint verifier applied.
+///
+/// A configured testnet may declare a custom genesis hash; the hard-coded
+/// block then doesn't match, and the commit is skipped with a warning (such a
+/// network must obtain its genesis block another way).
+pub async fn commit_genesis_if_missing<ZS>(network: &Network, state: ZS) -> Result<(), Report>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    let genesis_block = zebra_chain::block::genesis::regtest_genesis_block();
+    let genesis_block = zebra_chain::block::genesis::genesis_block(network);
     let genesis = zs::CheckpointVerifiedBlock::from(genesis_block);
 
-    assert_eq!(
-        genesis.hash,
-        network.genesis_hash(),
-        "the Regtest genesis block hash should match the network genesis hash"
-    );
+    if genesis.hash != network.genesis_hash() {
+        warn!(
+            expected = ?network.genesis_hash(),
+            hard_coded = ?genesis.hash,
+            "the configured network uses a custom genesis block; \
+             not committing the hard-coded genesis block",
+        );
+        return Ok(());
+    }
 
     let known = state
         .clone()
@@ -583,7 +588,7 @@ where
     state
         .oneshot(zs::Request::CommitCheckpointVerifiedBlock(genesis))
         .await
-        .map_err(|error| eyre!("committing the Regtest genesis block failed: {error}"))?;
+        .map_err(|error| eyre!("committing the genesis block failed: {error}"))?;
 
     Ok(())
 }

@@ -24,7 +24,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP},
-    peer::{ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion},
+    peer::{
+        ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
+    },
     peer_set::{inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD},
     protocol::external::{types::Version, InventoryHash},
     BoxError, Config, InventoryResponse, PeerSocketAddr, Request, Response, SharedPeerError,

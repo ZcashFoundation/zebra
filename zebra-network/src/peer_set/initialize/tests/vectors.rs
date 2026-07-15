@@ -13,7 +13,6 @@
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
-use std::net::IpAddr;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,

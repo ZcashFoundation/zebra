@@ -190,7 +190,7 @@ impl ZebraDb {
         // file can only be changed while we hold the RocksDB database lock.
         let disk_db = DiskDb::new(
             config,
-            db_kind,
+            &db_kind,
             format_version_in_code,
             network,
             column_families_in_code,
@@ -217,7 +217,7 @@ impl ZebraDb {
                 format_version_in_code,
                 network,
                 debug_skip_format_upgrades,
-            )));
+            )?));
         }
 
         // Load the optional snapshot-consume state, if configured. This is done
@@ -320,7 +320,7 @@ impl ZebraDb {
         format_version_in_code: &Version,
         network: &Network,
         debug_skip_format_upgrades: bool,
-    ) -> ZebraDb {
+    ) -> Result<ZebraDb, StateInitError> {
         use crate::service::finalized_state::{
             RPC_INDEX_COLUMN_FAMILIES_IN_CODE, RPC_INDEX_DB_DIR,
         };
@@ -738,7 +738,8 @@ mod load_snapshot_consume_tests {
             #[cfg(feature = "elasticsearch")]
             false,
             false,
-        );
+        )
+        .expect("test database opens");
         let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
             .expect("genesis deserializes");
@@ -781,7 +782,8 @@ mod load_snapshot_consume_tests {
             #[cfg(feature = "elasticsearch")]
             false,
             false,
-        );
+        )
+        .expect("test database opens");
 
         let config = Config {
             snapshot_consume: Some(SnapshotConsumeConfig::default()),
@@ -816,7 +818,8 @@ mod load_snapshot_consume_tests {
             #[cfg(feature = "elasticsearch")]
             false,
             false,
-        );
+        )
+        .expect("test database opens");
 
         let result = state
             .db

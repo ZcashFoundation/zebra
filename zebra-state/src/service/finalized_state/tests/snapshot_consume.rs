@@ -48,7 +48,8 @@ fn fresh_state_with_genesis(network: &Network) -> (FinalizedState, Arc<Block>) {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
 
     state
         .commit_finalized_direct(
@@ -177,7 +178,8 @@ fn commit_blocks_normally(network: &Network, max_height: u32) -> (FinalizedState
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
 
     let mut blocks = Vec::new();
     for height in 0..=max_height {
@@ -231,7 +233,8 @@ fn snapshot_consume_h_max_parity() {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
     consume_state
         .db
         .set_snapshot_consume(Some(Arc::new(SnapshotConsumeState::from_parts(
@@ -355,7 +358,8 @@ fn snapshot_consume_elision_never_misses_a_spend() {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
     consume_state
         .db
         .set_snapshot_consume(Some(Arc::new(SnapshotConsumeState::from_parts(

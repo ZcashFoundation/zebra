@@ -89,7 +89,7 @@ use tokio::{
     pin, select,
     sync::{oneshot, watch},
 };
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService};
 use tower_fair_buffer::FairBuffer;
 use tracing_futures::Instrument;
 
@@ -664,17 +664,28 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        // In regtest, commit the genesis block directly (bypassing the syncer's genesis
-        // download, which requires a connected peer). Then run the syncer normally so
-        // that multi-hop block propagation works: gossiped blocks that arrive out of
-        // order (e.g. only the latest tip hash was gossiped) will be recovered by the
-        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
-        if is_regtest {
-            ibd::commit_regtest_genesis_if_missing(&config.network.network, state.clone()).await?;
-        }
+        // Commit the genesis block directly if the state is empty: the semantic
+        // verifier's checkpoint gate never commits blocks at or below the
+        // mandatory floor, the known-hash engine only covers networks with a
+        // bundled list, and the legacy syncer's genesis download requires a
+        // connected peer that already has it (which a standalone Regtest node
+        // never does). Then run the syncer normally so that multi-hop block
+        // propagation works: gossiped blocks that arrive out of order (e.g.
+        // only the latest tip hash was gossiped) will be recovered by the
+        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY.
+        ibd::commit_genesis_if_missing(&config.network.network, state.clone()).await?;
 
         // Run the known-hash IBD engine (design doc §4.7) to completion
         // before driving the legacy syncer.
+        //
+        // An ephemeral state must never write to the configured cache
+        // directory, so the engine's disk block cache goes to a per-process
+        // temporary directory instead (like the ephemeral database itself).
+        let ibd_cache_dir = if config.state.ephemeral {
+            std::env::temp_dir().join(format!("zebrad-ephemeral-{}", std::process::id()))
+        } else {
+            config.state.cache_dir.clone()
+        };
         let ibd_engine = ibd::IbdEngine::new(
             config.sync.clone(),
             config.network.network.clone(),
@@ -682,7 +693,7 @@ impl StartCmd {
             state.clone(),
             latest_chain_tip.clone(),
             peer_set_status,
-            &config.state.cache_dir,
+            &ibd_cache_dir,
         );
         let syncer_task_handle = ibd::spawn_engine_then_legacy_sync(ibd_engine, syncer.sync());
 

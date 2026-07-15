@@ -293,7 +293,8 @@ mod tests {
             &Network::Mainnet,
             #[cfg(feature = "elasticsearch")]
             false,
-        );
+        )
+        .expect("test database opens");
 
         let blocks = Network::Mainnet.blockchain_map();
         for height in 0..=2 {

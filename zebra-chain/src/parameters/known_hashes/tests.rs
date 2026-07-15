@@ -104,12 +104,16 @@ fn for_network_coverage() {
         let spec = KnownHashListSpec::for_network(&network)
             .expect("Mainnet and the default Testnet have a bundled known-hash list");
 
-        // The bundled list must cover exactly up to the max checkpoint height,
-        // since the engine finalizes the known-hash range up to that height.
-        assert_eq!(
+        // The engine finalizes the known-hash range, so the bundled list must
+        // stay inside the checkpointed range. `emit-snapshot` re-aligns the two
+        // to one value at each release, but the checkpoint lists may grow ahead
+        // of the bundled known-hash assets between re-emissions.
+        assert!(
+            spec.max_height <= network.max_checkpoint_height(),
+            "{network} known-hash list max_height must not extend past its max \
+             checkpoint height: list max {:?}, checkpoint max {:?}",
             spec.max_height,
             network.max_checkpoint_height(),
-            "{network} known-hash list max_height must match its max checkpoint height",
         );
     }
 }
@@ -123,8 +127,17 @@ fn assert_bundled_list_loads(network: &Network) -> KnownHashList {
         .unwrap_or_else(|error| panic!("bundled {network} assets load and verify: {error:?}"))
         .unwrap_or_else(|| panic!("{network} has a bundled list"));
 
+    // `emit-snapshot` re-aligns the known-hash coverage and the checkpoint
+    // constant to one value at each release, but the checkpoint lists may grow
+    // ahead of the bundled known-hash assets between re-emissions, so the
+    // assets may trail (never exceed) the checkpoint constant.
     let max_height = list.max_height();
-    assert_eq!(max_height, network.max_checkpoint_height());
+    assert!(
+        max_height <= network.max_checkpoint_height(),
+        "the bundled known-hash list must not extend past the checkpointed range: \
+         list max {max_height:?}, checkpoint max {:?}",
+        network.max_checkpoint_height(),
+    );
 
     // After open(), no chunks are resident (verify-then-drop).
     assert_eq!(list.resident_chunks(), 0);

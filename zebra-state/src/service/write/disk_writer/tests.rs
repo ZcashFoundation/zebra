@@ -47,7 +47,8 @@ fn spawn_disk_writer() -> (
         &Network::Mainnet,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     let db = state.db.clone();
 
     let (disk_tx, disk_rx) = crossbeam_channel::bounded::<DiskRequest>(500);

@@ -788,16 +788,22 @@ impl WriteBlockWorker {
 
     /// Reconsiders a previously invalidated block into the non-finalized state.
     ///
-    /// A block whose disk write is enqueued, in flight, or complete (its height
-    /// is below the disk frontier) can't be reconsidered; above the frontier,
+    /// A block at a height whose disk write is enqueued, in flight, or complete
+    /// (below the disk frontier) can't be reconsidered; above the frontier,
     /// reconsideration works even during checkpoint sync.
+    ///
+    /// A reconsider target is an *invalidated* block, so its height comes from
+    /// the invalidated-blocks list, not the live chains. An unknown hash passes
+    /// through to [`NonFinalizedState::reconsider_block`], which reports the
+    /// precise [`ReconsiderError::MissingInvalidatedBlock`] error.
     fn handle_reconsider(
         &mut self,
         loop_state: &WorkerLoopState<'_>,
         hash: block::Hash,
         rsp_tx: tokio::sync::oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     ) {
-        if self.is_below_disk_frontier(loop_state, hash) {
+        let target_height = self.non_finalized_state.invalidated_block_height(hash);
+        if target_height.is_some_and(|height| height < loop_state.next_disk_height) {
             let _ = rsp_tx.send(Err(ReconsiderError::CheckpointCommitInProgress));
             return;
         }
@@ -816,7 +822,7 @@ impl WriteBlockWorker {
 
     /// Returns `true` if `hash`'s height is below the disk frontier (its disk
     /// write is enqueued, in flight, or complete), so it can't be the target of
-    /// an invalidate or reconsider.
+    /// an invalidate.
     ///
     /// A hash that isn't in any non-finalized chain (already finalized, or
     /// unknown) is treated as below the frontier: invalidating it is either

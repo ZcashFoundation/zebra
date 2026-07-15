@@ -37,8 +37,8 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, QueuedCheckpointVerified},
-    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
+    service::check,
+    Config, StateInitError, ValidateContextError,
 };
 
 pub mod column_family;
@@ -178,11 +178,16 @@ pub const CONSENSUS_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "orchard_anchors",
     "orchard_note_commitment_tree",
     "orchard_note_commitment_subtree",
+    // Ironwood (NU6.3)
+    "ironwood_nullifiers",
+    "ironwood_anchors",
+    "ironwood_note_commitment_tree",
+    "ironwood_note_commitment_subtree",
     // Chain
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
-    // P2P known-hash snapshot distribution
+    // Known-hash snapshot distribution
     KNOWN_HASH_CHUNK,
 ];
 

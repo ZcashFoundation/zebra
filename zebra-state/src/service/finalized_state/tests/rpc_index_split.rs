@@ -73,7 +73,8 @@ fn commit_blocks(
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
 
     let mut blocks = Vec::new();
     for height in 0..=max_height {
@@ -542,7 +543,8 @@ fn split_rpc_reads_match_single_db_with_cross_block_spend() {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
     commit_consensus_block(
         &baseline_state.db,
         &network,
@@ -571,7 +573,8 @@ fn split_rpc_reads_match_single_db_with_cross_block_spend() {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
     commit_consensus_block(
         &split_state.db,
         &network,
@@ -683,7 +686,8 @@ fn split_bulk_address_balances_round_trip_via_rpc_index_db() {
         #[cfg(feature = "elasticsearch")]
         false,
         false,
-    );
+    )
+    .expect("test database opens");
 
     // Two synthetic final balances to bulk-load.
     let address_a = Address::from_script_hash(NetworkKind::Mainnet, [0x01; 20]);

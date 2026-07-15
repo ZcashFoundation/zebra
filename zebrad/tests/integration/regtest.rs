@@ -19,7 +19,13 @@ use crate::common::{
     regtest::MiningRpcMethods,
 };
 
-/// Checks that the Regtest genesis block can be validated.
+/// Checks that the Regtest genesis block is committed by the direct startup
+/// path, and that the semantic verifier's checkpoint gate rejects it.
+///
+/// On this branch blocks at or below the mandatory checkpoint height never
+/// reach the semantic verifier: they are committed by the known-hash IBD
+/// engine, or, for the Regtest genesis block, directly by the startup path
+/// (`zebrad::components::ibd::commit_genesis_if_missing`).
 #[tokio::test]
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
@@ -31,19 +37,35 @@ async fn validate_regtest_genesis_block() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state)
+    ) = zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state.clone())
         .await;
 
-    let genesis_hash = block_verifier_router
+    // The gate rejects genesis (it is at the mandatory checkpoint floor).
+    let error = block_verifier_router
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
         .await
-        .expect("should validate Regtest genesis block");
+        .expect_err("the checkpoint gate rejects blocks at the mandatory floor");
+    assert!(
+        matches!(
+            error.downcast_ref::<zebra_consensus::VerifyBlockError>(),
+            Some(zebra_consensus::VerifyBlockError::BelowMandatoryCheckpoint { .. })
+        ),
+        "got {error:?}",
+    );
 
-    assert_eq!(
-        genesis_hash,
-        network.genesis_hash(),
-        "validated block hash should match network genesis hash"
-    )
+    // The production genesis path commits it directly to the state.
+    zebrad::components::ibd::commit_genesis_if_missing(&network, state.clone())
+        .await
+        .expect("the Regtest genesis block commits directly to the state");
+
+    let response = state
+        .oneshot(zebra_state::Request::KnownBlock(network.genesis_hash()))
+        .await
+        .expect("the state responds to KnownBlock");
+    assert!(
+        matches!(response, zebra_state::Response::KnownBlock(Some(_))),
+        "the committed genesis block is known to the state, got {response:?}",
+    );
 }
 
 /// Test successful `getblocktemplate` and `submitblock` RPC calls on Regtest on Canopy.
@@ -216,20 +238,17 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::init_test(
-        zebra_consensus::Config::default(),
-        &network,
-        state.clone(),
-    )
-    .await;
+    ) = zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state.clone())
+        .await;
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
-    let genesis_hash = block_verifier_router
-        .clone()
-        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+    // Genesis is at the mandatory checkpoint floor, so the semantic verifier's
+    // checkpoint gate rejects it; commit it directly, like production startup.
+    zebrad::components::ibd::commit_genesis_if_missing(&network, state.clone())
         .await
-        .expect("should validate Regtest genesis block");
+        .expect("the Regtest genesis block commits directly to the state");
+    let genesis_hash = network.genesis_hash();
 
     let mut mempool = MockService::build()
         .with_max_request_delay(Duration::from_secs(5))
@@ -575,20 +594,17 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::init_test(
-        zebra_consensus::Config::default(),
-        &network,
-        state.clone(),
-    )
-    .await;
+    ) = zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state.clone())
+        .await;
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
-    let genesis_hash = block_verifier_router
-        .clone()
-        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+    // Genesis is at the mandatory checkpoint floor, so the semantic verifier's
+    // checkpoint gate rejects it; commit it directly, like production startup.
+    zebrad::components::ibd::commit_genesis_if_missing(&network, state.clone())
         .await
-        .expect("should validate Regtest genesis block");
+        .expect("the Regtest genesis block commits directly to the state");
+    let genesis_hash = network.genesis_hash();
 
     let mut mempool = MockService::build()
         .with_max_request_delay(Duration::from_secs(5))

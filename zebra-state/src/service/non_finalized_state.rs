@@ -598,9 +598,7 @@ impl NonFinalizedState {
                 finalized_state
                     .finalized_tip_height()
                     .unwrap_or(block::Height(0)),
-                finalized_state.sprout_tree_for_tip(),
-                finalized_state.sapling_tree_for_tip(),
-                finalized_state.orchard_tree_for_tip(),
+                finalized_state.note_commitment_trees_for_tip(),
                 finalized_state.history_tree(),
                 finalized_state.finalized_value_pool(),
             ),
@@ -1162,6 +1160,15 @@ impl NonFinalizedState {
     /// Return the invalidated blocks.
     pub fn invalidated_blocks(&self) -> IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>> {
         self.invalidated_blocks.clone()
+    }
+
+    /// Returns the height of the invalidated block with `hash`, if it is the
+    /// root of an invalidated-blocks record (the only hash
+    /// [`reconsider_block`](Self::reconsider_block) accepts).
+    pub fn invalidated_block_height(&self, hash: block::Hash) -> Option<Height> {
+        self.invalidated_blocks
+            .iter()
+            .find_map(|(height, blocks)| (blocks.first()?.hash == hash).then_some(*height))
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.

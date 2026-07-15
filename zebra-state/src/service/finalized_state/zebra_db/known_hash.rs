@@ -131,6 +131,7 @@ mod tests {
                 .map(ToString::to_string),
             false,
         )
+        .expect("test database opens")
     }
 
     /// Writing a known-hash chunk blob and reading it back returns the same bytes.

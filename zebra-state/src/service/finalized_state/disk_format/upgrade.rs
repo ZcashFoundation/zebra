@@ -110,7 +110,14 @@ fn format_upgrades(
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
         // major-version upgrade that is restorable from the previous major database format version.
         Box::new(add_ironwood_tree::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        // The known-hash snapshot distribution adds the `known_hash_chunk`
+        // column family. New column families are created automatically when the
+        // database is opened, so no data migration is needed.
+        Box::new(no_migration::NoMigration::new(
+            "add known-hash chunk column family",
+            Version::new(28, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 7])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -605,6 +612,12 @@ impl DbFormatChange {
             );
             Self::mark_as_upgraded_to(db, &upgrade.version());
         }
+
+        info!(
+            %newer_running_version,
+            %older_disk_version,
+            "database is fully upgraded"
+        );
 
         Ok(())
     }

@@ -163,7 +163,9 @@ impl EmitSnapshotCmd {
 
         // `init_read_only` returns the read service, the finalized `ZebraDb`,
         // and the non-finalized sender; the updater only needs the finalized DB.
-        let db = zebra_state::init_read_only(config, &self.network).1;
+        let db = zebra_state::init_read_only(config, &self.network)
+            .map_err(|error| eyre!("could not open the cached state read-only: {error}"))?
+            .1;
 
         let (tip_height, tip_hash) = db
             .tip()
@@ -820,7 +822,8 @@ mod tests {
             &Network::Mainnet,
             #[cfg(feature = "elasticsearch")]
             false,
-        );
+        )
+        .expect("test database opens");
 
         let block_bytes: [&[u8]; 3] = [
             zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.as_ref(),

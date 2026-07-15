@@ -64,7 +64,8 @@ impl WorkerHarness {
             &network,
             #[cfg(feature = "elasticsearch")]
             false,
-        );
+        )
+        .expect("test database opens");
         Self::with_states(finalized_state, NonFinalizedState::new(&network))
     }
 
@@ -269,16 +270,18 @@ fn admin_requests_below_the_frontier_are_rejected() {
         "expected ProcessingCheckpointedBlocks, got {invalidate_error:?}",
     );
 
-    // Reconsidering it is rejected the same way.
+    // Reconsidering it is rejected too: a below-frontier block was never
+    // invalidated (its invalidation is gated above), so the precise
+    // missing-invalidated-block error surfaces rather than the frontier gate.
     let reconsider_error = harness
         .send_reconsider(blocks[1].hash())
         .expect_err("a below-frontier block can't be reconsidered");
     assert!(
         matches!(
             reconsider_error,
-            crate::service::ReconsiderError::CheckpointCommitInProgress
+            crate::service::ReconsiderError::MissingInvalidatedBlock(_)
         ),
-        "expected CheckpointCommitInProgress, got {reconsider_error:?}",
+        "expected MissingInvalidatedBlock, got {reconsider_error:?}",
     );
 
     // An unknown hash (not in any non-finalized chain) is rejected too.
@@ -309,7 +312,8 @@ fn invalidate_above_frontier_empties_and_publishes() {
         &network,
         #[cfg(feature = "elasticsearch")]
         false,
-    );
+    )
+    .expect("test database opens");
     finalized_state
         .commit_finalized_direct(blocks[0].clone().into(), None, "test genesis")
         .expect("genesis commits to the database");
