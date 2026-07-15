@@ -27,15 +27,25 @@ Usage:
 
 Scope and limits
 ----------------
-* Tests that require the sidecar to mine directly (`getblocktemplate`,
-  `submitblock`, `generate` on zcashd), or that assert miner-RPC availability,
-  cannot pass: those RPCs are removed from the sidecar by design.
-* Orchard/unified tests require a network where NU6.3 is not active (the sidecar
-  descopes Orchard from NU6.3). Run them with a Regtest params file that leaves
-  NU6.3 unset; see README.md.
-* The harness fans all sidecars into one Zebra, so it emulates the upstream mesh
-  rather than reproducing it; tests that assert specific peer topology on the
-  sidecar (getpeerinfo counts beyond "one Zebra peer") need adjustment.
+A test runs here only if it fits the harness's fixed Regtest configuration:
+
+* Shared, fixed network-upgrade schedule. Zebra mines the blocks the sidecar
+  validates, so both must agree on activation heights; the harness activates
+  every upgrade through NU5 at height 1. Tests that pass their own
+  `nuparams=...:<height>` via `extra_args` (most wallet tests) request a
+  different schedule and can't be honoured without reconfiguring Zebra's Regtest
+  params to match per test. The harness ignores `extra_args`.
+* No deprecated / transparent-only RPCs: the sidecar is shielded-first and
+  disables the legacy transparent `getnewaddress`.
+* No miner RPCs on the sidecar (`getblocktemplate`, `submitblock`, `generate` on
+  zcashd) — those are removed by design; mining is Zebra's job.
+* No forks / reorgs / network splits: all sidecars follow one Zebra chain.
+* No cached-chain assumptions: `initialize_chain` is a no-op, so the chain
+  starts empty and any pre-seeded height/UTXO state must be mined by the test.
+
+The self-contained `wallet_conformance.py` / `wallet_multinode.py` exercise the
+full modern wallet surface within these constraints and are the primary
+demonstration of the pairing. See README.md.
 """
 
 import importlib.util

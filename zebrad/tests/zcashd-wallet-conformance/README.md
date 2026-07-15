@@ -1,6 +1,6 @@
 # zcashd wallet/RPC conformance against the Zebra + sidecar pairing
 
-This harness runs zcashd's own RPC test suite against a **Zebra + zcashd-sidecar**
+This harness runs zcashd wallet RPC tests against a **Zebra + zcashd-sidecar**
 pairing (zcashd-compat mode), to prove the sidecar's wallet and RPC surface
 behaves the same when Zebra — not a mesh of standalone zcashds — is its network
 and miner.
@@ -37,63 +37,122 @@ sidecar keeps its wallet.
 `generatetoaddress` was added to Zebra for this (regtest-only; it mines to a
 caller-specified address instead of the configured `mining.miner_address`).
 
+## Shielded-first wallet
+
+The sidecar zcashd build is shielded-first: the legacy transparent
+`getnewaddress` is disabled, and transparent coinbase paid to a unified-address
+receiver is not credited. So the harness drives the wallet through the modern
+account / unified-address / shielded `z_*` RPCs: `z_getnewaccount`,
+`z_getaddressforaccount`, `z_getbalanceforaccount`, and `z_sendmany`. Coinbase
+is mined to each account's Sapling receiver.
+
+`z_getbalanceforaccount` is purely confirmation-gated — it does not apply
+coinbase maturity itself — so spendable (mature) coinbase is queried at
+`COINBASE_MATURITY + 1` confirmations.
+
+## What makes the pairing work on Regtest
+
+A few Regtest-specific behaviours are required for a zcashd sidecar to follow a
+Zebra Regtest chain; the corresponding Zebra fixes live on this branch:
+
+* **Fixed difficulty.** Zebra pins every Regtest block to the powLimit (no
+  retargeting), matching zcashd's `fPowNoRetargeting`, so the sidecar accepts
+  the headers instead of rejecting them as `bad-diffbits`.
+* **Minimal block-time advance.** Zebra advances Regtest block time minimally
+  (just above the median-time-past) instead of clamping `now()` to
+  `median-time-past + 90 min`. A fresh chain starts from the 2011-era genesis,
+  so clamping to real time would race chain time ~90 min per block and outrun
+  the sidecar's block-time window.
+* **`getheaders` always answered.** Zebra replies to `getheaders` with a
+  `headers` message even when it has none, so the sidecar's request never hangs.
+* **Frozen-clock tx relay (`setmocktime`).** The sidecar's clock is frozen with
+  `mocktime` so a genesis-era tip reads as recent (not IBD, wallet enabled). But
+  with the clock frozen, zcashd's transaction-relay trickle timer never elapses,
+  so it never flushes queued tx invs to Zebra (block invs are sent
+  unconditionally, so block sync is unaffected). The harness therefore advances
+  the sidecar clock while waiting for a wallet tx to reach Zebra's mempool, as
+  zcashd's own test framework advances mocktime. Real-clock nodes (mainnet /
+  testnet) don't hit this.
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `harness.py` | The reusable harness: launches Zebra + N sidecars, mines per-node via Zebra, cleans up. |
-| `wallet_conformance.py` | Single-node wallet conformance (address gen, coinbase maturity, balance, transparent spend, `getwalletinfo`). |
-| `wallet_multinode.py` | Faithful 3-node port of `wallet.py`'s transparent self-mining assertions. |
-| `run_upstream.py` | Adapter that runs an **unmodified** upstream test by monkeypatching the framework's node-lifecycle and topology primitives. |
+| `harness.py` | The reusable harness: launches Zebra + N sidecars, mines per-node via Zebra, advances the sidecar clock to drive tx relay, cleans up. |
+| `wallet_conformance.py` | Single-node wallet conformance: account creation, shielded coinbase, coinbase maturity, account balance, a `z_sendmany` shielded spend that propagates over P2P to Zebra, is mined, confirms, and credits the recipient. |
+| `wallet_multinode.py` | 3-node shielded conformance: three sidecars fan into one Zebra, each mining its own shielded coinbase, with a shielded node-to-node transfer. |
+| `run_upstream.py` | Adapter that runs an **unmodified** upstream test by monkeypatching the framework's node-lifecycle and topology primitives (see limits below). |
 
 ## Requirements
 
 ```sh
 export ZEBRAD_BIN=/path/to/zebrad          # built from this branch (has generatetoaddress + zcashd-compat)
-export ZCASHD_BIN=/path/to/sidecar/zcashd  # a P2P-sidecar zcashd build (valargroup/zcashd)
+export ZCASHD_BIN=/path/to/sidecar/zcashd  # a P2P-sidecar zcashd build (ZcashFoundation/zcashd zebra-compat release)
 ```
 
 ## Running
 
-Ported conformance tests (self-contained):
+Ported conformance tests (self-contained, no upstream tree needed):
 
 ```sh
 python3 wallet_conformance.py
 python3 wallet_multinode.py
 ```
 
+Both exit 0 on success and print `PASS: ...`.
+
 An unmodified upstream test, via the adapter:
 
 ```sh
 export ZCASHD_RPC_TESTS_DIR=/path/to/zcash/qa/rpc-tests
-python3 run_upstream.py wallet.py
+python3 run_upstream.py <test>.py
 ```
 
-## Coverage: what runs, and what can't
+Set `HARNESS_TRACING_FILTER` (e.g. `info,zebra_network=debug`) to pass a
+`[tracing] filter` through to zebrad for debugging. It is deliberately **not**
+`ZEBRA_`-prefixed, since zebrad treats `ZEBRA_*` env vars as config-field
+overrides and fatal-errors on an unknown field.
 
-| Category | Status |
-| --- | --- |
-| Transparent + Sapling wallet tests | Run against the standard pairing. |
-| Orchard / unified / accounts tests | Require a Regtest params file where **NU6.3 is not active** — the sidecar descopes Orchard from NU6.3, but supports it before activation, and Zebra supports it fully. |
-| Miner tests (`getblocktemplate`, `submitblock`, `generate` on zcashd) | **Cannot pass** — those RPCs are removed from the sidecar by design; mining is Zebra's job. |
-| `wallet_deprecation` (EOS halt) | Needs adapting — the sidecar removes the end-of-support halt. |
+## `run_upstream.py` scope and limits
+
+The adapter reuses zcashd's own `test_framework`, swapping only the primitives
+that assume a standalone, mining, mesh-capable zcashd (`start_nodes`,
+`connect_nodes*`, `initialize_chain*`, `stop_nodes`). It can run an upstream
+test **only if that test fits the harness's fixed Regtest configuration**:
+
+* **Shared, fixed network-upgrade schedule.** Zebra mines the blocks the sidecar
+  validates, so both must agree on activation heights. The harness activates
+  every upgrade through NU5 at height 1. Tests that pass their own
+  `nuparams=...:<height>` via `extra_args` (most wallet tests do) are asking for
+  a *different* schedule and can't be honoured without reconfiguring Zebra's
+  Regtest params to match per test.
+* **No deprecated / transparent-only RPCs.** Tests relying on
+  `-allowdeprecated=getnewaddress` (or the transparent wallet in general) fail on
+  the shielded-first sidecar.
+* **No miner RPCs on the sidecar.** `getblocktemplate` / `submitblock` /
+  `generate` are removed by design — mining is Zebra's job.
+* **No forks / reorgs / network splits.** All sidecars follow one Zebra chain, so
+  tests that split the mesh to create competing tips have no equivalent.
+* **No cached-chain assumptions.** `initialize_chain` is a no-op; the harness
+  starts every node on an empty Regtest chain, so tests asserting a pre-seeded
+  height/UTXO set need to mine that state themselves.
+
+The self-contained `wallet_conformance.py` / `wallet_multinode.py` exist because
+they exercise the full modern wallet surface within these constraints; they are
+the primary demonstration of the pairing.
 
 ## Validation status
 
-Built and validated in the Zebra tree:
+Validated end-to-end in the Zebra tree against a live sidecar:
 
-* Zebra half end to end: regtest zebrad starts with the externally-managed
-  zcashd-compat config, and both `generate` and the new `generatetoaddress`
-  mine correctly (confirmed the coinbase pays the requested address, and that
-  `generate` still uses the configured address).
-* Harness Python: syntax-checked; the Zebra-facing paths exercised live.
+* `wallet_conformance.py` — **PASS.** Zebra mines 105 Regtest blocks paid to the
+  sidecar's shielded account; the sidecar follows over P2P; coinbase matures;
+  a `z_sendmany` shielded spend propagates back to Zebra, is mined, confirms,
+  and credits the recipient account.
+* `wallet_multinode.py` — **PASS.** Three sidecars fan into one Zebra, each mines
+  its own shielded coinbase, and a shielded transfer moves value node-to-node
+  through Zebra.
 
-Pending an environment that can execute the third-party sidecar binary:
-
-* End-to-end runs of `wallet_conformance.py`, `wallet_multinode.py`, and
-  `run_upstream.py wallet.py` against a live sidecar.
-* Wiring the green run into the `zcashd-compat` CI job.
-
-The sidecar↔Zebra P2P + wallet path these depend on is already covered by the
-Rust integration suite (`zebrad/tests/common/zcashd_compat/`), which mines on
-Zebra and reads wallet state back from the sidecar.
+The sidecar↔Zebra P2P + wallet path is also covered by the Rust integration
+suite (`zebrad/tests/common/zcashd_compat/`), which mines on Zebra and reads
+wallet state back from the sidecar.
