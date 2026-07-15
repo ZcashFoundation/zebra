@@ -62,15 +62,30 @@ pub struct DiscoveryFeed {
     /// Sends crawl events to the source.
     events: mpsc::UnboundedSender<DiscoveryEvent>,
 
-    /// The source's count of hashes at or above the fetch frontier.
-    remaining: watch::Receiver<u64>,
+    /// The cumulative count of hashes the source has accounted for — released
+    /// (committed and dropped from the engine's window) or skipped as a
+    /// crawl-overlap duplicate — published by the source.
+    released: watch::Receiver<u64>,
+
+    /// The cumulative count of hashes this feed has sent.
+    ///
+    /// The outstanding (fed but not yet accounted-for) count is `fed - released`.
+    /// Tracked on the feed side so it updates the instant [`extend`](Self::extend)
+    /// queues hashes, rather than only when the engine next drains the event
+    /// channel — otherwise a stale released count would let the syncer crawl
+    /// far past [`DISCOVERY_LOW_WATER_MARK`] before the engine catches up.
+    fed: u64,
 }
 
 impl DiscoveryFeed {
     /// Appends `hashes` above the source's current maximum height, in chain
     /// order. A send after the engine stopped is silently dropped.
-    pub fn extend(&self, hashes: Vec<block::Hash>) {
+    pub fn extend(&mut self, hashes: Vec<block::Hash>) {
         if !hashes.is_empty() {
+            // usize -> u64 is lossless on every supported platform. This can
+            // slightly over-count when the source skips a crawl-overlap prefix,
+            // which only makes `wants_more_hashes` a touch more conservative.
+            self.fed = self.fed.saturating_add(hashes.len() as u64);
             let _ = self.events.send(DiscoveryEvent::Extend(hashes));
         }
     }
@@ -81,14 +96,14 @@ impl DiscoveryFeed {
         let _ = self.events.send(DiscoveryEvent::Finish);
     }
 
-    /// Waits until the source's remaining (uncommitted) hash count drops to
-    /// [`DISCOVERY_LOW_WATER_MARK`] or below, so the syncer extends the tips
-    /// just ahead of the engine draining them.
+    /// Waits until the outstanding (fed but not yet committed) hash count
+    /// drops to [`DISCOVERY_LOW_WATER_MARK`] or below, so the syncer extends
+    /// the tips just ahead of the engine draining them.
     ///
     /// Returns immediately if the source (engine) is gone.
     pub async fn wants_more_hashes(&mut self) {
-        while *self.remaining.borrow() > DISCOVERY_LOW_WATER_MARK {
-            if self.remaining.changed().await.is_err() {
+        while self.fed.saturating_sub(*self.released.borrow()) > DISCOVERY_LOW_WATER_MARK {
+            if self.released.changed().await.is_err() {
                 return;
             }
         }
@@ -125,22 +140,38 @@ pub struct DiscoverySource {
     /// longer grows, so draining it completes the engine.
     finished: bool,
 
-    /// Publishes the remaining hash count to the feed after every change.
-    remaining: watch::Sender<u64>,
+    /// The cumulative count of hashes accounted for: released by the engine
+    /// (committed and dropped from its window) plus crawl-overlap duplicates
+    /// skipped by [`apply`](Self::apply). Published to the feed's low-water gate.
+    released: u64,
+
+    /// Publishes [`released`](Self::released) to the feed.
+    released_tx: watch::Sender<u64>,
 }
 
 impl DiscoverySource {
     /// Returns a source whose first hash will be for `base` (the lowest
     /// uncommitted height), anchored on `anchor` (the hash committed at
     /// `base - 1`, normally the state tip hash), and the feed that grows it.
+    ///
+    /// `base` is always at least [`Height(1)`](block::Height): the genesis
+    /// block is committed before the sync cycles start, so the lowest
+    /// uncommitted height is never genesis. [`max_height`](HashSource::max_height)
+    /// relies on this to represent an empty range as `base - 1`.
     pub fn new(base: block::Height, anchor: block::Hash) -> (DiscoveryFeed, Self) {
+        debug_assert!(
+            base.0 >= 1,
+            "the genesis block is committed before discovery, so base is never height 0",
+        );
+
         let (events_tx, events_rx) = mpsc::unbounded_channel();
-        let (remaining_tx, remaining_rx) = watch::channel(0);
+        let (released_tx, released_rx) = watch::channel(0);
 
         (
             DiscoveryFeed {
                 events: events_tx,
-                remaining: remaining_rx,
+                released: released_rx,
+                fed: 0,
             },
             Self {
                 base,
@@ -148,7 +179,8 @@ impl DiscoverySource {
                 hashes: VecDeque::new(),
                 events: events_rx,
                 finished: false,
-                remaining: remaining_tx,
+                released: 0,
+                released_tx,
             },
         )
     }
@@ -168,7 +200,8 @@ impl DiscoverySource {
             }
         }
 
-        self.publish_remaining();
+        // `apply` may have bumped `released` for skipped duplicates.
+        self.publish_released();
     }
 
     /// Applies one crawl event.
@@ -183,6 +216,13 @@ impl DiscoverySource {
                     let mut peeked = new_hashes.clone();
                     if peeked.next() == Some(tail) {
                         new_hashes = peeked;
+                        // The feed counted the skipped hash in `fed`, so count
+                        // it as released too — otherwise `fed - released`
+                        // over-counts the outstanding hashes by one per skip,
+                        // and after enough skips the feed's low-water gate
+                        // (`wants_more_hashes`) would stop crawling while the
+                        // engine still waits for more, deadlocking the cycle.
+                        self.released = self.released.saturating_add(1);
                     }
                 }
 
@@ -192,12 +232,11 @@ impl DiscoverySource {
         }
     }
 
-    /// Publishes the remaining hash count to the feed.
-    fn publish_remaining(&self) {
-        let remaining = self.hashes.len() as u64;
-        self.remaining.send_if_modified(|current| {
-            if *current != remaining {
-                *current = remaining;
+    /// Publishes the cumulative released count to the feed's low-water gate.
+    fn publish_released(&self) {
+        self.released_tx.send_if_modified(|current| {
+            if *current != self.released {
+                *current = self.released;
                 true
             } else {
                 false
@@ -208,10 +247,10 @@ impl DiscoverySource {
 
 impl HashSource for DiscoverySource {
     fn max_height(&self) -> block::Height {
-        // With no hashes, the maximum is just below `base`, so the engine
-        // sees an empty range. `base` is 0 only for an unsynced state feeding
-        // from genesis, which the syncer's genesis bootstrap prevents;
-        // saturate to fail safe regardless.
+        // With no hashes, the maximum is just below `base`, so the engine sees
+        // an empty range. `new` asserts `base >= 1`, so `base - 1` never
+        // underflows here; `len` fits u32 because the window (and so the fed
+        // range the engine holds) is bounded far below u32::MAX.
         block::Height(
             self.base
                 .0
@@ -228,6 +267,7 @@ impl HashSource for DiscoverySource {
         }
 
         let index = match height.0.checked_sub(self.base.0) {
+            // `index` is a VecDeque offset, which is always well below usize::MAX.
             Some(index) => index as usize,
             // Below the anchor: already committed and released.
             None => return Ok(None),
@@ -244,9 +284,10 @@ impl HashSource for DiscoverySource {
                 None => break,
             }
             self.base = block::Height(self.base.0.saturating_add(1));
+            self.released = self.released.saturating_add(1);
         }
 
-        self.publish_remaining();
+        self.publish_released();
     }
 
     fn ensure_covers(
@@ -271,40 +312,38 @@ impl HashSource for DiscoverySource {
         &mut self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
         Box::pin(async move {
-            // Drain first: growth may already be queued.
-            self.drain_events();
-            if !self.hashes.is_empty() {
-                return true;
-            }
-            if self.finished {
-                return false;
-            }
-
-            match self.events.recv().await {
-                Some(event) => {
-                    self.apply(event);
-                    self.drain_events();
-                    // A Finish (or an empty extend) may still leave the range
-                    // empty; report growth only if there is something to fetch.
-                    !self.hashes.is_empty()
+            // "Growth" means the range extends above what the engine has
+            // already seen — not merely that `hashes` is non-empty. The engine
+            // calls `release_below(base - 1)`, deliberately retaining the
+            // committed parent as `hashes[0]`, so a fully-committed source is
+            // non-empty; keying off non-emptiness would make this return `true`
+            // forever and spin the engine's completion loop.
+            let start = self.max_height();
+            loop {
+                self.drain_events();
+                if self.max_height() > start {
+                    return true;
                 }
-                None => {
-                    self.finished = true;
-                    false
+                if self.finished {
+                    return false;
+                }
+
+                match self.events.recv().await {
+                    Some(event) => self.apply(event),
+                    None => {
+                        self.finished = true;
+                        return false;
+                    }
                 }
             }
         })
     }
 
-    fn extend(&mut self, hashes: &[block::Hash]) {
-        self.hashes.extend(hashes.iter().copied());
-        self.publish_remaining();
-    }
-
     fn invalidate_above(&mut self, height: block::Height) {
+        // `keep` counts the hashes at or below `height`, which is a VecDeque
+        // length and so always well below usize::MAX.
         let keep = height.0.saturating_add(1).saturating_sub(self.base.0) as usize;
         self.hashes.truncate(keep);
-        self.publish_remaining();
     }
 }
 

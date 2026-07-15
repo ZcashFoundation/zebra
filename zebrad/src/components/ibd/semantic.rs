@@ -175,11 +175,28 @@ where
                         expected
                     }
                     Ok(verify_error) => {
+                        if verify_error.is_below_mandatory_checkpoint() {
+                            // Tip-following sync reached a block at or below the
+                            // mandatory checkpoint, which only checkpoint-verified
+                            // (known-hash) sync can commit. Re-crawling cannot
+                            // help; surface the actionable config fix the legacy
+                            // syncer logged, rather than only the engine's
+                            // eventual "restarting the crawl" error.
+                            error!(
+                                error = %verify_error,
+                                height = height.0,
+                                "a block at or below the mandatory checkpoint was rejected \
+                                 during tip-following sync; that range is only committed by \
+                                 known-hash sync. Enable sync.known_hash_sync to make progress \
+                                 below the mandatory checkpoint",
+                            );
+                        }
+
                         return Err(VerifyAndCommitError::Commit {
                             height,
                             hash: expected,
                             error: verify_error,
-                        })
+                        });
                     }
                     Err(error) => {
                         return Err(VerifyAndCommitError::Commit {

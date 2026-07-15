@@ -62,6 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   initial checkpoint sync no longer ends the checkpoint pipeline. Block
   invalidation and reconsideration (`invalidateblock` / `reconsiderblock` RPCs)
   now work during the initial sync for blocks above the disk-write frontier.
+- Tip-following sync now runs through the same block-download engine as
+  known-hash initial sync (over hashes discovered from peers), replacing the
+  legacy per-block download/retry/hedge stack. Behaviour is unchanged for
+  operators, but the `sync.download_concurrency_limit` and
+  `sync.checkpoint_verify_concurrency_limit` config fields are now used as
+  configured — they only size Zebra's internal service and verifier queues, and
+  the previous startup clamp/warning to `MIN_CHECKPOINT_CONCURRENCY_LIMIT` /
+  `MIN_CONCURRENCY_LIMIT` no longer fires. `known_hash_lookahead_bytes` and
+  `known_hash_gap_hedge_secs` now also govern tip-following sync. The
+  `sync.downloads.in_flight` and `sync.verified.block.count` metrics are removed
+  (superseded by the `ibd.*` engine metrics).
 
 ### Fixed
 

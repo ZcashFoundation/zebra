@@ -76,6 +76,20 @@ pub const IBD_MAX_RESTARTS_WITHOUT_PROGRESS: u32 = 5;
 /// avoid flooding the logs while the stall escalation ladder works.
 pub const IBD_STALL_WARN_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How long a **non-final** source's fetch frontier may stall before the
+/// engine gives up the cycle so the supervisor restarts it.
+///
+/// A pinned known-hash list retries a missing block forever — the hashes are
+/// reviewed constants, so a stall means slow or missing peers, and giving up
+/// would strand initial sync. A discovery source's hashes are tentative: a
+/// frontier that cannot be fetched means the discovered sequence is wrong
+/// (fabricated or reorged-away hashes), so the engine returns a retryable
+/// error and the syncer re-crawls from the real state tip. This threshold is
+/// the engine-internal equivalent of the legacy per-batch verify timeout, but
+/// measured on the engine's own fetch frontier so inbound gossip cannot mask
+/// the stall.
+pub const IBD_DISCOVERY_STALL_RESTART: Duration = Duration::from_secs(8 * 60);
+
 /// The result of running the known-hash IBD engine.
 ///
 /// Whatever the outcome, the tip-following syncer starts afterwards from a block

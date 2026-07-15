@@ -19,7 +19,7 @@ use zebra_state::ChainTipSender;
 use crate::{
     components::sync::{
         ChainSync, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT, GENESIS_TIMEOUT_RETRY,
-        SYNC_PROGRESS_CHECK_INTERVAL, SYNC_RESTART_DELAY,
+        SYNC_RESTART_DELAY,
     },
     config::ZebradConfig,
 };
@@ -58,14 +58,6 @@ fn ensure_timeouts_consistent() {
                 .target_spacing()
                 .num_seconds() as u64,
         "Block verify should allow for at least one new block to be generated and distributed"
-    );
-
-    // The sync cycle's no-progress restart uses `BLOCK_VERIFY_TIMEOUT` as its
-    // threshold, so the checks must run several times within that window for
-    // the elapsed comparison to fire close to the intended timeout.
-    assert!(
-        SYNC_PROGRESS_CHECK_INTERVAL.as_secs() * 4 < BLOCK_VERIFY_TIMEOUT.as_secs(),
-        "progress checks should run several times within the no-progress restart window"
     );
 
     // This constraint makes genesis retries more likely to succeed

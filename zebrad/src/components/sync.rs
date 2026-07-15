@@ -174,20 +174,6 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 /// So we allow about half the spurious timeout, which might cause some re-downloads.
 pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(8 * 60);
 
-/// The interval between the sync cycle's engine progress checks.
-///
-/// Each check compares the state tip against the previous check. A cycle
-/// whose tip has not moved for [`BLOCK_VERIFY_TIMEOUT`] is restarted, exactly
-/// as the legacy syncer's per-batch verify timeout restarted it. This is the
-/// backstop for a crawl that fed the engine hashes no peer serves (for
-/// example, a peer advertising fabricated or reorged-away hashes): the engine
-/// retries missing blocks forever, which is correct for pinned known-hash
-/// lists, but must not wedge a tentative discovered range.
-///
-/// Using a prime number makes sure that progress checks don't synchronise
-/// with other tasks.
-const SYNC_PROGRESS_CHECK_INTERVAL: Duration = Duration::from_secs(59);
-
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This delay should be long enough to:
@@ -246,10 +232,9 @@ pub struct Config {
     ///
     /// Blocks below the mandatory checkpoint are committed by the known-hash
     /// sync engine (bounded by its byte budget), so this limit only sizes
-    /// Zebra's internal verifier and state queues.
-    ///
-    /// Zebra enforces a [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`].
-    /// Decreasing this value reduces RAM usage.
+    /// Zebra's internal verifier and state queues. It is used as configured;
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] is only its recommended lower
+    /// bound. Decreasing this value reduces RAM usage.
     #[serde(alias = "lookahead_limit")]
     pub checkpoint_verify_concurrency_limit: usize,
 
@@ -705,59 +690,64 @@ where
             self.full_verify_concurrency_limit,
             self.gap_hedge_after,
         );
-        let mut engine_run = pin!(engine.run());
 
-        let mut progress_tip = self.latest_chain_tip.best_tip_height();
-        let mut last_progress = std::time::Instant::now();
-        let mut progress_check = tokio::time::interval(SYNC_PROGRESS_CHECK_INTERVAL);
+        // Scope the engine and crawl futures so their borrows of `self` (the
+        // crawl mutates `prospective_tips` / crawls `tip_network`) and `feed`
+        // release before the post-cycle logging below.
+        let outcome = {
+            let mut engine_run = pin!(engine.run());
 
-        // Drive the engine over the growing range, extending the tips just
-        // ahead of its fetch frontier, until the crawl runs out of
-        // prospective tips and the engine drains what it was fed.
-        let mut crawl_finished = false;
-        let outcome = loop {
-            tokio::select! {
-                outcome = &mut engine_run => break outcome,
+            // The crawl runs concurrently with the engine, so block fetch,
+            // verify, and commit never pause for a crawl round trip. It
+            // extends the tips just ahead of the engine's fetch frontier
+            // ([`DISCOVERY_LOW_WATER_MARK`](ibd::discovery::DISCOVERY_LOW_WATER_MARK)),
+            // feeding tentative hashes to the discovery source, until the tips
+            // run out. Whatever ends the crawl (tips exhausted or a transient
+            // error), it always finishes the feed so the engine completes once
+            // it drains the range it was given.
+            let crawl = async {
+                let result = loop {
+                    feed.wants_more_hashes().await;
 
-                _ = feed.wants_more_hashes(), if !crawl_finished => {
                     if self.prospective_tips.is_empty() {
-                        // No tips left to crawl this cycle: the fed range is
-                        // final, so the engine completes once it drains. Keep
-                        // looping (rather than awaiting the engine directly)
-                        // so the no-progress restart below stays active
-                        // through the drain.
-                        crawl_finished = true;
-                        feed.finish();
-                        continue;
+                        break Ok(());
                     }
 
-                    let hashes = timeout(SYNC_RESTART_DELAY, self.extend_tips())
+                    match timeout(SYNC_RESTART_DELAY, self.extend_tips())
                         .await
                         .map_err(Into::into)
                         // TODO: replace with flatten() when it stabilises (#70142)
                         .and_then(convert::identity)
-                        .map_err(|e| {
-                            info!("temporary error extending tips: {:#}", e);
-                            e
-                        })?;
-                    self.update_metrics();
-
-                    feed.extend(hashes.into_iter().collect());
-                }
-
-                _ = progress_check.tick() => {
-                    let tip = self.latest_chain_tip.best_tip_height();
-                    if tip != progress_tip {
-                        progress_tip = tip;
-                        last_progress = std::time::Instant::now();
-                    } else if last_progress.elapsed() >= BLOCK_VERIFY_TIMEOUT {
-                        // See [`SYNC_PROGRESS_CHECK_INTERVAL`]: a discovered
-                        // range that cannot drain (fabricated or reorged-away
-                        // hashes) must restart the cycle, not wedge it.
-                        return Err(eyre!(
-                            "sync cycle made no progress for {BLOCK_VERIFY_TIMEOUT:?}, restarting",
-                        ));
+                    {
+                        Ok(hashes) => {
+                            self.update_metrics();
+                            feed.extend(hashes.into_iter().collect());
+                        }
+                        Err(error) => break Err(error),
                     }
+                };
+
+                feed.finish();
+                result
+            };
+            let mut crawl = pin!(crawl);
+
+            // The engine is authoritative for cycle liveness: a discovery
+            // source whose tentative hashes cannot be fetched stalls the
+            // engine's fetch frontier, which the engine restarts on internally
+            // (`IBD_DISCOVERY_STALL_RESTART`) — measured on its own frontier,
+            // so inbound gossip advancing the state tip cannot mask a wedge.
+            tokio::select! {
+                outcome = &mut engine_run => outcome,
+
+                crawl_result = &mut crawl => {
+                    if let Err(error) = crawl_result {
+                        info!("crawl ended early, draining the engine then restarting: {error:#}");
+                    }
+                    // The crawl finished the feed, so the engine completes once
+                    // it drains the fed range; keep driving it rather than
+                    // abandoning the blocks already in flight.
+                    (&mut engine_run).await
                 }
             }
         };

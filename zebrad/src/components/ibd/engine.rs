@@ -55,7 +55,7 @@ use super::{
         FetchedBlock, DEFAULT_SIZE_HINT,
     },
     tree::{HeightTrees, TreeFetch, TreeLookahead, TREE_LOOKAHEAD_MAX},
-    IbdOutcome, IBD_STALL_WARN_INTERVAL,
+    IbdOutcome, IBD_DISCOVERY_STALL_RESTART, IBD_STALL_WARN_INTERVAL,
 };
 use crate::BoxError;
 
@@ -216,9 +216,10 @@ pub enum EngineError {
     #[error("fatal known-hash list diagnostic: {0}")]
     ListDiagnostic(#[source] ConvertError),
 
-    /// A byte-identical block failed its state commit
-    /// [`COMMIT_FAILURE_ATTEMPT_LIMIT`] times: a known-hash list-vs-chain
-    /// inconsistency or local database corruption (design doc §4.6).
+    /// A byte-identical block from the **pinned** known-hash list failed its
+    /// state commit [`COMMIT_FAILURE_ATTEMPT_LIMIT`] times: a known-hash
+    /// list-vs-chain inconsistency or local database corruption (design doc
+    /// §4.6). Not retryable — the pinned bytes are reviewed constants.
     #[error(
         "block {hash:?} at {height:?} failed its state commit {attempts} times \
          with byte-identical copies: known-hash list inconsistency or local \
@@ -228,6 +229,29 @@ pub enum EngineError {
         /// The height of the failing block.
         height: block::Height,
         /// The pinned hash of the failing block.
+        hash: block::Hash,
+        /// How many times byte-identical copies failed.
+        attempts: u8,
+        /// The state's last commit error.
+        #[source]
+        error: BoxError,
+    },
+
+    /// A byte-identical block from a **discovery** (tip-following) source
+    /// failed its state commit [`COMMIT_FAILURE_ATTEMPT_LIMIT`] times: the
+    /// tentative hash the crawl fed is wrong — an invalid block, a stale
+    /// fork, or (below the mandatory checkpoint without known-hash sync) a
+    /// block only checkpoint-verified sync can commit. Retryable: the syncer
+    /// re-crawls from the real state tip.
+    #[error(
+        "discovered block {hash:?} at {height:?} failed its state commit {attempts} \
+         times with byte-identical copies: the crawled hashes are wrong (an invalid \
+         block, a stale fork, or a sub-checkpoint block); restarting the crawl"
+    )]
+    InvalidDiscoveredBlock {
+        /// The height the engine assigned the failing block.
+        height: block::Height,
+        /// The tentative hash of the failing block.
         hash: block::Hash,
         /// How many times byte-identical copies failed.
         attempts: u8,
@@ -265,7 +289,12 @@ impl EngineError {
     /// broken list or a closed state, and retrying them would be the silent
     /// fallback §4.6 forbids.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, EngineError::List(_) | EngineError::Internal(_))
+        matches!(
+            self,
+            EngineError::List(_)
+                | EngineError::Internal(_)
+                | EngineError::InvalidDiscoveredBlock { .. }
+        )
     }
 }
 
@@ -394,9 +423,13 @@ pub trait HashSource: Send + 'static {
     /// Appends discovered hashes immediately above the current
     /// [`max_height`](Self::max_height), growing the covered range.
     ///
-    /// The pinned [`KnownHashList`] is fixed and never calls this, so the
-    /// default is a no-op. A discovery source appends each `FindBlocks` round
-    /// here.
+    /// This is the reorg seam's growth counterpart to
+    /// [`invalidate_above`](Self::invalidate_above): a future engine-side
+    /// window-reorg op will re-extend a truncated source through it. The pinned
+    /// [`KnownHashList`] never grows, and the
+    /// [`DiscoverySource`](super::discovery::DiscoverySource) grows through its
+    /// own feed channel rather than this method, so it has no engine caller
+    /// today and the default is a no-op.
     fn extend(&mut self, _hashes: &[block::Hash]) {}
 
     /// Drops every hash strictly above `height`: a reorg of the source's
@@ -989,6 +1022,14 @@ where
     /// shutdowns, and broken invariants; the supervisor decides which of
     /// those to retry (design doc §4.7).
     pub async fn run(&mut self) -> Result<IbdOutcome, EngineError> {
+        // Drain any growth the source already has queued before sizing the
+        // cache-restore range. A discovery source only learns its fed hashes
+        // when its event queue is drained (inside `ensure_covers`), so without
+        // this its `max_height` reads `base - 1` and `restore_cache` would
+        // prune the entire disk overflow tier as "outside the range",
+        // re-downloading every block left by a previous cycle or a Degraded
+        // known-hash handoff.
+        self.ensure_source_coverage(self.base).await?;
         let mut end = HashSource::max_height(&self.list);
 
         self.restore_cache(end)?;
@@ -1040,7 +1081,7 @@ where
             self.schedule_tree_fetches(end)?;
             self.hedge_frontier(now, &mut next_wake)?;
             self.update_gauges();
-            self.track_stall(now, &mut next_wake);
+            self.track_stall(now, &mut next_wake)?;
 
             tokio::select! {
                 completion = self.blocks.next(), if !self.blocks.is_empty() => {
@@ -2149,11 +2190,24 @@ where
         let attempts = entry.0;
 
         if attempts >= COMMIT_FAILURE_ATTEMPT_LIMIT {
-            return Err(EngineError::DeterministicCommitFailure {
-                height,
-                hash,
-                attempts,
-                error,
+            // A pinned list's hashes are reviewed constants, so a persistent
+            // commit failure is fatal (list/db inconsistency); a discovery
+            // source's hashes are tentative, so it is a wrong crawl the syncer
+            // recovers from by re-crawling.
+            return Err(if self.list.is_final() {
+                EngineError::DeterministicCommitFailure {
+                    height,
+                    hash,
+                    attempts,
+                    error,
+                }
+            } else {
+                EngineError::InvalidDiscoveredBlock {
+                    height,
+                    hash,
+                    attempts,
+                    error,
+                }
             });
         }
 
@@ -2253,13 +2307,23 @@ where
     /// Tracks fetch-frontier progress and warns on the
     /// [`IBD_STALL_WARN_INTERVAL`] cadence while it is stalled (stall ladder
     /// step 5, design doc §4.1).
-    fn track_stall(&mut self, now: Instant, next_wake: &mut Option<Instant>) {
+    ///
+    /// Returns a retryable error when a **non-final** source's fetch frontier
+    /// has been stalled for [`IBD_DISCOVERY_STALL_RESTART`]: its tentative
+    /// hashes cannot be fetched, so the supervisor re-crawls from the real
+    /// state tip. A pinned known-hash list is final, so its stalls only warn —
+    /// a reviewed hash is retried forever (see [`IBD_DISCOVERY_STALL_RESTART`]).
+    fn track_stall(
+        &mut self,
+        now: Instant,
+        next_wake: &mut Option<Instant>,
+    ) -> Result<(), EngineError> {
         let lowest_missing = self.window.iter().position(|slot| !slot.is_fetched());
 
         let Some(lowest_missing) = lowest_missing else {
             // Nothing missing (or the window is empty): not stalled.
             self.frontier_progress_at = now;
-            return;
+            return Ok(());
         };
 
         // `lowest_missing` is within the u32 height span.
@@ -2269,7 +2333,7 @@ where
             self.fetch_watermark = height;
             self.frontier_progress_at = now;
             self.last_stall_warn = None;
-            return;
+            return Ok(());
         }
 
         let stalled_for = now.duration_since(self.frontier_progress_at);
@@ -2278,7 +2342,18 @@ where
                 next_wake,
                 self.frontier_progress_at + IBD_STALL_WARN_INTERVAL,
             );
-            return;
+            return Ok(());
+        }
+
+        // A discovery source's tentative hashes that no peer serves stall the
+        // frontier indefinitely; restart the cycle so the syncer re-crawls
+        // (measured on the fetch frontier, so inbound gossip cannot mask it).
+        if !self.list.is_final() && stalled_for >= IBD_DISCOVERY_STALL_RESTART {
+            return Err(EngineError::Internal(format!(
+                "discovery fetch frontier stalled at {height:?} for {}s: \
+                 the discovered hashes cannot be fetched; restarting the crawl",
+                stalled_for.as_secs(),
+            )));
         }
 
         let warn_due = self
@@ -2316,6 +2391,8 @@ where
 
         let last = self.last_stall_warn.unwrap_or(now);
         merge_wake(next_wake, last + IBD_STALL_WARN_INTERVAL);
+
+        Ok(())
     }
 
     /// Publishes the window gauges (design doc §8).

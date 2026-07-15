@@ -1598,26 +1598,42 @@ Phases that each compile, lint, and test green on this branch:
    `should_restart_sync` applied.
 4. **`DiscoverySource` added and wired.** The crawl feeds tentative hashes to
    the engine through a `DiscoveryFeed` handle (an unbounded event channel the
-   engine drains each loop pass); a `remaining`-count watch drives
-   `wants_more_hashes`, so the crawl runs just ahead of the fetch frontier
-   (`DISCOVERY_LOW_WATER_MARK`). The source anchors on the state tip hash so
-   the engine's frontier parent pin (`list[base - 1]`) always resolves.
-   Growing-range completion is `HashSource::is_final` + `wait_for_growth`: the
-   run loop treats a drained range as complete only after the crawl calls
-   `finish()` (or drops the feed).
+   engine drains each loop pass). The low-water crawl signal
+   (`wants_more_hashes`, `DISCOVERY_LOW_WATER_MARK`) compares a feed-side `fed`
+   counter against a source-published `released` counter, so it reflects
+   hashes fed but not yet drained and the syncer never over-crawls past the
+   mark while the engine catches up. The source anchors on the state tip hash
+   so the engine's frontier parent pin (`list[base - 1]`) always resolves.
+   Growing-range completion is `HashSource::is_final` + `wait_for_growth`,
+   where `wait_for_growth` reports growth by a `max_height` delta (not raw
+   non-emptiness): the engine deliberately retains the committed parent as
+   `hashes[0]` via `release_below(base - 1)`, so keying off non-emptiness would
+   spin the completion loop. `base` is always ≥ 1 (genesis is committed before
+   the cycles start).
 5. **`ChainSync` internals swapped and `downloads.rs` deleted.** `sync_cycle`
-   runs one crawl-plus-engine round: `obtain_tips` seeds the feed,
-   `Engine::new_semantic` (no tree lookahead or snapshot source; the commit
-   pipeline capped by `full_verify_concurrency_limit`) drives fetch/verify/
-   commit, and `extend_tips` tops the feed up on the low-water signal. What
-   stayed in `sync.rs`, exactly as planned: discovery cadence, genesis
+   runs the crawl **concurrently** with the engine: `obtain_tips` seeds the
+   feed, then a crawl future (topping the feed up on the low-water signal via
+   `extend_tips`) and `Engine::new_semantic().run()` (no tree lookahead or
+   snapshot source; the commit pipeline capped by
+   `full_verify_concurrency_limit`) are driven together in one `select!`, so
+   block fetch/verify/commit never pause for a crawl round trip. Whatever ends
+   the crawl always `finish()`es the feed so the engine drains and completes.
+   What stayed in `sync.rs`, exactly as planned: discovery cadence, genesis
    bootstrap, `SyncStatus` / `RecentSyncLengths` (mempool activation), and
-   gossip. Cycle-level liveness is a state-tip progress check
-   (`SYNC_PROGRESS_CHECK_INTERVAL`, threshold `BLOCK_VERIFY_TIMEOUT`): a
-   tentative range that cannot drain (fabricated or reorged-away hashes)
-   restarts the cycle from the state tip, exactly as the legacy per-batch
-   verify timeout did. The engine's disk overflow cache is shared with
-   known-hash sync (the two never run concurrently).
+   gossip. **Cycle liveness is the engine's own signal**, not a state-tip
+   poll: a discovery source whose tentative hashes no peer serves stalls the
+   engine's *fetch* frontier, which the engine restarts on internally after
+   `IBD_DISCOVERY_STALL_RESTART` — measured on its own frontier, so inbound
+   gossip advancing the state tip cannot mask a wedge. A persistent
+   deterministic frontier commit failure on a discovery source surfaces as
+   `EngineError::InvalidDiscoveredBlock` (a clearly-messaged, retryable "the
+   crawled hashes are wrong" error), never the pinned-list
+   `DeterministicCommitFailure` ("list inconsistency or database corruption");
+   a `BelowMandatoryCheckpoint` rejection additionally logs the actionable
+   "enable `sync.known_hash_sync`" hint the legacy syncer did. The engine's
+   disk overflow cache is shared with known-hash sync (the two never run
+   concurrently); `run()` drains the source before `restore_cache` so a
+   discovery cycle reuses, rather than prunes, blocks left on disk.
 
 Wrong tentative sequences (interleaved forks from two peers) fail contextual
 validation, surface as an engine error, and restart the cycle; restart-based
@@ -1639,8 +1655,27 @@ full genesis→tip sync run (Mainnet and Testnet) on top of the unit,
 - **Peer attribution** (D6): classify peer-attributable invalid blocks in
   `SemanticCommit` and report the implicated copy's source peer (the
   `Slot::Fetched` `source` field) through the address book updater, restoring
-  the misbehavior scoring the legacy `handle_block_response` performed.
-- **Crawl overlap dedup**: the feed skips only a tail-overlapping prefix; a
-  crawl round that re-returns hashes already deeper in the window appends them
-  at new heights, where they commit as duplicates (mapped to success) — benign
-  but wasteful; full-window dedup is a small follow-up.
+  the misbehavior scoring the legacy `handle_block_response` performed. Until
+  this lands, an adversarial peer that repeatedly wins the `ObtainTips` fanout
+  with an invalid block is not banned — each cycle re-crawls and restarts, so
+  progress is not permanently blocked, but the peer is not deprioritised.
+- **Above-frontier fast-fail throttle**: the engine's commit-failure reset for
+  a slot *above* the frontier re-pushes with no backoff — correct for the
+  strictly-ordered known-hash path (an above-frontier failure is a write-thread
+  reset drop), but on the semantic path an invalid block above the frontier
+  (valid header, bad body — the fetch layer only checks the header hash)
+  re-verifies every loop pass until the frontier reaches it and the 3-strike
+  counter applies. Bounded by frontier catch-up and the discovery-stall
+  restart, but a per-slot backoff would stop the wasted re-verification; it
+  needs the (not-yet-built) constructed-`Engine` test harness.
+- **Crawl overlap dedup**: the feed skips only a tail-overlapping prefix, and
+  the engine lost the legacy per-hash in-flight dedup, so a crawl round that
+  re-returns hashes already deeper in the window (or an already-committed hash)
+  re-fetches them; the re-fetched block is cheaply rejected by the verifier's
+  `KnownBlock` short-circuit (never fully re-verified) and its window height is
+  only an engine key (consensus height/parent come from the block), so this is
+  bandwidth waste, not corruption. Full-window dedup is a small follow-up.
+- **Observability**: the bundled Grafana dashboards still query the removed
+  `sync_downloads_in_flight` / `sync_verified_block_count` metrics; they should
+  move to the engine's `ibd.*` metrics (`ibd.committed.height`,
+  `ibd.duplicate.download.count`, `ibd.stall.seconds`, …).
