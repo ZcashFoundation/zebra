@@ -40,6 +40,12 @@ mod tests;
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// The maximum body length allowed before the handshake completes.
+///
+/// Version messages are ~344 bytes max (including a 256-byte user agent);
+/// verack is 0 bytes. 1 KB provides headroom for future protocol changes.
+const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
+
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
     builder: Builder,
@@ -64,7 +70,7 @@ impl Codec {
         Builder {
             network: Network::Mainnet,
             version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
-            max_len: MAX_PROTOCOL_MESSAGE_LEN,
+            max_len: MAX_HANDSHAKE_BODY_LEN,
             metrics_addr_label: None,
         }
     }
@@ -72,6 +78,14 @@ impl Codec {
     /// Reconfigure the version used by the codec, e.g., after completing a handshake.
     pub fn reconfigure_version(&mut self, version: Version) {
         self.builder.version = version;
+    }
+
+    /// Raise the maximum accepted body length to the full protocol limit.
+    ///
+    /// Called after a successful handshake so post-handshake messages (blocks,
+    /// transactions) can use the full `MAX_PROTOCOL_MESSAGE_LEN`.
+    pub fn reconfigure_full_body_len(&mut self) {
+        self.builder.max_len = MAX_PROTOCOL_MESSAGE_LEN;
     }
 }
 
@@ -279,7 +293,10 @@ impl Codec {
 
                 // Regardless of the way we received the address,
                 // Zebra always sends `addr` messages
-                let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
+                let v1_addrs: Vec<AddrV1> = addrs
+                    .iter()
+                    .map(|addr| AddrV1::from(addr.clone()))
+                    .collect();
                 v1_addrs.zcash_serialize(&mut writer)?
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }

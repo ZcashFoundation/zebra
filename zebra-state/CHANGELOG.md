@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- The finalized-state open functions now return `Result<_, StateInitError>` instead
+  of panicking when a read-only state cannot be opened: `FinalizedState::new`,
+  `FinalizedState::new_with_debug`, `init_read_only`, `spawn_init_read_only`, and the
+  lower-level `ZebraDb::new` / `DiskDb::new`. A read-only open against a missing or
+  unreadable cache directory, with no existing database on disk, or with an ephemeral
+  database also configured (a read-only secondary must not delete the primary's
+  files), now returns the new public `StateInitError` rather than panicking. The
+  read-write open path is unchanged.
+  ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
+- `ReadRequest::NonFinalizedBlocksListener` is now a struct variant carrying the
+  caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
+  blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
+  is now re-exported from the crate root.
+- Added `ReadRequest::FindForkPoint { known_blocks }` request and the corresponding
+  `ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)` response. The
+  server returns the most recent block in the caller-supplied locator that is
+  on the best chain (the fork point) to assist in reorg handling for clients
+  that track only a single chain tip at a time.
+  ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764)).
+
+## [9.0.1] - 2026-06-18
+
+### Changed
+
+- Increased the local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to 1000
+  blocks as a defence-in-depth measure against sustained consensus splits
+  ([#10650](https://github.com/ZcashFoundation/zebra/pull/10650))
+
+## [9.0.0] - 2026-06-10
+
+### Breaking Changes
+
+- Removed `deferred_pool_balance_change` field from `ContextuallyVerifiedBlock`,
+  `SemanticallyVerifiedBlock`, and `CheckpointVerifiedBlock`. The deferred pool
+  balance change is now calculated on demand and passed as a parameter to
+  `FinalizedBlock::from_checkpoint_verified()` and
+  `FinalizedBlock::from_contextually_verified()`.
+- `CheckpointVerifiedBlock::new()` no longer takes a `deferred_pool_balance_change`
+  parameter.
+
+### Fixed
+
+- `QueuedBlocks::dequeue_children()`: fixed `by_height` index handling to remove
+  individual hashes instead of the entire height entry, preventing loss of queued
+  blocks at the same height
+  ([#10604](https://github.com/ZcashFoundation/zebra/pull/10604)).
+
+## [8.0.0] - 2026-06-02
+
+### Changed
+
+- Release for NU6.2 support (updates `zebra-chain` to 9.0.0). Internal refactor of the
+  chain-tip mempool-reset height computation; no public API or behavior change.
+
+## [7.0.0] - 2026-05-28
+
+This release fixes four state security issues:
+
+- Drop rejected block hashes from `SentHashes` so honest re-deliveries of a
+  block are no longer short-circuited as duplicates
+  ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp).
+- Apply transparent address-balance updates per-transaction in
+  debit-before-credit order so same-address self-spend chains do not push
+  intermediate balances above `MAX_MONEY` and panic
+  ([GHSA-w834-cf6p-9m9w](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w834-cf6p-9m9w)).
+- Pop the matching Sapling/Orchard subtree when popping a non-finalized tip
+  that completed one
+  ([GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h)).
+- Reject repeated shielded transactions cleanly before the defence-in-depth
+  `tx_loc_by_hash` assertion
+  ([GHSA-hhm7-qrv5-h4r6](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hhm7-qrv5-h4r6)).
+
+The impact of these issues for crate users will depend on the particular
+usage; if you use it as a building block for a consensus node, you should
+update.
+
+### Added
+
+- `CommitBlockError::misbehavior_score(&self) -> u32` (currently always `0`;
+  mirrors the misbehavior-score API in `zebra-consensus` /
+  `zebra-network`).
+- `SentHashes::remove(&mut self, hash: &block::Hash)`, used to drop rejected
+  block hashes and their tracked outpoints/buffers.
+
+### Changed
+
+- `service::write::BlockWriteSender::spawn` return tuple gained a fourth
+  element: an `UnboundedReceiver<block::Hash>` that delivers hashes of
+  write-task-rejected non-finalized blocks so the `StateService` can clear
+  them from `SentHashes`.
+- `zebra-chain` dependency bumped to `8.0.0`.
+- `zebra-node-services` dependency bumped to `6.0.0`.
+
 ## [6.0.0] - 2026-05-01
 
 ### Changed

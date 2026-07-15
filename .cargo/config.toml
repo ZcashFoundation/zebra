@@ -7,6 +7,9 @@ rustdocflags = [
 
     # Links in public docs can point to private items.
     "-Arustdoc::private_intra_doc_links",
+    # Reference-style doc links whose target matches the display text are flagged
+    # by newer nightly rustdoc; suppress like private_intra_doc_links above.
+    "-Arustdoc::redundant_explicit_links",
 ]
 
 [env]

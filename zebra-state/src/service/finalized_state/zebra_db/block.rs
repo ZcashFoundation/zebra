@@ -526,7 +526,7 @@ impl ZebraDb {
         ) -> HashMap<transparent::Address, T> {
             changed_addresses
                 .into_iter()
-                .filter_map(|address| Some((address.clone(), f(&address)?)))
+                .filter_map(|address| Some((address, f(&address)?)))
                 .collect()
         }
 
@@ -569,9 +569,9 @@ impl ZebraDb {
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
-        self.db
-            .write(batch)
-            .expect("unexpected rocksdb error while writing block");
+        if let Err(error) = self.db.write(batch) {
+            panic!("unexpected rocksdb error while writing block: {error}");
+        }
         metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
             .record(batch_start.elapsed().as_secs_f64());
 

@@ -1,4 +1,4 @@
-//! `zebrad` launch-specific shared code for the `zebrad` acceptance tests.
+//! `zebrad` launch-specific shared code for the `zebrad` tests.
 //!
 //! # Warning
 //!

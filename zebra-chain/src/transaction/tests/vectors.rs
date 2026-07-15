@@ -843,6 +843,43 @@ fn zip244_sighash() -> Result<()> {
     Ok(())
 }
 
+/// Real Orchard proofs from mined transactions must have the canonical size, and padding
+/// a proof with trailing bytes must make it non-canonical (GHSA-jfw5-j458-pfv6). This
+/// also cross-checks `expected_proof_size` against real proofs produced by the chain.
+#[test]
+fn orchard_proof_size_is_canonical() {
+    let mut checked = 0;
+
+    for net in Network::iter() {
+        for tx in v5_transactions(net.block_iter()) {
+            let Some(shielded_data) = tx.orchard_shielded_data() else {
+                continue;
+            };
+
+            // A real, mined Orchard proof has the canonical length for its actions.
+            assert!(
+                shielded_data.proof_size_is_canonical(),
+                "a real Orchard proof should be canonically sized"
+            );
+
+            // Padding the proof with trailing data must break canonicity.
+            let mut padded = shielded_data.clone();
+            padded.proof.0.push(0);
+            assert!(
+                !padded.proof_size_is_canonical(),
+                "a padded Orchard proof must not be considered canonical"
+            );
+
+            checked += 1;
+        }
+    }
+
+    assert!(
+        checked > 0,
+        "expected at least one Orchard transaction in the test vectors"
+    );
+}
+
 #[test]
 fn consensus_branch_id() {
     for net in Network::iter() {
@@ -1066,10 +1103,17 @@ mod v6_tests {
         zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap()
     }
 
-    /// Helper: build an Adjunct with the given wtxid (covering-aggregate
-    /// reference for stripped bundles).
-    fn adjunct_with_wtxid(wtxid: [u8; 64]) -> zcash_tachyon::stamp::Adjunct {
-        zcash_tachyon::stamp::Adjunct { wtxid }
+    /// Helper: build an `AggregateId` with the given wtxid (covering-aggregate
+    /// reference for stripped/adjunct bundles).
+    fn adjunct_with_wtxid(wtxid: [u8; 64]) -> zcash_tachyon::stamp::AggregateId {
+        zcash_tachyon::stamp::AggregateId::try_from(wtxid).unwrap()
+    }
+
+    /// Helper: build a deterministic `ActionSetCommit` for stamp fixtures. The
+    /// commitment value is not asserted by consumers; it only needs to be a
+    /// valid, round-trippable curve point, so we use the `Eq` generator.
+    fn default_action_set() -> zcash_tachyon::ActionSetCommit {
+        zcash_tachyon::ActionSetCommit::from(pasta_curves::EqAffine::generator().to_curve())
     }
 
     lazy_static! {
@@ -1094,7 +1138,7 @@ mod v6_tests {
                 rk,
                 sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
             };
-            let bundle = zcash_tachyon::TachyonBundle::Stripped(zcash_tachyon::Stripped {
+            let bundle = zcash_tachyon::TachyonBundle::Adjunct(zcash_tachyon::Bundle {
                 actions: vec![action],
                 value_balance: 0i64,
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
@@ -1121,15 +1165,16 @@ mod v6_tests {
                 rk,
                 sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
             };
-            let tachygram = zcash_tachyon::Tachygram::from(&fp_from_seed([0xAAu8; 64]));
-            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Stamped {
+            let tachygram = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
+            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Bundle {
                 actions: vec![action],
                 value_balance: 100i64,
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
                 stamp: zcash_tachyon::Stamp {
+                    action_set: default_action_set(),
                     tachygrams: vec![tachygram],
                     anchor: default_anchor(),
-                    proof: mock_ragu::Proof::trivial(),
+                    proof: Box::new(ragu::Proof::trivial()),
                 },
             });
             Transaction::V6 {
@@ -1159,17 +1204,18 @@ mod v6_tests {
                 rk: rk2,
                 sig: zcash_tachyon::action::Signature::from([0x03u8; 64]),
             };
-            let tg1 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xAAu8; 64]));
-            let tg2 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xCCu8; 64]));
-            let tg3 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xDDu8; 64]));
-            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Stamped {
+            let tg1 = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
+            let tg2 = zcash_tachyon::Tachygram::from(fp_from_seed([0xCCu8; 64]));
+            let tg3 = zcash_tachyon::Tachygram::from(fp_from_seed([0xDDu8; 64]));
+            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Bundle {
                 actions: vec![action1, action2],
                 value_balance: 300i64,
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
                 stamp: zcash_tachyon::Stamp {
+                    action_set: default_action_set(),
                     tachygrams: vec![tg1, tg2, tg3],
                     anchor: default_anchor(),
-                    proof: mock_ragu::Proof::trivial(),
+                    proof: Box::new(ragu::Proof::trivial()),
                 },
             });
             Transaction::V6 {
@@ -1434,7 +1480,7 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
         expiry_height,
         inputs: vec![transparent::Input::Coinbase {
             height,
-            data: transparent::CoinbaseData(vec![0x00; 4]),
+            data: vec![0x00; 4],
             sequence: 0xFFFF_FFFF,
         }],
         outputs: if outputs.is_empty() {

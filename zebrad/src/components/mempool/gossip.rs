@@ -95,7 +95,8 @@ where
         }
 
         let txs_len = txs.len();
-        let request = zn::Request::AdvertiseTransactionIds(txs);
+        // Zebra is the originator of this advertisement, so no peer source.
+        let request = zn::Request::AdvertiseTransactionIds(txs, None);
 
         info!(%request, changes = %combined_changes, "sending mempool transaction broadcast");
         debug!(

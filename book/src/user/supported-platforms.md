@@ -22,8 +22,8 @@ For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#
 
 | platform                    | os                                                   | notes        | rust                                                                | artifacts |
 | --------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------- | --------- |
-| `x86_64-unknown-linux-gnu`  | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit       | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker    |
-| `aarch64-unknown-linux-gnu` | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit ARM64 | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker    |
+| `x86_64-unknown-linux-gnu`  | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit       | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker, binary |
+| `aarch64-unknown-linux-gnu` | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit ARM64 | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker, binary |
 
 > **Note:** Official Docker images are multi-architecture and support both AMD64 and ARM64.
 > The same image tag can be used on either platform.

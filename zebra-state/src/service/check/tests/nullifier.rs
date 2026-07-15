@@ -969,6 +969,237 @@ proptest! {
         prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
+
+    /// A block whose sprout-shielded transaction has the same hash as one
+    /// already finalized must be rejected with `DuplicateSproutNullifier`.
+    #[test]
+    fn reject_block_containing_sprout_tx_already_in_finalized_chain(
+        mut joinsplit in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
+        joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+        let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        make_distinct_nullifiers(&mut joinsplit.nullifiers);
+        let expected_duplicate_nullifier = joinsplit.nullifiers[0];
+
+        let transaction = Arc::new(transaction_v4_with_joinsplit_data(joinsplit_data.0, [joinsplit.0]));
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+        block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
+
+        // Push the same Arc into both blocks so they share a tx hash.
+        block1.transactions.push(transaction.clone());
+        block2.transactions.push(transaction);
+
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
+
+        let block1 = CheckpointVerifiedBlock::from(Arc::new(block1));
+        let commit_result = finalized_state.commit_finalized_direct(block1.into(), None, "test");
+        prop_assert!(commit_result.is_ok());
+
+        let block2 = Arc::new(block2).prepare();
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2,
+        );
+
+        prop_assert_eq!(
+            commit_result,
+            Err(DuplicateSproutNullifier {
+                nullifier: expected_duplicate_nullifier,
+                in_finalized_state: true,
+            })
+        );
+    }
+
+    /// A block whose sapling-shielded transaction has the same hash as one
+    /// already finalized must be rejected with `DuplicateSaplingNullifier`.
+    #[test]
+    fn reject_block_containing_sapling_tx_already_in_finalized_chain(
+        spend in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+        let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let expected_duplicate_nullifier = spend.nullifier;
+
+        let transaction = Arc::new(transaction_v4_with_sapling_shielded_data(
+            sapling_shielded_data.0,
+            [spend.0],
+        ));
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+        block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
+
+        block1.transactions.push(transaction.clone());
+        block2.transactions.push(transaction);
+
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
+
+        let block1 = CheckpointVerifiedBlock::from(Arc::new(block1));
+        let commit_result = finalized_state.commit_finalized_direct(block1.into(), None, "test");
+        prop_assert!(commit_result.is_ok());
+
+        let block2 = Arc::new(block2).prepare();
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2,
+        );
+
+        prop_assert_eq!(
+            commit_result,
+            Err(DuplicateSaplingNullifier {
+                nullifier: expected_duplicate_nullifier,
+                in_finalized_state: true,
+            })
+        );
+    }
+
+    /// A block whose orchard-shielded transaction has the same hash as one
+    /// already finalized must be rejected with `DuplicateOrchardNullifier`.
+    #[test]
+    fn reject_block_containing_orchard_tx_already_in_finalized_chain(
+        authorized_action in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
+        orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+        let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let expected_duplicate_nullifier = authorized_action.action.nullifier;
+
+        let transaction = Arc::new(transaction_v5_with_orchard_shielded_data(
+            orchard_shielded_data.0,
+            [authorized_action.0],
+        ));
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+        block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
+
+        block1.transactions.push(transaction.clone());
+        block2.transactions.push(transaction);
+
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
+
+        let block1 = CheckpointVerifiedBlock::from(Arc::new(block1));
+        let commit_result = finalized_state.commit_finalized_direct(block1.into(), None, "test");
+        prop_assert!(commit_result.is_ok());
+
+        let block2 = Arc::new(block2).prepare();
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2,
+        );
+
+        prop_assert_eq!(
+            commit_result,
+            Err(DuplicateOrchardNullifier {
+                nullifier: expected_duplicate_nullifier,
+                in_finalized_state: true,
+            })
+        );
+    }
+
+    /// A block whose sapling-shielded transaction has the same hash as one
+    /// already present in the **non-finalized** part of the chain must be
+    /// rejected with `DuplicateSaplingNullifier` — not panic.
+    ///
+    /// This is the BIP30-style duplicate-txid scenario where the prior
+    /// occurrence lives in the non-finalized chain (so the
+    /// `no_duplicates_in_finalized_chain` check in `initial_contextual_validity`
+    /// cannot catch it). The fix in
+    /// `zebra-state/src/service/non_finalized_state/chain.rs` runs the
+    /// shielded nullifier check before the `tx_loc_by_hash` assertion,
+    /// so the duplicate is rejected via the existing nullifier check.
+    #[test]
+    fn reject_block_containing_sapling_tx_already_in_non_finalized_chain(
+        spend in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
+        sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+        let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let expected_duplicate_nullifier = spend.nullifier;
+
+        let transaction = Arc::new(transaction_v4_with_sapling_shielded_data(
+            sapling_shielded_data.0,
+            [spend.0],
+        ));
+
+        block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
+        block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
+
+        // Push the same Arc into both blocks so they share a tx hash.
+        block1.transactions.push(transaction.clone());
+        block2.transactions.push(transaction);
+
+        let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
+
+        // Commit block1 to the *non-finalized* state so the duplicate-tx
+        // scenario is purely within the non-finalized chain.
+        let block1 = Arc::new(block1).prepare();
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1,
+        );
+        prop_assert_eq!(commit_result, Ok(()));
+
+        let block2 = Arc::new(block2).prepare();
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2,
+        );
+
+        prop_assert_eq!(
+            commit_result,
+            Err(DuplicateSaplingNullifier {
+                nullifier: expected_duplicate_nullifier,
+                in_finalized_state: false,
+            })
+        );
+    }
 }
 
 /// Make sure the supplied nullifiers are distinct, modifying them if necessary.

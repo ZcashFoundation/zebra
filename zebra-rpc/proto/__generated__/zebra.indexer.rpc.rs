@@ -25,6 +25,31 @@ pub struct BlockAndHash {
     #[prost(bytes = "vec", tag = "2")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+/// A request for a single block by hash or height from the best chain.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BlockRequest {
+    /// The block to fetch, identified by either its hash or its height.
+    ///
+    /// A 32-byte value is interpreted as a block hash in display order; a 4-byte
+    /// value is interpreted as a big-endian block height. Any other length is
+    /// rejected.
+    #[prost(bytes = "vec", tag = "1")]
+    pub hash_or_height: ::prost::alloc::vec::Vec<u8>,
+}
+/// A request to subscribe to non-finalized state changes.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NonFinalizedStateChangeRequest {
+    /// The hashes of the chain tips the caller already has, in display order.
+    ///
+    /// The server streams only the non-finalized blocks that come after these
+    /// tips, skipping any block at or below a provided tip on the same chain.
+    /// If empty, every block currently in the non-finalized state is sent, so an
+    /// empty request is equivalent to the previous no-argument behavior.
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub chain_tip_hashes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Represents a change in the mempool.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -204,9 +229,13 @@ pub mod indexer_client {
             self.inner.server_streaming(req, path, codec).await
         }
         /// Notifies listeners of new blocks in the non-finalized state.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams blocks after those tips. An empty request streams every
+        /// block currently in the non-finalized state.
         pub async fn non_finalized_state_change(
             &mut self,
-            request: impl tonic::IntoRequest<super::Empty>,
+            request: impl tonic::IntoRequest<super::NonFinalizedStateChangeRequest>,
         ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::BlockAndHash>>,
             tonic::Status,
@@ -258,6 +287,31 @@ pub mod indexer_client {
                 .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "MempoolChange"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Returns the block with the given hash or height from the best chain.
+        ///
+        /// Used by a syncer to fetch finalized blocks that bridge the gap between its
+        /// local finalized tip and the start of the streamed non-finalized chain.
+        pub async fn get_block(
+            &mut self,
+            request: impl tonic::IntoRequest<super::BlockRequest>,
+        ) -> std::result::Result<tonic::Response<super::BlockAndHash>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/zebra.indexer.rpc.Indexer/GetBlock",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("zebra.indexer.rpc.Indexer", "GetBlock"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -294,9 +348,13 @@ pub mod indexer_server {
             + std::marker::Send
             + 'static;
         /// Notifies listeners of new blocks in the non-finalized state.
+        ///
+        /// Callers may provide the hashes of the chain tips they already have so the
+        /// server only streams blocks after those tips. An empty request streams every
+        /// block currently in the non-finalized state.
         async fn non_finalized_state_change(
             &self,
-            request: tonic::Request<super::Empty>,
+            request: tonic::Request<super::NonFinalizedStateChangeRequest>,
         ) -> std::result::Result<
             tonic::Response<Self::NonFinalizedStateChangeStream>,
             tonic::Status,
@@ -315,6 +373,14 @@ pub mod indexer_server {
             tonic::Response<Self::MempoolChangeStream>,
             tonic::Status,
         >;
+        /// Returns the block with the given hash or height from the best chain.
+        ///
+        /// Used by a syncer to fetch finalized blocks that bridge the gap between its
+        /// local finalized tip and the start of the streamed non-finalized chain.
+        async fn get_block(
+            &self,
+            request: tonic::Request<super::BlockRequest>,
+        ) -> std::result::Result<tonic::Response<super::BlockAndHash>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct IndexerServer<T> {
@@ -439,8 +505,11 @@ pub mod indexer_server {
                 "/zebra.indexer.rpc.Indexer/NonFinalizedStateChange" => {
                     #[allow(non_camel_case_types)]
                     struct NonFinalizedStateChangeSvc<T: Indexer>(pub Arc<T>);
-                    impl<T: Indexer> tonic::server::ServerStreamingService<super::Empty>
-                    for NonFinalizedStateChangeSvc<T> {
+                    impl<
+                        T: Indexer,
+                    > tonic::server::ServerStreamingService<
+                        super::NonFinalizedStateChangeRequest,
+                    > for NonFinalizedStateChangeSvc<T> {
                         type Response = super::BlockAndHash;
                         type ResponseStream = T::NonFinalizedStateChangeStream;
                         type Future = BoxFuture<
@@ -449,7 +518,9 @@ pub mod indexer_server {
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::Empty>,
+                            request: tonic::Request<
+                                super::NonFinalizedStateChangeRequest,
+                            >,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
@@ -521,6 +592,49 @@ pub mod indexer_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/zebra.indexer.rpc.Indexer/GetBlock" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetBlockSvc<T: Indexer>(pub Arc<T>);
+                    impl<T: Indexer> tonic::server::UnaryService<super::BlockRequest>
+                    for GetBlockSvc<T> {
+                        type Response = super::BlockAndHash;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::BlockRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Indexer>::get_block(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetBlockSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

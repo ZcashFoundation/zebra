@@ -9,14 +9,30 @@
 [advisories]
 version = 2
 yanked = "deny"
-# Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
-# Remove each ignore entry as the dependency chain is upgraded.
+# Unmaintained-crate advisories. Each entry is a transitive dep we can't upgrade
+# yet, or a direct dep. Remove each entry as its dependency chain is upgraded.
 ignore = [
-    "RUSTSEC-2021-0139", # ansi_term — transitive via abscissa_core -> structopt
-    "RUSTSEC-2024-0375", # atty — transitive via abscissa_core -> structopt
-    "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
-    "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
-    "RUSTSEC-2025-0141", # bincode — direct dependency
+    "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained): via librustzcash orchard -> getset
+    "RUSTSEC-2025-0119", # number_prefix: transitive via indicatif
+    "RUSTSEC-2025-0141", # bincode: direct dependency
+    # Advisories flagged after the jun29 upstream-merge snapshot. These are
+    # almost all upstream Zebra transitive deps (opentelemetry/tonic/prost,
+    # sentry, reqwest/rustls, metrics, proptest, profiling tools, and the zcash
+    # crypto stack) — not tachyon-specific — surfaced because the RustSec DB
+    # advanced past this snapshot's lockfile/ignore list. The `advisories` deny
+    # job is `continue-on-error` (non-blocking); this is the union seen across
+    # recent runs. Prune as deps upgrade (or as we catch up to upstream's main).
+    "RUSTSEC-2025-0134", # rustls-pemfile: unmaintained (deprecated; no fixed release)
+    "RUSTSEC-2026-0007", # bytes: integer overflow in BytesMut::reserve
+    "RUSTSEC-2026-0049", # rustls-webpki: CRLs not considered authoritative
+    "RUSTSEC-2026-0097", # rand: unsound with a custom logger using rand::rng()
+    "RUSTSEC-2026-0098", # rustls-webpki: URI name constraints incorrectly accepted
+    "RUSTSEC-2026-0099", # rustls-webpki: wildcard name constraints incorrectly accepted
+    "RUSTSEC-2026-0104", # rustls-webpki: reachable panic in CRL parsing
+    "RUSTSEC-2026-0190", # anyhow: unsoundness in Error::downcast_mut()
+    "RUSTSEC-2026-0194", # quick-xml: quadratic run time on duplicate attribute names
+    "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation (DoS)
+    "RUSTSEC-2026-0204", # crossbeam-epoch: invalid pointer deref in fmt::Pointer
 ]
 
 # This section is considered when running `cargo deny check licenses`.
@@ -86,8 +102,21 @@ deny = [
 # If we add a crate here, duplicate dependencies of that crate are still shown.
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
+# These duplicates are pulled in by the tachyon librustzcash/tachyon dependency
+# tree merged from upstream. Each entry skips the older duplicate version so a
+# single version remains counted. Remove entries as the trees converge.
 skip = [
-
+    { name = "base64", version = "=0.13.1" },
+    { name = "base64", version = "=0.21.7" },
+    { name = "convert_case", version = "=0.8.0" },
+    { name = "maybe-rayon", version = "=0.1.1" },
+    { name = "quick-xml", version = "=0.37.5" }, # only duplicated under --all-features
+    { name = "ron", version = "=0.7.1" },
+    { name = "toml", version = "=0.9.7" },
+    { name = "toml_datetime", version = "=0.6.11" },
+    { name = "toml_datetime", version = "=0.7.2" },
+    { name = "windows-sys", version = "=0.60.2" },
+    { name = "winnow", version = "=0.7.13" },
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -95,23 +124,17 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
+    # wait for bindgen to update itertools
+    { name = "itertools", version = "0.13" },
+
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
-
-    # wait for structopt upgrade (or upgrade to clap 4)
-    { name = "clap", version = "=2.34.0" },
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
 
-    # Multiple base64 versions through different dependencies
-    { name = "base64", version = "=0.21.7" },
-
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
-
-    # wait for structopt-derive to update heck
-    { name = "heck", version = "=0.3.3" },
 
     # wait for librocksdb-sys to update bindgen
     { name = "bindgen", version = "=0.69.5" },
@@ -155,15 +178,13 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait for librustzcash to update tonic
-    { name = "tonic", version = "0.12" },
-    { name = "prost-types", version = "0.13" },
-
     { name = "windows-sys", version = "=0.52.0" },
 
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.14.x pulled by indexmap 1.9 (transitive of librustzcash)
+    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
 
@@ -171,6 +192,7 @@ skip-tree = [
     { name = "itertools", version = "0.13" },
 
     { name = "getrandom", version = "0.2" },
+    { name = "getrandom", version = "0.3" },
 
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
@@ -182,11 +204,8 @@ skip-tree = [
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
 
-    # wait until `config` updates `toml`
-    { name = "toml_datetime", version = "0.7.5"},
-
-    #
-    { name = "getrandom", version = "0.3.4" },
+    # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
+    { name = "hashbrown", version = "0.15" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -196,18 +215,24 @@ skip-tree = [
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
 unknown-registry = "deny"
+
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
+
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
 # List of URLs for allowed Git repositories
+# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
 allow-git = [
     "https://github.com/zcash/librustzcash.git",
-    "https://github.com/zcash/incrementalmerkletree",
-    "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto"
+    # tachyon fork dependencies, pinned via the [patch] table in the root Cargo.toml
+    "https://github.com/S1nus/librustzcash",
+    "https://github.com/S1nus/ragu",
+    "https://github.com/S1nus/tachyon",
+    "https://github.com/tachyon-zcash/maybe-rayon.git",
 ]
 
 [sources.allow-org]

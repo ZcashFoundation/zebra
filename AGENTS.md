@@ -94,11 +94,10 @@ cargo test -p zebra-state
 # Run a single test by name
 cargo test -p zebra-chain -- test_name
 
-# CI-like nextest profile for broad coverage
-cargo nextest run --profile all-tests --locked --release --features default-release-binaries --run-ignored=all
+# CI-like nextest profile (unit + integration, excludes stateful and E2E)
+cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
-# Run with nextest (integration profiles)
-cargo nextest run --profile sync-large-checkpoints-empty
+# Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```
 
 ## Commit & Pull Request Guidelines
@@ -209,17 +208,20 @@ S::Future: Send + 'static,
 
 ## Testing Guidelines
 
-- Unit/property tests: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
-- Integration tests: `crate/tests/` (standard Rust layout)
+- **Unit/property tests**: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
+- **zebrad tests**: `zebrad/tests/main.rs` is the canonical source for test tiers and local `cargo nextest` examples.
+- **Adding new zebrad tests**: Place the test in the appropriate module tier. No nextest config changes needed.
 - Async tests: `#[tokio::test]` with timeouts for long-running tests
 - Test configs must match real network parameters (don't rely on defaults)
 
 ```bash
-# Unit tests
+# Unit tests (all crates)
 cargo test --workspace
 
-# Integration tests with nextest
-cargo nextest run --profile sync-large-checkpoints-empty
+# zebrad unit + integration tests (default nextest profile excludes stateful and E2E)
+cargo nextest run
+
+# Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```
 
 ## Metrics & Observability

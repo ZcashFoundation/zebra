@@ -1,0 +1,15 @@
+# zizmor configuration
+# https://docs.zizmor.sh/configuration/
+#
+# These findings are in ZcashFoundation deployment/integration workflows that
+# are inherited unchanged from upstream Zebra. They target ZFND-only infra (GCP
+# deploys, the integration-test bot) that this fork does not run, and upstream
+# has already triaged them. Suppress them here so they don't surface as new
+# code-scanning alerts on every upstream-merge PR to this fork.
+rules:
+  github-app:
+    ignore:
+      - trigger-integration-tests.yml
+  template-injection:
+    ignore:
+      - zfnd-deploy-nodes-gcp.yml

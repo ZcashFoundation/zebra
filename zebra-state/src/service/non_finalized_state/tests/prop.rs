@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, env, sync::Arc};
 use zebra_test::prelude::*;
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{DeferredPoolBalanceChange, NonNegative},
     block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block, Height},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
@@ -52,6 +52,7 @@ fn push_genesis_chain() -> Result<()> {
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                     block,
                     only_chain.unspent_utxos(),
+                    DeferredPoolBalanceChange::zero(),
                 )
                 .map_err(|e| (e, chain_values.clone()))
                 .expect("invalid block value pool change");
@@ -148,6 +149,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                 block,
                 partial_chain.unspent_utxos(),
+                DeferredPoolBalanceChange::zero(),
             )?;
             partial_chain = partial_chain
                 .push(block)
@@ -167,7 +169,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
 
         for block in chain.iter().cloned() {
             let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos())?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos(), DeferredPoolBalanceChange::zero())?;
 
             // Check some properties of the genesis block and don't push it to the chain.
             if block.height == block::Height(0) {
@@ -210,7 +212,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // same original full chain.
         for block in chain.iter().skip(fork_at_count).cloned() {
             let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos())?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos(), DeferredPoolBalanceChange::zero())?;
             forked = forked.push(block).expect("forked chain push is valid");
         }
 
@@ -480,7 +482,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
       }
       ))| {
         let mut state = NonFinalizedState::new(&network);
-        let finalized_state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false);
+        let finalized_state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false).expect("opening an ephemeral database should succeed");
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
         finalized_state.set_finalized_value_pool(fake_value_pool);

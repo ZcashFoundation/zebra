@@ -57,7 +57,7 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, StateInitError,
 };
 
 pub mod block_iter;
@@ -90,7 +90,8 @@ pub use self::traits::{ReadState, State};
 /// A read-write service for Zebra's cached blockchain state.
 ///
 /// This service modifies and provides access to:
-/// - the non-finalized state: the ~100 most recent blocks.
+/// - the non-finalized state: the most recent blocks, up to
+///   [`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT) of them.
 ///   Zebra allows chain forks in the non-finalized state,
 ///   stores it in memory, and re-downloads it when restarted.
 /// - the finalized state: older blocks that have many confirmations.
@@ -156,6 +157,15 @@ pub(crate) struct StateService {
     // TODO: add tests for finalized and non-finalized resets (#2654)
     invalid_block_write_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
+    /// Receives the hash of every non-finalized block that the write task
+    /// rejected, so the corresponding entry can be removed from
+    /// `non_finalized_block_write_sent_hashes`.
+    ///
+    /// Without this, a rejected same-hash block locks out a later honest
+    /// re-delivery of a block at the same hash as a "duplicate" until restart
+    /// or reorg.
+    non_finalized_rejected_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
@@ -183,7 +193,8 @@ pub(crate) struct StateService {
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
-/// - the non-finalized state: the ~100 most recent blocks.
+/// - the non-finalized state: the most recent blocks, up to
+///   [`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT) of them.
 /// - the finalized state: older blocks that have many confirmations.
 ///
 /// Requests to this service are processed in parallel,
@@ -231,6 +242,7 @@ impl Drop for StateService {
         // This makes the block write thread exit the next time it checks the channels.
         // We want to do this here so we get any errors or panics from the block write task before it shuts down.
         self.invalid_block_write_reset_receiver.close();
+        self.non_finalized_rejected_receiver.close();
 
         std::mem::drop(self.block_write_sender.finalized.take());
         std::mem::drop(self.block_write_sender.non_finalized.take());
@@ -312,6 +324,11 @@ impl StateService {
                     &network,
                     #[cfg(feature = "elasticsearch")]
                     true,
+                )
+                .expect(
+                    "opening the read-write finalized state database failed; check that the \
+                     state cache directory is writable and not locked by another Zebra instance, \
+                     and that there is free disk space",
                 );
                 timer.finish_desc("opening finalized state database");
 
@@ -368,15 +385,19 @@ impl StateService {
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
-        let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
-            write::BlockWriteSender::spawn(
-                finalized_state_for_writing,
-                non_finalized_state,
-                chain_tip_sender,
-                non_finalized_state_sender,
-                should_use_finalized_block_write_sender,
-                sync_backup_dir_path,
-            );
+        let (
+            block_write_sender,
+            invalid_block_write_reset_receiver,
+            non_finalized_rejected_receiver,
+            block_write_task,
+        ) = write::BlockWriteSender::spawn(
+            finalized_state_for_writing,
+            non_finalized_state,
+            chain_tip_sender,
+            non_finalized_state_sender,
+            should_use_finalized_block_write_sender,
+            sync_backup_dir_path,
+        );
 
         let read_service = ReadStateService::new(
             &finalized_state,
@@ -406,6 +427,7 @@ impl StateService {
             finalized_block_write_last_sent_hash,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
+            non_finalized_rejected_receiver,
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
@@ -602,6 +624,38 @@ impl StateService {
         }
     }
 
+    /// Drains every hash queued on `non_finalized_rejected_receiver` and
+    /// removes it from `non_finalized_block_write_sent_hashes`.
+    ///
+    /// This closes the lockout window where a rejected block keeps its hash
+    /// recorded as "sent", so a subsequent honest re-delivery of a block at
+    /// the same hash is not short-circuited as a false "duplicate".
+    ///
+    /// # Correctness & Performance
+    ///
+    /// Like the other drain methods on `StateService`, this must not block,
+    /// access the database, or perform CPU-intensive work, because it is
+    /// called directly from the tokio executor's Future threads.
+    fn drain_non_finalized_rejected_hashes(&mut self) {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        loop {
+            match self.non_finalized_rejected_receiver.try_recv() {
+                Ok(hash) => {
+                    self.non_finalized_block_write_sent_hashes.remove(&hash);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    info!(
+                        "Block commit task closed the non-finalized rejected hash channel. \
+                         Is Zebra shutting down?"
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
     fn clear_finalized_block_queue(
         &mut self,
@@ -662,6 +716,12 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
+
+        // Drop hashes of any blocks the write task has rejected before checking
+        // the SentHashes membership below. Without this, a rejected same-hash
+        // block would lock out a later honest re-delivery of a block at the
+        // same hash as a false "duplicate".
+        self.drain_non_finalized_rejected_hashes();
 
         if self
             .non_finalized_block_write_sent_hashes
@@ -1311,12 +1371,12 @@ impl Service<ReadRequest> for ReadStateService {
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
 
-        if req == ReadRequest::NonFinalizedBlocksListener {
+        if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
             let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
-                self.network.clone(),
                 self.non_finalized_state_receiver.clone(),
+                known_chain_tips,
             );
 
             return async move {
@@ -1495,6 +1555,28 @@ impl Service<ReadRequest> for ReadStateService {
                 .map(|header| CountedHeader { header })
                 .collect(),
             )),
+
+            ReadRequest::FindForkPoint { known_blocks } => {
+                // Reject over-long locators before doing any work, so an untrusted
+                // caller can't force unbounded lookups.
+                let locator_len: u64 = known_blocks
+                    .len()
+                    .try_into()
+                    .expect("usize always fits in u64 on supported (<=64-bit) platforms");
+                if locator_len > block::MAX_BLOCK_LOCATOR_LENGTH {
+                    return Err(BoxError::from(format!(
+                        "FindForkPoint locator length {locator_len} exceeds \
+                         MAX_BLOCK_LOCATOR_LENGTH ({})",
+                        block::MAX_BLOCK_LOCATOR_LENGTH,
+                    )));
+                }
+
+                Ok(ReadResponse::ForkPoint(read::find_fork_point(
+                    state.latest_best_chain(),
+                    &state.db,
+                    known_blocks,
+                )))
+            }
 
             ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
                 read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
@@ -1711,7 +1793,7 @@ impl Service<ReadRequest> for ReadStateService {
                 ))
             }
 
-            ReadRequest::NonFinalizedBlocksListener => {
+            ReadRequest::NonFinalizedBlocksListener { .. } => {
                 unreachable!("should return early");
             }
 
@@ -1778,11 +1860,14 @@ pub async fn init(
 pub fn init_read_only(
     config: Config,
     network: &Network,
-) -> (
-    ReadStateService,
-    ZebraDb,
-    tokio::sync::watch::Sender<NonFinalizedState>,
-) {
+) -> Result<
+    (
+        ReadStateService,
+        ZebraDb,
+        tokio::sync::watch::Sender<NonFinalizedState>,
+    ),
+    StateInitError,
+> {
     let finalized_state = FinalizedState::new_with_debug(
         &config,
         network,
@@ -1790,11 +1875,11 @@ pub fn init_read_only(
         #[cfg(feature = "elasticsearch")]
         false,
         true,
-    );
+    )?;
     let (non_finalized_state_sender, non_finalized_state_receiver) =
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 
-    (
+    Ok((
         ReadStateService::new(
             &finalized_state,
             None,
@@ -1802,19 +1887,28 @@ pub fn init_read_only(
         ),
         finalized_state.db.clone(),
         non_finalized_state_sender,
-    )
+    ))
 }
 
 /// Calls [`init_read_only`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// Returns a [`tokio::task::JoinHandle`] with a read state service and chain tip sender.
+///
+/// Returns a [`tokio::task::JoinHandle`] whose output is a [`Result`]: awaiting it yields a
+/// [`JoinError`](tokio::task::JoinError) if the blocking task panicked or was cancelled, and
+/// otherwise an `Err(`[`StateInitError`]`)` if the read-only state could not be opened (for
+/// example, a missing read-only database).
 pub fn spawn_init_read_only(
     config: Config,
     network: &Network,
-) -> tokio::task::JoinHandle<(
-    ReadStateService,
-    ZebraDb,
-    tokio::sync::watch::Sender<NonFinalizedState>,
-)> {
+) -> tokio::task::JoinHandle<
+    Result<
+        (
+            ReadStateService,
+            ZebraDb,
+            tokio::sync::watch::Sender<NonFinalizedState>,
+        ),
+        StateInitError,
+    >,
+> {
     let network = network.clone();
     tokio::task::spawn_blocking(move || init_read_only(config, &network))
 }

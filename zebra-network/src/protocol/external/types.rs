@@ -116,8 +116,14 @@ impl Version {
                 170_130
             }
             (Mainnet, Nu6_1) => 170_140,
-            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_150,
-            (Mainnet, Nu7) => 170_160,
+            (Testnet(params), Nu6_2) if params.is_default_testnet() || params.is_regtest() => {
+                170_150
+            }
+            (Mainnet, Nu6_2) => 170_150,
+            // TODO(NU6.2): these Nu7 protocol versions are provisional, bumped above Nu6_2's
+            // 170_150. Update them when the real Nu7 values are specified.
+            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_160,
+            (Mainnet, Nu7) => 170_170,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
@@ -223,7 +229,7 @@ mod test {
 
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
         assert!(
-            matches!(highest_network_upgrade, Nu6 | Nu6_1 | Nu7),
+            matches!(highest_network_upgrade, Nu6 | Nu6_1 | Nu6_2 | Nu7),
             "expected coverage of all network upgrades: \
             add the new network upgrade to the list in this test"
         );
@@ -238,6 +244,7 @@ mod test {
             Nu5,
             Nu6,
             Nu6_1,
+            Nu6_2,
             Nu7,
         ] {
             let height = network_upgrade.activation_height(network);

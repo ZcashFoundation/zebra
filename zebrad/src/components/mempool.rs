@@ -576,7 +576,7 @@ impl Service<Request> for Mempool {
                 for tx in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
                     // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx, None);
+                    let _result = tx_downloads.download_if_needed_and_verify(tx, None, None);
                 }
             }
 
@@ -634,8 +634,11 @@ impl Service<Request> for Mempool {
                             tracing::trace!("chain grew during tx verification, retrying ..",);
 
                             // We don't care if re-queueing the transaction request fails.
-                            let _result = tx_downloads
-                                .download_if_needed_and_verify(tx.transaction.into(), rsp_tx);
+                            let _result = tx_downloads.download_if_needed_and_verify(
+                                tx.transaction.into(),
+                                None,
+                                rsp_tx,
+                            );
                         }
                     }
                     Ok(Err(boxed_err)) => {
@@ -660,13 +663,13 @@ impl Service<Request> for Mempool {
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
                     }
-                    Err(_elapsed) => {
-                        // A timeout happens when the stream hangs waiting for another service,
-                        // so there is no specific transaction ID.
+                    Err((tx_id, _elapsed)) => {
+                        tracing::info!(
+                            ?tx_id,
+                            "mempool transaction failed to verify due to timeout"
+                        );
 
-                        // TODO: Return the transaction id that timed out during verification so it can be
-                        //       included in the list of invalidated transactions and change `warn!` to `info!`.
-                        tracing::warn!("mempool transaction failed to verify due to timeout");
+                        invalidated_ids.insert(tx_id);
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
                     }
@@ -872,8 +875,11 @@ impl Service<Request> for Mempool {
                                 > {
                                     let (rsp_tx, rsp_rx) = oneshot::channel();
                                     storage.should_download_or_verify(gossiped_tx.id())?;
-                                    tx_downloads
-                                        .download_if_needed_and_verify(gossiped_tx, Some(rsp_tx))?;
+                                    tx_downloads.download_if_needed_and_verify(
+                                        gossiped_tx,
+                                        None,
+                                        Some(rsp_tx),
+                                    )?;
 
                                     Ok(rsp_rx)
                                 },
@@ -885,6 +891,27 @@ impl Service<Request> for Mempool {
                     self.update_metrics();
 
                     async move { Ok(Response::Queued(rsp)) }.boxed()
+                }
+
+                // Queue inv-advertised candidates from a specific peer.
+                // Per-peer accounting is enforced inside the downloader.
+                Request::QueueFromPeer { txids, source } => {
+                    trace!(req_count = ?txids.len(), ?source, "got mempool QueueFromPeer request");
+
+                    for txid in txids {
+                        if storage.should_download_or_verify(txid).is_err() {
+                            continue;
+                        }
+                        let _ = tx_downloads.download_if_needed_and_verify(
+                            Gossip::Id(txid),
+                            Some(source),
+                            None,
+                        );
+                    }
+
+                    self.update_metrics();
+
+                    async move { Ok(Response::Queued(Vec::new())) }.boxed()
                 }
 
                 // Store successfully downloaded and verified transactions in the mempool
@@ -1006,6 +1033,9 @@ impl Service<Request> for Mempool {
                             .map(Err)
                             .collect(),
                     ),
+
+                    // Drop peer-advertised txids when the mempool is disabled.
+                    Request::QueueFromPeer { .. } => Response::Queued(Vec::new()),
 
                     // Check if the mempool should be enabled.
                     // This request makes sure mempools are debug-enabled in the acceptance tests.

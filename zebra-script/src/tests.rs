@@ -884,12 +884,23 @@ fn count_coinbase_legacy_sigops_includes_coinbase_script() -> Result<()> {
         .activation_height(&network)
         .expect("NU5 has a Mainnet activation height");
 
-    let tx = Transaction::new_v5_coinbase(
-        &network,
-        height,
-        vec![(output_amount, dummy_output_script)],
-        miner_data,
-    );
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height,
+            data: miner_data,
+            sequence: 0xffff_ffff,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script,
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    let _ = network;
 
     // Before the fix, Zebra's `Sigops` impl skipped the coinbase input and returned 0 for a
     // coinbase with no OP_CHECKSIG in its outputs. After the fix, every OP_CHECKSIG in the coinbase
@@ -989,6 +1000,95 @@ fn p2sh_sigop_count_counts_redeem_script() -> Result<()> {
     Ok(())
 }
 
+/// Regression test: `p2sh_sigop_count` must agree with zcashd's
+/// `GetP2SHSigOpCount()` when the redeem script contains a "disabled" opcode such as
+/// `OP_CODESEPARATOR` (0xab).
+#[test]
+fn p2sh_sigop_count_matches_zcashd_when_redeem_script_contains_disabled_opcode() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+    const OP_CODESEPARATOR: u8 = 0xab; // "disabled" in the Rust parser; valid byte in zcashd's GetOp2
+    const OP_CHECKMULTISIG: u8 = 0xae;
+
+    // Redeem script: OP_CODESEPARATOR followed by 50 x OP_CHECKMULTISIG.
+    // zcashd's GetSigOpCount(true): lastOpcode is OP_INVALIDOPCODE before the first
+    // CHECKMULTISIG (and OP_CODESEPARATOR after it), so the `fAccurate && lastOpcode in
+    // OP_1..=OP_16` branch never fires; every CHECKMULTISIG contributes the fallback
+    // count of 20. Total: 50 * 20 = 1000.
+    let mut redeem_script = vec![OP_CODESEPARATOR];
+    redeem_script.extend(std::iter::repeat_n(OP_CHECKMULTISIG, 50));
+    assert_eq!(redeem_script.len(), 51);
+
+    // scriptSig: a single direct push of the 51-byte redeem script. 51 <= 0x4b, so the
+    // literal-length push opcode is just the length byte followed by the payload.
+    let mut unlock_bytes = Vec::with_capacity(1 + redeem_script.len());
+    unlock_bytes.push(redeem_script.len() as u8);
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    // scriptPubKey: OP_HASH160 <20 bytes> OP_EQUAL. The hash value is irrelevant: only
+    // the shape (23 bytes, surrounding opcodes) is checked by `is_pay_to_script_hash`.
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // zcashd's GetP2SHSigOpCount() returns 1000 here; Zebra's pure-Rust counter
+    // short-circuits at the leading 0xab and returns 0. Failing this assertion is the
+    // consensus-split bug.
+    assert_eq!(
+        p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output)),
+        1000,
+        "P2SH redeem scripts containing a disabled opcode (e.g. OP_CODESEPARATOR) must \
+         agree with zcashd's GetP2SHSigOpCount; the pure-Rust parser short-circuits on \
+         disabled bytes, undercounting sigops and opening a chain split against zcashd"
+    );
+
+    // Same expectation through the block-verifier entry point.
+    let cached = super::CachedFfiTransaction::new(
+        Arc::new(tx),
+        Arc::new(vec![spent_output]),
+        NetworkUpgrade::Nu5,
+    )
+    .expect("network upgrade should be valid for tx");
+    assert_eq!(
+        cached.p2sh_sigops(),
+        1000,
+        "CachedFfiTransaction::p2sh_sigops must agree with zcashd on redeem scripts \
+         containing disabled opcodes"
+    );
+
+    Ok(())
+}
+
 /// Non-P2SH inputs, and coinbase inputs, must contribute zero P2SH sigops regardless of what bytes
 /// appear in their `scriptSig`. zcashd skips the coinbase input in [`GetP2SHSigOpCount()`].
 ///
@@ -1007,12 +1107,23 @@ fn p2sh_sigop_count_is_zero_for_non_p2sh_and_coinbase() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]);
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::new_v5_coinbase(
-        &network,
-        nu5_height,
-        vec![(output_amount, dummy_output_script.clone())],
-        vec![OP_CHECKSIG; 80],
-    );
+    let coinbase_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height: nu5_height,
+            data: vec![OP_CHECKSIG; 80],
+            sequence: 0xffff_ffff,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script.clone(),
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    let _ = &network;
 
     // Coinbase inputs have no spent output; zcashd passes an empty vector.
     assert_eq!(p2sh_sigop_count(&coinbase_tx, &[]), 0);
@@ -1086,12 +1197,23 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]); // OP_TRUE
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::new_v5_coinbase(
-        &network,
-        nu5_height,
-        vec![(output_amount, dummy_output_script)],
-        vec![OP_CHECKSIG; 80],
-    );
+    let coinbase_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height: nu5_height,
+            data: vec![OP_CHECKSIG; 80],
+            sequence: 0xffff_ffff,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script,
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    let _ = &network;
 
     // Surface B: each non-coinbase transaction has one P2SH input whose
     // 15-byte redeem script is 15 x OP_CHECKSIG, contributing 15 P2SH
@@ -1369,4 +1491,200 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
          OP_CHECKSIGVERIFY + OP_CHECKSIG with an invalid second hash-type \
          byte (0x50) must be rejected, matching zcashd"
     );
+}
+
+#[test]
+fn p2sh_sigop_count_uses_accurate_multisig_mode() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // P2SH redeem script: OP_1 <33-byte pubkey> OP_1 OP_CHECKMULTISIG (a 1-of-1 multisig).
+    // zcashd's GetP2SHSigOpCount counts the redeem script with GetSigOpCount(true), so an
+    // OP_N-prefixed CHECKMULTISIG counts as N (here 1). The legacy mode counts it as 20;
+    // over-counting here lets a zcashd-valid block exceed Zebra's MAX_BLOCK_SIGOPS and splits
+    // Zebra off the chain. This guards the accurate-mode P2SH counter.
+    let mut redeem = vec![0x51u8, 0x21u8];
+    redeem.extend_from_slice(&[0x02u8; 33]);
+    redeem.extend_from_slice(&[0x51u8, 0xaeu8]);
+
+    let mut unlock = vec![redeem.len() as u8];
+    unlock.extend_from_slice(&redeem);
+
+    let mut lock = vec![0xa9u8, 0x14u8];
+    lock.extend_from_slice(&[0u8; 20]);
+    lock.push(0x87u8);
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: transaction::Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&unlock),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]),
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    let spent = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script: transparent::Script::new(&lock),
+    };
+
+    // Accurate mode: 1. (Legacy mode would return 20.)
+    assert_eq!(p2sh_sigop_count(&tx, std::slice::from_ref(&spent)), 1);
+    Ok(())
+}
+
+fn poc_p2sh_1_of_1_multisig_scripts() -> (transparent::Script, transparent::Script) {
+    const OP_1: u8 = 0x51;
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+    const OP_CHECKMULTISIG: u8 = 0xae;
+
+    // Redeem script:
+    //   OP_1 <33-byte compressed pubkey> OP_1 OP_CHECKMULTISIG
+    //
+    // zcashd's P2SH path calls GetSigOpCount(true), so this counts as 1 sigop.
+    // Zebra's vulnerable path calls legacy_sigop_count_script -> GetSigOpCount(false),
+    // so this counts as 20 sigops.
+    let pubkey = [0x02u8; 33];
+
+    let mut redeem_script = Vec::with_capacity(37);
+    redeem_script.push(OP_1);
+    redeem_script.push(0x21); // push 33-byte pubkey
+    redeem_script.extend_from_slice(&pubkey);
+    redeem_script.push(OP_1);
+    redeem_script.push(OP_CHECKMULTISIG);
+    assert_eq!(redeem_script.len(), 37);
+
+    // scriptSig: push redeem_script as the final push.
+    // The actual HASH160 match/signature validity is irrelevant for this accounting PoC;
+    // p2sh_sigop_count only checks the spent output is P2SH-shaped and extracts the last push.
+    let mut unlock_bytes = Vec::with_capacity(1 + redeem_script.len());
+    unlock_bytes.push(redeem_script.len() as u8);
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    // P2SH scriptPubKey shape:
+    //   OP_HASH160 <20-byte hash> OP_EQUAL
+    //
+    // The hash value is intentionally dummy. p2sh_sigop_count only needs IsPayToScriptHash shape.
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    (unlock_script, lock_script)
+}
+
+#[test]
+fn poc_p2sh_accurate_multisig_should_count_one_not_twenty() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (unlock_script, lock_script) = poc_p2sh_1_of_1_multisig_scripts();
+
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let zebra_count = p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output));
+
+    assert_eq!(
+        zebra_count, 1,
+        "P2SH OP_1 <pubkey> OP_1 OP_CHECKMULTISIG must use accurate sigop mode"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn poc_p2sh_1001_accurate_multisigs_should_stay_below_block_sigop_limit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const SPENDS: usize = 1_001;
+
+    let (unlock_script, lock_script) = poc_p2sh_1_of_1_multisig_scripts();
+
+    let inputs: Vec<_> = (0..SPENDS)
+        .map(|i| {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&(i as u64).to_le_bytes());
+
+            transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: zebra_chain::transaction::Hash(hash),
+                    index: 0,
+                },
+                unlock_script: unlock_script.clone(),
+                sequence: u32::MAX,
+            }
+        })
+        .collect();
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let spent_outputs = vec![spent_output; SPENDS];
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs,
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let zebra_count = p2sh_sigop_count(&tx, &spent_outputs);
+    let zcashd_accurate_count = SPENDS as u32;
+
+    assert_eq!(
+        zebra_count, zcashd_accurate_count,
+        "Zebra should count each accurate 1-of-1 P2SH multisig spend as 1 sigop, not 20"
+    );
+
+    assert!(
+        zebra_count <= 20_000,
+        "A zcashd-valid block-level sigop total should not cross Zebra's MAX_BLOCK_SIGOPS"
+    );
+
+    Ok(())
 }

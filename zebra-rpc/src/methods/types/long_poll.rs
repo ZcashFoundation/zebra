@@ -16,6 +16,9 @@ use zebra_chain::{
 };
 use zebra_node_services::BoxError;
 
+#[cfg(test)]
+mod tests;
+
 /// The length of a serialized [`LongPollId`] string.
 ///
 /// This is an internal Zebra implementation detail, which does not need to match `zcashd`.
@@ -267,9 +270,13 @@ impl FromStr for LongPollId {
 
     /// Exact conversion from a string to LongPollId.
     fn from_str(long_poll_id: &str) -> Result<Self, Self::Err> {
-        if long_poll_id.len() != LONG_POLL_ID_LENGTH {
+        // A well-formed `LongPollId` is exactly `LONG_POLL_ID_LENGTH` ASCII digits/hex
+        // characters (see `Display` above). Requiring ASCII here means each field's byte
+        // range is also a valid UTF-8 char boundary, so the slices below cannot panic on
+        // attacker-controlled input containing multibyte characters.
+        if long_poll_id.len() != LONG_POLL_ID_LENGTH || !long_poll_id.is_ascii() {
             return Err(format!(
-                "incorrect long poll id length, must be {LONG_POLL_ID_LENGTH} for Zebra"
+                "invalid long poll id, must be {LONG_POLL_ID_LENGTH} ASCII digits / hex chars"
             )
             .into());
         }
@@ -300,29 +307,4 @@ impl TryFrom<String> for LongPollId {
     fn try_from(s: String) -> Result<Self, Self::Error> {
         s.parse()
     }
-}
-
-/// Check that [`LongPollInput::new`] will sort mempool transaction ids.
-///
-/// The mempool does not currently guarantee the order in which it will return transactions and
-/// may return the same items in a different order, while the long poll id should be the same if
-/// its other components are equal and no transactions have been added or removed in the mempool.
-#[test]
-fn long_poll_input_mempool_tx_ids_are_sorted() {
-    let mempool_tx_ids = || {
-        (0..10)
-            .map(|i| transaction::Hash::from([i; 32]))
-            .map(UnminedTxId::Legacy)
-    };
-
-    assert_eq!(
-        LongPollInput::new(Height::MIN, Default::default(), 0.into(), mempool_tx_ids()),
-        LongPollInput::new(
-            Height::MIN,
-            Default::default(),
-            0.into(),
-            mempool_tx_ids().rev()
-        ),
-        "long poll input should sort mempool tx ids"
-    );
 }

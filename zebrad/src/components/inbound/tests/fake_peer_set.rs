@@ -206,7 +206,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(tx.unmined_id());
     peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
         .await
         .respond(Response::Nil);
 
@@ -255,7 +255,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     // Test `Request::AdvertiseTransactionIds`
     let request = inbound_service
         .clone()
-        .oneshot(Request::AdvertiseTransactionIds(txs.clone()));
+        .oneshot(Request::AdvertiseTransactionIds(txs.clone(), None));
     // Ensure the mocked peer set responds
     let peer_set_responder =
         peer_set
@@ -316,7 +316,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(test_transaction.unmined_id());
     peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
         .await
         .respond(Response::Nil);
 
@@ -434,7 +434,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
     tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     let possible_requests = &mut [
-        Request::AdvertiseTransactionIds(hs),
+        Request::AdvertiseTransactionIds(hs, None),
         Request::AdvertiseBlock(block_two.hash(), None),
     ]
     .to_vec();
@@ -585,7 +585,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
     peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
         .await
         .respond(Response::Nil);
 

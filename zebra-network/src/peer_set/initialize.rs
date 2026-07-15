@@ -149,10 +149,7 @@ where
                     _ = flush_timer.next() => {
                         for (addr, score_increment) in misbehaviors.drain() {
                             let _ = misbehaviour_updater
-                                .send(MetaAddrChange::UpdateMisbehavior {
-                                    addr,
-                                    score_increment
-                                })
+                                .send(MetaAddr::new_misbehavior(addr, score_increment))
                                 .await;
                         }
                     },

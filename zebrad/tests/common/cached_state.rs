@@ -171,7 +171,8 @@ pub async fn load_finalized_tip_height_from_state_directory(
     let (_read_state, db, _sender) =
         tokio::task::spawn_blocking(move || zebra_state::init_read_only(config, &network))
             .await
-            .map_err(|e| eyre!("Blocking task failed while loading state: {e}"))?;
+            .map_err(|e| eyre!("Blocking task failed while loading state: {e}"))?
+            .map_err(|e| eyre!("Failed to open read-only state: {e}"))?;
 
     let finalized_tip_height = db
         .finalized_tip_height()

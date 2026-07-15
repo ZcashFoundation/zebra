@@ -4,6 +4,12 @@ use std::{io, net::Ipv6Addr, sync::Arc};
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
 
+/// Initial-allocation cap for `zcash_deserialize_external_count`.
+///
+/// 1024 is large enough that honest messages amortize their growth to a few
+/// reallocations.
+const MAX_INITIAL_ALLOCATION: usize = 1024;
+
 /// Consensus-critical deserialization for Zcash.
 ///
 /// This trait provides a generic deserialization for consensus-critical
@@ -93,7 +99,11 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
         // for 128 bit memory spaces.)
         Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
     }
-    let mut vec = Vec::with_capacity(external_count);
+    // Cap the upfront reservation. The Vec grows via push() as elements
+    // arrive, so a peer-supplied `external_count` can't force a large
+    // allocation before any data is read. Fixes the deserializer-level
+    // case of GHSA-xr93-pcq3-pxf8.
+    let mut vec = Vec::with_capacity(external_count.min(MAX_INITIAL_ALLOCATION));
     for _ in 0..external_count {
         vec.push(T::zcash_deserialize(&mut reader)?);
     }
