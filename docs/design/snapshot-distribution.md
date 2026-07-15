@@ -118,6 +118,17 @@ start. The node never fetches snapshot artifacts over the network itself; every
 artifact is verified against the pinned constants as it is read, so the
 installer's transport (HTTPS) does not extend the trust model.
 
+Concretely, `scripts/install-zebra.sh --ibd-snapshot yes` downloads the
+release's `zebra-ibd-snapshot-mainnet-<version>.tar.gz` (fail-closed against
+the checksum pinned in the script, like the binary downloads), extracts it
+into `<cache-dir>/ibd-snapshot/<network>`, reads `H_max` from the artifact
+`MANIFEST.txt`, and writes a ready-to-use `zebrad-snapshot-sync.toml` wiring
+`sync.known_hash_sync`, `sync.snapshot_consume_sync`,
+`sync.known_hash_local_source_dir`, and `[state.snapshot_consume]`
+(`survivor_set_path` + `h_max`) together. The state re-verifies the survivor
+set against the pinned `…_UNSPENT_OUTPUTS_HASH` constant at load, and the
+engine re-verifies every chunk and tree as it reads them.
+
 A P2P network-protocol extension for fetching the same artifacts from peers
 (new request/response messages, serve-from-state inbound handlers, a capability
 bit) was implemented in an earlier revision of this branch and is **deferred to

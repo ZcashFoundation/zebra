@@ -89,8 +89,12 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::Height,
+    parameters::{known_hashes::KnownHashListSpec, Network},
+};
 
 /// The on-disk byte length of an [`OutputLocation`](crate::OutputLocation):
 /// 3-byte height + 2-byte transaction index + 3-byte output index, big-endian.
@@ -173,16 +177,48 @@ pub struct SurvivorSet {
     locations: Vec<[u8; OUTPUT_LOCATION_DISK_BYTES]>,
 }
 
+/// The sanity cap on a survivor-set file's byte length, applied before the
+/// file is read into memory.
+///
+/// The unspent-output set at `H_max` is at most a few hundred MiB on Mainnet
+/// today; 8 GiB is far above any plausible real set (leaving headroom for chain
+/// growth) while still refusing a wrong or corrupt file that would otherwise
+/// drive a huge allocation at startup. The content is verified against the
+/// pinned hash regardless, so this only guards the allocation.
+pub const MAX_SURVIVOR_SET_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
 impl SurvivorSet {
-    /// Loads a survivor set from `path`.
+    /// Loads a survivor set from `path`, verifying it against the pinned
+    /// `expected_hash` (lowercase hex SHA-256) when one is pinned for the
+    /// network.
     ///
     /// The file must be a whole number of 8-byte records and strictly
-    /// ascending (the emitter guarantees both). Returns an error otherwise.
-    pub fn load(path: &Path) -> Result<Self, SurvivorSetError> {
+    /// ascending (the emitter guarantees both), no larger than
+    /// [`MAX_SURVIVOR_SET_BYTES`], and — when the network pins a hash — must
+    /// hash to it, so a truncated or tampered artifact is rejected rather than
+    /// silently corrupting the final UTXO set. Returns an error otherwise.
+    ///
+    /// A network without a pinned hash (the constants are pinned by
+    /// `emit-snapshot` at release) loads unverified with a prominent warning:
+    /// snapshot-consume sync cannot run end-to-end without the pinned chunk
+    /// hashes either, so this is a development-only configuration.
+    pub fn load(path: &Path, expected_hash: Option<&str>) -> Result<Self, SurvivorSetError> {
         let file = File::open(path).map_err(|source| SurvivorSetError::Open {
             path: path.to_path_buf(),
             source,
         })?;
+
+        // Refuse an implausibly large file before reading it into memory.
+        if let Ok(metadata) = file.metadata() {
+            if metadata.len() > MAX_SURVIVOR_SET_BYTES {
+                return Err(SurvivorSetError::Oversized {
+                    path: path.to_path_buf(),
+                    len: metadata.len(),
+                    cap: MAX_SURVIVOR_SET_BYTES,
+                });
+            }
+        }
+
         let mut reader = BufReader::new(file);
         let mut bytes = Vec::new();
         reader
@@ -191,6 +227,25 @@ impl SurvivorSet {
                 path: path.to_path_buf(),
                 source,
             })?;
+
+        match expected_hash {
+            Some(expected) => {
+                let actual = hex::encode(Sha256::digest(&bytes));
+                if actual != expected {
+                    return Err(SurvivorSetError::HashMismatch {
+                        path: path.to_path_buf(),
+                        expected: expected.to_string(),
+                        actual,
+                    });
+                }
+            }
+            None => tracing::warn!(
+                path = %path.display(),
+                "loading a survivor set without a pinned SHA-256 constant to verify \
+                 it against; this is a development-only configuration — releases pin \
+                 the constant via `emit-snapshot`",
+            ),
+        }
 
         Self::from_bytes(bytes)
     }
@@ -273,8 +328,15 @@ impl SnapshotConsumeState {
         config: &SnapshotConsumeConfig,
         network: &Network,
     ) -> Result<Self, SurvivorSetError> {
+        // The trust root: the per-network SHA-256 constant pinned in
+        // `zebra-chain` (updated by `emit-snapshot` at release). `None` until a
+        // release pins it, in which case the set loads unverified with a
+        // warning (see [`SurvivorSet::load`]).
+        let pinned_hash =
+            KnownHashListSpec::for_network(network).and_then(|spec| spec.unspent_outputs_hash);
+
         let survivor_set = match &config.survivor_set_path {
-            Some(path) => Some(Arc::new(SurvivorSet::load(path)?)),
+            Some(path) => Some(Arc::new(SurvivorSet::load(path, pinned_hash)?)),
             None => None,
         };
 
@@ -456,6 +518,34 @@ pub enum SurvivorSetError {
     /// The records are not strictly ascending.
     #[error("survivor set records are not strictly ascending")]
     NotSorted,
+
+    /// The survivor-set file is larger than any plausible real set, so it is
+    /// refused before it is read into memory.
+    #[error(
+        "survivor set file {path} is {len} bytes, over the {cap}-byte sanity cap;          refusing to read it"
+    )]
+    Oversized {
+        /// The path of the oversized file.
+        path: PathBuf,
+        /// The file's reported length.
+        len: u64,
+        /// The sanity cap on a survivor set's byte length.
+        cap: u64,
+    },
+
+    /// The survivor-set file does not hash to the pinned SHA-256 constant: a
+    /// corrupt or tampered artifact, never trusted.
+    #[error(
+        "survivor set file {path} hashed to {actual}, but the pinned constant          is {expected}; fix or re-download the snapshot artifacts"
+    )]
+    HashMismatch {
+        /// The path of the mismatched file.
+        path: PathBuf,
+        /// The pinned SHA-256, as lowercase hex.
+        expected: String,
+        /// The file's SHA-256, as lowercase hex.
+        actual: String,
+    },
 }
 
 #[cfg(test)]
@@ -504,6 +594,44 @@ mod tests {
         assert!(!set.is_survivor_bytes(&loc(50, 0, 0)));
         assert!(!set.is_survivor_bytes(&loc(100, 3, 1)));
         assert!(!set.is_survivor_bytes(&loc(200, 0, 0)));
+    }
+
+    /// `SurvivorSet::load` accepts a file matching its pinned hash and rejects
+    /// a mismatched (tampered or truncated) file with the precise error.
+    #[test]
+    fn survivor_set_load_verifies_pinned_hash() {
+        use sha2::{Digest, Sha256};
+
+        let dir = tempfile::tempdir().expect("temp dir is created");
+        let path = dir.path().join("survivors.bin");
+
+        let mut records: Vec<[u8; 8]> = vec![[0, 0, 0, 1, 0, 0, 0, 1], [0, 0, 0, 2, 0, 0, 0, 1]];
+        records.sort_unstable();
+        let bytes: Vec<u8> = records.iter().flatten().copied().collect();
+        std::fs::write(&path, &bytes).expect("survivor set file is written");
+
+        let good_hash = hex::encode(Sha256::digest(&bytes));
+
+        // A matching pinned hash is accepted.
+        let set = SurvivorSet::load(&path, Some(&good_hash))
+            .expect("a survivor set matching its pinned hash loads");
+        assert_eq!(set.len(), 2);
+
+        // A wrong pinned hash (e.g. a truncated or tampered file) is rejected
+        // with the precise mismatch error, never trusted.
+        let wrong_hash = hex::encode(Sha256::digest(b"different"));
+        let error = SurvivorSet::load(&path, Some(&wrong_hash))
+            .expect_err("a survivor set that fails its pinned hash is rejected");
+        assert!(
+            matches!(error, SurvivorSetError::HashMismatch { .. }),
+            "got {error:?}",
+        );
+
+        // With no pinned hash (a development configuration), the set loads
+        // unverified.
+        let set = SurvivorSet::load(&path, None)
+            .expect("a survivor set loads unverified when no hash is pinned");
+        assert_eq!(set.len(), 2);
     }
 
     #[test]
