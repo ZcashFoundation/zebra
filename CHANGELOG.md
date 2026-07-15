@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- New regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase
+  to a caller-specified address, instead of the configured `mining.miner_address`.
+  This lets a test harness fund several wallets from one node; it is used by the
+  zcashd wallet-conformance harness
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
 - New zcashd-compat mode (`zebrad start --zcashd-compat` or `[zcashd_compat]`
   config section) for operators migrating from `zcashd` while keeping its
   wallet and RPC surface: Zebra faces the Zcash network and always includes
