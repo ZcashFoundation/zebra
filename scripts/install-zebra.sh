@@ -18,8 +18,12 @@ ZEBRA_URL="https://github.com/ZcashFoundation/zebra/releases/download/${ZEBRA_RE
 # Updated to the archive checksum of each release before publishing.
 ZEBRA_ARCHIVE_SHA256="942bbcf03eecb5488b9852aa6dc60a10795444f1d85a4f723b1cdb6f7c6c96a0"
 ZEBRA_MEMBER="zebrad"
-ZEBRA_DOCKER_IMAGE="zfnd/zebra:${ZEBRA_VERSION}"
-ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:zcashd-compat-${ZEBRA_VERSION}"
+# The Docker image published from the zcashd-compat branch releases. Its tag
+# tracks the release that published the image, which can differ from the
+# zebrad binary release pinned above. The image bundles zebrad and the
+# hash-pinned zcashd sidecar, so it serves both the plain and compat modes.
+ZEBRA_DOCKER_IMAGE="zfnd/zebra:6.0.0-zcashd-compat.2"
+ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:6.0.0-zcashd-compat.2"
 ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE="zfnd/zebra:zcashd-compat-latest"
 ZEBRA_DEFAULT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/zebra"
 ZEBRA_DOCKER_RUNTIME_UID=10001
