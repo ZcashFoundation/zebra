@@ -175,6 +175,11 @@ jobs:
             echo "released=true"
             echo "version=${VERSION}"
             echo "tag=${TAG}"
+            if [[ "${VERSION}" == *-* ]]; then
+              echo "prerelease=true"
+            else
+              echo "prerelease=false"
+            fi
           } >> "${GITHUB_OUTPUT}"
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         if: steps.zebrad-release.outputs.released == 'true'
@@ -300,10 +305,16 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           TAG: ${{ steps.zebrad-release.outputs.tag }}
+          PRERELEASE: ${{ steps.zebrad-release.outputs.prerelease }}
         run: |
           set -euo pipefail
 
           notes_file="${RUNNER_TEMP}/release-notes.final.md"
+          release_flags=(--latest --prerelease=false)
+
+          if [ "${PRERELEASE}" = "true" ]; then
+            release_flags=(--latest=false --prerelease)
+          fi
 
           if gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${TAG}" \
@@ -311,7 +322,7 @@ jobs:
               --title "Zebra ${TAG}" \
               --notes-file "${notes_file}" \
               --target "${TARGET_SHA}" \
-              --latest
+              "${release_flags[@]}"
           else
             gh release create "${TAG}" \
               --repo "${REPOSITORY}" \
@@ -319,5 +330,5 @@ jobs:
               --notes-file "${notes_file}" \
               --target "${TARGET_SHA}" \
               --verify-tag \
-              --latest
+              "${release_flags[@]}"
           fi
