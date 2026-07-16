@@ -1,9 +1,8 @@
-# Automated checkpoint and end-of-support height updates.
+# Automated checkpoint updates.
 #
 # Triggered when the weekly integration tests complete successfully.
 # Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
-# appends new entries to the checkpoint files, updates the end-of-support
-# height, validates everything, and opens a PR.
+# appends new entries to the checkpoint files, validates them, and opens a PR.
 #
 # The PR requires human review before merge; checkpoints are consensus-critical.
 name: Checkpoint Update
@@ -30,17 +29,25 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     permissions:
       actions: read
-      contents: write
-      pull-requests: write
+      contents: read
     env:
       MAINNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
       TESTNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
-      EOS_FILE: zebrad/src/components/sync/end_of_support.rs
     steps:
+      - name: Generate release app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
-          persist-credentials: true
+          persist-credentials: false
           ref: main
+          token: ${{ steps.app-token.outputs.token }}
 
       # Resolve the integration test run ID.
       # For workflow_run: use the triggering run directly.
@@ -124,9 +131,11 @@ jobs:
             exit 0
           fi
 
-          echo "has_mainnet=${HAS_MAINNET}" >> "$GITHUB_OUTPUT"
-          echo "has_testnet=${HAS_TESTNET}" >> "$GITHUB_OUTPUT"
-          echo "has_updates=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "has_mainnet=${HAS_MAINNET}"
+            echo "has_testnet=${HAS_TESTNET}"
+            echo "has_updates=true"
+          } >> "$GITHUB_OUTPUT"
 
       # Append new mainnet checkpoints (entries with heights higher than current last)
       - name: Append new mainnet checkpoints
@@ -161,22 +170,6 @@ jobs:
             echo "Updated last testnet checkpoint: ${NEW_LAST}"
           fi
 
-      # Update the end-of-support estimated release height using the latest
-      # mainnet checkpoint height. This is a lower bound (~3-7 days behind
-      # the real tip), but the EOS window is 105 days, making it negligible.
-      - name: Update end-of-support height
-        if: steps.check-artifacts.outputs.has_mainnet == 'true'
-        run: |
-          LAST_HEIGHT=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
-          # Format with underscores for Rust readability (e.g., 3_282_406)
-          FORMATTED=$(echo "$LAST_HEIGHT" | awk '{n=$0; r=""; for(i=length(n);i>0;i--) { r=substr(n,i,1) r; if((length(n)-i)%3==2 && i>1) r="_" r }; print r}')
-          echo "Setting ESTIMATED_RELEASE_HEIGHT to ${FORMATTED} (height ${LAST_HEIGHT})"
-
-          sed -i "s/ESTIMATED_RELEASE_HEIGHT: u32 = [0-9_]*/ESTIMATED_RELEASE_HEIGHT: u32 = ${FORMATTED}/" \
-            "${EOS_FILE}"
-
-          grep "ESTIMATED_RELEASE_HEIGHT" "${EOS_FILE}" | head -1
-
       # Validate the updated checkpoint files
       - name: Validate checkpoint files
         if: steps.check-artifacts.outputs.has_updates == 'true'
@@ -203,32 +196,18 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 #v8.1.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           branch: chore/update-checkpoints
-          title: "chore(chain): update checkpoints and end-of-support height"
+          add-paths: |
+            zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
+            zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
+          title: "chore(chain): update checkpoints"
           body: |
             Automated checkpoint update from the weekly integration test run.
 
             **Source:** [Integration test run #${{ steps.resolve-run.outputs.run_id }}](${{ steps.resolve-run.outputs.run_url }})
 
-            ### Changes
-
-            - Updated mainnet and/or testnet checkpoint files with new entries
-            - Updated `ESTIMATED_RELEASE_HEIGHT` in `end_of_support.rs` to match the latest mainnet checkpoint
-
-            ### Validation
-
-            The checkpoint validation script verified:
-            - All entries match `HEIGHT HASH` format
-            - Heights are monotonically increasing
-            - No gaps exceed 400 blocks
-            - No duplicate heights or hashes
-
-            ### Review
-
-            Checkpoints are consensus-critical; incorrect hashes could cause nodes
-            to follow a wrong fork. Verify the source integration test run linked
-            above completed successfully against the real Zcash network.
+            Checkpoints are consensus-critical. Verify the new hashes against the source run before merging.
           labels: A-release,C-enhancement
-          commit-message: "chore(chain): update checkpoints and end-of-support height"
+          commit-message: "chore(chain): update checkpoints"
           delete-branch: true
