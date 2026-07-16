@@ -41,7 +41,7 @@ jobs:
           filters: .github/path-filters.yml
 
   clippy:
-    name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
+    name: clippy stable 1.97.0 / ${{ matrix.type }}
     needs: changes
     if: needs.changes.outputs.lint == 'true'
     permissions:
@@ -53,7 +53,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust-version: [1.97.0]
         type: [release, tests]
         include:
           - type: release
@@ -70,7 +69,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           components: clippy
-          toolchain: ${{ matrix.rust-version }}
+          toolchain: 1.97.0
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
