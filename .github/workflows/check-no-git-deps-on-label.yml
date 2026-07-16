@@ -7,9 +7,11 @@ name: Check No Git Dependencies (label added)
 # does not re-run it: the check stays skipped until the next commit is
 # pushed (issue #10897).
 #
-# This workflow reacts specifically to the label being added and runs the
-# same check, without re-triggering the whole unit test workflow on every
-# label change across all PRs.
+# This workflow listens for the `labeled` event and runs the same check.
+# A (lightweight) run is created for any label added to a PR targeting
+# `main`, but the job only executes when the added label is `A-release`
+# and is skipped otherwise. This keeps the check off `tests-unit.yml`, so
+# the full unit-test suite is not re-run on label changes.
 
 on:
   pull_request:
