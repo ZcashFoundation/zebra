@@ -25,9 +25,11 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::{subsidy::block_subsidy, Network},
     primitives::zcash_history::BlockCommitmentTreeRoots,
+    transparent,
 };
 use zebra_db::{
     chain::BLOCK_INFO,
+    known_hash::KNOWN_HASH_CHUNK,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
@@ -35,8 +37,8 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, QueuedCheckpointVerified},
-    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
+    service::check,
+    Config, StateInitError, ValidateContextError,
 };
 
 pub mod column_family;
@@ -70,6 +72,12 @@ pub use disk_format::upgrade::restorable_db_versions;
 /// The column families supported by the running `zebra-state` database code.
 ///
 /// Existing column families that aren't listed here are preserved when the database is opened.
+///
+/// This is the full set; it is the union of [`CONSENSUS_COLUMN_FAMILIES_IN_CODE`]
+/// and [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]. When the single-database default
+/// (`!Config::separate_rpc_index_db`) is in effect, the main database is opened
+/// with this full list and every column family lives together, exactly as
+/// before.
 pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Blocks
     "hash_by_height",
@@ -109,7 +117,93 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
+    // P2P known-hash snapshot distribution
+    KNOWN_HASH_CHUNK,
 ];
+
+/// The RPC-only column families: address / balance / spent-transaction indexes
+/// that are read **only** by RPC methods, never on a consensus, spend-resolution,
+/// chain-reconstruction, or IBD-engine path.
+///
+/// See `docs/design/state-write-split.md` §2 for the per-column-family
+/// classification and the read-site audit that confirms each is RPC-only.
+///
+/// When [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)
+/// is set, these column families live in a separate "RPC index" database written
+/// by a thread that trails the consensus database, and the consensus database is
+/// opened with [`CONSENSUS_COLUMN_FAMILIES_IN_CODE`] only.
+pub const RPC_INDEX_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    BALANCE_BY_TRANSPARENT_ADDR,
+    "tx_loc_by_transparent_addr_loc",
+    "utxo_loc_by_transparent_addr_loc",
+    TX_LOC_BY_SPENT_OUT_LOC,
+    // The RPC index database's own durable tip marker (height -> block hash),
+    // so it knows crash-safely how far it has indexed. Never present in the
+    // single-database default path.
+    RPC_INDEX_TIP,
+];
+
+/// The consensus-critical column families: everything block / transaction
+/// validation, spend resolution, the value pool, the note-commitment / history
+/// trees, chain reconstruction, and the IBD engine need.
+///
+/// This is [`STATE_COLUMN_FAMILIES_IN_CODE`] minus the four RPC-only column
+/// families in [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`] (the RPC-index tip marker
+/// is never in the consensus database). The consensus database is opened with
+/// this list only when
+/// [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db) is
+/// set.
+pub const CONSENSUS_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    // Blocks
+    "hash_by_height",
+    "height_by_hash",
+    "block_header_by_height",
+    // Transactions
+    "tx_by_loc",
+    "hash_by_tx_loc",
+    "tx_loc_by_hash",
+    // Transparent (consensus subset: the unspent-output set only)
+    "utxo_by_out_loc",
+    // Sprout
+    "sprout_nullifiers",
+    "sprout_anchors",
+    "sprout_note_commitment_tree",
+    // Sapling
+    "sapling_nullifiers",
+    "sapling_anchors",
+    "sapling_note_commitment_tree",
+    "sapling_note_commitment_subtree",
+    // Orchard
+    "orchard_nullifiers",
+    "orchard_anchors",
+    "orchard_note_commitment_tree",
+    "orchard_note_commitment_subtree",
+    // Ironwood (NU6.3)
+    "ironwood_nullifiers",
+    "ironwood_anchors",
+    "ironwood_note_commitment_tree",
+    "ironwood_note_commitment_subtree",
+    // Chain
+    "history_tree",
+    "tip_chain_value_pool",
+    BLOCK_INFO,
+    // Known-hash snapshot distribution
+    KNOWN_HASH_CHUNK,
+];
+
+/// The name of the RPC index database's durable tip column family
+/// (height -> block hash of the highest indexed block).
+///
+/// Only present in the separate RPC index database (see
+/// [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]).
+pub const RPC_INDEX_TIP: &str = "rpc_index_tip";
+
+/// The database-kind sub-directory name for the separate RPC index database.
+///
+/// The RPC index database lives at `<consensus-db-path>/rpc-index`, so it shares
+/// the consensus database's version / network directory and is deleted together
+/// with it.
+pub const RPC_INDEX_DB_DIR: &str = "rpc-index";
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -209,15 +303,23 @@ impl FinalizedState {
             None
         };
 
+        // With the consensus / RPC write split enabled, the main database holds
+        // only the consensus-critical column families; the RPC-only indexes live
+        // in the separate RPC index database that `ZebraDb::new` opens. The
+        // single-database default opens the full list, unchanged.
+        let main_column_families: &[&str] = if config.separate_rpc_index_db && !read_only {
+            CONSENSUS_COLUMN_FAMILIES_IN_CODE
+        } else {
+            STATE_COLUMN_FAMILIES_IN_CODE
+        };
+
         let db = ZebraDb::new(
             config,
             STATE_DATABASE_KIND,
             &state_database_format_version_in_code(),
             network,
             debug_skip_format_upgrades,
-            STATE_COLUMN_FAMILIES_IN_CODE
-                .iter()
-                .map(ToString::to_string),
+            main_column_families.iter().map(ToString::to_string),
             read_only,
         )?;
 
@@ -280,42 +382,51 @@ impl FinalizedState {
         self.db.network()
     }
 
-    /// Commit a checkpoint-verified block to the state.
+    /// Decides whether a supplied (downloaded) note commitment tree set can be
+    /// written directly for `block`, verifying it against the block header where
+    /// the header pins it.
     ///
-    /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order.
-    pub fn commit_finalized(
-        &mut self,
-        ordered_block: QueuedCheckpointVerified,
-        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (checkpoint_verified, rsp_tx) = ordered_block;
-        let result = self.commit_finalized_direct(
-            checkpoint_verified.clone().into(),
-            prev_note_commitment_trees,
-            "commit checkpoint-verified request",
-        );
-
-        if result.is_ok() {
-            metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
-            metrics::gauge!("state.checkpoint.finalized.block.height")
-                .set(checkpoint_verified.height.0 as f64);
-
-            // This height gauge is updated for both fully verified and checkpoint blocks.
-            // These updates can't conflict, because the state makes sure that blocks
-            // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height")
-                .set(checkpoint_verified.height.0 as f64);
-            metrics::counter!("zcash.chain.verified.block.total").increment(1);
-        } else {
-            metrics::counter!("state.checkpoint.error.block.count").increment(1);
-            metrics::gauge!("state.checkpoint.error.block.height")
-                .set(checkpoint_verified.height.0 as f64);
-        };
-
-        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
-
-        result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
+    /// Returns:
+    /// - `Ok(true)` — the supplied trees are directly verifiable and verified:
+    ///   the header's `hashFinalSaplingRoot` commits to the bare Sapling root
+    ///   (the Sapling/Blossom era), the supplied Sapling root matches it, and
+    ///   there is no Orchard tree yet (Orchard activates at NU5, well after
+    ///   Blossom), so the whole supplied set is pinned by the header.
+    /// - `Ok(false)` — the supplied trees are **not** directly verifiable at this
+    ///   layer, so they must be **refused** (the caller folds the block's own
+    ///   note commitments instead, which is always correct).
+    /// - `Err(..)` — the supplied trees *are* directly verifiable but the
+    ///   supplied Sapling root does not match the header (a malicious or corrupt
+    ///   tree): a fatal commit error.
+    ///
+    /// # Security
+    ///
+    /// For Heartwood onward, the header commitment is the chain-history root
+    /// (`ChainHistoryRoot`) or the NU5+ block-commitments hash
+    /// (`ChainHistoryBlockTxAuthCommitment`). Neither commits to *this* block's
+    /// Sapling/Orchard roots: `block_commitment_is_valid_for_chain_history` (run
+    /// downstream by the caller) checks the header against the **parent's**
+    /// history tree root, which is independent of the trees supplied for this
+    /// block. So a supplied tree for a Heartwood-onward block is **unverifiable
+    /// against the block alone** — accepting it would let a malicious peer inject
+    /// a wrong tree (whose wrong root would only surface later, as a cascading
+    /// failure, after corrupting the history tree). We therefore refuse supplied
+    /// trees outside the era where the header directly pins them. The
+    /// design-intended verification (against the chunk's recorded per-height
+    /// roots) is the way to safely accept them later; until those roots are
+    /// threaded to this layer, refusing-and-folding is the safe behaviour. See
+    /// finding #27 and `docs/design/snapshot-distribution.md` §3.2.
+    fn supplied_trees_are_verifiable(
+        block: &Arc<block::Block>,
+        supplied: &NoteCommitmentTrees,
+        network: &Network,
+    ) -> Result<bool, CommitCheckpointVerifiedError> {
+        // The single source of truth for this check lives in `service::check`, so
+        // the in-memory (non-finalized) and finalized commit paths can never
+        // disagree on which supplied trees are verifiable.
+        Ok(check::supplied_trees_are_verifiable(
+            block, supplied, network,
+        )?)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -338,106 +449,228 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
-            FinalizableBlock::Checkpoint {
-                checkpoint_verified,
-            } => {
-                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
-                // treestate of the finalized tip from the database and update it for the block
-                // being committed, assuming the retrieved treestate is the parent block's
-                // treestate. Later on, this function proves this assumption by asserting that the
-                // finalized tip is the parent block of the block being committed.
+        self.commit_finalized_direct_with_trees(
+            finalizable_block,
+            prev_note_commitment_trees,
+            None,
+            source,
+        )
+    }
 
-                let block = checkpoint_verified.block.clone();
-                let mut history_tree = self.db.history_tree();
-                let prev_note_commitment_trees = prev_note_commitment_trees
-                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+    /// Like [`Self::commit_finalized_direct`], but for a checkpoint-verified
+    /// block in snapshot-consume (assumeUTXO) mode, optionally accepts a
+    /// pre-fetched, verified note commitment tree set for the block's height.
+    ///
+    /// When `supplied_trees` is `Some`, the checkpoint commit **writes the
+    /// supplied trees directly** instead of folding the block's note commitments
+    /// (`update_trees_parallel`). The supplied sapling tree's `.root()` is
+    /// checked against the block header's `hashFinalSaplingRoot` before it is
+    /// accepted; a mismatch is a fatal commit error. The history tree is still
+    /// derived and the `hashBlockCommitments` check still runs against the
+    /// (supplied) sapling and orchard roots, so the auth-data binding is
+    /// unchanged.
+    ///
+    /// `supplied_trees` is ignored for contextual blocks (they always carry
+    /// their own treestate) and for genesis.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::commit_finalized_direct`], plus a fatal error if a
+    /// supplied sapling tree's root does not match the block header's
+    /// `hashFinalSaplingRoot`.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_finalized_direct_with_trees(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        supplied_trees: Option<NoteCommitmentTrees>,
+        source: &str,
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        let (height, hash, finalized, spent_utxos, prev_note_commitment_trees) =
+            match finalizable_block {
+                FinalizableBlock::Checkpoint {
+                    checkpoint_verified,
+                } => {
+                    // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
+                    // treestate of the finalized tip from the database and update it for the block
+                    // being committed, assuming the retrieved treestate is the parent block's
+                    // treestate. Later on, this function proves this assumption by asserting that the
+                    // finalized tip is the parent block of the block being committed.
 
-                // Update the note commitment trees.
-                let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees
-                    .update_trees_parallel(&block)
-                    .map_err(ValidateContextError::from)?;
+                    let block = checkpoint_verified.block.clone();
+                    let mut history_tree = self.db.history_tree();
+                    let prev_note_commitment_trees = prev_note_commitment_trees
+                        .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
-                // Check the block commitment if the history tree was not
-                // supplied by the non-finalized state. Note that we don't do
-                // this check for history trees supplied by the non-finalized
-                // state because the non-finalized state checks the block
-                // commitment.
-                //
-                // For Nu5-onward, the block hash commits only to
-                // non-authorizing data (see ZIP-244). This checks the
-                // authorizing data commitment, making sure the entire block
-                // contents were committed to. The test is done here (and not
-                // during semantic validation) because it needs the history tree
-                // root. While it _is_ checked during contextual validation,
-                // that is not called by the checkpoint verifier, and keeping a
-                // history tree there would be harder to implement.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
-                    &self.network(),
-                    &history_tree,
-                )?;
+                    // Update the note commitment trees, or use the supplied trees
+                    // directly in snapshot-consume mode — but only if the supplied
+                    // trees are verifiable against the block header. A supplied
+                    // tree that can't be verified at this layer (Heartwood onward,
+                    // where the header does not pin this block's trees) is refused
+                    // and the block's note commitments are folded instead, so a
+                    // malicious peer can never inject an unverified tree (finding
+                    // #27, see `supplied_trees_are_verifiable`).
+                    let verified_supplied_trees = match supplied_trees {
+                        Some(supplied)
+                            if Self::supplied_trees_are_verifiable(
+                                &block,
+                                &supplied,
+                                &self.network(),
+                            )? =>
+                        {
+                            Some(supplied)
+                        }
+                        _ => None,
+                    };
+                    let note_commitment_trees = match verified_supplied_trees {
+                        Some(supplied) => supplied,
+                        None => {
+                            let mut note_commitment_trees = prev_note_commitment_trees.clone();
+                            note_commitment_trees
+                                .update_trees_parallel(&block)
+                                .map_err(ValidateContextError::from)?;
+                            note_commitment_trees
+                        }
+                    };
 
-                // Update the history tree.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                let history_tree_mut = Arc::make_mut(&mut history_tree);
-                let sapling_root = note_commitment_trees.sapling.root();
-                let orchard_root = note_commitment_trees.orchard.root();
-                let ironwood_root = note_commitment_trees.ironwood.root();
-                history_tree_mut
-                    .push(
-                        &self.network(),
+                    // Check the block commitment if the history tree was not
+                    // supplied by the non-finalized state. Note that we don't do
+                    // this check for history trees supplied by the non-finalized
+                    // state because the non-finalized state checks the block
+                    // commitment.
+                    //
+                    // For Nu5-onward, the block hash commits only to
+                    // non-authorizing data (see ZIP-244). This checks the
+                    // authorizing data commitment, making sure the entire block
+                    // contents were committed to. The test is done here (and not
+                    // during semantic validation) because it needs the history tree
+                    // root. While it _is_ checked during contextual validation,
+                    // that is not called by the checkpoint verifier, and keeping a
+                    // history tree there would be harder to implement.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    check::block_commitment_is_valid_for_chain_history(
                         block.clone(),
-                        BlockCommitmentTreeRoots {
-                            sapling: &sapling_root,
-                            orchard: &orchard_root,
-                            ironwood: &ironwood_root,
-                        },
-                    )
-                    .map_err(Arc::new)
-                    .map_err(ValidateContextError::from)?;
+                        &self.network(),
+                        &history_tree,
+                    )?;
 
-                let treestate = Treestate {
-                    note_commitment_trees,
-                    history_tree,
-                };
+                    // Update the history tree.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    let history_tree_mut = Arc::make_mut(&mut history_tree);
+                    let sapling_root = note_commitment_trees.sapling.root();
+                    let orchard_root = note_commitment_trees.orchard.root();
+                    let ironwood_root = note_commitment_trees.ironwood.root();
+                    history_tree_mut
+                        .push(
+                            &self.network(),
+                            block.clone(),
+                            BlockCommitmentTreeRoots {
+                                sapling: &sapling_root,
+                                orchard: &orchard_root,
+                                ironwood: &ironwood_root,
+                            },
+                        )
+                        .map_err(Arc::new)
+                        .map_err(ValidateContextError::from)?;
 
-                let height = checkpoint_verified.height;
+                    let treestate = Treestate {
+                        note_commitment_trees,
+                        history_tree,
+                    };
 
-                (
-                    height,
-                    checkpoint_verified.hash,
-                    FinalizedBlock::from_checkpoint_verified(
+                    let height = checkpoint_verified.height;
+
+                    let finalized = FinalizedBlock::from_checkpoint_verified(
                         checkpoint_verified,
                         treestate,
                         calculate_deferred_pool_balance_change(height, &self.network()),
-                    ),
-                    Some(prev_note_commitment_trees),
-                )
-            }
-            FinalizableBlock::Contextual {
-                contextually_verified,
-                treestate,
-            } => {
-                let height = contextually_verified.height;
-                (
-                    height,
-                    contextually_verified.hash,
-                    FinalizedBlock::from_contextually_verified(
-                        contextually_verified,
-                        treestate,
-                        calculate_deferred_pool_balance_change(height, &self.network()),
-                    ),
-                    prev_note_commitment_trees,
-                )
-            }
-        };
+                    );
+
+                    // Checkpoint-verified blocks don't carry resolved spent
+                    // UTXOs, so resolve them here.
+                    //
+                    // In snapshot-consume (assumeUTXO) mode, resolve only the
+                    // spent OutputLocations (for the `utxo_by_out_loc` delete),
+                    // never the spent values: every spent output is a
+                    // non-survivor whose address-index/balance writes are elided,
+                    // and per-block value pools are loaded at H_max rather than
+                    // derived. This avoids reading the spent value from
+                    // `utxo_by_out_loc`, which may be elided — the access that
+                    // would otherwise crash. Outside snapshot-consume mode, the
+                    // full lookup (value + location) is used so per-block value
+                    // pools and balances derive normally.
+                    let spent_utxos = if self.db.snapshot_consume().is_some() {
+                        self.db.lookup_spent_output_locations_only(&finalized)
+                    } else {
+                        self.db.lookup_spent_utxos(&finalized)
+                    };
+
+                    (
+                        height,
+                        finalized.hash,
+                        finalized,
+                        spent_utxos,
+                        Some(prev_note_commitment_trees),
+                    )
+                }
+                FinalizableBlock::Contextual {
+                    contextually_verified,
+                    treestate,
+                } => {
+                    let height = contextually_verified.height;
+
+                    // The non-finalized chain already resolved every spent UTXO
+                    // when the block was committed to it, so derive the output
+                    // locations from that data instead of re-reading the
+                    // database per input. `spent_outputs` is a superset that
+                    // also contains the block's own outputs, so it is indexed by
+                    // the block's actual transparent inputs.
+                    let spent_utxos: Vec<(
+                        transparent::OutPoint,
+                        OutputLocation,
+                        transparent::Utxo,
+                    )> = contextually_verified
+                        .block
+                        .transactions
+                        .iter()
+                        .flat_map(|tx| tx.inputs().iter())
+                        .flat_map(|input| input.outpoint())
+                        .map(|outpoint| {
+                            let ordered_utxo = contextually_verified
+                                .spent_outputs
+                                .get(&outpoint)
+                                .expect("contextually verified blocks carry all their spent UTXOs");
+
+                            let transaction_location = TransactionLocation::from_usize(
+                                ordered_utxo.utxo.height,
+                                ordered_utxo.tx_index_in_block,
+                            );
+
+                            (
+                                outpoint,
+                                OutputLocation::from_outpoint(transaction_location, &outpoint),
+                                ordered_utxo.utxo.clone(),
+                            )
+                        })
+                        .collect();
+
+                    (
+                        height,
+                        contextually_verified.hash,
+                        FinalizedBlock::from_contextually_verified(
+                            contextually_verified,
+                            treestate,
+                            calculate_deferred_pool_balance_change(height, &self.network()),
+                        ),
+                        spent_utxos,
+                        prev_note_commitment_trees,
+                    )
+                }
+            };
 
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
@@ -470,11 +703,19 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
+        // In snapshot-consume (assumeUTXO) mode the per-block chain value pool is
+        // not derived from the block's spends (the spent values aren't resolved);
+        // the verified final value pools are loaded at H_max instead. Skip the
+        // value-pool batch so it never reads the unresolved/placeholder spends.
+        let skip_value_pool_derivation = self.db.snapshot_consume().is_some();
+
         let result = self.db.write_block(
             finalized,
+            spent_utxos,
             prev_note_commitment_trees,
             &self.network(),
             source,
+            skip_value_pool_derivation,
         );
 
         if result.is_ok() {

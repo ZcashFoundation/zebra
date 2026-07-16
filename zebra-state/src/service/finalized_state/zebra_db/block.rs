@@ -40,7 +40,7 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
-        zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+        zebra_db::{metrics::block_precommit_metrics, transparent::TransparentBatchKind, ZebraDb},
         FromDisk, RawBytes,
     },
     HashOrHeight,
@@ -309,6 +309,36 @@ impl ZebraDb {
             .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
     }
 
+    /// Returns the [`transparent::Output`] stored at `output_location` by reading
+    /// the transaction body from `tx_by_loc`, regardless of whether the output is
+    /// still unspent.
+    ///
+    /// Unlike [`utxo_by_location`](ZebraDb::utxo_by_location), which reads
+    /// `utxo_by_out_loc` and therefore returns `None` once an output is spent
+    /// (the consensus commit deletes the entry), this reads the immutable
+    /// transaction body, so it resolves the output value of any output that has
+    /// ever existed — including one already spent in an earlier committed block.
+    ///
+    /// Used by the trailing RPC indexer (the consensus / RPC write split) to
+    /// resolve a block's spent outputs from the consensus database after that
+    /// database has already deleted those outputs from its unspent set.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn output_by_location(
+        &self,
+        output_location: &OutputLocation,
+    ) -> Option<transparent::Output> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction: Transaction = self
+            .db
+            .zs_get(&tx_by_loc, &output_location.transaction_location())?;
+
+        transaction
+            .outputs()
+            .get(output_location.output_index().as_usize())
+            .cloned()
+    }
+
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
     #[allow(clippy::unwrap_in_result)]
     pub fn transactions_by_height(
@@ -429,7 +459,121 @@ impl ZebraDb {
 
     // Write block methods
 
+    /// Look up the output locations and UTXOs spent by a finalized block.
+    ///
+    /// For each transparent input, resolves the [`OutputLocation`] and the spent
+    /// [`transparent::Utxo`], from the finalized database or from the block's own
+    /// outputs (for outputs created and spent in the same block).
+    ///
+    /// # Panics
+    ///
+    /// If a spent UTXO is in neither the finalized state nor the block itself.
+    pub(in super::super) fn lookup_spent_utxos(
+        &self,
+        finalized: &FinalizedBlock,
+    ) -> Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> {
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .transaction_hashes
+            .iter()
+            .enumerate()
+            .map(|(index, hash)| (*hash, index))
+            .collect();
+
+        finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .map(|outpoint| {
+                (
+                    outpoint,
+                    // Some utxos are spent in the same block, so they will be in
+                    // `tx_hash_indexes` and `new_outputs`
+                    self.output_location(&outpoint).unwrap_or_else(|| {
+                        lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                    }),
+                    self.utxo(&outpoint)
+                        .map(|ordered_utxo| ordered_utxo.utxo)
+                        .or_else(|| {
+                            finalized
+                                .new_outputs
+                                .get(&outpoint)
+                                .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                        })
+                        .expect("UTXO must be in the finalized state or the block itself"),
+                )
+            })
+            .collect()
+    }
+
+    /// Look up only the [`OutputLocation`]s spent by a checkpoint-verified block
+    /// in snapshot-consume (assumeUTXO) mode, **without reading the spent
+    /// outputs' values**.
+    ///
+    /// In snapshot-consume mode every output spent by a block is, by definition,
+    /// a non-survivor (it is not unspent at `H_max`), so all of its RPC
+    /// address-index and balance writes are elided
+    /// ([`crate::snapshot_consume`]). The only thing the finalized write path
+    /// still does for a spent output is delete it from `utxo_by_out_loc`, which
+    /// needs the [`OutputLocation`] only. Per-block value pools and balances are
+    /// not derived in this mode — they are loaded at `H_max` from the verified
+    /// snapshot — so the spent value is never needed.
+    ///
+    /// This avoids reading `utxo_by_out_loc` for the spent value, which is the
+    /// crash-unsafe access that would `None`/panic when the value was elided.
+    /// The [`OutputLocation`] is resolved from the spending output's *creating*
+    /// transaction location (`tx_loc_by_hash`, always written and never elided),
+    /// or from the block's own transactions for an in-block spend.
+    ///
+    /// The returned [`transparent::Utxo`] is a zero-value placeholder: it carries
+    /// the correct height and coinbase flag but a zero, empty-script output, and
+    /// is only used by elision-gated passes that skip it for non-survivors. It is
+    /// never written and never affects the value pool.
+    pub(in super::super) fn lookup_spent_output_locations_only(
+        &self,
+        finalized: &FinalizedBlock,
+    ) -> Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> {
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .transaction_hashes
+            .iter()
+            .enumerate()
+            .map(|(index, hash)| (*hash, index))
+            .collect();
+
+        finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .map(|outpoint| {
+                let out_loc = self.output_location(&outpoint).unwrap_or_else(|| {
+                    lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                });
+
+                // A zero-value, empty-script placeholder. Its `address()` is
+                // `None`, so the elision-gated address passes skip it, and the
+                // only consumer that runs — the `utxo_by_out_loc` delete — uses
+                // `out_loc` alone.
+                let placeholder = transparent::Utxo {
+                    output: transparent::Output {
+                        value: zebra_chain::amount::Amount::zero(),
+                        lock_script: transparent::Script::new(&[]),
+                    },
+                    height: out_loc.height(),
+                    from_coinbase: false,
+                };
+
+                (outpoint, out_loc, placeholder)
+            })
+            .collect()
+    }
+
     /// Write `finalized` to the finalized state.
+    ///
+    /// `spent_utxos` must contain the output location and UTXO for every transparent
+    /// input in the block, as returned by [`lookup_spent_utxos`](Self::lookup_spent_utxos).
     ///
     /// Uses:
     /// - `history_tree`: the current tip's history tree
@@ -445,9 +589,11 @@ impl ZebraDb {
     pub(in super::super) fn write_block(
         &mut self,
         finalized: FinalizedBlock,
+        spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
+        skip_value_pool_derivation: bool,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -472,43 +618,19 @@ impl ZebraDb {
             })
             .collect();
 
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
-            finalized
-                .block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.inputs().iter())
-                .flat_map(|input| input.outpoint())
-                .map(|outpoint| {
-                    (
-                        outpoint,
-                        // Some utxos are spent in the same block, so they will be in
-                        // `tx_hash_indexes` and `new_outputs`
-                        self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
-                        }),
-                        self.utxo(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| {
-                                finalized
-                                    .new_outputs
-                                    .get(&outpoint)
-                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
-                            })
-                            .expect("already checked UTXO was in state or block"),
-                    )
-                })
-                .collect();
-
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             spent_utxos
                 .iter()
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
 
+        // The map from spent outpoints to their output locations. Built
+        // unconditionally so the snapshot-consume (assumeUTXO) balance pass can
+        // test a spent output's survivor-set membership by its location, keeping
+        // the spend-debit and create-credit elision decisions consistent. The
+        // `indexer` feature also uses this map for its spent-output index.
+        //
         // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
-        #[cfg(feature = "indexer")]
         let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
             .iter()
             .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
@@ -543,6 +665,18 @@ impl ZebraDb {
                 .collect()
         }
 
+        // When the consensus / RPC write split is enabled, the RPC-only
+        // transparent indexes and balances are written by the trailing RPC
+        // indexer thread to the separate RPC index database, not here. The
+        // consensus write path then skips the address-balance read entirely (it
+        // is only used to derive those RPC-only writes), and writes only the
+        // consensus `utxo_by_out_loc` set. See `docs/design/state-write-split.md`.
+        let transparent_batch_kind = if self.rpc_index_db().is_some() {
+            TransparentBatchKind::ConsensusOnly
+        } else {
+            TransparentBatchKind::Combined
+        };
+
         // # Performance
         //
         // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
@@ -553,15 +687,19 @@ impl ZebraDb {
         // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
         // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
         // is to read entries that have been updated with merge operations.
-        let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
-            AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
-                self.address_balance_location(addr)
-            }))
-        } else {
-            AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
-                Some(self.address_balance_location(addr)?.into_new_change())
-            }))
-        };
+        let address_balances: AddressBalanceLocationUpdates =
+            if !transparent_batch_kind.writes_rpc_indexes() {
+                // The RPC indexer owns the balance derivation; skip the read here.
+                AddressBalanceLocationUpdates::Insert(HashMap::new())
+            } else if self.finished_format_upgrades() {
+                AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
+                    self.address_balance_location(addr)
+                }))
+            } else {
+                AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
+                    Some(self.address_balance_location(addr)?.into_new_change())
+                }))
+            };
 
         let mut batch = DiskWriteBatch::new();
 
@@ -573,11 +711,12 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
-            #[cfg(feature = "indexer")]
             out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
+            skip_value_pool_derivation,
+            transparent_batch_kind,
         )?;
 
         // Track batch commit latency for observability
@@ -638,13 +777,12 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
-        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
-            transparent::OutPoint,
-            OutputLocation,
-        >,
+        out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation>,
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        skip_value_pool_derivation: bool,
+        transparent_batch_kind: TransparentBatchKind,
     ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
@@ -671,27 +809,46 @@ impl DiskWriteBatch {
         // for the genesis block. This also ignores genesis shielded value pool updates, but there
         // aren't any of those on mainnet or testnet.
         if !finalized.height.is_min() {
-            // Commit transaction indexes
-            self.prepare_transparent_transaction_batch(
+            // Commit transaction indexes. `transparent_batch_kind` selects the
+            // consensus `utxo_by_out_loc` set, the RPC-only indexes, or both
+            // (the single-database default).
+            self.prepare_transparent_transaction_batch_split(
                 zebra_db,
                 network,
                 finalized,
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
-                #[cfg(feature = "indexer")]
                 &out_loc_by_outpoint,
                 address_balances,
+                transparent_batch_kind,
             );
         }
 
-        // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(
-            zebra_db,
-            finalized,
-            spent_utxos_by_outpoint,
-            value_pool,
-        )?;
+        // Commit the chain value pools, unless snapshot-consume mode skips the
+        // per-block value-pool derivation (it loads the verified final value
+        // pools at H_max instead, and the spent values needed to derive them
+        // here were not resolved). See `crate::snapshot_consume`.
+        //
+        // The per-block `block_info` (block size + value pool) is written in
+        // *both* modes: it is needed by `getblock` RPC and the value-pool
+        // reconstruction reader, and `commit_finalized_direct` must not leave a
+        // hole in the `block_info` column family. In snapshot-consume mode the
+        // per-block value pool cannot be derived (the spends are unresolved), so
+        // `prepare_block_info_only_batch` records the correct block size with a
+        // placeholder (zero) value pool; the authoritative chain value pool is
+        // the single `()`-keyed entry bulk-loaded at `H_max`
+        // (`bulk_load_chain_value_pools`). See `crate::snapshot_consume`.
+        if skip_value_pool_derivation {
+            self.prepare_block_info_only_batch(zebra_db, finalized);
+        } else {
+            self.prepare_chain_value_pools_batch(
+                zebra_db,
+                finalized,
+                spent_utxos_by_outpoint,
+                value_pool,
+            )?;
+        }
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);

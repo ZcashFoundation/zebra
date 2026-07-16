@@ -81,12 +81,6 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
-    /// Returns `true` if there are any queued children of `parent_hash`.
-    #[instrument(skip(self), fields(%parent_hash))]
-    pub fn has_queued_children(&self, parent_hash: block::Hash) -> bool {
-        self.by_parent.contains_key(&parent_hash)
-    }
-
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
     #[instrument(skip(self), fields(%parent_hash))]
@@ -250,10 +244,6 @@ pub(crate) struct SentHashes {
 
     /// Known UTXOs.
     known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
-
-    /// Whether the hashes in this struct can be used check if the chain can be forked.
-    /// This is set to false until all checkpoint-verified block hashes have been pruned.
-    pub(crate) can_fork_chain_at_hashes: bool,
 }
 
 impl SentHashes {
@@ -265,10 +255,6 @@ impl SentHashes {
             .flat_map(|c| c.blocks.clone())
         {
             sent_hashes.add(&block.into());
-        }
-
-        if !sent_hashes.sent.is_empty() {
-            sent_hashes.can_fork_chain_at_hashes = true;
         }
 
         sent_hashes
@@ -296,6 +282,30 @@ impl SentHashes {
         self.sent.insert(block.hash, outpoints);
 
         self.update_metrics_for_block(block.height);
+    }
+
+    /// Stores a sent checkpoint block's `hash` and `height` only (no UTXOs), so
+    /// `can_fork_chain_at` and the service's duplicate check recognise it.
+    ///
+    /// Unlike [`add_finalized`](Self::add_finalized), this does not record the
+    /// block's UTXOs: a checkpoint block far from the final checkpoint can't be
+    /// spent by a semantic block, so the semantic verifier never needs its
+    /// outputs. UTXO recording stays gated by `is_close_to_final_checkpoint`.
+    ///
+    /// Assumes that blocks are added in the order of their height between
+    /// `finish_batch` calls for efficient pruning.
+    pub fn add_sent_hash(&mut self, hash: block::Hash, height: block::Height) {
+        // Skip if already recorded (e.g. its UTXOs were added by
+        // `add_finalized` near the final checkpoint), to avoid a duplicate
+        // batch-buffer entry.
+        if self.sent.contains_key(&hash) {
+            return;
+        }
+
+        self.curr_buf.push_back((hash, height));
+        self.sent.insert(hash, Vec::new());
+
+        self.update_metrics_for_block(height);
     }
 
     /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a
@@ -401,9 +411,14 @@ impl SentHashes {
         }
     }
 
-    /// Returns true if the chain can be forked at the provided hash
+    /// Returns true if `hash` is a recorded sent block, so the chain can be
+    /// forked at it.
+    ///
+    /// Every sent checkpoint hash is now recorded (see
+    /// [`add_sent_hash`](Self::add_sent_hash)), so this is valid in every
+    /// phase; the service also treats the finalized tip as forkable.
     pub fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.can_fork_chain_at_hashes && self.contains(hash)
+        self.contains(hash)
     }
 
     /// Update sent block metrics after a block is sent.

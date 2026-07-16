@@ -167,7 +167,7 @@ impl NoteCommitmentTrees {
 
     /// Update the sprout note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
-    fn update_sprout_note_commitment_tree(
+    pub fn update_sprout_note_commitment_tree(
         mut sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sprout_note_commitments: Vec<sprout::NoteCommitment>,
     ) -> Result<Arc<sprout::tree::NoteCommitmentTree>, NoteCommitmentTreeError> {

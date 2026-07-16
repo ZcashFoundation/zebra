@@ -255,19 +255,32 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        // TODO: do DNS and disk in parallel if startup speed becomes important
-        let dns_peers =
-            Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
+        let hostnames = self.initial_peer_hostnames().iter().cloned().collect();
 
         if self.network.is_regtest() {
             // Only return local peer addresses and skip loading the peer cache on Regtest.
-            dns_peers
+            Config::resolve_peers(&hostnames, false)
+                .await
                 .into_iter()
                 .filter(PeerSocketAddr::is_localhost)
                 .collect()
         } else {
+            // Load the disk cache first, then resolve the DNS seeders, so cached peers are
+            // available as a fallback for DNS resolution.
+            //
+            // # Reliability
+            //
+            // `resolve_peers` retries indefinitely until DNS returns at least one address. If DNS
+            // is slow or unavailable, that retry loop would otherwise leave a working disk cache
+            // unused, stalling startup even though Zebra has enough cached peers to bootstrap.
+            // Passing the cached peers as a fallback lets `resolve_peers` stop retrying once we
+            // already have usable addresses, so Zebra can bootstrap from cache when the DNS
+            // seeders can't be reached.
+            //
             // Ignore disk errors because the cache is optional and the method already logs them.
             let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+
+            let dns_peers = Config::resolve_peers(&hostnames, !disk_peers.is_empty()).await;
 
             dns_peers.into_iter().chain(disk_peers).collect()
         }
@@ -276,18 +289,25 @@ impl Config {
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
     /// timeout of a few seconds on each DNS request.
     ///
-    /// If DNS resolution fails or times out for all peers, continues retrying
-    /// until at least one peer is found.
-    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<PeerSocketAddr> {
+    /// If DNS resolution fails or times out for all peers, and `have_fallback_peers` is `false`,
+    /// continues retrying until at least one peer is found. If `have_fallback_peers` is `true`,
+    /// the caller already has usable peer addresses (such as a populated disk cache), so this
+    /// returns after a single resolution round instead of blocking startup on DNS.
+    async fn resolve_peers(
+        peers: &HashSet<String>,
+        have_fallback_peers: bool,
+    ) -> HashSet<PeerSocketAddr> {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
-            warn!(
-                "no initial peers in the network config. \
-                 Hint: you must configure at least one peer IP or DNS seeder to run Zebra, \
-                 give it some previously cached peer IP addresses on disk, \
-                 or make sure Zebra's listener port gets inbound connections."
-            );
+            if !have_fallback_peers {
+                warn!(
+                    "no initial peers in the network config. \
+                     Hint: you must configure at least one peer IP or DNS seeder to run Zebra, \
+                     give it some previously cached peer IP addresses on disk, \
+                     or make sure Zebra's listener port gets inbound connections."
+                );
+            }
             return HashSet::new();
         }
 
@@ -303,17 +323,27 @@ impl Config {
                 .concat()
                 .await;
 
-            if peer_addresses.is_empty() {
-                tracing::info!(
-                    ?peers,
-                    ?peer_addresses,
-                    "empty peer list after DNS resolution, retrying after {} seconds",
-                    DNS_LOOKUP_TIMEOUT.as_secs(),
-                );
-                tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
-            } else {
+            if !peer_addresses.is_empty() {
                 return peer_addresses;
             }
+
+            // Stop retrying if the caller already has fallback peers (such as a disk cache):
+            // blocking startup on DNS retries would leave those usable addresses unused.
+            if have_fallback_peers {
+                tracing::info!(
+                    ?peers,
+                    "no addresses from DNS resolution, using cached peers instead",
+                );
+                return peer_addresses;
+            }
+
+            tracing::info!(
+                ?peers,
+                ?peer_addresses,
+                "empty peer list after DNS resolution, retrying after {} seconds",
+                DNS_LOOKUP_TIMEOUT.as_secs(),
+            );
+            tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
         }
     }
 

@@ -17,6 +17,7 @@ use zebra_chain::{common::default_cache_dir, parameters::Network};
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
     service::finalized_state::restorable_db_versions,
+    snapshot_consume::SnapshotConsumeConfig,
     state_database_format_version_in_code, BoxError,
 };
 
@@ -99,6 +100,108 @@ pub struct Config {
     /// no check for old database versions will be made and nothing will be
     /// deleted.
     pub delete_old_database: bool,
+
+    /// Whether to skip writing to the database's write-ahead log (WAL) while
+    /// Zebra is bulk-writing checkpoint-verified blocks during the initial
+    /// block download.
+    ///
+    /// Set to `false` by default.
+    ///
+    /// # Tradeoff
+    ///
+    /// Skipping the WAL avoids writing every block to disk twice (once to the
+    /// log and once to the database files), which can speed up the initial
+    /// sync on machines with slow disks. On fast disks it makes little
+    /// difference, so it is only worth enabling on slow disks.
+    ///
+    /// The cost is durability during the initial sync: if Zebra crashes or
+    /// the machine loses power while this is enabled, blocks written since
+    /// the last database flush are lost, and Zebra re-downloads them from
+    /// the network when it restarts. This is safe for consensus, because
+    /// those blocks are public chain data that is re-verified when it is
+    /// re-downloaded, but it costs extra sync time after a crash.
+    ///
+    /// The crash-loss window is bounded: when this option is enabled, Zebra
+    /// also enables RocksDB atomic flushes — so a crash rolls the database
+    /// back to a consistent point Zebra can resume syncing from, never to
+    /// scratch — and flushes the database every few minutes during the
+    /// bulk-write phase, so a restart resumes from at most a few minutes
+    /// behind where it crashed.
+    ///
+    /// The WAL is only skipped while the initial bulk-write phase is active.
+    /// It is re-enabled, and the database is flushed, when that phase
+    /// finishes (including on graceful shutdown). This option has no effect
+    /// on blocks that are committed after the initial sync.
+    pub disable_wal_during_ibd: bool,
+
+    /// Deprecated and unused: the size of a former in-memory cache of recently
+    /// finalized transparent outputs (`PrunedChain`) during the initial
+    /// checkpoint sync.
+    ///
+    /// The checkpoint commit path no longer resolves spent outputs against the
+    /// finalized state (checkpoint blocks are trusted by the pinned known-hash
+    /// list), so the cache that accelerated those lookups was removed. This
+    /// field is retained only for configuration backward-compatibility and has
+    /// no effect; it will be removed in a future database/config version.
+    ///
+    /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
+    /// (1000) by default.
+    pub checkpoint_sync_retained_blocks: u32,
+
+    /// The capacity of the worker-to-disk-writer channel: how far the
+    /// finalized state's database writes may fall behind the in-memory
+    /// block commits during the initial checkpoint sync.
+    ///
+    /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
+    /// (1000) by default. Configured values below half the reorg height are
+    /// raised to that minimum.
+    ///
+    /// A deeper pipeline keeps the disk writer fed across commit-rate
+    /// bursts. In-flight blocks are held in the in-memory non-finalized
+    /// state until their writes land, so memory use grows with this value —
+    /// roughly `blocks × 2 MB` in the worst case.
+    pub checkpoint_sync_pipeline_capacity: usize,
+
+    /// Write RPC-only address / balance / spent-transaction indexes to a
+    /// separate "RPC index" database, updated by a thread that trails the
+    /// consensus database.
+    ///
+    /// `false` by default: every column family lives in one database and the
+    /// RPC-only indexes are written together with the consensus data on the
+    /// block-commit path, exactly as before.
+    ///
+    /// When `true`, the finalized state is split in two:
+    ///
+    /// - a **consensus database** holding everything block / transaction
+    ///   validation, spend resolution, the value pool, the note-commitment /
+    ///   history trees and the IBD engine need, committed block-by-block; and
+    /// - an **RPC index database** (under `<consensus-db>/rpc-index`) holding
+    ///   only the transparent address / balance / spent-tx indexes, written by
+    ///   a thread that trails the consensus database.
+    ///
+    /// The consensus thread never blocks on the RPC indexer. On restart the
+    /// RPC index database catches up from its own durable tip to the consensus
+    /// tip; it is never ahead of the consensus database. RPC reads tolerate the
+    /// RPC index trailing recent heights (best-effort, same as during IBD).
+    ///
+    /// See `docs/design/state-write-split.md`.
+    pub separate_rpc_index_db: bool,
+
+    /// Optional "snapshot consume" mode for the known-hash / checkpoint initial
+    /// block download (assumeUTXO sync).
+    ///
+    /// `None` by default (off): a normal sync derives all state from the blocks
+    /// it commits. When set, the finalized write path consumes a verified state
+    /// snapshot at the maximum checkpoint height instead of deriving it — it
+    /// writes downloaded note commitment trees directly, skips the per-block
+    /// address-balance derivation in favour of bulk-loading the final balances,
+    /// and skips the RPC address-index / balance writes for non-survivor
+    /// transparent outputs.
+    ///
+    /// See [`SnapshotConsumeConfig`] and `docs/design/utxo-elision.md` for the
+    /// crash-safety analysis. The unsafe `utxo_by_out_loc` byte elision stays
+    /// off unless explicitly enabled in [`SnapshotConsumeConfig`].
+    pub snapshot_consume: Option<SnapshotConsumeConfig>,
 
     // Debug configs
     //
@@ -216,6 +319,11 @@ impl Default for Config {
             ephemeral: false,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
+            disable_wal_during_ibd: false,
+            checkpoint_sync_retained_blocks: crate::constants::MAX_BLOCK_REORG_HEIGHT,
+            checkpoint_sync_pipeline_capacity: crate::constants::MAX_BLOCK_REORG_HEIGHT as usize,
+            separate_rpc_index_db: false,
+            snapshot_consume: None,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

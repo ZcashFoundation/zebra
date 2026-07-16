@@ -3,10 +3,14 @@
 #![allow(clippy::unwrap_in_result)]
 
 use super::*;
+use std::net::IpAddr;
 
 impl<S, C> Handshake<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {

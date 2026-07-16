@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- The checkpoint verifier (`CheckpointVerifier`, `VerifyCheckpointError`, and the
+  `MAX_CHECKPOINT_BYTE_COUNT`/`MAX_CHECKPOINT_HEIGHT_GAP` re-exports): initial sync
+  now commits pinned blocks directly to the state via the known-hash IBD engine.
+  The block verifier router rejects semantic commits at or below the known-hash
+  floor with the new `RouterError::BelowKnownHashRange`. The floor is a constant:
+  the larger of the mandatory checkpoint height and the network's bundled
+  known-hash list max height.
+- The router's background task no longer walks the full checkpoint list against
+  the state (one request per checkpoint); it spot-checks the highest checkpoint
+  at or below the state tip instead.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

@@ -67,6 +67,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "tracing
 tokio-stream = { workspace = true, features = ["sync", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower-fair-buffer = { path = "../tower-fair-buffer", version = "0.1.0" }
 
 metrics = { workspace = true }
 tracing-futures = { workspace = true }

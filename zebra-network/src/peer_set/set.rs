@@ -100,9 +100,12 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures::{
@@ -125,11 +128,13 @@ use tower::{
     Service,
 };
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
-    constants::MIN_PEER_SET_LOG_INTERVAL,
+    constants::{
+        MIN_PEER_SET_LOG_INTERVAL, PEER_STATS_DETAILED_LOG_INTERVAL, PEER_STATS_LOG_INTERVAL,
+    },
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -138,13 +143,20 @@ use crate::{
     },
     protocol::{
         external::InventoryHash,
-        internal::{Request, Response},
+        internal::{InventoryResponse, Request, Response},
     },
     BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
 
 #[cfg(test)]
 mod tests;
+
+/// How long the best chain tip height can stay the same before the peer set
+/// evicts a random peer, to try to recover from a stalled sync.
+///
+/// A stalled tip can mean we're connected to peers that aren't serving us new
+/// blocks. Dropping a random peer frees a slot for the crawler to replace.
+const TIP_STALL_EVICTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///
@@ -160,6 +172,16 @@ pub struct MorePeers;
 /// [1]: crate::peer::Client
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
+
+/// A snapshot of the peer set's size, published on a watch channel.
+///
+/// Used by sync consumers to size their download pipelines from the number of
+/// usable peers.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct PeerSetStatus {
+    /// The number of peers that are ready for requests.
+    pub ready_peers: usize,
+}
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
@@ -181,6 +203,56 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
+}
+
+/// Wraps a block-download response future so that, once the request completes,
+/// the routed peer's live height is raised to the highest delivered block
+/// height, and the delivered blocks are added to the peer's block-download
+/// counter.
+///
+/// Only blocks the peer actually delivered raise its height, which keeps
+/// [`LoadTrackedClient::remote_height`] a trusted direct signal rather than
+/// gossip. Missing inventory entries and errors leave both stats unchanged.
+fn track_block_delivery<Fut, E>(
+    live_height: Arc<AtomicU32>,
+    blocks_received: Arc<AtomicU64>,
+    fut: Fut,
+) -> ResponseFuture
+where
+    Fut: Future<Output = Result<Response, E>> + Send + 'static,
+    E: Into<BoxError>,
+{
+    async move {
+        let response = fut.await.map_err(Into::into);
+
+        if let Ok(Response::Blocks(blocks)) = &response {
+            let mut delivered_count: u64 = 0;
+            let mut delivered_height = None;
+
+            for block in blocks {
+                if let InventoryResponse::Available((block, _addr)) = block {
+                    delivered_count += 1;
+                    delivered_height = delivered_height.max(block.coinbase_height());
+                }
+            }
+
+            // Correctness: both atomics are standalone stats with no
+            // associated memory to publish, so `Relaxed` is sufficient; the
+            // read-modify-write operations (`fetch_add`/`fetch_max`) never
+            // lose concurrent updates, and `fetch_max` keeps the live height
+            // monotonic. See the `LoadTrackedClient` field docs.
+            if delivered_count > 0 {
+                blocks_received.fetch_add(delivered_count, Ordering::Relaxed);
+            }
+
+            if let Some(height) = delivered_height {
+                live_height.fetch_max(height.0, Ordering::Relaxed);
+            }
+        }
+
+        response
+    }
+    .boxed()
 }
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
@@ -310,6 +382,31 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
+    /// The last time we logged per-peer sync diagnostics at debug level.
+    last_peer_stats_log: Option<Instant>,
+
+    /// The last time we logged full per-peer connection details at info level.
+    last_peer_detailed_log: Option<Instant>,
+
+    /// Publishes [`PeerSetStatus`] snapshots whenever the peer set's size or
+    /// peer heights change.
+    ///
+    /// Subscribe via [`PeerSet::status_receiver`].
+    status_sender: watch::Sender<PeerSetStatus>,
+
+    // Stalled Sync Detection
+    //
+    /// The highest best-chain-tip height the peer set has observed so far.
+    ///
+    /// Used to detect when the chain tip stops growing.
+    last_observed_tip_height: Option<Height>,
+
+    /// The last time the best chain tip height grew (or the peer set started).
+    ///
+    /// If the tip does not grow within [`TIP_STALL_EVICTION_TIMEOUT`], the peer
+    /// set evicts a random peer to try to recover from a stalled sync.
+    last_tip_growth: Instant,
+
     /// The configured maximum number of peers that can be in the
     /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
@@ -371,6 +468,7 @@ where
         max_conns_per_ip: Option<usize>,
     ) -> Self {
         let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
+        let (status_sender, _status_receiver) = watch::channel(PeerSetStatus::default());
         Self {
             // New peers
             discover,
@@ -406,12 +504,27 @@ where
 
             // Metrics
             last_peer_log: None,
+            last_peer_stats_log: None,
+            last_peer_detailed_log: None,
+            status_sender,
             address_metrics,
+
+            // Stalled sync detection
+            last_observed_tip_height: None,
+            last_tip_growth: Instant::now(),
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
 
             network: config.network.clone(),
         }
+    }
+
+    /// Returns a watch channel receiver for [`PeerSetStatus`] snapshots.
+    ///
+    /// The status is updated whenever the peer set polls its peers, so it can
+    /// briefly lag behind the live peer set.
+    pub fn status_receiver(&self) -> watch::Receiver<PeerSetStatus> {
+        self.status_sender.subscribe()
     }
 
     /// Check background task handles to make sure they're still running.
@@ -799,6 +912,38 @@ where
         }
     }
 
+    /// Calls a ready peer, moving it to the unready set.
+    ///
+    /// `BlocksByHash` response futures are wrapped so that delivered blocks
+    /// raise the peer's live height — keeping
+    /// [`LoadTrackedClient::remote_height`] up to date for height-aware
+    /// routing — and increment the peer's block-download counter for sync
+    /// diagnostics.
+    ///
+    /// # Panics
+    ///
+    /// If the peer at `key` is not in `ready_services`.
+    fn call_ready_peer(&mut self, key: D::Key, req: Request) -> <Self as Service<Request>>::Future {
+        let mut svc = self
+            .take_ready_service(&key)
+            .expect("selected peer must be ready");
+
+        // Track the blocks this peer delivers, for height-aware routing and
+        // sync diagnostics.
+        let delivery_stats = matches!(&req, Request::BlocksByHash(_))
+            .then(|| (svc.live_height_handle(), svc.blocks_received_handle()));
+
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+
+        match delivery_stats {
+            Some((live_height, blocks_received)) => {
+                track_block_delivery(live_height, blocks_received, fut)
+            }
+            None => fut.map_err(Into::into).boxed(),
+        }
+    }
+
     /// Takes a ready service by key.
     fn take_ready_service(&mut self, key: &D::Key) -> Option<D::Service> {
         if let Some(svc) = self.ready_services.remove(key) {
@@ -905,38 +1050,25 @@ where
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn select_ready_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
+        let ready_peers: Vec<D::Key> = self.ready_services.keys().copied().collect();
+        self.select_p2c_peer_from_list(&ready_peers)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
+    ///
+    /// The list must not contain duplicate peers, so each peer gets an equal
+    /// chance of being sampled.
     #[allow(clippy::unwrap_in_result)]
-    fn select_p2c_peer_from_list(&self, ready_service_list: &HashSet<D::Key>) -> Option<D::Key> {
-        match ready_service_list.len() {
-            0 => None,
-            1 => Some(
-                *ready_service_list
-                    .iter()
-                    .next()
-                    .expect("just checked there is one service"),
-            ),
-            len => {
+    fn select_p2c_peer_from_list(&self, ready_service_list: &[D::Key]) -> Option<D::Key> {
+        match *ready_service_list {
+            [] => None,
+            [only_peer] => Some(only_peer),
+            ref list => {
                 // Choose 2 random peers, then return the least loaded of those 2 peers.
-                let (a, b) = {
-                    let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
-                    let a = idxs.index(0);
-                    let b = idxs.index(1);
-
-                    let a = *ready_service_list
-                        .iter()
-                        .nth(a)
-                        .expect("sample returns valid indexes");
-                    let b = *ready_service_list
-                        .iter()
-                        .nth(b)
-                        .expect("sample returns valid indexes");
-
-                    (a, b)
-                };
+                let len = list.len();
+                let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
+                let a = list[idxs.index(0)];
+                let b = list[idxs.index(1)];
 
                 let a_load = self.query_load(&a).expect("supplied services are ready");
                 let b_load = self.query_load(&b).expect("supplied services are ready");
@@ -968,6 +1100,24 @@ where
             .keys()
             .copied()
             .choose_multiple(&mut rand::thread_rng(), max_peers)
+    }
+
+    /// Randomly selects one connected peer (ready or unready), if any exist.
+    ///
+    /// Configured zcashd-compat sidecar peers are exempt, like every other
+    /// adversarial-peer policy: they sync *from* this node (never the peer
+    /// withholding newer chain, so evicting one can't cure a stall), and
+    /// dropping one would silently disconnect the wallet.
+    fn select_random_peer(&self) -> Option<D::Key> {
+        use rand::seq::IteratorRandom;
+
+        // `cancel_handles` holds the unready peers, `ready_services` the ready ones.
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .filter(|key| !self.zcashd_compat_peer_keys.contains(key))
+            .copied()
+            .choose(&mut rand::thread_rng())
     }
 
     /// Randomly chooses ready peers for block gossip, always including configured
@@ -1023,6 +1173,93 @@ where
             .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
     }
 
+    /// Evicts a random peer if the best chain tip height hasn't grown for at
+    /// least [`TIP_STALL_EVICTION_TIMEOUT`] **and** the peer set is full.
+    ///
+    /// A stalled chain tip can indicate that we're connected to peers that aren't
+    /// serving us new blocks (for example, peers on a stuck or minority chain, or
+    /// unresponsive peers holding download slots). Eviction is a last resort:
+    /// while the peer set has free connection slots, the crawler can add new
+    /// peers without dropping a working connection, so this only signals
+    /// [`MorePeers`] demand. Once the set is full, dropping a random peer is the
+    /// only way to make room for a different one.
+    ///
+    /// At most one peer is evicted per stall window.
+    fn evict_peer_if_tip_stalled(&mut self) {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        // The tip grew (or we're seeing it for the first time): reset the stall timer.
+        if self
+            .last_observed_tip_height
+            .is_none_or(|last| tip_height > last)
+        {
+            self.last_observed_tip_height = Some(tip_height);
+            self.last_tip_growth = Instant::now();
+            return;
+        }
+
+        // The tip hasn't grown yet: wait until the stall timeout elapses.
+        // The checks below run at most once per stall window, so they stay
+        // off the per-poll hot path.
+        if self.last_tip_growth.elapsed() < TIP_STALL_EVICTION_TIMEOUT {
+            return;
+        }
+
+        // Reset the timer so we act at most once per stall window, even if
+        // the tip stays stuck.
+        self.last_tip_growth = Instant::now();
+
+        // Only treat a static tip as a stall worth acting on when at least
+        // one peer reports a height above ours — i.e. there is newer chain
+        // we are failing to obtain. A fully-synced node during a natural
+        // >timeout block gap, a quiet/partitioned network where no peer has
+        // anything newer, and regtest or an unmined testnet (where the tip
+        // never grows) are not recoverable by churning peers; dropping a
+        // healthy peer and cancelling its in-flight work there is pure harm.
+        // The timer was just reset, so a peer that pulls ahead later still
+        // gets a full window before any action.
+        let some_peer_is_ahead = self
+            .ready_services
+            .values()
+            .any(|svc| svc.remote_height() > tip_height);
+        if !some_peer_is_ahead {
+            return;
+        }
+
+        // While there are free connection slots, ask the crawler for more
+        // peers instead of dropping a working connection: eviction only helps
+        // when the set is full and a new peer can't be added any other way.
+        let num_peers = self.ready_services.len() + self.cancel_handles.len();
+        if num_peers < self.peerset_total_connection_limit {
+            info!(
+                ?tip_height,
+                num_peers,
+                peer_limit = self.peerset_total_connection_limit,
+                stall = ?TIP_STALL_EVICTION_TIMEOUT,
+                "chain tip is stalled behind our peers, requesting more peers"
+            );
+
+            let _ = self.demand_signal.try_send(MorePeers);
+            return;
+        }
+
+        if let Some(key) = self.select_random_peer() {
+            info!(
+                ?key,
+                ?tip_height,
+                stall = ?TIP_STALL_EVICTION_TIMEOUT,
+                "chain tip is stalled behind a full peer set, \
+                 evicting a random peer to make room for a new one"
+            );
+
+            // `remove()` drops ready peers and cancels in-flight work for unready peers.
+            self.remove(&key);
+
+            // Prompt the crawler to open a replacement connection.
+            let _ = self.demand_signal.try_send(MorePeers);
+        }
+    }
+
     /// Accesses a ready endpoint by `key` and returns its current load.
     ///
     /// Returns `None` if the service is not in the ready service list.
@@ -1035,10 +1272,6 @@ where
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         if let Some(p2c_key) = self.select_ready_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
-
-            let mut svc = self
-                .take_ready_service(&p2c_key)
-                .expect("selected peer must be ready");
 
             let is_find_request = matches!(
                 &req,
@@ -1055,22 +1288,31 @@ where
             let track_stalls =
                 is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
 
+            if !track_stalls {
+                // `call_ready_peer` tracks delivered block heights for
+                // `BlocksByHash` requests, which reach `route_p2c` via the
+                // `route_block_download` fallback. Block requests are never
+                // `FindBlocks`/`FindHeaders`, so at most one response wrapper
+                // applies to each request.
+                return self.call_ready_peer(p2c_key, req);
+            }
+
+            let mut svc = self
+                .take_ready_service(&p2c_key)
+                .expect("selected peer must be ready");
+
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
 
-            if track_stalls {
-                let stall_tx = self.stall_event_tx.clone();
-                return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
-                    }
-                    result.map_err(Into::into)
+            let stall_tx = self.stall_event_tx.clone();
+            return async move {
+                let result = fut.await;
+                if let Some(outcome) = classify_find_response(&result) {
+                    let _ = stall_tx.send((p2c_key, outcome));
                 }
-                .boxed();
+                result.map_err(Into::into)
             }
-
-            return fut.map_err(Into::into).boxed();
+            .boxed();
         }
 
         async move {
@@ -1088,6 +1330,41 @@ where
         .boxed()
     }
 
+    /// Routes a block download request to a ready peer whose chain height is
+    /// at or above our current chain tip.
+    ///
+    /// During initial sync, this avoids wasting download slots on peers that
+    /// are behind us — they're unlikely to have the blocks we need. The peer
+    /// height is the handshake height raised by blocks the peer actually
+    /// delivered (see [`LoadTrackedClient::remote_height`]).
+    ///
+    /// Falls back to normal P2C routing if no ready peers are at our height.
+    fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        let tall_peers: Vec<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_addr, svc)| svc.remote_height() >= tip_height)
+            .map(|(addr, _svc)| *addr)
+            .collect();
+
+        // Security: choose a random, less-loaded peer at or above our chain tip.
+        if let Some(key) = self.select_p2c_peer_from_list(&tall_peers) {
+            tracing::trace!(
+                ?key,
+                ?tip_height,
+                tall_peers = tall_peers.len(),
+                "routing block download to a peer at or above our chain tip"
+            );
+
+            return self.call_ready_peer(key, req);
+        }
+
+        // No ready peers at our height — fall back to normal P2C.
+        self.route_p2c(req)
+    }
+
     /// Tries to route a request to a ready peer that advertised that inventory,
     /// falling back to a ready peer that isn't missing the inventory.
     ///
@@ -1100,7 +1377,9 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        let advertising_peer_list = self
+        // `status_peers` yields each peer at most once, so this list is
+        // duplicate-free, as `select_p2c_peer_from_list` requires.
+        let advertising_peer_list: Vec<D::Key> = self
             .inventory_registry
             .advertising_peers(hash)
             .filter(|&addr| self.ready_services.contains_key(addr))
@@ -1117,12 +1396,9 @@ where
         // so that a peer can't provide all our inventory responses.
         let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|key| self.ready_services.contains_key(key)) {
+            tracing::trace!(?hash, ?key, "routing to a peer which advertised inventory");
+            return self.call_ready_peer(key, req);
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self
@@ -1130,7 +1406,7 @@ where
             .missing_peers(hash)
             .copied()
             .collect();
-        let maybe_peer_list = self
+        let maybe_peer_list: Vec<D::Key> = self
             .ready_services
             .keys()
             .filter(|addr| !missing_peer_list.contains(addr))
@@ -1140,12 +1416,9 @@ where
         // Security: choose a random, less-loaded peer that might have the inventory.
         let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|key| self.ready_services.contains_key(key)) {
+            tracing::trace!(?hash, ?key, "routing to a peer that might have inventory");
+            return self.call_ready_peer(key, req);
         }
 
         tracing::debug!(
@@ -1421,6 +1694,9 @@ where
 
         self.last_peer_log = Some(now);
 
+        // Log sync diagnostics about the connected peers.
+        self.log_peer_stats(ready_services_len, unready_services_len);
+
         // Log potential duplicate connections.
         let peers = self.peer_set_addresses();
 
@@ -1477,6 +1753,130 @@ where
         }
     }
 
+    /// Logs sync diagnostics about the connected peers.
+    ///
+    /// Emits one compact summary line at info level on each call — every
+    /// [`MIN_PEER_SET_LOG_INTERVAL`], via [`PeerSet::log_peer_set_size`] —
+    /// with the peer counts against the connection limit, how many ready
+    /// peers are at or above our chain tip, the spread of reported peer
+    /// heights, and the total blocks downloaded over the current connections.
+    /// Every [`PEER_STATS_LOG_INTERVAL`] it also emits one **debug**-level
+    /// line per ready peer with its reported height, blocks downloaded, and
+    /// load (a peak-EWMA latency estimate) — per-peer detail is for debug
+    /// runs, not production logs.
+    ///
+    /// Every [`PEER_STATS_DETAILED_LOG_INTERVAL`] it emits one **info**-level
+    /// line per ready peer with the full connection details (user agent,
+    /// protocol versions, advertised services, handshake and live heights,
+    /// blocks downloaded, and load), so operators get an occasional complete
+    /// picture of the peer set without enabling debug logging.
+    ///
+    /// Stats for peers that are currently handling a request (unready) are not
+    /// readable here, so the height/download stats cover ready peers. Counts
+    /// are cumulative over each peer connection's lifetime.
+    fn log_peer_stats(&mut self, ready: usize, unready: usize) {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        let mut heights: Vec<Height> = self
+            .ready_services
+            .values()
+            .map(|svc| svc.remote_height())
+            .collect();
+        heights.sort_unstable();
+
+        let peers_at_or_above_tip = heights
+            .iter()
+            .filter(|&&height| height >= tip_height)
+            .count();
+        let min_height = heights.first().map(|height| height.0);
+        let max_height = heights.last().map(|height| height.0);
+        let median_height = heights.get(heights.len() / 2).map(|height| height.0);
+        let blocks_downloaded: u64 = self
+            .ready_services
+            .values()
+            .map(|svc| svc.blocks_received())
+            .sum();
+
+        info!(
+            ready,
+            unready,
+            peer_limit = self.peerset_total_connection_limit,
+            tip = tip_height.0,
+            peers_at_or_above_tip,
+            min_height,
+            median_height,
+            max_height,
+            blocks_downloaded,
+            "peer sync status",
+        );
+
+        let now = Instant::now();
+
+        // The full connection details are verbose but valuable: one
+        // info-level line per ready peer, every few minutes.
+        let detailed_log_due = self
+            .last_peer_detailed_log
+            .is_none_or(|last| now.duration_since(last) >= PEER_STATS_DETAILED_LOG_INTERVAL);
+        if detailed_log_due {
+            self.last_peer_detailed_log = Some(now);
+
+            for (addr, svc) in &self.ready_services {
+                let connection_info = svc.connection_info();
+                info!(
+                    ?addr,
+                    user_agent = %connection_info.remote.user_agent,
+                    remote_version = %connection_info.remote.version,
+                    negotiated_version = %connection_info.negotiated_version,
+                    services = ?connection_info.remote.services,
+                    handshake_height = connection_info.remote.start_height.0,
+                    height = svc.remote_height().0,
+                    blocks_downloaded = svc.blocks_received(),
+                    load = ?svc.load(),
+                    "ready peer connection details",
+                );
+            }
+
+            // The debug lines below are a subset of the detailed lines, so
+            // skip them on detailed-log passes.
+            self.last_peer_stats_log = Some(now);
+            return;
+        }
+
+        // The per-peer sync lines are verbose (one per connected peer):
+        // debug only.
+        if let Some(last) = self.last_peer_stats_log {
+            if now.duration_since(last) < PEER_STATS_LOG_INTERVAL {
+                return;
+            }
+        }
+        self.last_peer_stats_log = Some(now);
+
+        for (addr, svc) in &self.ready_services {
+            debug!(
+                ?addr,
+                height = svc.remote_height().0,
+                blocks_downloaded = svc.blocks_received(),
+                load = ?svc.load(),
+                "ready peer sync status",
+            );
+        }
+    }
+
+    /// Publishes a [`PeerSetStatus`] snapshot on the status watch channel,
+    /// waking subscribers only when the status has changed.
+    fn publish_status(&self, ready_peers: usize) {
+        let status = PeerSetStatus { ready_peers };
+
+        self.status_sender.send_if_modified(|current| {
+            if *current == status {
+                false
+            } else {
+                *current = status;
+                true
+            }
+        });
+    }
+
     /// Updates the peer set metrics.
     ///
     /// # Panics
@@ -1489,6 +1889,8 @@ where
         metrics::gauge!("pool.num_ready").set(num_ready as f64);
         metrics::gauge!("pool.num_unready").set(num_unready as f64);
         metrics::gauge!("zcash.net.peers").set(num_peers as f64);
+
+        self.publish_status(num_ready);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
@@ -1537,6 +1939,10 @@ where
         let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
         let ready_peers = self.poll_peers(cx)?;
+
+        // If the chain tip has stalled for too long, drop a random peer to try to
+        // recover sync. The elapsed-time guard makes this cheap to run every poll.
+        self.evict_peer_if_tip_stalled();
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
@@ -1588,6 +1994,12 @@ where
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
+
+            // Route multi-block download requests to peers whose chain height
+            // is at or above our current chain tip. This avoids wasting
+            // download slots on peers that are behind us during initial sync.
+            // Falls back to normal P2C if no peers are tall enough.
+            Request::BlocksByHash(ref hashes) if hashes.len() > 1 => self.route_block_download(req),
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),

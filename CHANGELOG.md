@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Known-hash initial sync engine: on Mainnet, initial block download now fetches
+  every block directly by its pinned hash from a bundled, integrity-checked list,
+  in parallel batches placed into a configurable RAM block buffer with disk
+  overflow, instead of discovering hashes from peers round by round. Set
+  `sync.known_hash_sync = false` to use the legacy syncer. See
+  `docs/design/known-hash-ibd.md` for the design.
+- New `[sync]` config fields for the engine: `known_hash_lookahead_bytes` (the
+  block-buffer RAM budget), `known_hash_gap_hedge_secs`, and
+  `known_hash_list_dir`.
+- New `[state]` config field `disable_wal_during_ibd` (default off): opt-in
+  RocksDB WAL skipping during the initial-sync write phase, trading crash-resync
+  time for write throughput on slow disks.
+- New `[state]` config fields `checkpoint_sync_retained_blocks` and
+  `checkpoint_sync_pipeline_capacity` (both default 1000, minimum 500): during
+  the initial checkpoint sync, the spendable outputs of recently finalized
+  blocks are kept in an in-memory cache so spends of recent outputs resolve
+  without database reads (most outputs created during the 2022–2023
+  transaction spam are spent within a few hundred blocks), and the database
+  writer may run up to the configured number of blocks behind the in-memory
+  commits.
 - New regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase
   to a caller-specified address, instead of the configured `mining.miner_address`.
   This lets a test harness fund several wallets from one node; it is used by the
@@ -26,6 +46,39 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   modes, a `runtime-zcashd-compat` Docker image stage, make targets, a
   sync-check script, and a Zebra Book chapter (`user/zcashd-compat.md`)
   ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+
+### Changed
+
+- The inbound service now handles peer requests fairly: queued requests are
+  processed from the peer with the lowest recent request count first, and when
+  the queue is full, the queued request from the peer with the highest recent
+  request count is shed, instead of failing the newest request from a random
+  peer. This stops spammy peers crowding out quiet ones under load
+  ([#7306](https://github.com/ZcashFoundation/zebra/issues/7306)).
+- The state's block write path is now a single worker loop that commits
+  checkpoint-verified and semantically-verified blocks in any order, replacing
+  the previous two-phase pipeline that switched from finalized to non-finalized
+  commits on the first semantic block. A semantic block arriving during the
+  initial checkpoint sync no longer ends the checkpoint pipeline. Block
+  invalidation and reconsideration (`invalidateblock` / `reconsiderblock` RPCs)
+  now work during the initial sync for blocks above the disk-write frontier.
+- Tip-following sync now runs through the same block-download engine as
+  known-hash initial sync (over hashes discovered from peers), replacing the
+  legacy per-block download/retry/hedge stack. Behaviour is unchanged for
+  operators, but the `sync.download_concurrency_limit` and
+  `sync.checkpoint_verify_concurrency_limit` config fields are now used as
+  configured — they only size Zebra's internal service and verifier queues, and
+  the previous startup clamp/warning to `MIN_CHECKPOINT_CONCURRENCY_LIMIT` /
+  `MIN_CONCURRENCY_LIMIT` no longer fires. `known_hash_lookahead_bytes` and
+  `known_hash_gap_hedge_secs` now also govern tip-following sync. The
+  `sync.downloads.in_flight` and `sync.verified.block.count` metrics are removed
+  (superseded by the `ibd.*` engine metrics).
+
+### Fixed
+
+- Fixed a panic when invalidating the only non-finalized chain (the chain was
+  removed from the chain set by value, hitting an internal "chain tip hashes
+  are unique" assertion); the chain is now removed by tip hash.
 
 ## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
 

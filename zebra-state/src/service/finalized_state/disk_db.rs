@@ -96,6 +96,29 @@ pub struct DiskDb {
     /// applying any format changes that may have been required.
     finished_format_upgrades: Arc<AtomicBool>,
 
+    /// When true, [`DiskDb::write`] skips the write-ahead log.
+    ///
+    /// Only set during the initial bulk-write phase, and only if the user
+    /// opted in via [`Config::disable_wal_during_ibd`].
+    skip_wal: Arc<AtomicBool>,
+
+    /// Mirrors the most recent successful [`DiskDb::set_auto_compaction`]
+    /// call.
+    ///
+    /// RocksDB has no property that reads back the `disable_auto_compactions`
+    /// option, so this in-process flag is the only way for tests and
+    /// diagnostics to check whether auto-compaction is currently paused.
+    auto_compaction_disabled: Arc<AtomicBool>,
+
+    /// The names of the column families this database was opened with.
+    ///
+    /// Captured at construction so per-column-family operations (flush,
+    /// auto-compaction toggling, level-0 counting) don't re-read the list off
+    /// disk on every call — and, more importantly, can't silently degrade to a
+    /// no-op if that disk read transiently fails, which for the WAL-skip flush
+    /// would mean reporting bulk writes durable when nothing was flushed.
+    column_families: Arc<[String]>,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -592,7 +615,7 @@ impl DiskDb {
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
@@ -648,7 +671,7 @@ impl DiskDb {
     pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
 
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
@@ -716,7 +739,7 @@ impl DiskDb {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
-        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
+        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), [], false) {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -765,6 +788,30 @@ impl DiskDb {
         R: RangeBounds<K>,
     {
         self.zs_range_iter_with_direction(cf, range, false)
+    }
+
+    /// Returns a forward iterator over the raw on-disk key/value byte pairs of
+    /// every entry in `cf`, in ascending key-byte order.
+    ///
+    /// Unlike [`zs_forward_range_iter`](Self::zs_forward_range_iter), this does
+    /// not deserialize keys or values, so it works for column families whose key
+    /// type only implements [`FromDisk`] under test (for example
+    /// [`transparent::Address`](zebra_chain::transparent::Address)) and lets
+    /// callers stream the canonical on-disk bytes directly.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    pub fn zs_forward_full_bytes_iter<'a, C>(
+        &'a self,
+        cf: &'a C,
+    ) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a
+    where
+        C: rocksdb::AsColumnFamilyRef,
+    {
+        // Reading multiple items from iterators has caused database hangs,
+        // in previous RocksDB versions.
+        self.db
+            .iterator_cf(cf, rocksdb::IteratorMode::Start)
+            .map(|result| result.expect("unexpected database failure"))
     }
 
     /// Returns a reverse iterator over the items in `cf` in `range`.
@@ -964,6 +1011,7 @@ impl DiskDb {
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
     ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
@@ -973,7 +1021,19 @@ impl DiskDb {
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
         let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
-        let column_families_in_code = column_families_in_code.into_iter();
+
+        // A read-only (secondary) instance cannot create column families. A code
+        // column family that does not yet exist on disk — e.g. one added by a
+        // later format version, before a read/write open has created it — would
+        // make a secondary open fail with "Column family not found". So in
+        // read-only mode we open only the families already on disk; read-only
+        // consumers do not need newly-added (necessarily empty) families. In
+        // read/write mode we still add the new code families so they are created.
+        let column_families_in_code: Vec<String> = if read_only {
+            Vec::new()
+        } else {
+            column_families_in_code.into_iter().collect()
+        };
 
         column_families_on_disk
             .into_iter()
@@ -1041,10 +1101,29 @@ impl DiskDb {
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
 
-        let db_options = DiskDb::options();
+        let mut db_options = DiskDb::options();
 
-        let column_families =
-            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
+        // Atomic flushes keep the column families consistent with each other
+        // when the WAL is skipped during the initial sync: without a WAL, a
+        // crash rolls each column family back to its last flush, and only
+        // atomic flushes guarantee those flushes happened at the same point.
+        // With the WAL enabled (the default), writes are always consistent
+        // across column families, so this option isn't needed.
+        if config.disable_wal_during_ibd {
+            db_options.set_atomic_flush(true);
+        }
+
+        // Collect the in-code column family names once: they're stored on the
+        // DiskDb so per-CF operations never re-list from disk, and reused to
+        // build the open descriptors below.
+        let column_family_names: Arc<[String]> = column_families_in_code.into_iter().collect();
+
+        let column_families = DiskDb::construct_column_families(
+            db_options.clone(),
+            &path,
+            column_family_names.iter().cloned(),
+            read_only,
+        );
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
@@ -1079,6 +1158,9 @@ impl DiskDb {
                     mode,
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    skip_wal: Arc::new(AtomicBool::new(false)),
+                    auto_compaction_disabled: Arc::new(AtomicBool::new(false)),
+                    column_families: column_family_names,
                 };
 
                 db.assert_default_cf_is_empty();
@@ -1147,8 +1229,134 @@ impl DiskDb {
     // Low-level write methods are located in the WriteDisk trait
 
     /// Writes `batch` to the database.
+    ///
+    /// While WAL skipping is active (see [`DiskDb::set_skip_wal`]), the batch
+    /// is written without the write-ahead log: a crash before the next flush
+    /// loses the batch. WAL skipping is only activated during the initial
+    /// bulk-write phase, when lost blocks can be re-downloaded from the
+    /// network.
     pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
-        self.db.write(batch.batch)
+        if self.skip_wal.load(atomic::Ordering::SeqCst) {
+            let mut write_options = rocksdb::WriteOptions::default();
+            write_options.disable_wal(true);
+            self.db.write_opt(batch.batch, &write_options)
+        } else {
+            self.db.write(batch.batch)
+        }
+    }
+
+    /// Enables or disables WAL skipping for future [`DiskDb::write`] calls.
+    ///
+    /// # Correctness
+    ///
+    /// WAL skipping must only be enabled during the initial bulk-write phase,
+    /// and only when the user opted in via [`Config::disable_wal_during_ibd`].
+    /// When disabling it after the phase ends, call
+    /// [`DiskDb::flush_all_column_families`] to make the WAL-less writes
+    /// durable.
+    pub(crate) fn set_skip_wal(&self, skip_wal: bool) {
+        self.skip_wal.store(skip_wal, atomic::Ordering::SeqCst);
+    }
+
+    /// Returns true if [`DiskDb::write`] currently skips the write-ahead log.
+    #[cfg(test)]
+    pub(crate) fn skip_wal(&self) -> bool {
+        self.skip_wal.load(atomic::Ordering::SeqCst)
+    }
+
+    /// Enables or disables RocksDB auto-compaction on every column family.
+    ///
+    /// Returns the first error if updating any column family fails. After an
+    /// error, some column families can be left with the old setting, and the
+    /// in-process mirror flag is not updated.
+    ///
+    /// # Persistence
+    ///
+    /// RocksDB's `SetOptions` is a runtime change: it writes an updated
+    /// `OPTIONS-*` file in the database directory, but Zebra never loads
+    /// options from disk. Every [`DiskDb::new`] builds its options in code
+    /// via [`DiskDb::options`], which leaves auto-compaction enabled. So if
+    /// Zebra crashes or is killed while auto-compaction is disabled, the next
+    /// open automatically re-enables it, and no explicit "re-enable on open"
+    /// code is needed.
+    pub(crate) fn set_auto_compaction(&self, enabled: bool) -> Result<(), rocksdb::Error> {
+        // The RocksDB option is a "disable" flag, so it is inverted.
+        let disable_auto_compactions = if enabled { "false" } else { "true" };
+
+        for cf_name in self.column_family_names() {
+            // Skip column families that were dropped or renamed since the names were listed.
+            let Some(cf) = self.db.cf_handle(cf_name) else {
+                continue;
+            };
+
+            self.db.set_options_cf(
+                &cf,
+                &[("disable_auto_compactions", disable_auto_compactions)],
+            )?;
+        }
+
+        self.auto_compaction_disabled
+            .store(!enabled, atomic::Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// Returns true if the last successful [`DiskDb::set_auto_compaction`]
+    /// call disabled auto-compaction.
+    ///
+    /// This is an in-process mirror of the option: RocksDB has no property
+    /// that reads `disable_auto_compactions` back from the database.
+    #[cfg(test)]
+    pub(crate) fn auto_compaction_disabled(&self) -> bool {
+        self.auto_compaction_disabled.load(atomic::Ordering::SeqCst)
+    }
+
+    /// Returns the largest number of level 0 SST files in any column family.
+    ///
+    /// RocksDB compacts each column family independently, so the column
+    /// family with the most level 0 files is the one with the worst read
+    /// amplification.
+    ///
+    /// Column families that can't be read are counted as having no level 0
+    /// files: this method is used for diagnostics and compaction scheduling,
+    /// where an occasional under-count is harmless.
+    pub(crate) fn level0_file_count(&self) -> u64 {
+        self.column_family_names()
+            .iter()
+            .filter_map(|cf_name| self.db.cf_handle(cf_name))
+            .filter_map(|cf| {
+                self.db
+                    .property_int_value_cf(&cf, "rocksdb.num-files-at-level0")
+                    .ok()
+                    .flatten()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Flushes every column family's memtables to SST files on disk, waiting
+    /// for the flushes to finish.
+    ///
+    /// This makes blocks that were written while the WAL was skipped durable.
+    /// Returns the first error if flushing fails.
+    pub(crate) fn flush_all_column_families(&self) -> Result<(), rocksdb::Error> {
+        let mut flush_options = rocksdb::FlushOptions::default();
+        flush_options.set_wait(true);
+
+        let cf_names = self.column_family_names();
+        let cf_handles: Vec<_> = cf_names
+            .iter()
+            .filter_map(|cf_name| self.db.cf_handle(cf_name))
+            .collect();
+
+        // When atomic flushes are enabled, a single multi-column-family flush
+        // keeps the flushed data consistent across column families.
+        self.db.flush_cfs_opt(&cf_handles, &flush_options)
+    }
+
+    /// Returns the names of the column families this database was opened with.
+    fn column_family_names(&self) -> &[String] {
+        &self.column_families
     }
 
     // Private methods
@@ -1318,6 +1526,26 @@ impl DiskDb {
         //
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
+
+        // # Write-heavy workload tuning for initial sync
+        //
+        // Larger write buffers reduce write stalls by allowing more data to
+        // accumulate in memory before flushing to L0. The default 64 MB is
+        // conservative; 256 MB per buffer with 4 buffers gives the flush
+        // thread headroom to keep up with sustained block commits.
+        opts.set_write_buffer_size(256 * ONE_MEGABYTE);
+        opts.set_max_write_buffer_number(4);
+
+        // Allow multiple background threads for flush and compaction.
+        // The default (1 flush + 1 compaction) can't keep up during sync.
+        // RocksDB splits these across flush and compaction automatically.
+        opts.set_max_background_jobs(6);
+
+        // Allow multiple memtables to be written to concurrently.
+        // This is safe with the default skiplist memtable and reduces
+        // contention when the write path and flush path overlap.
+        opts.set_allow_concurrent_memtable_write(true);
+        opts.set_enable_write_thread_adaptive_yield(true);
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
@@ -1542,6 +1770,20 @@ impl DiskDb {
         // `flush()`/`flush_wal()` on secondaries with "Not supported operation in
         // secondary mode". Only a read-write primary needs flushing on shutdown.
         if !self.mode.is_read_only() {
+            // If recent writes skipped the WAL, the memtables hold the only copy:
+            // flush every column family so those writes survive the shutdown.
+            // (The default flush below only covers the default column family,
+            // which Zebra doesn't store data in.)
+            if self.skip_wal.load(atomic::Ordering::SeqCst) {
+                if let Err(error) = self.flush_all_column_families() {
+                    info!(
+                        ?error,
+                        ?path,
+                        "error flushing column families during shutdown with WAL skipping active"
+                    );
+                }
+            }
+
             // These flushes can fail during forced shutdown or during Drop after a shutdown,
             // particularly in tests. If they fail, there's nothing we can do about it anyway.
             if let Err(error) = self.db.flush() {

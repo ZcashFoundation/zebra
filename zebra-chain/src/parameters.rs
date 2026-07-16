@@ -15,6 +15,7 @@
 pub mod checkpoint;
 pub mod constants;
 mod genesis;
+pub mod known_hashes;
 mod network;
 mod network_upgrade;
 mod transaction;

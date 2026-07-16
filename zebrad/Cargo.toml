@@ -167,6 +167,9 @@ zebra-state = { path = "../zebra-state", version = "10.1.0" }
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
 zebra-script = { path = "../zebra-script", version = "10.1.0" }
+
+tower-batch-control = { path = "../tower-batch-control", version = "1.0.1" }
+tower-fair-buffer = { path = "../tower-fair-buffer", version = "0.1.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
@@ -203,7 +206,8 @@ metrics = { workspace = true }
 
 dirs = { workspace = true }
 
-# zcashd-compat sidecar supervision dependencies
+# zcashd-compat sidecar supervision dependencies; sha2/hex also hash the
+# regenerated snapshot artifacts in the `emit-snapshot` command.
 reqwest = { workspace = true, default-features = false, features = ["blocking", "rustls-tls"] }
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -277,6 +281,11 @@ tonic-prost-build = { workspace = true, optional = true }
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
 anyhow = { workspace = true }
+# Used by the snapshot-consume tree-root verification tests to serialize a note
+# commitment tree with the same `bincode::DefaultOptions` encoding zebra-state
+# uses on disk.
+bincode = { workspace = true }
+hex = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }

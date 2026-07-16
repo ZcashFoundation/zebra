@@ -14,3 +14,4 @@ use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
 pub use initialize::{init, init_with_block_gossip_peer_ips};
+pub use set::PeerSetStatus;

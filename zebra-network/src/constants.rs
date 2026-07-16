@@ -388,6 +388,23 @@ pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The minimum interval between logging detailed per-peer sync diagnostics
+/// (reported height, blocks downloaded, and load).
+///
+/// The per-peer detail is logged at debug level (one line per connected peer
+/// is too verbose for production logs); this interval rate-limits it for
+/// debug runs.
+pub const PEER_STATS_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The minimum interval between logging full per-peer connection details
+/// (user agent, protocol versions, advertised services, handshake and live
+/// heights, blocks downloaded, and load) at info level.
+///
+/// Infrequent enough that one line per connected peer is acceptable in
+/// production logs, so operators get an occasional complete picture of the
+/// peer set without enabling debug logging.
+pub const PEER_STATS_DETAILED_LOG_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
 /// The maximum number of peer misbehavior incidents before a peer is
 /// disconnected and banned.
 pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;

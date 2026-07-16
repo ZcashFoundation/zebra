@@ -31,6 +31,7 @@ mod error;
 mod request;
 mod response;
 mod service;
+pub mod snapshot_consume;
 
 #[cfg(test)]
 mod tests;
@@ -48,7 +49,7 @@ pub use error::{
 };
 pub use request::{
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
-    ReadRequest, Request, SemanticallyVerifiedBlock,
+    ReadRequest, Request, SemanticallyVerifiedBlock, ShieldedPool,
 };
 
 #[cfg(feature = "indexer")]
@@ -62,11 +63,17 @@ pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
     finalized_state::FinalizedState,
-    init, init_read_only,
+    init, init_read_only, known_hash_chunk_bytes,
     non_finalized_state::NonFinalizedState,
-    spawn_init_read_only,
+    note_commitment_tree_bytes, note_commitment_tree_root_from_bytes, spawn_init_read_only,
+    supplied_note_commitment_trees_from_bytes,
     watch_receiver::WatchReceiver,
     OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
+    ADDRESS_BALANCE_RECORD_LEN, UNSPENT_OUTPUT_RECORD_LEN,
+};
+pub use snapshot_consume::{
+    SnapshotConsumeConfig, SnapshotConsumeLoadError, SnapshotConsumeState, SurvivorSet,
+    SurvivorSetError,
 };
 
 // Allow use in the scanner and external tests

@@ -43,6 +43,11 @@ pub use request::Request;
 mod tests;
 
 /// Asynchronous semantic block verification.
+///
+/// Processes any block above the network's mandatory checkpoint height; the
+/// [`CheckpointGateLayer`](crate::checkpoints::CheckpointGateLayer) in front
+/// of it rejects everything else (Zebra cannot fully validate blocks below
+/// the mandatory checkpoint).
 #[derive(Debug)]
 pub struct SemanticBlockVerifier<S, V> {
     /// The network to be verified.
@@ -93,6 +98,23 @@ pub enum VerifyBlockError {
     /// This is for errors that are not specifically related to block depth or commit failures.
     #[error("state service error for block {hash}: {source}")]
     StateService { source: BoxError, hash: block::Hash },
+
+    /// The block is at or below the mandatory checkpoint height: Zebra
+    /// cannot fully validate blocks in that range, so they are only committed
+    /// by checkpoint-equivalent verification (the known-hash IBD engine). A
+    /// benign rejection for gossiped blocks; an explicit one for RPC block
+    /// submission.
+    #[error(
+        "block at height {height:?} is at or below the mandatory checkpoint height {floor:?}: \
+         Zebra cannot fully validate blocks in that range, so they are only committed by \
+         checkpoint-verified sync (the known-hash engine)"
+    )]
+    BelowMandatoryCheckpoint {
+        /// The rejected block's height.
+        height: block::Height,
+        /// The mandatory checkpoint height.
+        floor: block::Height,
+    },
 }
 
 impl VerifyBlockError {
@@ -114,8 +136,18 @@ impl VerifyBlockError {
             Equihash { .. } | Subsidy(_) => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             Commit(err) => err.misbehavior_score(),
+            // A historic below-checkpoint block is valid data on the wrong
+            // path, not necessarily misbehavior.
             _other => 0,
         }
+    }
+
+    /// Returns `true` if this is a
+    /// [`VerifyBlockError::BelowMandatoryCheckpoint`] rejection: the block is
+    /// in the range only checkpoint-verified sync (the known-hash engine) can
+    /// commit, so re-downloading it through the legacy path cannot help.
+    pub fn is_below_mandatory_checkpoint(&self) -> bool {
+        matches!(self, VerifyBlockError::BelowMandatoryCheckpoint { .. })
     }
 }
 
@@ -166,7 +198,7 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
-    /// Creates a new SemanticBlockVerifier
+    /// Creates a new [`SemanticBlockVerifier`].
     pub fn new(network: &Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network: network.clone(),

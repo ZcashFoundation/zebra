@@ -1,5 +1,6 @@
 //! Initial [`Handshake`]s with Zebra peers over a `PeerTransport`.
 
+use std::net::IpAddr;
 use std::{
     cmp::min,
     fmt,
@@ -23,7 +24,8 @@ use tokio::{
 };
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
-use tower::Service;
+use tower::{Service, ServiceExt};
+use tower_fair_buffer::Tagged;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
@@ -63,7 +65,10 @@ mod tests;
 /// - wrapped in a timeout.
 pub struct Handshake<S, C = NoChainTip>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -83,7 +88,10 @@ where
 
 impl<S, C> fmt::Debug for Handshake<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -102,7 +110,10 @@ where
 
 impl<S, C> Clone for Handshake<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -395,7 +406,10 @@ impl fmt::Debug for ConnectedAddr {
 /// A builder for `Handshake`.
 pub struct Builder<S, C = NoChainTip>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -412,7 +426,10 @@ where
 
 impl<S, C> Builder<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -542,7 +559,10 @@ where
 
 impl<S> Handshake<S, NoChainTip>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
 {
     /// Create a builder that configures a [`Handshake`] service.
@@ -868,7 +888,10 @@ where
 
 impl<S, PeerTransport, C> Service<HandshakeRequest<PeerTransport>> for Handshake<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -898,7 +921,29 @@ where
 
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
-        let inbound_service = self.inbound_service.clone();
+
+        // Tag every request from this connection's peer with the peer's IP
+        // address, so a fair buffer in the inbound service can prioritize
+        // requests from quiet peers, and shed requests from loud peers.
+        //
+        // The key is the IP alone, not the full transient socket address:
+        // inbound ports are ephemeral, so keying by socket address would let
+        // a peer reset its recent-request count on every reconnect.
+        // Reconnect churn is already rate-limited, but the IP key removes
+        // the reset entirely. Peers behind one NAT share a fairness budget,
+        // which is the standard trade-off for per-IP accounting.
+        //
+        // Isolated connections have no transient address, so their requests
+        // are tagged as internal. In practice, they use their own nil inbound
+        // service, and never reach a shared inbound service.
+        let peer_ip = connected_addr.get_transient_addr().map(|addr| addr.ip());
+        let inbound_service = self
+            .inbound_service
+            .clone()
+            .map_request(move |request| Tagged {
+                key: peer_ip,
+                request,
+            });
         let address_book_updater = self.address_book_updater.clone();
         let inv_collector = self.inv_collector.clone();
         let config = self.config.clone();

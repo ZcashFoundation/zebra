@@ -2,6 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use halo2::pasta::pallas;
 use zebra_chain::{
     amount::{Amount, DeferredPoolBalanceChange, NonNegative},
     block::{self, Block, Height},
@@ -22,14 +23,13 @@ use crate::{
     arbitrary::Prepare,
     request::ContextuallyVerifiedBlock,
     service::{
-        finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
+        finalized_state::{calculate_deferred_pool_balance_change, FinalizedState, IntoDisk},
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
         ReconsiderError,
     },
     tests::FakeChainHelper,
-    Config, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock, ValidateContextError,
 };
-
 #[test]
 fn construct_empty() {
     let _init_guard = zebra_test::init();
@@ -1176,6 +1176,609 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
         .constrain::<NonNegative>()?;
 
     assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
+
+    Ok(())
+}
+
+/// Builds an empty pre-Heartwood [`NonFinalizedState`], a matching
+/// [`FinalizedState`], and a root block whose parent is the empty database's
+/// finalized tip, so it can be committed via `commit_checkpoint_block`'s
+/// `Chain::new` arm.
+///
+/// Pre-Heartwood blocks skip the history-tree commitment check (see
+/// `block_commitment_is_valid_for_chain_history`).
+fn empty_checkpoint_test_states(
+    network: &Network,
+) -> (NonFinalizedState, FinalizedState, Arc<Block>) {
+    let state = NonFinalizedState::new(network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("test database opens");
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    // Re-root a real pre-Heartwood block onto the empty database's tip so the
+    // checkpoint commit's parent-linkage holds.
+    let block: Arc<Block> = Arc::new(network.test_block(653_599, 583_999).unwrap());
+    let mut root = Block::clone(&block);
+    Arc::make_mut(&mut root.header).previous_block_hash = finalized_state.db.finalized_tip_hash();
+    let root = Arc::new(root);
+
+    (state, finalized_state, root)
+}
+
+/// `commit_checkpoint_block` commits a block whose parent is a non-best
+/// chain's tip onto that chain, forking it, instead of assuming a single best
+/// chain.
+#[test]
+fn commit_checkpoint_block_forks_at_parent_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        // Two children of block1 with different work, forming two chains once
+        // both are committed on top of block1.
+        let block2a = block1.make_fake_child().set_work(10);
+        let block2b = block1.make_fake_child().set_work(5);
+        // A checkpoint block whose parent is the *lower-work* chain's tip.
+        let block3b = block2b.make_fake_child().set_work(5);
+
+        // block1, then a fork: block2a (best) and block2b (side chain).
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+        state.commit_block(block2a.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2b.clone().prepare(), &finalized_state.db)?;
+        assert_eq!(state.chain_count(), 2, "block1 forked into two chains");
+
+        // A checkpoint block extending the lower-work side chain must commit
+        // against block2b's context, not the best chain's tip block2a.
+        let (tip_block, finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block3b.clone()),
+            &finalized_state.db,
+        )?;
+
+        assert_eq!(tip_block.hash, block3b.hash());
+        assert_eq!(finalizable.inner_block(), block3b);
+
+        // The block3b chain now exists and contains block3b on top of block2b.
+        let chain = state
+            .find_chain(|chain| chain.non_finalized_tip_hash() == block3b.hash())
+            .expect("the block3b chain exists");
+        assert!(chain.contains_block_hash(block2b.hash()));
+        assert!(chain.contains_block_hash(block1.hash()));
+    }
+
+    Ok(())
+}
+
+/// In snapshot-consume (assumeUTXO) mode, `commit_checkpoint_block` resolves
+/// spends from memory only (no finalized read) and zeroes the per-block value
+/// pool, so a checkpoint block commits without ever reading a (possibly elided)
+/// finalized UTXO — the spend-resolution path that previously crashed.
+#[test]
+fn commit_checkpoint_block_snapshot_consume_skips_finalized_spend_read() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, mut finalized_state, block1) = empty_checkpoint_test_states(&network);
+
+        // Enable snapshot-consume mode with an empty survivor set (every output
+        // is a non-survivor → maximal elision), and UTXO-byte elision on.
+        finalized_state.db.set_snapshot_consume(Some(Arc::new(
+            crate::snapshot_consume::SnapshotConsumeState::from_parts(
+                network.clone(),
+                Height(1_000_000),
+                true,
+                Some(Arc::new(
+                    crate::snapshot_consume::SurvivorSet::from_bytes(Vec::new())
+                        .expect("empty survivor set loads"),
+                )),
+            ),
+        )));
+
+        // A short pinned chain of checkpoint blocks commits cleanly: the
+        // in-memory commit never reads the finalized UTXO set, and the value-pool
+        // computation is bypassed (it can't error).
+        let (_tip, _finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+
+        let block2 = block1.make_fake_child().set_work(10);
+        let (tip_block, finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block2.clone()),
+            &finalized_state.db,
+        )?;
+
+        assert_eq!(tip_block.hash, block2.hash());
+        assert_eq!(finalizable.inner_block(), block2);
+        assert_eq!(state.chain_count(), 1, "the pinned chain extends cleanly");
+    }
+
+    Ok(())
+}
+
+/// Enables snapshot-consume mode on `finalized_state`, so the supplied-tree
+/// commit path is taken (no survivor set is needed to use supplied trees).
+fn enable_snapshot_consume(finalized_state: &mut FinalizedState, network: &Network) {
+    finalized_state.db.set_snapshot_consume(Some(Arc::new(
+        crate::snapshot_consume::SnapshotConsumeState::from_parts(
+            network.clone(),
+            Height(1_000_000),
+            true,
+            None,
+        ),
+    )));
+}
+
+/// Builds a Sapling-era (pre-Heartwood, pre-Orchard) checkpoint root block on an
+/// empty database, with its `hashFinalSaplingRoot` set to `sapling_root` so the
+/// supplied-tree path verifies against the header (the era where the header pins
+/// the bare Sapling root). Returns the empty states and the root block.
+fn sapling_era_checkpoint_states(
+    network: &Network,
+    sapling_root: [u8; 32],
+) -> (NonFinalizedState, FinalizedState, Arc<Block>) {
+    let (state, finalized_state, root) = empty_checkpoint_test_states(network);
+    let root = root.set_block_commitment(sapling_root);
+    (state, finalized_state, root)
+}
+
+/// Returns the sapling/orchard note commitment trees a folded checkpoint commit
+/// of `root` produces, by committing it normally (folding) to a throwaway state.
+fn folded_trees_for(
+    network: &Network,
+    root: &Arc<Block>,
+) -> zebra_chain::parallel::tree::NoteCommitmentTrees {
+    let (mut state, finalized_state, _) = empty_checkpoint_test_states(network);
+    let (_tip, finalizable) = state
+        .commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(root.clone()),
+            &finalized_state.db,
+        )
+        .expect("the folded baseline commit succeeds");
+
+    match finalizable {
+        crate::request::FinalizableBlock::Contextual { treestate, .. } => {
+            treestate.note_commitment_trees
+        }
+        _ => panic!("commit_checkpoint_block returns a Contextual finalizable block"),
+    }
+}
+
+/// Builds a non-trivial orchard note commitment tree with `count` distinct notes
+/// and its cached root, for supplied-tree tests. Orchard notes are plain pallas
+/// base elements, so this is cheap and deterministic without real shielded data.
+fn orchard_tree_with_notes(count: u64) -> Arc<orchard::tree::NoteCommitmentTree> {
+    let mut tree = orchard::tree::NoteCommitmentTree::default();
+    for i in 0..count {
+        tree.append(pallas::Base::from(i + 1))
+            .expect("appending a note to the orchard tree succeeds");
+    }
+    let _ = tree.root();
+    Arc::new(tree)
+}
+
+/// In snapshot-consume mode, a supplied, verified note commitment tree is written
+/// **directly** instead of folding: the committed sapling/orchard trees are
+/// byte-identical to the supplied ones (including their cached roots and
+/// serialized frontiers), and the supplied frontier is used. This is the
+/// throughput win of the P2P snapshot feature (finding #10).
+///
+/// The test block has no orchard notes of its own, so the only way the committed
+/// orchard tree can be the non-trivial supplied tree is if the supplied path was
+/// taken — making this a write-through *and* a fold-skip check with a non-trivial
+/// tree. The sapling tree is supplied empty (matching the pre-Sapling-output test
+/// block's header) to exercise the header-pin verification on the accept path.
+#[test]
+fn commit_checkpoint_block_uses_supplied_trees() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // The empty sapling tree the test block folds to; the header pins its root, so
+    // the supplied sapling tree verifies on the accept path.
+    let (_, _, base_root) = empty_checkpoint_test_states(&network);
+    let folded = folded_trees_for(&network, &base_root);
+    let sapling_root: [u8; 32] = (&folded.sapling.root()).into();
+
+    // A non-trivial orchard frontier (10 notes) to be written through directly.
+    let supplied_orchard = orchard_tree_with_notes(10);
+    let supplied = zebra_chain::parallel::tree::NoteCommitmentTrees {
+        sapling: folded.sapling.clone(),
+        orchard: supplied_orchard.clone(),
+        ..Default::default()
+    };
+    // The serialized frontier we expect to round-trip onto disk byte-for-byte.
+    let supplied_orchard_bytes = supplied_orchard.as_bytes();
+
+    let (mut state, mut finalized_state, root) =
+        sapling_era_checkpoint_states(&network, sapling_root);
+    enable_snapshot_consume(&mut finalized_state, &network);
+
+    let (_tip, finalizable) = state.commit_checkpoint_block(
+        CheckpointVerifiedBlock::from(root.clone()).with_supplied_trees(Some(supplied)),
+        &finalized_state.db,
+    )?;
+
+    let committed = match finalizable {
+        crate::request::FinalizableBlock::Contextual { treestate, .. } => {
+            treestate.note_commitment_trees
+        }
+        _ => panic!("expected a Contextual finalizable block"),
+    };
+
+    // The committed sapling tree matches the verified supplied (empty) one, and the
+    // committed orchard tree is the non-trivial supplied frontier written directly:
+    // root, full tree equality, and serialized bytes all match.
+    assert_eq!(
+        committed.sapling, folded.sapling,
+        "supplied sapling written"
+    );
+    assert_eq!(
+        committed.orchard, supplied_orchard,
+        "the non-trivial supplied orchard frontier was written through (fold skipped)",
+    );
+    assert_eq!(
+        committed.orchard.root(),
+        supplied_orchard.root(),
+        "committed orchard root matches the supplied frontier",
+    );
+    assert_eq!(
+        committed.orchard.as_bytes(),
+        supplied_orchard_bytes,
+        "committed orchard frontier serializes byte-identically to the supplied one",
+    );
+
+    Ok(())
+}
+
+/// Deterministic proof that the per-note fold is **skipped** when a verified tree
+/// is supplied: supply a sapling tree matching the header but a *deliberately
+/// wrong* (non-empty) orchard tree. If the fold ran, the committed orchard tree
+/// would be the correct (empty, pre-Orchard) folded tree; because the supplied
+/// path is taken, the committed orchard tree is the wrong supplied one.
+#[test]
+fn commit_checkpoint_block_supplied_trees_skip_the_fold() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let (_, _, base_root) = empty_checkpoint_test_states(&network);
+    let folded = folded_trees_for(&network, &base_root);
+    let sapling_root: [u8; 32] = (&folded.sapling.root()).into();
+
+    // A "poison" orchard tree: non-empty, so it differs from the correct
+    // (pre-Orchard, empty) folded orchard tree. Its only purpose is to be
+    // detectable in the committed result.
+    let mut poison_orchard = orchard::tree::NoteCommitmentTree::default();
+    poison_orchard
+        .append(pallas_marker_note())
+        .expect("appending one note to an empty orchard tree succeeds");
+    let _ = poison_orchard.root();
+    let poison_orchard = Arc::new(poison_orchard);
+    assert_ne!(
+        poison_orchard, folded.orchard,
+        "the poison orchard tree must differ from the correct folded one",
+    );
+
+    let supplied = zebra_chain::parallel::tree::NoteCommitmentTrees {
+        sapling: folded.sapling.clone(),
+        orchard: poison_orchard.clone(),
+        ..Default::default()
+    };
+
+    let (mut state, mut finalized_state, root) =
+        sapling_era_checkpoint_states(&network, sapling_root);
+    enable_snapshot_consume(&mut finalized_state, &network);
+
+    let (_tip, finalizable) = state.commit_checkpoint_block(
+        CheckpointVerifiedBlock::from(root.clone()).with_supplied_trees(Some(supplied)),
+        &finalized_state.db,
+    )?;
+
+    let committed = match finalizable {
+        crate::request::FinalizableBlock::Contextual { treestate, .. } => {
+            treestate.note_commitment_trees
+        }
+        _ => panic!("expected a Contextual finalizable block"),
+    };
+
+    assert_eq!(
+        committed.orchard, poison_orchard,
+        "the supplied (poison) orchard tree was written directly: the fold was skipped",
+    );
+
+    Ok(())
+}
+
+/// When a supplied tree would complete a `2^16`-leaf note-commitment subtree, the
+/// commit **falls back to folding the whole block** (the supplied frontier blob
+/// cannot reproduce a mid-block subtree completion, and subtree roots are served +
+/// RPC-checked, so they must stay byte-identical to a normally-synced node).
+///
+/// Proof: supply an orchard tree that completes subtree 0 (its position is exactly
+/// `2^16 - 1`) while the tip orchard tree is empty. If the supplied path were
+/// (incorrectly) taken, the committed orchard tree would be the supplied
+/// `2^16`-note tree; because the subtree completion forces a fold, the committed
+/// orchard tree is the *folded* (empty, for this note-less block) one instead.
+#[test]
+fn commit_checkpoint_block_subtree_completion_falls_back_to_folding() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let (_, _, base_root) = empty_checkpoint_test_states(&network);
+    let folded = folded_trees_for(&network, &base_root);
+    let sapling_root: [u8; 32] = (&folded.sapling.root()).into();
+
+    // A supplied orchard tree with exactly 2^16 notes: its last leaf completes
+    // subtree 0, so `contains_new_subtree` against the empty tip tree is true.
+    let subtree_size: u64 = 1 << u64::from(zebra_chain::subtree::TRACKED_SUBTREE_HEIGHT);
+    let completing_orchard = orchard_tree_with_notes(subtree_size);
+    assert!(
+        completing_orchard.is_complete_subtree(),
+        "the supplied orchard tree must complete a subtree to exercise the fallback",
+    );
+    assert!(
+        completing_orchard.contains_new_subtree(&orchard::tree::NoteCommitmentTree::default()),
+        "the supplied orchard tree must register as a new subtree vs the empty tip",
+    );
+
+    let supplied = zebra_chain::parallel::tree::NoteCommitmentTrees {
+        sapling: folded.sapling.clone(),
+        orchard: completing_orchard.clone(),
+        ..Default::default()
+    };
+
+    let (mut state, mut finalized_state, root) =
+        sapling_era_checkpoint_states(&network, sapling_root);
+    enable_snapshot_consume(&mut finalized_state, &network);
+
+    let (_tip, finalizable) = state.commit_checkpoint_block(
+        CheckpointVerifiedBlock::from(root.clone()).with_supplied_trees(Some(supplied)),
+        &finalized_state.db,
+    )?;
+
+    let committed = match finalizable {
+        crate::request::FinalizableBlock::Contextual { treestate, .. } => {
+            treestate.note_commitment_trees
+        }
+        _ => panic!("expected a Contextual finalizable block"),
+    };
+
+    // The block has no orchard notes, so folding yields the empty tip tree — NOT
+    // the supplied subtree-completing tree. This proves the fold ran.
+    assert_eq!(
+        committed.orchard, folded.orchard,
+        "a subtree-completing supplied tree forces a full fold (folded == empty)",
+    );
+    assert_ne!(
+        committed.orchard, completing_orchard,
+        "the subtree-completing supplied tree was NOT written directly",
+    );
+
+    Ok(())
+}
+
+/// Without snapshot-consume mode enabled, supplied trees are **ignored** and the
+/// block folds normally — the throughput path is strictly gated so a normal sync
+/// is unaffected.
+#[test]
+fn supplied_trees_are_ignored_outside_snapshot_consume() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let (_, _, base_root) = empty_checkpoint_test_states(&network);
+    let folded = folded_trees_for(&network, &base_root);
+    let sapling_root: [u8; 32] = (&folded.sapling.root()).into();
+
+    // A poison orchard tree as above. With snapshot-consume mode OFF, it must be
+    // ignored: the committed orchard tree is the correct folded (empty) one.
+    let mut poison_orchard = orchard::tree::NoteCommitmentTree::default();
+    poison_orchard
+        .append(pallas_marker_note())
+        .expect("appending one note succeeds");
+    let _ = poison_orchard.root();
+    let poison_orchard = Arc::new(poison_orchard);
+
+    let supplied = zebra_chain::parallel::tree::NoteCommitmentTrees {
+        sapling: folded.sapling.clone(),
+        orchard: poison_orchard,
+        ..Default::default()
+    };
+
+    // snapshot-consume mode NOT enabled on this finalized state.
+    let (mut state, finalized_state, root) = sapling_era_checkpoint_states(&network, sapling_root);
+
+    let (_tip, finalizable) = state.commit_checkpoint_block(
+        CheckpointVerifiedBlock::from(root.clone()).with_supplied_trees(Some(supplied)),
+        &finalized_state.db,
+    )?;
+
+    let committed = match finalizable {
+        crate::request::FinalizableBlock::Contextual { treestate, .. } => {
+            treestate.note_commitment_trees
+        }
+        _ => panic!("expected a Contextual finalizable block"),
+    };
+
+    assert_eq!(
+        committed.orchard, folded.orchard,
+        "supplied trees are ignored outside snapshot-consume mode: the block folds",
+    );
+
+    Ok(())
+}
+
+/// A supplied sapling tree whose root contradicts the block header's
+/// `hashFinalSaplingRoot` is rejected with a fatal `SuppliedSaplingTreeRootMismatch`
+/// (the prior fix's verification, preserved on the in-memory commit path) — never
+/// silently accepted.
+#[test]
+fn commit_checkpoint_block_rejects_unverifiable_supplied_sapling_tree() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let (_, _, base_root) = empty_checkpoint_test_states(&network);
+    let folded = folded_trees_for(&network, &base_root);
+    let correct_sapling_root: [u8; 32] = (&folded.sapling.root()).into();
+
+    // Pin a DIFFERENT sapling root in the header than the supplied tree's root.
+    let mut wrong_root = correct_sapling_root;
+    wrong_root[0] ^= 0xff;
+
+    let (mut state, mut finalized_state, root) =
+        sapling_era_checkpoint_states(&network, wrong_root);
+    enable_snapshot_consume(&mut finalized_state, &network);
+
+    let error = state
+        .commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(root.clone()).with_supplied_trees(Some(folded.clone())),
+            &finalized_state.db,
+        )
+        .err();
+
+    assert!(
+        matches!(
+            error,
+            Some(ValidateContextError::SuppliedSaplingTreeRootMismatch { .. })
+        ),
+        "expected SuppliedSaplingTreeRootMismatch, got {error:?}",
+    );
+
+    Ok(())
+}
+
+/// A small non-zero orchard note commitment, for building a "poison" orchard tree
+/// that is detectably different from the empty (pre-Orchard) folded tree.
+fn pallas_marker_note() -> pallas::Base {
+    // Any fixed non-zero pallas base element works as a distinguishable note.
+    pallas::Base::from(1u64)
+}
+
+/// A failed `commit_checkpoint_block` leaves the non-finalized state exactly
+/// as it was, so the write worker can treat the error as non-fatal.
+#[test]
+fn commit_checkpoint_block_error_leaves_state_untouched() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        let block2 = block1.make_fake_child().set_work(10);
+
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block2.clone()),
+            &finalized_state.db,
+        )?;
+
+        let before = state.clone();
+
+        // A block whose parent matches no chain tip and isn't the finalized
+        // tip is rejected without mutating the state.
+        let orphan = block1.make_fake_child().make_fake_child().set_work(10);
+        let error = state
+            .commit_checkpoint_block(CheckpointVerifiedBlock::from(orphan), &finalized_state.db)
+            .err();
+
+        assert!(
+            matches!(error, Some(ValidateContextError::NotReadyToBeCommitted)),
+            "expected NotReadyToBeCommitted, got {error:?}",
+        );
+        assert!(
+            before.eq_internal_state(&state),
+            "the non-finalized state must be unchanged after a failed commit",
+        );
+    }
+
+    Ok(())
+}
+
+/// `finalize_root(Some(best_root_hash))` is equivalent to `finalize()` when a
+/// single chain exists.
+#[test]
+fn finalize_root_some_matches_finalize_single_chain() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut by_hash_state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        let block2 = block1.make_fake_child().set_work(10);
+
+        by_hash_state.commit_new_chain(block1.clone().prepare(), &finalized_state.db)?;
+        by_hash_state.commit_block(block2.clone().prepare(), &finalized_state.db)?;
+
+        let mut best_state = by_hash_state.clone();
+
+        let root_hash = by_hash_state
+            .best_chain()
+            .expect("chain committed")
+            .non_finalized_root_hash();
+
+        let by_hash = by_hash_state.finalize_root(Some(root_hash)).inner_block();
+        let best = best_state.finalize().inner_block();
+
+        assert_eq!(
+            by_hash, best,
+            "finalize_root(Some(best)) must equal finalize()"
+        );
+        assert_eq!(by_hash, block1);
+        assert!(
+            best_state.eq_internal_state(&by_hash_state),
+            "both states must be left identical",
+        );
+    }
+
+    Ok(())
+}
+
+/// `finalize_root(Some(hash))` finalizes the named chain's root and drops a
+/// sibling chain whose root differs, even when the sibling has more work.
+#[test]
+fn finalize_root_drops_mismatched_sibling() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        // A fork on top of block1: two children at the same height.
+        let block2a = block1.make_fake_child().set_work(10);
+        let block2b = block1.make_fake_child().set_work(20);
+
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2a.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2b.clone().prepare(), &finalized_state.db)?;
+        assert_eq!(state.chain_count(), 2, "block1 forked into two chains");
+
+        // Finalize the shared root block1: both chains keep going, now rooted
+        // at block2a and block2b respectively.
+        let finalized = state.finalize_root(Some(block1.hash())).inner_block();
+        assert_eq!(finalized, block1);
+        assert_eq!(
+            state.chain_count(),
+            2,
+            "both forks survive the shared-root pop"
+        );
+
+        // Now finalize block2a by hash: the block2b chain is rooted at block2b
+        // (a different hash), so it forked below block2a and is dropped, even
+        // though block2b has more work.
+        let finalized = state.finalize_root(Some(block2a.hash())).inner_block();
+        assert_eq!(finalized, block2a);
+        assert!(
+            state.best_chain().is_none(),
+            "block2a finalized, block2b chain dropped as a mismatched sibling",
+        );
+    }
 
     Ok(())
 }

@@ -15,6 +15,7 @@ expression: cf_names
   "ironwood_note_commitment_subtree",
   "ironwood_note_commitment_tree",
   "ironwood_nullifiers",
+  "known_hash_chunk",
   "orchard_anchors",
   "orchard_note_commitment_subtree",
   "orchard_note_commitment_tree",

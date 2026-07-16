@@ -38,6 +38,20 @@ use crate::{
 #[cfg(feature = "indexer")]
 use zebra_chain::{ironwood, orchard, sapling, sprout};
 
+/// A shielded pool selector for note-commitment-tree snapshot lookups.
+///
+/// Used by [`note_commitment_tree_bytes`](crate::note_commitment_tree_bytes) and
+/// the snapshot-consume paths to pick which of the two shielded note commitment
+/// trees (Sapling or Orchard) is being serialized or loaded for a height.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum ShieldedPool {
+    /// The Sapling note commitment tree.
+    Sapling,
+
+    /// The Orchard note commitment tree.
+    Orchard,
+}
+
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
@@ -279,8 +293,22 @@ pub struct SemanticallyVerifiedBlock {
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+///
+/// The second tuple field carries the optional pre-fetched, verified note
+/// commitment trees supplied by the known-hash IBD engine in snapshot-consume
+/// (assumeUTXO) mode (`docs/design/snapshot-distribution.md` §3.2). When
+/// present and verifiable against the block header, the commit writes the
+/// supplied frontier directly instead of folding the block's note commitments;
+/// it is `None` outside snapshot-consume mode (the normal/semantic path), so a
+/// normal sync is unaffected. The supplied frontier blob does not carry the
+/// note-commitment subtree completions, so the commit derives those by the
+/// canonical fold only on the rare heights that complete a subtree (see
+/// `NonFinalizedState::commit_checkpoint_block`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+pub struct CheckpointVerifiedBlock(
+    pub(crate) SemanticallyVerifiedBlock,
+    pub(crate) Option<NoteCommitmentTrees>,
+);
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -394,6 +422,35 @@ pub struct FinalizedBlock {
 }
 
 impl FinalizedBlock {
+    /// Reconstructs a [`FinalizedBlock`] from a block already stored durably in
+    /// the consensus database, for the trailing RPC indexer (the consensus /
+    /// RPC write split).
+    ///
+    /// Recomputes `new_outputs` and `transaction_hashes` from the block (the
+    /// only fields the RPC-only transparent index uses, besides `block`, `hash`,
+    /// and `height`). The treestate and deferred-pool change are not read by the
+    /// RPC index path, so this uses placeholders for them — callers must only use
+    /// the result to build RPC-only index batches, never to commit consensus
+    /// state.
+    ///
+    /// See `docs/design/state-write-split.md`.
+    pub fn for_rpc_index(block: Arc<Block>, hash: block::Hash) -> Self {
+        let semantically_verified = SemanticallyVerifiedBlock::with_hash(block, hash);
+
+        Self {
+            block: semantically_verified.block,
+            hash: semantically_verified.hash,
+            height: semantically_verified.height,
+            new_outputs: semantically_verified.new_outputs,
+            transaction_hashes: semantically_verified.transaction_hashes,
+            treestate: Treestate {
+                note_commitment_trees: Default::default(),
+                history_tree: Default::default(),
+            },
+            deferred_pool_balance_change: DeferredPoolBalanceChange::zero(),
+        }
+    }
+
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(
         block: CheckpointVerifiedBlock,
@@ -444,6 +501,32 @@ impl FinalizableBlock {
         Self::Contextual {
             contextually_verified,
             treestate,
+        }
+    }
+
+    /// Returns the height of the block.
+    pub fn height(&self) -> block::Height {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => checkpoint_verified.height,
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => contextually_verified.height,
+        }
+    }
+
+    /// Returns the hash of the block.
+    pub fn hash(&self) -> block::Hash {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => checkpoint_verified.hash,
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => contextually_verified.hash,
         }
     }
 
@@ -528,6 +611,56 @@ impl ContextuallyVerifiedBlock {
             )?,
         })
     }
+
+    /// Creates a [`ContextuallyVerifiedBlock`] for a checkpoint-verified block in
+    /// snapshot-consume (assumeUTXO) mode, **without computing the chain value
+    /// pool change** from the block's spends.
+    ///
+    /// In snapshot-consume mode the spent outputs' values are not resolved (the
+    /// finalized set may have non-survivors elided, and per-block value pools are
+    /// loaded at `H_max` instead of derived). The resolved `spent_outputs` map
+    /// therefore may carry zero-value placeholders for finalized spends, so it
+    /// cannot be used to compute a meaningful value-pool change — and trying to
+    /// would understate the transparent input value and could underflow the
+    /// in-memory chain value pool. Instead this constructor sets
+    /// `chain_value_pool_change` to zero (only the deferred-pool contribution is
+    /// recorded), so the in-memory chain value pool stays consistent (it is not
+    /// authoritative during this phase; the verified final value pools are loaded
+    /// at `H_max`).
+    ///
+    /// `spent_outputs` must still contain an entry for **every** transparent
+    /// input the block spends (a placeholder is fine), so the chain's
+    /// transparent-input indexing does not panic on a missing output.
+    pub fn with_block_snapshot_consume(
+        semantically_verified: SemanticallyVerifiedBlock,
+        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+    ) -> Self {
+        let SemanticallyVerifiedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        } = semantically_verified;
+
+        spent_outputs.extend(new_outputs.clone());
+
+        // Zero transparent/shielded change; only the deferred-pool contribution
+        // is recorded. The authoritative value pools are loaded at H_max.
+        let chain_value_pool_change = *ValueBalance::<NegativeAllowed>::zero()
+            .set_deferred_amount(deferred_pool_balance_change.value());
+
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+        }
+    }
 }
 
 impl CheckpointVerifiedBlock {
@@ -542,7 +675,26 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
+        Self(SemanticallyVerifiedBlock::with_hash(block, hash), None)
+    }
+
+    /// Attaches pre-fetched, verified note commitment trees to this block, for
+    /// the snapshot-consume "tree supplied by download" commit path
+    /// (`docs/design/snapshot-distribution.md` §3.2).
+    ///
+    /// The supplied trees are only used when the finalized state is in
+    /// snapshot-consume mode and the trees are verifiable against the block
+    /// header (Sapling/Blossom era, where the header pins the Sapling root);
+    /// otherwise the commit folds the block's note commitments as usual.
+    pub fn with_supplied_trees(mut self, supplied_trees: Option<NoteCommitmentTrees>) -> Self {
+        self.1 = supplied_trees;
+        self
+    }
+
+    /// Returns the pre-fetched, verified note commitment trees supplied for the
+    /// snapshot-consume commit path, if any.
+    pub(crate) fn supplied_trees(&self) -> Option<&NoteCommitmentTrees> {
+        self.1.as_ref()
     }
 }
 
@@ -567,7 +719,7 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block), None)
     }
 }
 
@@ -1038,6 +1190,35 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Reads the stored `chunk_v2` bytes for the known-hash chunk at the given
+    /// index from the `known_hash_chunk` column family, or generates them
+    /// deterministically from the finalized state.
+    ///
+    /// Returns [`Response::KnownHashChunk(Some(bytes))`](Response::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`Response::KnownHashChunk(None)`](Response::KnownHashChunk) if the chunk
+    /// index is entirely above the finalized tip.
+    KnownHashChunk(u32),
+
+    /// Persists a downloaded-and-verified known-hash chunk's bytes into the
+    /// `known_hash_chunk` column family, so a later run can read it back without
+    /// re-fetching it.
+    ///
+    /// The caller (the snapshot-consume IBD engine) is responsible for verifying
+    /// `bytes` against the pinned SHA-256 constant for `index` before issuing
+    /// this request; the state stores the bytes opaquely. This is a side-index
+    /// write that is independent of block-commit ordering, so it does not go
+    /// through the block write task.
+    ///
+    /// Returns [`Response::WroteKnownHashChunk`](Response::WroteKnownHashChunk)
+    /// on success.
+    WriteKnownHashChunk {
+        /// The chunk index.
+        index: u32,
+        /// The verified `chunk_v2` bytes to store.
+        bytes: Vec<u8>,
+    },
 }
 
 impl Request {
@@ -1068,6 +1249,8 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::KnownHashChunk(_) => "known_hash_chunk",
+            Request::WriteKnownHashChunk { .. } => "write_known_hash_chunk",
         }
     }
 
@@ -1467,6 +1650,17 @@ pub enum ReadRequest {
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
     IsTransparentOutputSpent(transparent::OutPoint),
+
+    /// Reads the stored `chunk_v2` bytes for the known-hash chunk at the given
+    /// index from the `known_hash_chunk` column family, or generates them
+    /// deterministically from the finalized state.
+    ///
+    /// Returns
+    /// [`ReadResponse::KnownHashChunk(Some(bytes))`](ReadResponse::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`ReadResponse::KnownHashChunk(None)`](ReadResponse::KnownHashChunk) if the
+    /// chunk index is entirely above the finalized tip.
+    KnownHashChunk(u32),
 }
 
 impl ReadRequest {
@@ -1514,6 +1708,7 @@ impl ReadRequest {
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::KnownHashChunk(_) => "known_hash_chunk",
         }
     }
 
@@ -1570,6 +1765,10 @@ impl TryFrom<Request> for ReadRequest {
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
+            Request::WriteKnownHashChunk { .. } => {
+                Err("ReadService does not write known-hash chunks")
+            }
+
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
                      and handle pending UTXOs"),
@@ -1579,6 +1778,8 @@ impl TryFrom<Request> for ReadRequest {
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),
+
+            Request::KnownHashChunk(index) => Ok(ReadRequest::KnownHashChunk(index)),
         }
     }
 }

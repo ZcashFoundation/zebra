@@ -21,9 +21,9 @@ use super::{
 
 pub const TINY_CHECKPOINT_TEST_HEIGHT: Height = Height(0);
 pub const MEDIUM_CHECKPOINT_TEST_HEIGHT: Height =
-    Height(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32);
+    Height(zebra_node_services::constants::MAX_CHECKPOINT_HEIGHT_GAP as u32);
 pub const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
-    Height((zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2) as u32);
+    Height((zebra_node_services::constants::MAX_CHECKPOINT_HEIGHT_GAP * 2) as u32);
 
 pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 

@@ -1780,12 +1780,9 @@ async fn rpc_getblockcount() {
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &Mainnet,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &Mainnet, state.clone())
+            .await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -1824,12 +1821,9 @@ async fn rpc_getblockcount_empty_state() {
     // Create an empty state
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &Mainnet,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &Mainnet, state.clone())
+            .await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -1873,12 +1867,9 @@ async fn rpc_getpeerinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &network,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state.clone())
+            .await;
 
     // Add a connected outbound peer
     let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
@@ -1994,12 +1985,9 @@ async fn rpc_getblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &Mainnet,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &Mainnet, state.clone())
+            .await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2484,12 +2472,9 @@ async fn rpc_submitblock_errors() {
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &Mainnet).await;
 
     // Init RPCs
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &Mainnet,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &Mainnet, state.clone())
+            .await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2510,16 +2495,24 @@ async fn rpc_submitblock_errors() {
         None,
     );
 
-    // Try to submit pre-populated blocks and assert that it responds with duplicate.
+    // Submit pre-populated blocks and assert that they respond with
+    // rejected: the stateless checkpoint gate runs before the verifier (and
+    // its already-in-chain check), so every submission at or below the
+    // mandatory checkpoint height is rejected outright, whether or not the
+    // state already holds it. Blocks above the mandatory checkpoint follow
+    // the normal verifier path, which reports duplicates as duplicates.
     for &block_bytes in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.values() {
         let submit_block_response = rpc.submit_block(HexData(block_bytes.into()), None).await;
 
         assert_eq!(
             submit_block_response,
-            Ok(SubmitBlockErrorResponse::Duplicate.into())
+            Ok(SubmitBlockErrorResponse::Rejected.into())
         );
     }
 
+    // A new (not already-committed) block below the mandatory checkpoint is
+    // also rejected by the gate: that range is only committed by
+    // checkpoint-verified sync (the known-hash engine).
     let submit_block_response = rpc
         .submit_block(
             HexData(zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec()),
@@ -3146,12 +3139,9 @@ async fn rpc_addnode() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
-        zebra_consensus::Config::default(),
-        &network,
-        state.clone(),
-    )
-    .await;
+    let (block_verifier_router, _, _, _) =
+        zebra_consensus::init_test(zebra_consensus::Config::default(), &network, state.clone())
+            .await;
 
     //let mock_address_book = MockAddressBookPeers::default();
     let mock_address_book =

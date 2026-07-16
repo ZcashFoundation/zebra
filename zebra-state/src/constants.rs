@@ -53,7 +53,11 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+/// - 28.1.0: added the `known_hash_chunk` column family for known-hash snapshot
+///   distribution. New column families are created automatically when the
+///   database is opened, and existing column families are preserved, so this is
+///   a backward-compatible change.
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

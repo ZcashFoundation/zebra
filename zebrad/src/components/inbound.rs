@@ -29,7 +29,7 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
-use zebra_consensus::{router::RouterError, VerifyBlockError};
+use zebra_consensus::VerifyBlockError;
 use zebra_network::{AddressBook, InventoryResponse};
 use zebra_node_services::mempool;
 
@@ -56,6 +56,15 @@ use downloads::Downloads as BlockDownloads;
 /// and the peer might be disconnected.
 pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 
+/// The interval after which the inbound fair buffer's recent peer request costs decay.
+///
+/// Each peer's cost covers at least one and at most two of these intervals
+/// (7-14 minutes, around 6-11 blocks). Long enough that a peer which floods the
+/// inbound service, or sends expensive requests, stays deprioritized across many
+/// blocks rather than recovering within one; short enough that it is forgiven
+/// within two windows once it quiets down.
+pub const INBOUND_FAIRNESS_ROTATION_INTERVAL: Duration = Duration::from_secs(7 * 60);
+
 /// The number of bytes the [`Inbound`] service will queue in response to a single block or
 /// transaction request, before ignoring any additional block or transaction IDs in that request.
 ///
@@ -80,7 +89,7 @@ type BlockDownloadPeerSet =
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
 type SemanticBlockVerifier = Buffer<
-    BoxService<zebra_consensus::Request, block::Hash, RouterError>,
+    BoxService<zebra_consensus::Request, block::Hash, VerifyBlockError>,
     zebra_consensus::Request,
 >;
 type GossipedBlockDownloads =

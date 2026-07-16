@@ -26,6 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
+    snapshot_consume::{SnapshotConsumeLoadError, SnapshotConsumeState},
     write_database_format_version_to_disk, BoxError, Config, StateInitError,
 };
 
@@ -33,7 +34,9 @@ use super::disk_format::upgrade::restorable_db_versions;
 
 pub mod block;
 pub mod chain;
+pub mod known_hash;
 pub mod metrics;
+pub mod rpc_index;
 pub mod shielded;
 pub mod transparent;
 
@@ -80,6 +83,37 @@ pub struct ZebraDb {
 
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
+
+    /// The optional snapshot-consume state for known-hash / checkpoint
+    /// assumeUTXO sync, loaded once at construction from
+    /// [`Config::snapshot_consume`].
+    ///
+    /// `None` for a normal sync. When `Some`, the finalized write path consumes
+    /// a verified state snapshot at `H_max` instead of deriving it (direct tree
+    /// writes, skipped per-block balances, and survivor-set elision). Shared by
+    /// all clones (read-only after construction).
+    snapshot_consume: Option<Arc<SnapshotConsumeState>>,
+
+    /// The optional separate "RPC index" database, holding only the RPC-only
+    /// column families (transparent address / balance / spent-tx indexes),
+    /// written by a thread that trails this consensus database.
+    ///
+    /// `None` (the default) when
+    /// [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)
+    /// is off — every column family lives in this `ZebraDb` and the RPC-only
+    /// read accessors read from it directly.
+    ///
+    /// When `Some`, this `ZebraDb` is the consensus database (opened with the
+    /// consensus-only column families) and the RPC-only read accessors consult
+    /// this handle instead. Boxed to break the recursive type (a `ZebraDb`
+    /// containing a `ZebraDb`); the inner handle's own `rpc_index_db` is always
+    /// `None`. Shared by all clones via the inner `DiskDb`'s `Arc`.
+    //
+    // # Correctness
+    //
+    // The inner database is a normal `ZebraDb` with its own `Drop`, so the last
+    // clone closes it exactly like the consensus database.
+    rpc_index_db: Option<Box<ZebraDb>>,
 }
 
 impl ZebraDb {
@@ -156,7 +190,7 @@ impl ZebraDb {
         // file can only be changed while we hold the RocksDB database lock.
         let disk_db = DiskDb::new(
             config,
-            db_kind,
+            &db_kind,
             format_version_in_code,
             network,
             column_families_in_code,
@@ -168,7 +202,37 @@ impl ZebraDb {
             debug_skip_format_upgrades,
             format_change_handle: None,
             db: disk_db,
+            snapshot_consume: None,
+            rpc_index_db: None,
         };
+
+        // Open the separate RPC index database, if configured. It lives under
+        // the consensus database directory, so it shares the version / network
+        // path and is cleaned up with it. Only the top-level (consensus)
+        // database opens one; the recursive call passes `false`.
+        if config.separate_rpc_index_db && !read_only {
+            db.rpc_index_db = Some(Box::new(Self::open_rpc_index_db(
+                config,
+                &db_kind,
+                format_version_in_code,
+                network,
+                debug_skip_format_upgrades,
+            )?));
+        }
+
+        // Load the optional snapshot-consume state, if configured. This is done
+        // after the database is open so the fresh-DB guard can read the tip. A
+        // misconfigured assumeUTXO sync is a fatal startup error with an
+        // actionable message (a clean typed error rather than a raw panic),
+        // because continuing would silently corrupt the finalized state.
+        db.snapshot_consume = db
+            .load_snapshot_consume(config, network)
+            .unwrap_or_else(|error| {
+                // The snapshot-consume safety guards must hold before any block
+                // is committed; failing them is unrecoverable, so stop startup
+                // with the typed error's actionable message.
+                panic!("cannot enable snapshot-consume (assumeUTXO) sync: {error}");
+            });
 
         let zero_location_utxos =
             db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
@@ -224,6 +288,182 @@ impl ZebraDb {
     /// Returns config for this database.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Returns the loaded snapshot-consume state, if assumeUTXO sync is
+    /// configured ([`Config::snapshot_consume`]).
+    ///
+    /// `None` for a normal sync. The write path consults this to decide whether
+    /// to consume a snapshot (direct tree writes, skip per-block balances,
+    /// survivor-set elision) instead of deriving state.
+    pub fn snapshot_consume(&self) -> Option<&Arc<SnapshotConsumeState>> {
+        self.snapshot_consume.as_ref()
+    }
+
+    /// Opens the separate RPC index database under the consensus database path.
+    ///
+    /// The RPC index database holds only the RPC-only column families
+    /// ([`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]) plus its own durable tip marker.
+    /// It is placed at `<consensus-db-path>/rpc-index` by deriving a config
+    /// whose `cache_dir` is the consensus database's full version / network
+    /// directory and whose `db_kind` directory is [`RPC_INDEX_DB_DIR`], so it is
+    /// co-located with, and cleaned up alongside, the consensus database.
+    ///
+    /// The inner database never opens its own RPC index database (the derived
+    /// config has `separate_rpc_index_db` cleared), avoiding infinite recursion.
+    ///
+    /// [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]: crate::service::finalized_state::RPC_INDEX_COLUMN_FAMILIES_IN_CODE
+    /// [`RPC_INDEX_DB_DIR`]: crate::service::finalized_state::RPC_INDEX_DB_DIR
+    fn open_rpc_index_db(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+    ) -> Result<ZebraDb, StateInitError> {
+        use crate::service::finalized_state::{
+            RPC_INDEX_COLUMN_FAMILIES_IN_CODE, RPC_INDEX_DB_DIR,
+        };
+
+        // The consensus database's full version / network directory becomes the
+        // RPC index database's cache_dir, so the inner db_path resolves to
+        // <consensus-db-path>/rpc-index/v<major>/<network>.
+        let consensus_db_path = config.db_path(&db_kind, format_version_in_code.major, network);
+
+        let rpc_index_config = Config {
+            cache_dir: consensus_db_path,
+            // The inner database must never open its own RPC index database.
+            separate_rpc_index_db: false,
+            // The RPC index is non-consensus data; never skip its WAL or load a
+            // snapshot into it.
+            disable_wal_during_ibd: false,
+            snapshot_consume: None,
+            // It is a real on-disk database co-located with the consensus one,
+            // even when the consensus database is ephemeral the parent dir is a
+            // real temp dir, so keep ephemeral matched to the parent.
+            ephemeral: config.ephemeral,
+            ..config.clone()
+        };
+
+        ZebraDb::new(
+            &rpc_index_config,
+            RPC_INDEX_DB_DIR,
+            format_version_in_code,
+            network,
+            debug_skip_format_upgrades,
+            RPC_INDEX_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            false,
+        )
+    }
+
+    /// Returns the separate RPC index database handle, if the consensus / RPC
+    /// write split is enabled
+    /// ([`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)).
+    ///
+    /// `None` for the single-database default path, in which the RPC-only column
+    /// families live in this database.
+    pub fn rpc_index_db(&self) -> Option<&ZebraDb> {
+        self.rpc_index_db.as_deref()
+    }
+
+    /// Returns the database holding the RPC-only column families: the separate
+    /// RPC index database when the split is enabled, otherwise this database.
+    ///
+    /// RPC-only read accessors use this so they transparently read from the
+    /// correct database in both configurations.
+    pub fn rpc_index_or_self(&self) -> &ZebraDb {
+        self.rpc_index_db.as_deref().unwrap_or(self)
+    }
+
+    /// Returns `true` if this database's own handle does not have the column
+    /// family `cf_name` (used to assert RPC-only column families are absent from
+    /// the consensus database in the write-split tests).
+    #[cfg(test)]
+    pub(crate) fn raw_cf_handle_is_none_for_test(&self, cf_name: &str) -> bool {
+        self.db.cf_handle(cf_name).is_none()
+    }
+
+    /// Returns the inner low-level [`DiskDb`] handle, for tests that drive the
+    /// `&DiskDb`-taking batch builders directly (e.g. the write-split spend
+    /// resolution test).
+    #[cfg(test)]
+    pub(crate) fn disk_db_for_test(&self) -> &DiskDb {
+        &self.db
+    }
+
+    /// Sets the snapshot-consume state directly, for tests.
+    ///
+    /// Bypasses loading from a survivor-set file so tests can drive the
+    /// snapshot-consume write path with a synthetic [`SnapshotConsumeState`].
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_snapshot_consume(&mut self, snapshot_consume: Option<Arc<SnapshotConsumeState>>) {
+        self.snapshot_consume = snapshot_consume;
+    }
+
+    /// Loads the optional snapshot-consume state from `config` for `network`.
+    ///
+    /// Returns `Ok(None)` if snapshot-consume is not configured. Returns a clean,
+    /// typed [`SnapshotConsumeLoadError`] (never a panic) if it is configured but
+    /// fails a safety guard or can't be loaded, so a misconfigured assumeUTXO
+    /// sync fails fast at startup with an actionable error rather than silently
+    /// corrupting state. The caller turns the error into a fatal startup failure.
+    ///
+    /// # Guards
+    ///
+    /// - **Network match.** The configured network must match this database's
+    ///   network; a per-network artifact applied to the wrong chain would mark
+    ///   the wrong outputs.
+    /// - **Fresh DB only.** Snapshot-consume is only loaded against an empty
+    ///   database (a from-genesis sync). Loading it against a non-empty database
+    ///   could elide outputs the database already holds, or rely on an in-memory
+    ///   spend-resolution cache that is cold after a restart — both unsafe (see
+    ///   `docs/design/utxo-elision.md` §4.3). The other consume behaviours
+    ///   (direct tree writes, skipping per-block balances) are also only enabled
+    ///   on a fresh database for simplicity and to keep the snapshot's `H_max`
+    ///   meaningful. Resuming an in-progress assumeUTXO sync is a recorded
+    ///   follow-up (it needs the deferred-durability machinery to be
+    ///   restart-safe).
+    fn load_snapshot_consume(
+        &self,
+        config: &Config,
+        network: &Network,
+    ) -> Result<Option<Arc<SnapshotConsumeState>>, SnapshotConsumeLoadError> {
+        let Some(consume_config) = config.snapshot_consume.as_ref() else {
+            return Ok(None);
+        };
+
+        // Network match: a per-network artifact applied to the wrong chain marks
+        // the wrong outputs.
+        let db_network = self.network();
+        if &db_network != network {
+            return Err(SnapshotConsumeLoadError::NetworkMismatch {
+                configured: network.clone(),
+                database: db_network,
+            });
+        }
+
+        // Fresh DB only: refuse to enable any snapshot-consume behaviour against
+        // a database that already holds blocks. A normal resync from genesis
+        // creates a fresh database, so this is the expected state for assumeUTXO
+        // sync.
+        if !self.is_empty() {
+            return Err(SnapshotConsumeLoadError::NonEmptyDatabase {
+                tip_height: self.finalized_tip_height(),
+            });
+        }
+
+        let consume_state = SnapshotConsumeState::load(consume_config, network)?;
+
+        tracing::info!(
+            h_max = ?consume_state.h_max(),
+            survivors = consume_state.survivor_set().map(|s| s.len()),
+            elide_utxo_bytes = consume_state.elide_utxo_bytes(),
+            "loaded snapshot-consume (assumeUTXO) state",
+        );
+
+        Ok(Some(Arc::new(consume_state)))
     }
 
     /// Returns the configured database kind for this database.
@@ -287,6 +527,48 @@ impl ZebraDb {
         if let Some(format_change_handle) = self.format_change_handle.as_mut() {
             format_change_handle.check_for_panics();
         }
+    }
+
+    /// Enables or disables RocksDB auto-compaction on every column family.
+    ///
+    /// See [`DiskDb::set_auto_compaction`] for details.
+    pub(crate) fn set_auto_compaction(&self, enabled: bool) -> Result<(), rocksdb::Error> {
+        self.db.set_auto_compaction(enabled)
+    }
+
+    /// Returns true if the last successful [`ZebraDb::set_auto_compaction`]
+    /// call disabled auto-compaction.
+    #[cfg(test)]
+    pub(crate) fn auto_compaction_disabled(&self) -> bool {
+        self.db.auto_compaction_disabled()
+    }
+
+    /// Enables or disables WAL skipping for future database writes.
+    ///
+    /// See [`DiskDb::set_skip_wal`] for the correctness requirements.
+    pub(crate) fn set_skip_wal(&self, skip_wal: bool) {
+        self.db.set_skip_wal(skip_wal);
+    }
+
+    /// Returns true if database writes currently skip the write-ahead log.
+    #[cfg(test)]
+    pub(crate) fn skip_wal(&self) -> bool {
+        self.db.skip_wal()
+    }
+
+    /// Returns the largest number of level 0 SST files in any column family.
+    ///
+    /// See [`DiskDb::level0_file_count`] for details.
+    pub(crate) fn level0_file_count(&self) -> u64 {
+        self.db.level0_file_count()
+    }
+
+    /// Flushes every column family's memtables to SST files on disk, waiting
+    /// for the flushes to finish.
+    ///
+    /// See [`DiskDb::flush_all_column_families`] for details.
+    pub(crate) fn flush_all_column_families(&self) -> Result<(), rocksdb::Error> {
+        self.db.flush_all_column_families()
     }
 
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
@@ -423,5 +705,128 @@ impl ZebraDb {
 impl Drop for ZebraDb {
     fn drop(&mut self) {
         self.shutdown(false);
+    }
+}
+
+#[cfg(test)]
+mod load_snapshot_consume_tests {
+    use std::sync::Arc;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+
+    use crate::{
+        service::finalized_state::FinalizedState,
+        snapshot_consume::{SnapshotConsumeConfig, SnapshotConsumeLoadError},
+        CheckpointVerifiedBlock, Config,
+    };
+
+    /// `load_snapshot_consume` returns a clean typed error (never panics
+    /// internally) when assumeUTXO sync is configured against a database that
+    /// already holds blocks (finding #4). The caller (`ZebraDb::new`) turns the
+    /// error into a fatal startup failure with an actionable message.
+    #[test]
+    fn refuses_non_empty_database_with_clean_error() {
+        let _init_guard = zebra_test::init();
+
+        let network = Network::Mainnet;
+
+        // A fresh state, made non-empty by committing genesis.
+        let mut state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .expect("test database opens");
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .expect("genesis deserializes");
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(genesis).into(),
+                None,
+                "load_snapshot_consume non-empty-db test",
+            )
+            .expect("genesis commits");
+
+        // A config that enables snapshot-consume (no survivor set needed: the
+        // fresh-DB guard runs before the survivor set is loaded).
+        let config = Config {
+            snapshot_consume: Some(SnapshotConsumeConfig::default()),
+            ..Config::ephemeral()
+        };
+
+        let result = state.db.load_snapshot_consume(&config, &network);
+        assert!(
+            matches!(
+                result,
+                Err(SnapshotConsumeLoadError::NonEmptyDatabase { .. })
+            ),
+            "a non-empty database must be a clean NonEmptyDatabase error, got {result:?}",
+        );
+    }
+
+    /// `load_snapshot_consume` returns a clean typed error on a network mismatch
+    /// between the configured network and the database's network (finding #4).
+    #[test]
+    fn refuses_network_mismatch_with_clean_error() {
+        let _init_guard = zebra_test::init();
+
+        // An empty Mainnet database.
+        let state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &Network::Mainnet,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .expect("test database opens");
+
+        let config = Config {
+            snapshot_consume: Some(SnapshotConsumeConfig::default()),
+            ..Config::ephemeral()
+        };
+
+        // Asking to consume a Testnet snapshot against a Mainnet database is a
+        // clean error, not a panic.
+        let result = state
+            .db
+            .load_snapshot_consume(&config, &Network::new_default_testnet());
+        assert!(
+            matches!(
+                result,
+                Err(SnapshotConsumeLoadError::NetworkMismatch { .. })
+            ),
+            "a network mismatch must be a clean NetworkMismatch error, got {result:?}",
+        );
+    }
+
+    /// With snapshot-consume not configured, the loader returns `Ok(None)` on any
+    /// database (the normal-sync path).
+    #[test]
+    fn unconfigured_returns_none() {
+        let _init_guard = zebra_test::init();
+
+        let network = Network::Mainnet;
+        let state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .expect("test database opens");
+
+        let result = state
+            .db
+            .load_snapshot_consume(&Config::ephemeral(), &network);
+        assert!(
+            matches!(result, Ok(None)),
+            "unconfigured snapshot-consume returns Ok(None), got {result:?}",
+        );
     }
 }

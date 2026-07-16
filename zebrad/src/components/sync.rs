@@ -1,13 +1,15 @@
-//! The syncer downloads and verifies large numbers of blocks from peers to Zebra.
+//! The syncer discovers tentative chain tips from peers and drives the
+//! generic IBD engine over them, keeping Zebra synchronized with the network.
 //!
-//! It is used when Zebra is a long way behind the current chain tip.
+//! The crawl (`ObtainTips`/`ExtendTips`) stays here; block fetch, verify, and
+//! commit run inside [`crate::components::ibd::engine::Engine`] over a
+//! [`DiscoverySource`] (design doc `known-hash-ibd.md` §17).
 
 use std::{
-    cmp::max,
-    collections::{HashMap, HashSet},
-    convert,
-    pin::Pin,
-    task::Poll,
+    collections::HashSet,
+    convert, iter,
+    path::{Path, PathBuf},
+    pin::pin,
     time::Duration,
 };
 
@@ -16,27 +18,22 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, watch},
+    sync::watch,
     task::JoinError,
     time::{sleep, timeout},
 };
-use tower::{
-    builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
-    Service, ServiceExt,
-};
+use tower::{timeout::Timeout, Service, ServiceExt};
 
-use zebra_chain::{
-    block::{self, Height, HeightDiff},
-    chain_tip::ChainTip,
-};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_chain::{block, chain_tip::ChainTip};
+use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
-    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
+    components::ibd::{self, cache::BlockCache, discovery::DiscoverySource, engine::Engine},
+    config::ZebradConfig,
+    BoxError,
 };
 
-mod downloads;
 pub mod end_of_support;
 mod gossip;
 mod progress;
@@ -46,9 +43,6 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::{AlwaysHedge, Downloads};
-
-pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
@@ -57,26 +51,15 @@ pub use status::SyncStatus;
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
 
-/// Controls how many times we will retry each block download.
+/// A multiplier used to calculate the extra number of blocks we allow in the
+/// verifier, state, and block commit pipelines, on top of the configured
+/// checkpoint verify concurrency limit.
 ///
-/// Failing block downloads is important because it defends against peers who
-/// feed us bad hashes. But spurious failures of valid blocks cause the syncer to
-/// restart from the previous checkpoint, potentially re-downloading blocks.
-///
-/// We also hedge requests, so we may retry up to twice this many times. Hedged
-/// retries may be concurrent, inner retries are sequential.
-const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
-
-/// Controls how many times the syncer will re-request a block whose download
-/// failed because no peer delivered it (a `NotFound`), before giving up and
-/// letting the normal tip re-walk handle it.
-///
-/// Without this re-request, a single missing block at the checkpoint frontier
-/// is dropped and never re-fetched, wedging the whole verify pipeline until the
-/// 8-minute `BLOCK_VERIFY_TIMEOUT` fires (#5709). Each attempt already goes
-/// through the tower-level `BLOCK_DOWNLOAD_RETRY_LIMIT` (and hedging), so this
-/// is a coarse, hash-scoped retry on top of an exhausted per-request retry.
-const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
+/// This allows the verifier and state queues, and the block commit channel,
+/// to hold a few extra tips responses worth of blocks, even when the sync
+/// engine's own pipeline is full. Any unused capacity is shared between the
+/// queues.
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -97,7 +80,8 @@ const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize =
+    zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
 ///
@@ -190,17 +174,6 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 /// So we allow about half the spurious timeout, which might cause some re-downloads.
 pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(8 * 60);
 
-/// A shorter timeout used for the first few blocks after the final checkpoint.
-///
-/// This is a workaround for bug #5125, where the first fully validated blocks
-/// after the final checkpoint fail with a timeout, due to a UTXO race condition.
-const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(2 * 60);
-
-/// The number of blocks after the final checkpoint that get the shorter timeout.
-///
-/// We've only seen this error on the first few blocks after the final checkpoint.
-const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
-
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This delay should be long enough to:
@@ -249,31 +222,19 @@ const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 pub struct Config {
     /// The number of parallel block download requests.
     ///
-    /// This is set to a low value by default, to avoid task and
-    /// network contention. Increasing this value may improve
-    /// performance on machines with a fast network connection.
+    /// Block downloads are driven by the sync engine's own byte-budget
+    /// pipeline (see [`known_hash_lookahead_bytes`](Self::known_hash_lookahead_bytes)),
+    /// so this limit only sizes Zebra's internal service buffers.
     #[serde(alias = "max_concurrent_block_requests")]
     pub download_concurrency_limit: usize,
 
-    /// The number of blocks submitted in parallel to the checkpoint verifier.
+    /// The number of checkpointed blocks Zebra's internal queues can hold.
     ///
-    /// Increasing this limit increases the buffer size, so it reduces
-    /// the impact of an individual block request failing. However, it
-    /// also increases memory and CPU usage if block validation stalls,
-    /// or there are some large blocks in the pipeline.
-    ///
-    /// The block size limit is 2MB, so in theory, this could represent multiple
-    /// gigabytes of data, if we downloaded arbitrary blocks. However,
-    /// because we randomly load balance outbound requests, and separate
-    /// block download from obtaining block hashes, an adversary would
-    /// have to control a significant fraction of our peers to lead us
-    /// astray.
-    ///
-    /// For reliable checkpoint syncing, Zebra enforces a
-    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`].
-    ///
-    /// This is set to a high value by default, to avoid verification pipeline stalls.
-    /// Decreasing this value reduces RAM usage.
+    /// Blocks below the mandatory checkpoint are committed by the known-hash
+    /// sync engine (bounded by its byte budget), so this limit only sizes
+    /// Zebra's internal verifier and state queues. It is used as configured;
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] is only its recommended lower
+    /// bound. Decreasing this value reduces RAM usage.
     #[serde(alias = "lookahead_limit")]
     pub checkpoint_verify_concurrency_limit: usize,
 
@@ -289,6 +250,102 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+
+    /// Enable the known-hash initial sync engine.
+    ///
+    /// When enabled on a network with a bundled known-hash list, initial sync
+    /// downloads blocks directly by their pinned hashes instead of discovering
+    /// hashes from peers, then hands off to tip-following sync (the same
+    /// engine over hashes discovered from peers) at the end of the list.
+    ///
+    /// Enabled by default on networks with a bundled list (currently
+    /// Mainnet); other networks decline to tip-following sync automatically.
+    /// See `docs/design/known-hash-ibd.md` for the engine design.
+    pub known_hash_sync: bool,
+
+    /// The sync engine's lookahead limit, as a byte budget.
+    ///
+    /// Bounds the bytes of fetched and in-flight blocks the sync engine holds
+    /// in memory ahead of the commit frontier — during known-hash initial
+    /// sync and tip-following sync alike. The block-count lookahead is not
+    /// configured: it auto-scales from the per-block size hints, so
+    /// small-block eras look ahead further than large-block eras.
+    ///
+    /// Increasing this limit can improve sync throughput at the cost of RAM;
+    /// decreasing it reduces RAM usage.
+    pub known_hash_lookahead_bytes: usize,
+
+    /// The number of seconds a block near the commit frontier may be in flight
+    /// before the sync engine hedges it with a single-hash refetch from a
+    /// different peer.
+    ///
+    /// Lower values fill frontier gaps faster but send more duplicate
+    /// requests; higher values are more polite to slow peers.
+    pub known_hash_gap_hedge_secs: u64,
+
+    /// How many block heights ahead of the commit frontier the known-hash
+    /// engine downloads note commitment trees, in snapshot-consume mode.
+    ///
+    /// Trees are fetched *ahead of* the block-commit frontier — a deeper
+    /// lookahead than block fetch — so that by the time a block reaches the
+    /// commit stage its sapling/orchard tree is already downloaded and verified,
+    /// and the state takes the "tree supplied by download" path instead of
+    /// folding note commitments. Only the ~7% of heights that update a tree are
+    /// requested, so this many *heights* of margin schedules far fewer tree
+    /// fetches in practice.
+    ///
+    /// Clamped to an internal ceiling so it cannot make the engine fetch
+    /// unboundedly far ahead. Set to `0` to disable tree lookahead (the commit
+    /// then always folds). Ignored outside snapshot-consume mode (the bundled
+    /// `.bin` list folds notes the normal way).
+    pub known_hash_tree_lookahead: u32,
+
+    /// An override directory containing the known-hash list chunk files.
+    ///
+    /// When unset, the chunk files are resolved from the directories next to
+    /// the `zebrad` binary, the platform data directory, or the development
+    /// tree, in that order.
+    pub known_hash_list_dir: Option<PathBuf>,
+
+    /// The directory of **local snapshot-consume artifacts**: the directory the
+    /// installer downloaded from the release assets, or one written locally by
+    /// `emit-snapshot --emit-files`.
+    ///
+    /// **Experimental; defaults to `None`.**
+    ///
+    /// Required when [`snapshot_consume_sync`](Self::snapshot_consume_sync) is
+    /// enabled. The engine reads each snapshot artifact (the known-hash chunks
+    /// and the per-height note commitment trees; the unspent-output set, the
+    /// address-balance set, and the chain value pools are loaded by the state)
+    /// from this directory — verifying each against the pinned SHA-256
+    /// constants, so a tampered or corrupt download is rejected. Blocks
+    /// themselves still come over normal P2P.
+    ///
+    /// The directory layout is the one written by
+    /// `emit-snapshot --emit-files --out-dir <dir>`; see
+    /// [`crate::components::ibd::consume::local`] and
+    /// `docs/design/snapshot-distribution.md`.
+    pub known_hash_local_source_dir: Option<PathBuf>,
+
+    /// Enable snapshot-consume (assumeUTXO-style) initial sync.
+    ///
+    /// **Experimental; defaults to `false`, leaving normal sync unchanged.**
+    ///
+    /// When enabled together with [`known_hash_sync`](Self::known_hash_sync),
+    /// the engine reads the known-hash chunks and per-height note commitment
+    /// trees from the artifact directory named by
+    /// [`known_hash_local_source_dir`](Self::known_hash_local_source_dir)
+    /// (which must also be set) and hands the snapshot to the state instead of
+    /// deriving it from the blocks. The artifacts are content-addressed: each
+    /// is verified against a pinned SHA-256 constant before it is trusted. See
+    /// `docs/design/snapshot-distribution.md` and
+    /// `docs/design/utxo-elision.md`.
+    ///
+    /// The state-side consume behaviours (direct tree writes, bulk balance
+    /// loading, address-index elision) are configured separately under
+    /// `[state] snapshot_consume`; this flag enables the engine-side read and
+    /// verification of the snapshot artifacts.
+    pub snapshot_consume_sync: bool,
 }
 
 impl Default for Config {
@@ -317,6 +374,32 @@ impl Default for Config {
             // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
+
+            known_hash_sync: true,
+
+            // 256 MiB: enough lookahead to keep the network busy in every era
+            // without a large RSS increase.
+            known_hash_lookahead_bytes: 268_435_456,
+
+            // A small multiple of a typical block round-trip.
+            known_hash_gap_hedge_secs: 5,
+
+            // Fetch trees deeper ahead of the frontier than blocks, so a
+            // height's tree is already verified by the time its block commits.
+            // At ~7% updating heights this schedules a few hundred tree fetches
+            // at most. See `components::ibd::tree::TREE_LOOKAHEAD_DEFAULT`.
+            known_hash_tree_lookahead: crate::components::ibd::tree::TREE_LOOKAHEAD_DEFAULT,
+
+            // Use the layered asset search by default.
+            known_hash_list_dir: None,
+
+            // No artifact directory by default; snapshot-consume sync requires
+            // one (downloaded by the installer or emitted locally).
+            known_hash_local_source_dir: None,
+
+            // Experimental snapshot-consume sync is off by default, so normal
+            // sync is completely unaffected.
+            snapshot_consume_sync: false,
         }
     }
 }
@@ -356,17 +439,28 @@ where
     /// The genesis hash for the configured network
     genesis_hash: block::Hash,
 
-    /// The largest block height for the checkpoint verifier, based on the current config.
-    max_checkpoint_height: Height,
-
-    /// The configured checkpoint verification concurrency limit, after applying the minimum limit.
-    checkpoint_verify_concurrency_limit: usize,
-
-    /// The configured full verification concurrency limit, after applying the minimum limit.
+    /// The configured full verification concurrency limit, after applying the
+    /// minimum limit.
+    ///
+    /// Caps each sync cycle engine's commit pipeline: the number of blocks
+    /// concurrently inside the semantic verifier.
     full_verify_concurrency_limit: usize,
 
     /// Whether the node is running on regtest. Used to apply a shorter sync restart delay.
     is_regtest: bool,
+
+    /// The engine's fetch lookahead limit, as a byte budget
+    /// ([`Config::known_hash_lookahead_bytes`]).
+    lookahead_bytes: usize,
+
+    /// How long a block near the engine's commit frontier may be in flight
+    /// before it is hedged ([`Config::known_hash_gap_hedge_secs`]).
+    gap_hedge_after: Duration,
+
+    /// The directory of the engine's disk overflow block cache: the same
+    /// directory the known-hash initial sync engine uses (the two never run
+    /// concurrently, and either one removes it when its range completes).
+    cache_dir: PathBuf,
 
     // Services
     //
@@ -376,23 +470,23 @@ where
     /// Has no retry logic, because failover is handled using fanout.
     tip_network: Timeout<ZN>,
 
-    /// A service which downloads and verifies blocks, using the provided
-    /// network and verifier services.
-    downloads: Pin<
-        Box<
-            Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
-                Timeout<ZV>,
-                ZSTip,
-            >,
-        >,
-    >,
+    /// The unwrapped peer set: each sync cycle's engine builds its own
+    /// batched block fetch over it (retrying, hedging, and peer weighting
+    /// are the engine's own machinery).
+    peer_set: ZN,
+
+    /// The semantic block verifier, wrapped in a per-block timeout: the
+    /// commit stage for each sync cycle's engine.
+    verifier: Timeout<ZV>,
 
     /// The cached block chain state.
     state: ZS,
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: ZSTip,
+
+    /// Live peer set status, for sizing each engine's download pipeline.
+    peer_set_status: watch::Receiver<zn::PeerSetStatus>,
 
     // Internal sync state
     //
@@ -401,21 +495,6 @@ where
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
-
-    /// Receiver that is `true` when the downloader is past the lookahead limit.
-    /// This is based on the downloaded block height and the state tip height.
-    past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
-
-    /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-
-    /// Blocks whose download failed with `NotFound` and should be re-requested on
-    /// the next sync round, instead of being silently dropped (#5709).
-    reobtain_hashes: IndexSet<block::Hash>,
-
-    /// Per-hash count of how many times a `NotFound` block has been re-requested,
-    /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
-    block_reobtain_retries: HashMap<block::Hash, u8>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -447,44 +526,27 @@ where
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Returns a new syncer instance, using:
-    ///  - chain: the zebra-chain `Network` to download (Mainnet or Testnet)
+    ///  - config: the zebrad config, for the network and the engine limits
     ///  - peers: the zebra-network peers to contact for downloads
     ///  - verifier: the zebra-consensus verifier that checks the chain
     ///  - state: the zebra-state that stores the chain
     ///  - latest_chain_tip: the latest chain tip from `state`
+    ///  - peer_set_status: the live peer set status watch from
+    ///    [`zebra_network::init`], for sizing each engine's download pipeline
+    ///  - cache_dir: the state cache directory; the engine's disk overflow
+    ///    tier lives under `<cache_dir>/`[`ibd::cache::CACHE_DIR_NAME`]
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
     pub fn new(
         config: &ZebradConfig,
-        max_checkpoint_height: Height,
         peers: ZN,
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        peer_set_status: watch::Receiver<zn::PeerSetStatus>,
+        cache_dir: &Path,
     ) -> (Self, SyncStatus) {
-        let mut download_concurrency_limit = config.sync.download_concurrency_limit;
-        let mut checkpoint_verify_concurrency_limit =
-            config.sync.checkpoint_verify_concurrency_limit;
         let mut full_verify_concurrency_limit = config.sync.full_verify_concurrency_limit;
-
-        if download_concurrency_limit < MIN_CONCURRENCY_LIMIT {
-            warn!(
-                "configured download concurrency limit {} too low, increasing to {}",
-                config.sync.download_concurrency_limit, MIN_CONCURRENCY_LIMIT,
-            );
-
-            download_concurrency_limit = MIN_CONCURRENCY_LIMIT;
-        }
-
-        if checkpoint_verify_concurrency_limit < MIN_CHECKPOINT_CONCURRENCY_LIMIT {
-            warn!(
-                "configured checkpoint verify concurrency limit {} too low, increasing to {}",
-                config.sync.checkpoint_verify_concurrency_limit, MIN_CHECKPOINT_CONCURRENCY_LIMIT,
-            );
-
-            checkpoint_verify_concurrency_limit = MIN_CHECKPOINT_CONCURRENCY_LIMIT;
-        }
 
         if full_verify_concurrency_limit < MIN_CONCURRENCY_LIMIT {
             warn!(
@@ -497,63 +559,26 @@ where
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
 
-        // The Hedge middleware is the outermost layer, hedging requests
-        // between two retry-wrapped networks.  The innermost timeout
-        // layer is relatively unimportant, because slow requests will
-        // probably be preemptively hedged.
-        //
-        // The Hedge goes outside the Retry, because the Retry layer
-        // abstracts away spurious failures from individual peers
-        // making a less-fallible network service, and the Hedge layer
-        // tries to reduce latency of that less-fallible service.
-        let block_network = Hedge::new(
-            ServiceBuilder::new()
-                .concurrency_limit(download_concurrency_limit)
-                .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
-                .service(peers),
-            AlwaysHedge,
-            20,
-            0.95,
-            2 * SYNC_RESTART_DELAY,
-        );
-
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
         let (sync_status, recent_syncs) = SyncStatus::new_for_network(&config.network.network);
 
-        let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
-        let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
-
-        let downloads = Box::pin(Downloads::new(
-            block_network,
-            verifier,
-            latest_chain_tip.clone(),
-            past_lookahead_limit_sender,
-            max(
-                checkpoint_verify_concurrency_limit,
-                full_verify_concurrency_limit,
-            ),
-            max_checkpoint_height,
-        ));
-
         let new_syncer = Self {
             genesis_hash: config.network.network.genesis_hash(),
-            max_checkpoint_height,
-            checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             is_regtest: config.network.network.is_regtest(),
+            lookahead_bytes: config.sync.known_hash_lookahead_bytes,
+            gap_hedge_after: Duration::from_secs(config.sync.known_hash_gap_hedge_secs),
+            cache_dir: cache_dir.join(ibd::cache::CACHE_DIR_NAME),
             tip_network,
-            downloads,
+            peer_set: peers,
+            verifier,
             state,
             latest_chain_tip,
+            peer_set_status,
             prospective_tips: HashSet::new(),
             recent_syncs,
-            past_lookahead_limit_receiver,
-            misbehavior_sender,
-            reobtain_hashes: IndexSet::new(),
-            block_reobtain_retries: HashMap::new(),
         };
 
         (new_syncer, sync_status)
@@ -567,8 +592,8 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
-                self.downloads.cancel_all();
+            if let Err(error) = self.sync_cycle().await {
+                info!("sync cycle failed, will restart: {error:#}");
             }
 
             self.update_metrics();
@@ -587,30 +612,35 @@ where
         }
     }
 
-    /// Tries to synchronize the chain as far as it can.
+    /// Runs one sync cycle: crawls the network for tentative tip hashes, and
+    /// drives the generic IBD engine over them until the crawl and the engine
+    /// both run out of work.
     ///
-    /// Obtains some prospective tips and iteratively tries to extend them and download the missing
-    /// blocks.
+    /// The crawl feeds the engine's [`DiscoverySource`] through its
+    /// [`DiscoveryFeed`](ibd::discovery::DiscoveryFeed), extending the tips
+    /// just ahead of the engine's fetch frontier; the engine fetches,
+    /// verifies (full semantic and contextual validation), and commits each
+    /// discovered block in order.
     ///
-    /// Returns `Ok` if it was able to synchronize as much of the chain as it could, and then ran
-    /// out of prospective tips. This happens when synchronization finishes or if Zebra ended up
-    /// following a fork. Either way, Zebra should attempt to obtain some more tips.
+    /// Returns `Ok` if it was able to synchronize as much of the chain as it
+    /// could, and then ran out of prospective tips. This happens when
+    /// synchronization finishes or if Zebra ended up following a fork. Either
+    /// way, Zebra should attempt to obtain some more tips.
     ///
-    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
-    /// long time. (These usually indicate hangs.)
+    /// Returns `Err` if there was an unrecoverable error and restarting the
+    /// synchronization is necessary: the next cycle re-crawls from the state
+    /// tip with fresh peers, converging exactly as the legacy syncer's
+    /// restart loop did (committed blocks are never re-requested; tentative
+    /// hashes are re-discovered).
     #[instrument(skip(self))]
-    async fn try_to_sync(&mut self) -> Result<(), Report> {
+    async fn sync_cycle(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
-
-        self.reobtain_hashes.clear();
-        self.block_reobtain_retries.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
+        let hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
             .await
             .map_err(Into::into)
             // TODO: replace with flatten() when it stabilises (#70142)
@@ -621,128 +651,124 @@ where
             })?;
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
-                .await
-                .map_err(Into::into)
-                // TODO: replace with flatten() when it stabilises (#70142)
-                .and_then(convert::identity)?;
+        if hashes.is_empty() {
+            info!("exhausted prospective tip set");
+            return Ok(());
         }
 
-        info!("exhausted prospective tip set");
+        // The engine assigns the discovered hashes sequential window heights
+        // starting just above the state tip, anchored on the tip hash. When
+        // the crawl actually starts on a side chain below the tip (a fork),
+        // the assigned heights are offset from the true heights and the
+        // anchor is not the first block's parent: that is fine, because the
+        // assigned height is only the engine's window key — the fetch and
+        // commit stages match blocks by hash alone, and the verifier derives
+        // every consensus height and parent from the block itself.
+        let (base, anchor) = match self.latest_chain_tip.best_tip_height_and_hash() {
+            Some((tip_height, tip_hash)) => (
+                tip_height
+                    .next()
+                    .expect("the state tip is far below the maximum block height"),
+                tip_hash,
+            ),
+            // The genesis block was committed before the sync cycles started,
+            // so an unpublished tip is at least the genesis block.
+            None => (block::Height(1), self.genesis_hash),
+        };
+
+        let (mut feed, source) = DiscoverySource::new(base, anchor);
+        feed.extend(hashes.into_iter().collect());
+
+        let mut engine = Engine::new_semantic(
+            self.peer_set.clone(),
+            self.verifier.clone(),
+            base,
+            source,
+            self.peer_set_status.clone(),
+            BlockCache::new(&self.cache_dir),
+            self.lookahead_bytes,
+            self.full_verify_concurrency_limit,
+            self.gap_hedge_after,
+        );
+
+        // Scope the engine and crawl futures so their borrows of `self` (the
+        // crawl mutates `prospective_tips` / crawls `tip_network`) and `feed`
+        // release before the post-cycle logging below.
+        let outcome = {
+            let mut engine_run = pin!(engine.run());
+
+            // The crawl runs concurrently with the engine, so block fetch,
+            // verify, and commit never pause for a crawl round trip. It
+            // extends the tips just ahead of the engine's fetch frontier
+            // ([`DISCOVERY_LOW_WATER_MARK`](ibd::discovery::DISCOVERY_LOW_WATER_MARK)),
+            // feeding tentative hashes to the discovery source, until the tips
+            // run out. Whatever ends the crawl (tips exhausted or a transient
+            // error), it always finishes the feed so the engine completes once
+            // it drains the range it was given.
+            let crawl = async {
+                let result = loop {
+                    feed.wants_more_hashes().await;
+
+                    if self.prospective_tips.is_empty() {
+                        break Ok(());
+                    }
+
+                    match timeout(SYNC_RESTART_DELAY, self.extend_tips())
+                        .await
+                        .map_err(Into::into)
+                        // TODO: replace with flatten() when it stabilises (#70142)
+                        .and_then(convert::identity)
+                    {
+                        Ok(hashes) => {
+                            self.update_metrics();
+                            feed.extend(hashes.into_iter().collect());
+                        }
+                        Err(error) => break Err(error),
+                    }
+                };
+
+                feed.finish();
+                result
+            };
+            let mut crawl = pin!(crawl);
+
+            // The engine is authoritative for cycle liveness: a discovery
+            // source whose tentative hashes cannot be fetched stalls the
+            // engine's fetch frontier, which the engine restarts on internally
+            // (`IBD_DISCOVERY_STALL_RESTART`) — measured on its own frontier,
+            // so inbound gossip advancing the state tip cannot mask a wedge.
+            tokio::select! {
+                outcome = &mut engine_run => outcome,
+
+                crawl_result = &mut crawl => {
+                    if let Err(error) = crawl_result {
+                        info!("crawl ended early, draining the engine then restarting: {error:#}");
+                    }
+                    // The crawl finished the feed, so the engine completes once
+                    // it drains the fed range; keep driving it rather than
+                    // abandoning the blocks already in flight.
+                    (&mut engine_run).await
+                }
+            }
+        };
+
+        let outcome = outcome.map_err(|error| eyre!(error))?;
+        debug!(?outcome, "sync cycle engine completed");
+
+        info!(
+            state_tip = ?self.latest_chain_tip.best_tip_height(),
+            "exhausted prospective tip set"
+        );
 
         Ok(())
     }
 
-    /// Tries to synchronize the chain once, using the existing `extra_hashes`.
-    ///
-    /// Tries to extend the existing tips and download the missing blocks.
-    ///
-    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
-    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary.
-    #[instrument(skip(self, extra_hashes))]
-    async fn try_to_sync_once(
-        &mut self,
-        mut extra_hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, Report> {
-        // Check whether any block tasks are currently ready.
-        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-            // Some temporary errors are ignored, and syncing continues with other blocks.
-            // If it turns out they were actually important, syncing will run out of blocks, and
-            // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
-        }
-        // Re-request any blocks that just failed with `NotFound`, before pausing
-        // on the lookahead limit (#5709).
-        self.reobtain_missing_blocks().await;
-        self.update_metrics();
-
-        // Pause new downloads while the syncer or downloader are past their lookahead limits.
-        //
-        // To avoid a deadlock or long waits for blocks to expire, we ignore the download
-        // lookahead limit when there are only a small number of blocks waiting.
-        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                && self.past_lookahead_limit_receiver.cloned_watch_data())
-        {
-            trace!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "waiting for pending blocks",
-            );
-
-            let response = self.downloads.next().await.expect("downloads is nonempty");
-
-            self.handle_block_response(response)?;
-            // A block that just failed with `NotFound` is what unblocks the
-            // verifier, so re-request it now rather than waiting for the pause
-            // loop to clear — which it cannot until this block arrives (#5709).
-            self.reobtain_missing_blocks().await;
-            self.update_metrics();
-        }
-
-        // Once we're below the lookahead limit, we can request more blocks or hashes.
-        if !extra_hashes.is_empty() {
-            debug!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "requesting more blocks",
-            );
-
-            let response = self.request_blocks(extra_hashes).await;
-            extra_hashes = Self::handle_hash_response(response)?;
-        } else {
-            info!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "extending tips",
-            );
-
-            extra_hashes = self.extend_tips().await.map_err(|e| {
-                info!("temporary error extending tips: {:#}", e);
-                e
-            })?;
-        }
-        self.update_metrics();
-
-        Ok(extra_hashes)
-    }
-
-    /// Re-issues downloads for blocks that failed with `NotFound` (#5709).
-    ///
-    /// These are re-requested even while the download pipeline is past its
-    /// lookahead limit, because a missing low block is exactly what stops the
-    /// checkpoint verifier from advancing. Waiting for the lookahead pause to
-    /// clear would deadlock — the pause cannot clear until this block arrives.
-    /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
-    async fn reobtain_missing_blocks(&mut self) {
-        if self.reobtain_hashes.is_empty() {
-            return;
-        }
-
-        for hash in std::mem::take(&mut self.reobtain_hashes) {
-            // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it. A residual duplicate/queue error is
-            // benign — it means the block is already being handled.
-            if let Err(error) = self.downloads.download_and_verify(hash).await {
-                trace!(?hash, ?error, "re-download of missing block not queued");
-            }
-        }
-    }
-
     /// Given a block_locator list fan out request for subsequent hashes to
-    /// multiple peers
+    /// multiple peers.
+    ///
+    /// Returns the deduplicated unknown hashes, in download order, for the
+    /// engine's discovery feed, and records the new prospective tips for
+    /// [`extend_tips`](Self::extend_tips) to follow.
     #[instrument(skip(self))]
     async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let stage_start = std::time::Instant::now();
@@ -907,21 +933,25 @@ where
         }
 
         let new_downloads = download_set.len();
-        debug!(new_downloads, "queueing new downloads");
+        debug!(new_downloads, "feeding new hashes to the sync engine");
         metrics::gauge!("sync.obtain.queued.hash.count").set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
-        let response = self.request_blocks(download_set).await;
-
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
             .record(stage_start.elapsed().as_secs_f64());
 
-        Self::handle_hash_response(response).map_err(Into::into)
+        Ok(download_set)
     }
 
+    /// Fans out a `FindBlocks` request for each prospective tip, following
+    /// each tip forward.
+    ///
+    /// Returns the deduplicated unknown hashes, in download order, for the
+    /// engine's discovery feed, and replaces the prospective tips with the
+    /// extended ones.
     #[instrument(skip(self))]
     async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let stage_start = std::time::Instant::now();
@@ -1050,23 +1080,21 @@ where
         }
 
         let new_downloads = download_set.len();
-        debug!(new_downloads, "queueing new downloads");
+        debug!(new_downloads, "feeding new hashes to the sync engine");
         metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
-        let response = self.request_blocks(download_set).await;
-
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
             .record(stage_start.elapsed().as_secs_f64());
 
-        Self::handle_hash_response(response).map_err(Into::into)
+        Ok(download_set)
     }
 
-    /// Download and verify the genesis block, if it isn't currently known to
-    /// our node.
+    /// Download the genesis block and commit it directly to the state, if it
+    /// isn't currently known to our node.
     async fn request_genesis(&mut self) -> Result<(), Report> {
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
@@ -1074,36 +1102,25 @@ where
         //  - responses start with the block *after* the requested block, and
         //  - the genesis hash is used as a placeholder for "no matches".
         //
-        // So we just download and verify the genesis block here.
+        // So we just download and commit the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
-            info!("starting genesis block download and verify");
+            info!("starting genesis block download");
 
-            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
-                .await
-                .map_err(Into::into);
+            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once()).await;
 
-            // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
-                Ok(Ok(Ok(response))) => self
-                    .handle_block_response(Ok(response))
-                    .expect("never returns Err for Ok"),
-                // Handle fatal errors
-                Ok(Err(fatal_error)) => Err(fatal_error)?,
-                // Handle timeouts and block errors
-                Err(error) | Ok(Ok(Err(error))) => {
-                    // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
-                    if Self::should_restart_sync(&error) {
-                        warn!(
-                            ?error,
-                            "could not download or verify genesis block, retrying"
-                        );
-                    } else {
-                        info!(
-                            ?error,
-                            "temporary error downloading or verifying genesis block, retrying"
-                        );
-                    }
-
+                Ok(Ok(())) => {}
+                // Handle timeouts and download/commit errors: startup races
+                // (no ready peers yet, a peer without the block) all retry.
+                Err(_elapsed) => {
+                    info!("genesis block download timed out, retrying");
+                    tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
+                }
+                Ok(Err(error)) => {
+                    info!(
+                        ?error,
+                        "could not download or commit genesis block, retrying"
+                    );
                     tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
                 }
             }
@@ -1112,198 +1129,53 @@ where
         Ok(())
     }
 
-    /// Try to download and verify the genesis block once.
+    /// Try once to download the genesis block from a peer, verify it against
+    /// the network's pinned genesis hash, and commit it directly to the state.
     ///
-    /// Fatal errors are returned in the outer result, temporary errors in the inner one.
-    async fn request_genesis_once(
-        &mut self,
-    ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self.downloads.download_and_verify(self.genesis_hash).await;
-        Self::handle_response(response).map_err(|e| eyre!(e))?;
+    /// Blocks at or below the mandatory checkpoint floor never pass the
+    /// semantic verifier's checkpoint gate, so genesis cannot go through the
+    /// regular `downloads` path. Its hash is a network parameter — the same
+    /// pin the removed checkpoint verifier applied — so the hash comparison is
+    /// a complete verification, matching the startup path
+    /// (`ibd::commit_genesis_if_missing`) for networks whose genesis block is
+    /// not hard-coded (e.g. configured testnets with a custom genesis block).
+    async fn request_genesis_once(&mut self) -> Result<(), Report> {
+        let response = self
+            .tip_network
+            .ready()
+            .await
+            .map_err(|error| eyre!(error))?
+            .call(zn::Request::BlocksByHash(
+                iter::once(self.genesis_hash).collect(),
+            ))
+            .await
+            .map_err(|error| eyre!(error))?;
 
-        let response = self.downloads.next().await.expect("downloads is nonempty");
-
-        Ok(response)
-    }
-
-    /// Queue download and verify tasks for each block that isn't currently known to our node.
-    ///
-    /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
-    async fn request_blocks(
-        &mut self,
-        mut hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
-        let lookahead_limit = self.lookahead_limit(hashes.len());
-
-        debug!(
-            hashes.len = hashes.len(),
-            ?lookahead_limit,
-            "requesting blocks",
-        );
-
-        let extra_hashes = if hashes.len() > lookahead_limit {
-            hashes.split_off(lookahead_limit)
-        } else {
-            IndexSet::new()
+        let zn::Response::Blocks(mut blocks) = response else {
+            return Err(eyre!("wrong response to a genesis BlocksByHash request"));
         };
 
-        // Dispatch blocks with duplicate-tolerant error handling.
-        // DuplicateBlockQueuedForDownload is caught and skipped instead of
-        // propagating — this prevents dropping unprocessed hashes from the
-        // batch, which would create frontier gaps and stalls (#5709).
-        for hash in hashes.into_iter() {
-            match self.downloads.download_and_verify(hash).await {
-                Ok(()) => {}
-                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
-                    debug!("block request was already queued, continuing");
-                }
-                Err(error) => return Err(error),
-            }
+        let (block, _peer) = blocks
+            .pop()
+            .and_then(|inventory_response| inventory_response.available())
+            .ok_or_else(|| eyre!("the peer did not have the genesis block"))?;
+
+        let genesis = zs::CheckpointVerifiedBlock::from(block);
+        if genesis.hash != self.genesis_hash {
+            return Err(eyre!(
+                "the peer served a block that is not the genesis block"
+            ));
         }
 
-        Ok(extra_hashes)
-    }
+        self.state
+            .ready()
+            .await
+            .map_err(|error| eyre!(error))?
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(genesis))
+            .await
+            .map_err(|error| eyre!("committing the genesis block failed: {error}"))?;
 
-    /// The configured lookahead limit, based on the currently verified height,
-    /// and the number of hashes we haven't queued yet.
-    fn lookahead_limit(&self, new_hashes: usize) -> usize {
-        let max_checkpoint_height: usize = self
-            .max_checkpoint_height
-            .0
-            .try_into()
-            .expect("fits in usize");
-
-        // When the state is empty, we want to verify using checkpoints
-        let verified_height: usize = self
-            .latest_chain_tip
-            .best_tip_height()
-            .unwrap_or(Height(0))
-            .0
-            .try_into()
-            .expect("fits in usize");
-
-        if verified_height >= max_checkpoint_height {
-            self.full_verify_concurrency_limit
-        } else if (verified_height + new_hashes) >= max_checkpoint_height {
-            // If we're just about to start full verification, allow enough for the remaining checkpoint,
-            // and also enough for a separate full verification lookahead.
-            let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
-
-            self.full_verify_concurrency_limit + checkpoint_hashes
-        } else {
-            self.checkpoint_verify_concurrency_limit
-        }
-    }
-
-    /// Handles a response for a requested block.
-    ///
-    /// See [`Self::handle_response`] for more details.
-    #[allow(unknown_lints)]
-    fn handle_block_response(
-        &mut self,
-        response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        match response {
-            Ok((height, hash)) => {
-                trace!(?height, ?hash, "verified and committed block to state");
-
-                // The block arrived, so forget any re-request bookkeeping for it.
-                self.block_reobtain_retries.remove(&hash);
-
-                return Ok(());
-            }
-
-            Err(BlockDownloadVerifyError::Invalid {
-                ref error,
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) if error.misbehavior_score() != 0 => {
-                let _ = self
-                    .misbehavior_sender
-                    .try_send((advertiser_addr, error.misbehavior_score()));
-            }
-
-            Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
-            }
-
-            Err(BlockDownloadVerifyError::InvalidHeight {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
-            }
-
-            Err(_) => {}
-        };
-
-        // A block whose download failed because no peer delivered it (`NotFound`)
-        // is otherwise dropped here and never re-requested, which wedges the
-        // checkpoint frontier until the verify timeout (#5709). Re-queue it for
-        // the next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Consensus
-        // failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
-        // re-downloading a block the network already rejected is pointless.
-        if let Err(BlockDownloadVerifyError::DownloadFailed { error, hash }) = &response {
-            if format!("{error:?}").contains("NotFound") {
-                let attempts = self.block_reobtain_retries.entry(*hash).or_insert(0);
-                if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
-                    *attempts += 1;
-                    self.reobtain_hashes.insert(*hash);
-                    debug!(
-                        ?hash,
-                        attempts = *attempts,
-                        "re-queueing missing block for re-download"
-                    );
-                } else {
-                    debug!(
-                        ?hash,
-                        "missing block exceeded re-download retries, dropping"
-                    );
-                    self.block_reobtain_retries.remove(hash);
-                }
-            }
-        }
-
-        Self::handle_response(response)
-    }
-
-    /// Handles a response to block hash submission, passing through any extra hashes.
-    ///
-    /// See [`Self::handle_response`] for more details.
-    #[allow(unknown_lints)]
-    fn handle_hash_response(
-        response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
-        match response {
-            Ok(extra_hashes) => Ok(extra_hashes),
-            Err(_) => Self::handle_response(response).map(|()| IndexSet::new()),
-        }
-    }
-
-    /// Handles a response to a syncer request.
-    ///
-    /// Returns `Ok` if the request was successful, or if an expected error occurred,
-    /// so that the synchronization can continue normally.
-    ///
-    /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
-    #[allow(unknown_lints)]
-    fn handle_response<T>(
-        response: Result<T, BlockDownloadVerifyError>,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        match response {
-            Ok(_t) => Ok(()),
-            Err(error) => {
-                // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
-                if Self::should_restart_sync(&error) {
-                    Err(error)
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        Ok(())
     }
 
     /// Returns `true` if the hash is present in the state, and `false`
@@ -1323,95 +1195,7 @@ where
         }
     }
 
-    fn update_metrics(&mut self) {
+    fn update_metrics(&self) {
         metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
-        metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
-    }
-
-    /// Return if the sync should be restarted based on the given error
-    /// from the block downloader and verifier stream.
-    fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
-        match e {
-            // Structural matches: downcasts
-            BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
-                debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
-                false
-            }
-
-            // Structural matches: direct
-            BlockDownloadVerifyError::CancelledDuringDownload { .. }
-            | BlockDownloadVerifyError::CancelledDuringVerification { .. } => {
-                debug!(error = ?e, "block verification was cancelled, continuing");
-                false
-            }
-            BlockDownloadVerifyError::BehindTipHeightLimit { .. } => {
-                debug!(
-                    error = ?e,
-                    "block height is behind the current state tip, \
-                     assuming the syncer will eventually catch up to the state, continuing"
-                );
-                false
-            }
-            BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. } => {
-                debug!(
-                    error = ?e,
-                    "block height is above the lookahead limit, \
-                     dropping the block and continuing sync"
-                );
-                false
-            }
-            BlockDownloadVerifyError::InvalidHeight { .. } => {
-                debug!(
-                    error = ?e,
-                    "block has no valid height, \
-                     dropping the block and continuing sync"
-                );
-                false
-            }
-            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. } => {
-                debug!(
-                    error = ?e,
-                    "queued duplicate block hash for download, \
-                     assuming the syncer will eventually resolve duplicates, continuing"
-                );
-                false
-            }
-
-            BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
-            {
-                // Covers these errors:
-                // - NotFoundResponse
-                // - NotFoundRegistry
-                //
-                // TODO: improve this by checking the type (#2908)
-                //       restart after a certain number of NotFound errors?
-                debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
-                false
-            }
-
-            _ => {
-                // download_and_verify downcasts errors from the block verifier
-                // into VerifyChainError, and puts the result inside one of the
-                // BlockDownloadVerifyError enumerations. This downcast could
-                // become incorrect e.g. after some refactoring, and it is difficult
-                // to write a test to check it. The test below is a best-effort
-                // attempt to catch if that happens and log it.
-                //
-                // TODO: add a proper test and remove this
-                // https://github.com/ZcashFoundation/zebra/issues/2909
-                let err_str = format!("{e:?}");
-                if err_str.contains("NotFound") {
-                    error!(?e,
-                        "a BlockDownloadVerifyError that should have been filtered out was detected, \
-                        which possibly indicates a programming error in the downcast inside \
-                        zebrad::components::sync::downloads::Downloads::download_and_verify"
-                    )
-                }
-
-                warn!(?e, "error downloading and verifying block");
-                true
-            }
-        }
     }
 }

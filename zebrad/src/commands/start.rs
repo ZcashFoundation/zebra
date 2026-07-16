@@ -89,18 +89,20 @@ use tokio::{
     pin, select,
     sync::{oneshot, watch},
 };
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService};
+use tower_fair_buffer::FairBuffer;
 use tracing_futures::Instrument;
 
-use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::router::BackgroundTaskHandles;
+use zebra_consensus::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
-        health,
-        inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
+        health, ibd,
+        inbound::{
+            self, InboundSetupData, INBOUND_FAIRNESS_ROTATION_INTERVAL, MAX_INBOUND_RESPONSE_TIME,
+        },
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -339,10 +341,30 @@ impl StartCmd {
         };
 
         info!("initializing node state");
-        let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
+        let max_checkpoint_height = zebra_consensus::checkpoints::max_checkpoint_height(
             config.consensus.clone(),
             &config.network.network,
         );
+
+        // When the known-hash IBD engine is enabled, the finalized write
+        // path must cover the whole pinned list, not just the spaced
+        // checkpoint range (design doc §7.3 / D6). The consensus commit gate
+        // is independent of this: it always rejects semantic commits at or
+        // below the mandatory checkpoint height (see
+        // `zebra_consensus::checkpoints`).
+        let max_finalizable_height = config
+            .sync
+            .known_hash_sync
+            .then(|| {
+                zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(
+                    &config.network.network,
+                )
+                .map(|spec| spec.max_height)
+            })
+            .flatten()
+            .map_or(max_checkpoint_height, |list_max| {
+                max_checkpoint_height.max(list_max)
+            });
 
         info!("opening database, this may take a few minutes");
 
@@ -350,7 +372,7 @@ impl StartCmd {
             zebra_state::init(
                 config.state.clone(),
                 &config.network.network,
-                max_checkpoint_height,
+                max_finalizable_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
             )
@@ -364,27 +386,34 @@ impl StartCmd {
             .service(state_service);
 
         info!("initializing network");
-        // The service that our node uses to respond to requests by peers. The
-        // load_shed middleware ensures that we reduce the size of the peer set
-        // in response to excess load.
+        // The service that our node uses to respond to requests by peers.
         //
         // # Security
         //
         // This layer stack is security-sensitive, modifying it can cause hangs,
         // or enable denial of service attacks.
         //
+        // The fair buffer reduces the size of the peer set in response to excess load:
+        // it dispatches the request from the peer with the lowest recent request count
+        // first, and when it is full, it sheds the queued request from the peer with the
+        // highest recent request count, so loud peers can't crowd out quiet ones.
+        //
+        // The timeout is outside the fair buffer, so it bounds each request's combined
+        // queue and processing time: requests from loud peers that are starved by the
+        // priority queue time out and feed the same per-connection overload handling
+        // as shed requests.
+        //
         // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
-            .load_shed()
-            .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
+            .service(FairBuffer::new(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx),
+                inbound::downloads::MAX_INBOUND_CONCURRENCY,
+                INBOUND_FAIRNESS_ROTATION_INTERVAL,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) =
+        let (peer_set, address_book, misbehavior_sender, peer_set_status) =
             zebra_network::init_with_block_gossip_peer_ips(
                 config.network.clone(),
                 inbound,
@@ -393,13 +422,16 @@ impl StartCmd {
                 zcashd_compat_block_gossip_peer_ips,
             )
             .await;
+        // The engine's own handle, captured before later moves of `peer_set`.
+        let ibd_peer_set = peer_set.clone();
 
         // Start health server if configured (after sync_status is available)
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
-        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::router::init(
+
+        let (block_verifier_router, tx_verifier, consensus_task_handles, _max_checkpoint_height) =
+            zebra_consensus::init(
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
@@ -408,14 +440,33 @@ impl StartCmd {
             .await;
 
         info!("initializing syncer");
-        let (mut syncer, sync_status) = ChainSync::new(
+        // The sync engine's disk overflow block cache, shared by known-hash
+        // initial sync and the syncer's tip-following cycles (which never run
+        // concurrently).
+        //
+        // An ephemeral state must never write to the configured cache
+        // directory, so the cache goes to a random temporary directory
+        // instead, like the ephemeral database itself (a predictable name in
+        // the shared temp dir could be squatted by another local user;
+        // abandoned dirs are left to the OS temp cleaner, matching the
+        // ephemeral database's behavior).
+        let ibd_cache_dir = if config.state.ephemeral {
+            tempfile::Builder::new()
+                .prefix("zebrad-ibd-block-cache-")
+                .tempdir()
+                .expect("temporary directory is created successfully")
+                .keep()
+        } else {
+            config.state.cache_dir.clone()
+        };
+        let (syncer, sync_status) = ChainSync::new(
             &config,
-            max_checkpoint_height,
             peer_set.clone(),
             block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
-            misbehavior_sender.clone(),
+            peer_set_status.clone(),
+            &ibd_cache_dir,
         );
 
         info!("initializing mempool");
@@ -632,29 +683,29 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        // In regtest, commit the genesis block directly (bypassing the syncer's genesis
-        // download, which requires a connected peer). Then run the syncer normally so
-        // that multi-hop block propagation works: gossiped blocks that arrive out of
-        // order (e.g. only the latest tip hash was gossiped) will be recovered by the
-        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
-        if is_regtest
-            && !syncer
-                .state_contains(config.network.network.genesis_hash())
-                .await?
-        {
-            let genesis_hash = block_verifier_router
-                .clone()
-                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
-                .await
-                .expect("should validate Regtest genesis block");
+        // Commit the genesis block directly if the state is empty: the semantic
+        // verifier's checkpoint gate never commits blocks at or below the
+        // mandatory floor, the known-hash engine only covers networks with a
+        // bundled list, and the syncer's genesis download requires a
+        // connected peer that already has it (which a standalone Regtest node
+        // never does). Then run the syncer normally so that multi-hop block
+        // propagation works: gossiped blocks that arrive out of order (e.g.
+        // only the latest tip hash was gossiped) will be recovered by the
+        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY.
+        ibd::commit_genesis_if_missing(&config.network.network, state.clone()).await?;
 
-            assert_eq!(
-                genesis_hash,
-                config.network.network.genesis_hash(),
-                "validated block hash should match network genesis hash"
-            )
-        }
-        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
+        // Run the known-hash IBD engine (design doc §4.7) to completion
+        // before driving the tip-following syncer.
+        let ibd_engine = ibd::IbdEngine::new(
+            config.sync.clone(),
+            config.network.network.clone(),
+            ibd_peer_set,
+            state.clone(),
+            latest_chain_tip.clone(),
+            peer_set_status,
+            &ibd_cache_dir,
+        );
+        let syncer_task_handle = ibd::spawn_engine_then_tip_sync(ibd_engine, syncer.sync());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //

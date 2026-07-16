@@ -1,0 +1,37 @@
+[package]
+name = "tower-fair-buffer"
+version = "0.1.0"
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
+description = "Tower middleware that buffers requests in per-caller priority order"
+# # Legal
+#
+# This licence is deliberately different to the rest of Zebra.
+#
+# This code was modified from tower 0.4.13's `tower::buffer`:
+# https://github.com/tower-rs/tower/tree/master/tower/src/buffer
+license = "MIT"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# crates.io is limited to 5 keywords and categories
+keywords = ["tower", "buffer", "fairness"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["asynchronous"]
+
+[dependencies]
+crossbeam-skiplist = { workspace = true }
+pin-project = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "tracing"] }
+tower = { workspace = true, features = ["util"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tokio-test = { workspace = true }
+tower-test = { workspace = true }
+
+zebra-test = { path = "../zebra-test/", version = "4.0.0" }
+
+[lints]
+workspace = true

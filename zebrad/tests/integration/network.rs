@@ -166,7 +166,6 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 }
 
 async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
-    use crate::common::regtest::MiningRpcMethods;
     use zebra_rpc::client::PeerInfo;
 
     let _init_guard = zebra_test::init();
@@ -317,17 +316,14 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     let peer_info = wait_for_outbound_peer(&rpc_client_2).await?;
 
-    tracing::info!(
-        ?peer_info,
-        "found peer connection, committing genesis block"
-    );
+    tracing::info!(?peer_info, "found peer connection");
 
-    let genesis_block = network1.block_parsed_iter().next().unwrap();
-    rpc_client_1.submit_block(genesis_block.clone()).await?;
-    rpc_client_2.submit_block(genesis_block).await?;
+    // Both nodes commit the genesis block directly at startup (blocks at or
+    // below the mandatory checkpoint floor cannot be submitted through the
+    // semantic verifier's checkpoint gate, so `submitblock` rejects genesis).
 
     // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
-    tracing::info!("committed genesis block, mining blocks with invalid PoW");
+    tracing::info!("mining blocks with invalid PoW");
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     rpc_client_1.call("generate", "[500]").await?;

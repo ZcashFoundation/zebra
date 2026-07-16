@@ -30,6 +30,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
+use tower_fair_buffer::Tagged;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
@@ -43,7 +44,10 @@ use crate::{
         OutboundConnectorRequest, PeerPreference,
     },
     peer_cache_updater::peer_cache_updater,
-    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{
+        set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet,
+        PeerSetStatus,
+    },
     protocol::external::canonical_socket_addr,
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
@@ -77,9 +81,12 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// request.  Otherwise, inbound messages are interpreted as requests and sent
 /// to the supplied `inbound_service`.
 ///
-/// Wrapping the `inbound_service` in [`tower::load_shed`] middleware will
-/// cause the peer set to shrink when the inbound service is unable to keep up
-/// with the volume of inbound requests.
+/// Each connection tags its peer requests with the peer's IP address, so
+/// wrapping the `inbound_service` in a `tower_fair_buffer::FairBuffer` serves
+/// the quietest peers first and sheds the loudest peer's requests when the
+/// buffer is full. Shed (and timed-out) requests cause the peer set to shrink
+/// when the inbound service is unable to keep up, via the connection's
+/// overload handling.
 ///
 /// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
@@ -104,9 +111,14 @@ pub async fn init<S, C>(
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    watch::Receiver<PeerSetStatus>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
@@ -137,9 +149,14 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    watch::Receiver<PeerSetStatus>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
@@ -262,6 +279,9 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
+    // Sync consumers like the known-hash IBD engine size their download
+    // pipelines from the peer set status.
+    let peer_set_status = peer_set.status_receiver();
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // Connect peerset_tx to the 3 peer sources:
@@ -345,7 +365,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book, misbehavior_tx)
+    (peer_set, address_book, misbehavior_tx, peer_set_status)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and

@@ -28,6 +28,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tower::{service_fn, Layer, Service, ServiceExt};
+use tower_fair_buffer::Tagged;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 
@@ -1661,7 +1662,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1709,7 +1710,11 @@ async fn init_with_peer_limit<S>(
     default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
 {
     // This test might fail on machines with no configured IPv4 addresses
@@ -1727,7 +1732,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _) = init(
         config,
         inbound_service,
         NoChainTip,

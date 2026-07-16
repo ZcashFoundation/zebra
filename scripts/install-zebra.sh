@@ -29,6 +29,19 @@ ZEBRA_DEFAULT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/zebra"
 ZEBRA_DOCKER_RUNTIME_UID=10001
 ZEBRA_DOCKER_RUNTIME_GID=10001
 
+# Known-hash IBD snapshot artifact set (`zebrad emit-snapshot --emit-files`
+# output: the known-hash chunks, the unspent-output set at the max checkpoint
+# height, and the selected note commitment tree frontiers), downloaded for
+# snapshot-consume (assumeUTXO-style) initial sync. The node re-verifies every
+# artifact against SHA-256 constants pinned in Zebra's source, so this download
+# only needs transport integrity.
+# Updated to each release's artifact archive + checksum before publishing; an
+# empty checksum means the release ships no artifact set and the flow errors
+# rather than installing unverified artifacts.
+ZEBRA_IBD_SNAPSHOT_ARCHIVE="zebra-ibd-snapshot-mainnet-${ZEBRA_VERSION}.tar.gz"
+ZEBRA_IBD_SNAPSHOT_URL="https://github.com/ZcashFoundation/zebra/releases/download/${ZEBRA_RELEASE_TAG}/${ZEBRA_IBD_SNAPSHOT_ARCHIVE}"
+ZEBRA_IBD_SNAPSHOT_SHA256=""
+
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
 ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz"
@@ -39,6 +52,9 @@ ZCASHD_DEFAULT_DOCKER_IMAGE="zfnd/zcashd:zebra-compat-v1.0.0"
 INSTALL_PROFILE=""
 MODE=""
 NETWORK="Mainnet"
+IBD_SNAPSHOT=0
+IBD_SNAPSHOT_DIR=""
+IBD_SNAPSHOT_H_MAX=""
 ZCASHD_DEFAULT_DATADIR="${HOME}/.zcash"
 ZEBRA_STANDALONE_STATE_DIR="/mnt/data/zebra-state"
 ZEBRA_STANDALONE_INSTALL_DIR="${HOME}/.local/zebra"
@@ -209,6 +225,11 @@ Options:
   --zcashd-path PATH
   --zcashd-docker-image IMAGE
   --download-binaries yes|no
+  --ibd-snapshot yes|no      Download the IBD snapshot artifact set and print a
+                             snapshot-consume sync config (experimental;
+                             Mainnet native mode only)
+  --ibd-snapshot-dir DIR     Where to place the IBD snapshot artifacts
+                             (default: <cache-dir>/ibd-snapshot/<network>)
   --dry-run                  Do not download archives or pull Docker images
   --unsafe-low-specs         Report hardware/disk failures as warnings
   --self-test-disk-limits    Verify network-aware disk limit helpers
@@ -2485,6 +2506,124 @@ default_data_detection_message() {
   printf '\nhttps://zcashd.valargroup.dev/\n\n'
 }
 
+# Downloads and verifies the IBD snapshot artifact set, extracts it into
+# IBD_SNAPSHOT_DIR, reads H_max from its MANIFEST, and writes a ready-to-use
+# snapshot-consume sync config next to the artifacts.
+#
+# Fail-closed like the binary downloads: no pinned checksum means no install.
+# The node independently re-verifies every artifact against SHA-256 constants
+# pinned in Zebra's source before trusting it.
+default_prepare_ibd_snapshot() {
+  if ((!IBD_SNAPSHOT)); then
+    return
+  fi
+
+  if ((USE_ANSI)); then
+    print_section "[*]" "IBD snapshot artifacts"
+  fi
+
+  if [[ "$NETWORK" != "Mainnet" ]]; then
+    add_error "--ibd-snapshot is only available for Mainnet (this release ships no $NETWORK artifact set)"
+    finalize_checks
+    return
+  fi
+
+  if [[ "$MODE" != "native" ]]; then
+    add_error "--ibd-snapshot currently supports native mode only; run without it, or set up snapshot-consume sync manually (see docs/design/snapshot-distribution.md)"
+    finalize_checks
+    return
+  fi
+
+  if [[ -z "$IBD_SNAPSHOT_DIR" ]]; then
+    IBD_SNAPSHOT_DIR="${ZEBRA_DEFAULT_CACHE_DIR}/ibd-snapshot/$(compat_network_name_lowercase)"
+  fi
+
+  if ((DRY_RUN)); then
+    printf 'dry run: would download %s into %s\n' "$ZEBRA_IBD_SNAPSHOT_URL" "$IBD_SNAPSHOT_DIR"
+    return
+  fi
+
+  # Fail closed on a missing checksum: never install unverified artifacts.
+  if [[ -z "$ZEBRA_IBD_SNAPSHOT_SHA256" ]]; then
+    add_error "refusing to install IBD snapshot artifacts: this release pins no SHA256 checksum for $ZEBRA_IBD_SNAPSHOT_URL"
+    finalize_checks
+    return
+  fi
+
+  local archive_path
+  archive_path="$(mktemp -t zebra-ibd-snapshot.XXXXXX.tar.gz)"
+
+  printf 'downloading %s\n' "$ZEBRA_IBD_SNAPSHOT_URL"
+  if ! curl -fsSL "$ZEBRA_IBD_SNAPSHOT_URL" -o "$archive_path"; then
+    rm -f "$archive_path"
+    add_error "failed to download IBD snapshot artifacts from $ZEBRA_IBD_SNAPSHOT_URL"
+    finalize_checks
+    return
+  fi
+
+  if ! printf '%s  %s\n' "$ZEBRA_IBD_SNAPSHOT_SHA256" "$archive_path" | sha256sum -c -; then
+    rm -f "$archive_path"
+    add_error "IBD snapshot artifact checksum mismatch for $ZEBRA_IBD_SNAPSHOT_URL"
+    finalize_checks
+    return
+  fi
+
+  mkdir -p "$IBD_SNAPSHOT_DIR"
+  if ! tar -xzf "$archive_path" -C "$IBD_SNAPSHOT_DIR"; then
+    rm -f "$archive_path"
+    add_error "failed to extract IBD snapshot artifacts into $IBD_SNAPSHOT_DIR"
+    finalize_checks
+    return
+  fi
+  rm -f "$archive_path"
+
+  if [[ ! -f "$IBD_SNAPSHOT_DIR/MANIFEST.txt" ]]; then
+    add_error "IBD snapshot artifacts have no MANIFEST.txt in $IBD_SNAPSHOT_DIR"
+    finalize_checks
+    return
+  fi
+
+  IBD_SNAPSHOT_H_MAX="$(sed -n 's/^h_max = \([0-9]*\)$/\1/p' "$IBD_SNAPSHOT_DIR/MANIFEST.txt" | head -n 1)"
+  if [[ -z "$IBD_SNAPSHOT_H_MAX" ]]; then
+    add_error "could not read h_max from $IBD_SNAPSHOT_DIR/MANIFEST.txt"
+    finalize_checks
+    return
+  fi
+
+  # A config file rather than env vars: the nested optional
+  # [state.snapshot_consume] table only materializes through the config file.
+  cat > "$IBD_SNAPSHOT_DIR/zebrad-snapshot-sync.toml" <<EOF
+# Snapshot-consume (assumeUTXO-style) initial sync, written by install-zebra.sh.
+# Every artifact in this directory is verified against SHA-256 constants pinned
+# in Zebra's source before it is trusted.
+
+[network]
+network = "$NETWORK"
+
+[state]
+cache_dir = "$ZEBRA_STATE_DIR"
+
+[state.snapshot_consume]
+survivor_set_path = "$IBD_SNAPSHOT_DIR/unspent-output-locations.bin"
+h_max = $IBD_SNAPSHOT_H_MAX
+
+[sync]
+known_hash_sync = true
+snapshot_consume_sync = true
+known_hash_local_source_dir = "$IBD_SNAPSHOT_DIR"
+EOF
+
+  if ((USE_ANSI)); then
+    printf '%s IBD snapshot artifacts installed at %s (H_max %s)\n' \
+      "$(style "$GREEN" "[ok]")" "$IBD_SNAPSHOT_DIR" "$IBD_SNAPSHOT_H_MAX"
+  else
+    printf 'IBD snapshot artifacts installed at %s (H_max %s)\n' \
+      "$IBD_SNAPSHOT_DIR" "$IBD_SNAPSHOT_H_MAX"
+  fi
+
+  finalize_checks
+}
+
 default_prepare_docker_image() {
   docker_image_available_or_pull "$ZEBRA_DOCKER_IMAGE" ||
     add_error "Docker image is missing or could not be pulled: $ZEBRA_DOCKER_IMAGE"
@@ -2502,6 +2641,14 @@ default_prepare_docker_mounts() {
 }
 
 default_print_native_command() {
+  if ((IBD_SNAPSHOT)) && [[ -n "$IBD_SNAPSHOT_H_MAX" ]]; then
+    cat <<EOF
+$(style "$GREEN$BOLD" "Start Zebra (snapshot-consume sync):")
+$(shell_quote "$ZEBRAD_PATH") -c $(shell_quote "$IBD_SNAPSHOT_DIR/zebrad-snapshot-sync.toml") start
+EOF
+    return
+  fi
+
   cat <<EOF
 $(style "$GREEN$BOLD" "Start Zebra:")
 ZEBRA_NETWORK__NETWORK=$(shell_quote "$NETWORK") \\
@@ -2641,6 +2788,24 @@ while (($#)); do
       esac
       shift 2
       ;;
+    --ibd-snapshot)
+      require_value "$1" "${2:-}"
+      case "$2" in
+        yes | y | Y | YES | Yes) IBD_SNAPSHOT=1 ;;
+        no | n | N | NO | No) IBD_SNAPSHOT=0 ;;
+        *)
+          echo "--ibd-snapshot must be yes or no" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      ;;
+    --ibd-snapshot-dir)
+      require_value "$1" "${2:-}"
+      IBD_SNAPSHOT_DIR="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       NON_INTERACTIVE=1
@@ -2684,6 +2849,7 @@ case "$INSTALL_PROFILE" in
     case "$MODE" in
       native)
         default_prepare_binary_path
+        default_prepare_ibd_snapshot
         ;;
       docker)
         default_prepare_docker_mounts

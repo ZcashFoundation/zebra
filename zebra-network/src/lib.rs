@@ -180,6 +180,10 @@ pub use crate::{
     protocol::external::canonical_peer_addr,
 };
 
+// The inbound service's request envelope: `zebra_network::init` requires an
+// inbound service that takes requests tagged with the calling peer's address.
+pub use tower_fair_buffer::Tagged;
+
 pub use crate::{
     address_book::AddressBook,
     address_book_peers::AddressBookPeers,
@@ -187,7 +191,7 @@ pub use crate::{
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
-    peer_set::{init, init_with_block_gossip_peer_ips},
+    peer_set::{init, init_with_block_gossip_peer_ips, PeerSetStatus},
     policies::RetryLimit,
     protocol::{
         external::{Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},
