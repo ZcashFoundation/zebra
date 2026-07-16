@@ -61,15 +61,17 @@ compat-zcashd-prepare:
 		test -x "$(ZCASHD_COMPAT_EXTRACT_DIR)/bin/zcashd"; \
 	fi
 
-compat-docker-build: compat-zcashd-prepare
+# The runtime-zcashd-compat stage downloads and hash-verifies the sidecar
+# zcashd itself, so no build context or preparation step is needed. Override
+# the baked-in sidecar release with ZCASHD_COMPAT_IMAGE_ARCHIVE_URL/SHA256.
+ZCASHD_COMPAT_IMAGE_ARCHIVE_URL ?=
+ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256 ?=
+
+compat-docker-build:
 	@echo "Building Docker zcashd-compat image..."
-	@set -eu; \
-	context_dir="$(ZCASHD_COMPAT_BUILD_CONTEXT)"; \
-	if [ -z "$$context_dir" ]; then \
-		context_dir="$(ZCASHD_COMPAT_EXTRACT_DIR)"; \
-	fi; \
 	docker build -f ./docker/Dockerfile --target runtime-zcashd-compat \
-		--build-context "zcashd_compat=$$context_dir" \
+		$(if $(ZCASHD_COMPAT_IMAGE_ARCHIVE_URL),--build-arg "ZCASHD_COMPAT_ARCHIVE_URL=$(ZCASHD_COMPAT_IMAGE_ARCHIVE_URL)") \
+		$(if $(ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256),--build-arg "ZCASHD_COMPAT_ARCHIVE_SHA256=$(ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256)") \
 		--tag "$(ZEBRA_DOCKER_IMAGE)" .
 
 compat-docker-start:

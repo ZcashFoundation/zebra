@@ -11,7 +11,7 @@ help:
 	@echo ""
 	@echo "  zcashd-compat:"
 	@echo "  compat-docker-build              Build Docker zcashd-compat image"
-	@echo "  compat-zcashd-prepare            Fetch/verify zcashd-compat artifact for Docker build"
+	@echo "  compat-zcashd-prepare            Fetch/verify the zcashd-compat sidecar artifact (for tests)"
 	@echo "  compat-docker-start              Start Docker zcashd-compat with mounted snapshots"
 	@echo "  compat-zebrad-start-supervised   Start zebrad with zcashd supervision enabled"
 	@echo "  compat-zebrad-start-unsupervised Start zebrad with zcashd supervision disabled"
