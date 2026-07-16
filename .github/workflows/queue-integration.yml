@@ -1,0 +1,58 @@
+name: Queue Integration
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  queue-integration:
+    name: queue-integration
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action != 'closed' &&
+      startsWith(github.head_ref, 'mergify/merge-queue/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+        with:
+          toolchain: 1.97.0
+          cache-key: queue-integration-1.97.0-default-release-binaries
+          cache-on-failure: true
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
+        with:
+          tool: cargo-nextest
+      - uses: ./.github/actions/setup-zebra-build
+
+      - name: Resolve locked workspace dependency graph
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Compile release workspace
+        run: cargo build --workspace --locked --release --features default-release-binaries
+
+      - name: Run cross-crate integration tests
+        run: |
+          cargo nextest run \
+            --profile ci \
+            --locked \
+            --release \
+            --features default-release-binaries \
+            --package zebrad \
+            --test zebrad-tests \
+            --filter-expr 'test(=integration::regtest::validate_regtest_genesis_block) or test(=integration::network::zebra_zcash_listener_conflict) or test(=integration::rpc::rpc_endpoint_single_thread)'
