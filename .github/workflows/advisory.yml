@@ -1,4 +1,4 @@
-name: Advisory Rust Checks
+name: Advisory Checks
 
 on:
   schedule:
@@ -20,6 +20,33 @@ env:
   COLORBT_SHOW_HIDDEN: 1
 
 jobs:
+  link-check:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - name: Restore Lychee cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.sha }}
+          restore-keys: cache-lychee-
+      - name: Check links
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 #v2.8.0
+        with:
+          args: >-
+            --verbose
+            --no-progress
+            --cache
+            --config .lychee.toml
+            "**/*.md"
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   beta-clippy:
     name: Beta Clippy / ${{ matrix.type }}
     runs-on: ubuntu-latest
@@ -129,7 +156,13 @@ jobs:
 
   failure-issue:
     name: Open or update an issue for advisory failures
-    needs: [beta-clippy, beta-unit-tests, nightly-docs, nightly-features, unused-deps]
+    needs:
+      - link-check
+      - beta-clippy
+      - beta-unit-tests
+      - nightly-docs
+      - nightly-features
+      - unused-deps
     if: failure()
     runs-on: ubuntu-latest
     permissions:
@@ -138,7 +171,7 @@ jobs:
     steps:
       - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
-          title-template: "{{refname}} advisory Rust checks failed: {{eventName}} in {{workflow}}"
+          title-template: "{{refname}} advisory checks failed: {{eventName}} in {{workflow}}"
           label-name: S-ci-fail-auto-issue
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
