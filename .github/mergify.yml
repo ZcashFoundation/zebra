@@ -82,14 +82,14 @@ priority_rules:
     conditions:
       # is labeled with Critical priority
       - 'label~=^P-Critical'
-    allow_checks_interruption: true
+    allow_checks_interruption: false
     priority: high
 
   - name: low
     conditions:
       # is labeled with Optional or Low priority
       - 'label~=^P-(Optional|Low)'
-    allow_checks_interruption: true
+    allow_checks_interruption: false
     priority: low
 merge_protections_settings:
   reporting_method: check-runs
