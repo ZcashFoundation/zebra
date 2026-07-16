@@ -1,4 +1,5 @@
-# Required PR gate verifying that a PR's conventional-commit declaration is consistent with its code and changelog entries; changelog drafting lives in changelog-command.yml.
+# Required source-PR gate verifying that a conventional-commit declaration is consistent with its code and changelog entries.
+# Mergify queue candidates skip these policy jobs because their generated metadata does not describe a source change.
 name: PR Gate
 
 on:
@@ -32,23 +33,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      queue_candidate: ${{ steps.classify.outputs.queue_candidate || 'false' }}
       semver: ${{ steps.filter.outputs.semver || 'true' }}
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Identify Mergify queue candidates
+        id: classify
         if: github.event_name == 'pull_request'
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          queue_candidate=false
+          if [[ "$PR_AUTHOR" == "mergify[bot]" ]] &&
+             [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] &&
+             [[ "$HEAD_REF" == mergify/merge-queue/* ]]; then
+            queue_candidate=true
+          fi
+          echo "queue_candidate=$queue_candidate" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
         with:
           filters: .github/path-filters.yml
       - name: Read the declaration from the PR title
         id: title
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -78,9 +96,13 @@ jobs:
 
   semver-checks:
     needs: changes
-    # Real work runs only on pull requests that change Rust and do not already declare a break
-    # with `!`. A declared break is allowed through; release-plz majors the version at release.
-    if: github.event_name == 'pull_request' && needs.changes.outputs.semver == 'true' && needs.changes.outputs.breaking == 'false'
+    # Real work runs only on contributor pull requests that change Rust and do not already declare
+    # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.queue_candidate != 'true' &&
+      needs.changes.outputs.semver == 'true' &&
+      needs.changes.outputs.breaking == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -109,7 +131,9 @@ jobs:
 
   changelog-gate:
     needs: changes
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.queue_candidate != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
