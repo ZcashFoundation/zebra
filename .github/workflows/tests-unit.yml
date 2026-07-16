@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust-version: [stable, beta]
+        rust-version: [1.97.0]
         features: [default-release-binaries]
 
     steps:
@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
