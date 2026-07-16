@@ -66,4 +66,4 @@ cosign verify docker.io/zfnd/zebra:<version> \
 
 - Reproducible Builds: <https://reproducible-builds.org/docs/>
 - SLSA v1.0: <https://slsa.dev/spec/v1.0/levels>
-- BuildKit reproducibility: <https://docs.docker.com/build/building/reproducible-builds/>
+- BuildKit reproducibility: <https://docs.docker.com/build/ci/github-actions/reproducible-builds/>
