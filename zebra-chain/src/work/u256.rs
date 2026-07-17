@@ -5,6 +5,8 @@
 #![allow(clippy::range_plus_one)]
 #![allow(clippy::fallible_impl_from)]
 #![allow(missing_docs)]
+// `uint`'s macro expansion trips this lint on newer nightlies: https://github.com/rust-lang/rust/issues/79813
+#![allow(semicolon_in_expressions_from_macros)]
 
 use uint::construct_uint;
 
