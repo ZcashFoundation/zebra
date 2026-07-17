@@ -50,7 +50,7 @@ use crate::{
     serialization::ZcashSerialize,
     sprout,
     transparent::{
-        self, outputs_from_utxos,
+        self,
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::{ValueBalance, ValueBalanceError},
@@ -1562,7 +1562,16 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+        let outputs = self
+            .spent_outpoints()
+            .filter_map(|outpoint| {
+                utxos
+                    .get(&outpoint)
+                    .map(|utxo| (outpoint, utxo.output.clone()))
+            })
+            .collect();
+
+        self.value_balance_from_outputs(&outputs)
     }
 
     /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
