@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Checking the remaining transaction value of a block is no longer quadratic in the number of
   transactions (GHSA-4g24-549m-hp75).
+- The state service now accepts children of a block that was accepted and has the same
+  block header hash (due to [ZIP-244](https://zips.z.cash/zip-0244)) as a block that
+  was previously rejected
+  ([GHSA-8gxx-hc65-vv82](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82)).
 
 ## [10.1.0] - 2026-07-10
 

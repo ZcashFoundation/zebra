@@ -6,9 +6,15 @@ use tower::ServiceExt;
 use zebra_chain::{
     block::{genesis::regtest_genesis_block, Height},
     parameters::{testnet::ConfiguredActivationHeights, Network},
+    serialization::ZcashSerialize as _,
+    transparent,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+use zebra_rpc::{
+    client::{SubmitBlockErrorResponse, SubmitBlockResponse},
+    config::mining::ExtraCoinbaseData,
+    server::OPENED_RPC_ENDPOINT_MSG,
+};
 use zebra_test::{args, prelude::*};
 
 use crate::common::{
@@ -52,6 +58,162 @@ async fn validate_regtest_genesis_block() {
 #[tokio::test]
 async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     crate::common::regtest::submit_blocks_test().await?;
+    Ok(())
+}
+
+/// A rejected block body must not poison the children of a later valid block with the same header
+/// hash.
+///
+/// This is a regression test for [GHSA-8gxx-hc65-vv82][ghsa-8gxx]. Under the transaction digest
+/// scheme defined by [ZIP-244][zip-244], two different block bodies can share the same header hash.
+/// `zebra-state` previously retained the contextual validation error from the poisoned body and
+/// incorrectly propagated it to children of the later valid block, causing them to be incorrectly
+/// rejected.
+///
+/// [ghsa-8gxx]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82
+/// [zip-244]: https://zips.z.cash/zip-0244
+#[tokio::test]
+async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()> {
+    const EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+    config.mining.extra_coinbase_data =
+        Some(ExtraCoinbaseData::try_from(EXTRA_COINBASE_DATA.to_owned())?);
+
+    let mut block_builder = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for expected_height in 1..=4 {
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height.0, expected_height);
+        client.submit_block(block.clone()).await?;
+        blocks.push(block);
+    }
+
+    block_builder.kill(false)?;
+    let output = block_builder.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+    client.submit_block(blocks[0].clone()).await?;
+    client.submit_block(blocks[1].clone()).await?;
+
+    let valid_block = blocks[2].clone();
+
+    let mut poisoned_block = valid_block.clone();
+    let coinbase = Arc::make_mut(
+        poisoned_block
+            .transactions
+            .first_mut()
+            .expect("block templates contain a coinbase transaction"),
+    );
+    let transparent::Input::Coinbase { data, .. } = coinbase
+        .inputs_mut()
+        .first_mut()
+        .expect("coinbase transactions contain a transparent input")
+    else {
+        panic!("the first coinbase transaction input must be a coinbase input");
+    };
+    assert!(
+        data.ends_with(EXTRA_COINBASE_DATA.as_bytes()),
+        "the coinbase transaction must contain the configured extra data"
+    );
+    let last_data_byte = data
+        .last_mut()
+        .expect("configured extra coinbase data is non-empty");
+    *last_data_byte = b'a';
+
+    assert_eq!(
+        poisoned_block.hash(),
+        valid_block.hash(),
+        "changing a NU5 coinbase scriptSig must not change the block header hash"
+    );
+
+    let poisoned_block_data = hex::encode(poisoned_block.zcash_serialize_to_vec()?);
+    let poisoned_response: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{poisoned_block_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert!(
+        matches!(poisoned_response, SubmitBlockResponse::ErrorResponse(_)),
+        "the poisoned block body must be rejected"
+    );
+
+    // The rejected hash is still marked as sent until the state service drains the write task's
+    // rejection notification. For now this same-hash block is considered a duplicate.
+    let valid_block_data = hex::encode(valid_block.zcash_serialize_to_vec()?);
+    let first_valid_response: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{valid_block_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        first_valid_response,
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Duplicate),
+        "the first valid block submission must wait for the rejected hash to be drained"
+    );
+
+    // The child submission below triggers another state request and drains the previous
+    // notification, which means the block can then be resubmitted.
+    let valid_child = blocks[3].clone();
+    let valid_child_data = hex::encode(valid_child.zcash_serialize_to_vec()?);
+    let submit_child = client.json_result_from_call::<SubmitBlockResponse>(
+        "submitblock",
+        format!(r#"["{valid_child_data}"]"#),
+    );
+
+    let resubmit_valid_block = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        client
+            .json_result_from_call::<SubmitBlockResponse>(
+                "submitblock",
+                format!(r#"["{valid_block_data}"]"#),
+            )
+            .await
+    };
+    let (valid_child_response, valid_block_response) =
+        tokio::join!(submit_child, resubmit_valid_block);
+    let valid_child_response = valid_child_response.map_err(|err| eyre!(err))?;
+    let valid_block_response = valid_block_response.map_err(|err| eyre!(err))?;
+
+    assert_eq!(valid_block_response, SubmitBlockResponse::Accepted);
+    assert_eq!(
+        valid_child_response,
+        SubmitBlockResponse::Accepted,
+        "the valid child must not inherit the rejected block body's contextual error"
+    );
+    assert_eq!(
+        client.blockchain_info().await?.blocks(),
+        Height(4),
+        "the valid child must not inherit the rejected block body error"
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
     Ok(())
 }
 
@@ -152,7 +314,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 ConfiguredFundingStreams,
             },
         },
-        serialization::ZcashSerialize,
         work::difficulty::U256,
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
@@ -163,8 +324,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_rpc::{
         client::{
             BlockTemplateResponse, DefaultRoots, GetBlockTemplateParameters,
-            GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
-            SubmitBlockResponse, TransactionTemplate,
+            GetBlockTemplateRequestMode, GetBlockTemplateResponse, TransactionTemplate,
         },
         fetch_chain_info,
         methods::{RpcImpl, RpcServer},
@@ -513,7 +673,6 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
-        serialization::ZcashSerialize,
         work::difficulty::U256,
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
@@ -524,7 +683,6 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
     use zebra_rpc::{
         client::{
             GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
-            SubmitBlockResponse,
         },
         methods::{RpcImpl, RpcServer},
         proposal_block_from_template, SubmitBlockChannel,
