@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   [zakura](https://github.com/zakura-core/zakura) authors for the major part of
   this implementation.
 
+### Fixed
+
+- The `docker-supervised` mode of `scripts/install-zebra.sh` now prints a
+  `docker run` command that works with the published Zebra Docker image: it sets
+  `zcashd_source = "embedded"` so `zebrad` downloads the SHA256-pinned sidecar
+  `zcashd` into the mounted state cache at first start. Previously the printed
+  command only worked on images with a vendored `zcashd` binary and failed at
+  startup otherwise. Images with a vendored `zcashd` keep using it without a
+  download ([#11008](https://github.com/ZcashFoundation/zebra/pull/11008)).
+
 ## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
 
 ### Added
