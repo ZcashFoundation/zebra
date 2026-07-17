@@ -1,6 +1,6 @@
 # Automated checkpoint updates.
 #
-# Triggered when the integration tests complete and both checkpoint artifacts exist.
+# Triggered whenever the integration tests complete; requires both checkpoint artifacts.
 # Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
 # appends new entries to the checkpoint files, validates them, and opens a PR.
 #
