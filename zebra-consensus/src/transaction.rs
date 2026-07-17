@@ -960,7 +960,7 @@ where
     /// checked during contextual validation in the state (see #2336).
     ///
     /// Returns `Ok(())` if every transparent coinbase output spent by the transaction is
-    /// mature and valid for the given height, or a [`TransactionError`] if the transaction
+    /// mature and valid for the request height, or a [`TransactionError`] if the transaction
     /// spends transparent coinbase outputs that are immature and invalid for the request height.
     pub fn check_maturity_height(
         tx: Arc<Transaction>,
@@ -968,7 +968,13 @@ where
         network: &Network,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<(), TransactionError> {
-        check::tx_transparent_coinbase_spends_maturity(network, tx, height, spent_utxos)
+        check::tx_transparent_coinbase_spends_maturity(
+            network,
+            tx,
+            height,
+            Arc::new(HashMap::new()),
+            spent_utxos,
+        )
     }
 
     /// Dispatches version-specific async verification checks for `tx`.
