@@ -27,6 +27,14 @@ env:
 
 jobs:
   changes:
+    # Docker validation runs on source PRs, not temporary Mergify queue candidates.
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.user.login != 'mergify[bot]' ||
+        github.event.pull_request.head.repo.full_name != github.repository ||
+        !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -210,7 +218,7 @@ jobs:
 
   test-docker:
     runs-on: ubuntu-latest
-    if: always()
+    if: always() && needs.changes.result != 'skipped'
     needs:
       - changes
       - build-docker-image
