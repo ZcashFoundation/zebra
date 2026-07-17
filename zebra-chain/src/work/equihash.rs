@@ -7,6 +7,7 @@ use serde_big_array::BigArray;
 
 use crate::{
     block::Header,
+    parameters::Network,
     serialization::{
         zcash_deserialize_bytes_external_count, zcash_serialize_bytes, CompactSizeMessage,
         SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
@@ -109,6 +110,20 @@ impl Solution {
             _unexpected_len => Err(SerializationError::Parse(
                 "incorrect equihash solution size",
             )),
+        }
+    }
+
+    /// Returns the size of the serialized solution on `network`, in bytes,
+    /// including its CompactSize length prefix.
+    ///
+    /// The solution size is constant per network, so this is also constant per network.
+    pub fn serialized_size(network: &Network) -> usize {
+        if network.is_regtest() {
+            // The 36-byte Regtest solution has a 1-byte CompactSize length prefix.
+            1 + REGTEST_SOLUTION_SIZE
+        } else {
+            // The 1344-byte solution has a 3-byte CompactSize length prefix (`0xfd` + `u16`).
+            3 + SOLUTION_SIZE
         }
     }
 
