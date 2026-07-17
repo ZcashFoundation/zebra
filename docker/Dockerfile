@@ -40,8 +40,8 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-    libclang-dev=1:19.0-63 \
-    protobuf-compiler=3.21.12-11 \
+    libclang-dev=1:19.0-* \
+    protobuf-compiler=3.21.12-* \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 # Build arguments and variables
@@ -92,7 +92,7 @@ ARG CARGO_TARGET_DIR
 
 # Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-1+b1 curl=8.14.1-2+deb13u3 && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-* curl=8.14.1-* && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -209,8 +209,8 @@ ENV HOME=${HOME}
 # Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
-    adduser=3.152 \
-    curl=8.14.1-2+deb13u3 \
+    adduser=3.152* \
+    curl=8.14.1-* \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
