@@ -5,7 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
+
+### Added
+
+- Added the `getstandardfee` RPC, a parameterless method returning the
+  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
+  zatoshis) with a `version` field for future dynamic fee estimation
+  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717)).
 
 ### Security
 
@@ -73,10 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Added the `getstandardfee` RPC, a parameterless method returning the
-  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
-  zatoshis) with a `version` field for future dynamic fee estimation
-  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717))
 - Support for the NU6.3 "Ironwood" shielded pool and v6 transaction format,
   activating on Testnet at height 4,134,000. The consensus parameters (v6 version
   group ID, consensus branch ID, and Testnet activation height) match
