@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tx`, `height`, `network`, and `spent_utxos` directly instead of `&Request`.
   ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843))
 
+## [12.0.1] - 2026-07-17
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.0`.
+
 ## [12.0.0] - 2026-07-17
 
 ### Changed
