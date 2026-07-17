@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `methods::RpcServer::get_standard_fee`, the `getstandardfee` RPC returning the ZIP-317
   marginal fee ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717)).
 
+### Changed
+
+- Requires `zebra-state` 11.0.0 and `zebra-consensus` 12.0.0, whose types appear in this
+  crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+
 ### Fixed
 
 - Block template transaction selection now reserves space for the block header and the

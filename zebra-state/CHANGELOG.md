@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [10.1.1] - 2026-07-17
+## [11.0.0] - 2026-07-17
+
+### Changed
+
+- Major version bump for the rocksdb 0.24 upgrade. `rocksdb::Error` is reachable through
+  `ZebraDb`'s public API, so the rocksdb 0.22 → 0.24 bump is a breaking change; 10.1.0
+  shipped it without a major and is yanked. Downstream code pinning an older rocksdb must
+  upgrade.
 
 ### Security
 
