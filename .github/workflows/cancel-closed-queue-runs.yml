@@ -1,0 +1,68 @@
+name: Cancel Closed Merge Queue Runs
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  cancel-runs:
+    if: >-
+      github.event.pull_request.user.login == 'mergify[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel active runs for the closed queue candidate
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const activeStatuses = new Set([
+              'in_progress',
+              'pending',
+              'queued',
+              'requested',
+              'waiting',
+            ]);
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch,
+                event: 'pull_request',
+                per_page: 100,
+              },
+            );
+
+            const activeRuns = runs.filter(
+              (run) => run.id !== context.runId && activeStatuses.has(run.status),
+            );
+
+            for (const run of activeRuns) {
+              core.info(`Cancelling ${run.name} run ${run.id} (${run.status})`);
+
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id,
+                });
+              } catch (error) {
+                if (error.status === 409) {
+                  core.info(`Run ${run.id} completed before it could be cancelled`);
+                  continue;
+                }
+
+                throw error;
+              }
+            }
+
+            core.info(`Requested cancellation for ${activeRuns.length} active run(s)`);
