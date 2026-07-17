@@ -318,8 +318,7 @@ pub async fn run(
                     "failed waiting on zcashd-compat zcashd child; \
                      terminating it before restart"
                 );
-                if let Err(error) =
-                    terminate_child(&mut child, config.shutdown_grace_period).await
+                if let Err(error) = terminate_child(&mut child, config.shutdown_grace_period).await
                 {
                     // The child's state is unknown and reaping was not
                     // confirmed, so refuse to start a second instance. The
