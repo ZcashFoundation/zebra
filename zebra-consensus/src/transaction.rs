@@ -958,14 +958,14 @@ where
     ///
     /// This check applies only to mempool transactions. Block transactions are
     /// checked during contextual validation in the state (see #2336).
-    /// 
+    ///
     /// Calls [`check::tx_transparent_coinbase_spends_maturity`] with an empty
     /// `block_new_outputs` map, since mempool transactions have no block context.
     ///
     /// Returns `Ok(())` if every transparent coinbase output spent by the transaction is
     /// mature and valid for the given height, or a [`TransactionError`] if the transaction
     /// spends transparent coinbase outputs that are immature and invalid for the given height.
-    pub fn check_maturity_height(
+    fn check_maturity_height(
         tx: Arc<Transaction>,
         height: block::Height,
         network: &Network,
