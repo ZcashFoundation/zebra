@@ -125,6 +125,7 @@ use types::{
     get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
+    get_standard_fee::GetStandardFeeResponse,
     long_poll::LongPollInput,
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
@@ -646,6 +647,16 @@ pub trait Rpc {
     /// - No notes
     #[method(name = "z_validateaddress")]
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
+
+    /// Returns the recommended standard fee per logical action, in zatoshis.
+    ///
+    /// Currently returns a static fee with `version` 0; this will be replaced by
+    /// a dynamic estimate without changing the parameters or result shape.
+    ///
+    /// method: post
+    /// tags: wallet
+    #[method(name = "getstandardfee")]
+    async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
@@ -2856,6 +2867,14 @@ where
         let network = self.network.clone();
 
         z_validate_address(network, raw_address)
+    }
+
+    async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
+        use zebra_chain::transaction::zip317::MARGINAL_FEE;
+
+        const VERSION: u32 = 0;
+
+        Ok(GetStandardFeeResponse::new(MARGINAL_FEE, VERSION))
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {

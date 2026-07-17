@@ -11,19 +11,22 @@ use futures_core::ready;
 use pin_project::pin_project;
 use tower::Service;
 
-use crate::BoxedError;
+use crate::{BoxedError, FallbackPolicy, OnError};
 
 /// Future that completes either with the first service's successful response, or
 /// with the second service's response.
 #[pin_project]
-pub struct ResponseFuture<S1, S2, Request>
+pub struct ResponseFuture<S1, S2, Request, F = OnError>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    F: FallbackPolicy<<S1 as Service<Request>>::Response>,
+    S1::Error: Into<BoxedError>,
     S2::Error: Into<BoxedError>,
 {
     #[pin]
     state: ResponseState<S1, S2, Request>,
+    policy: F,
 }
 
 #[pin_project(project_replace = __ResponseStateProjectionOwned, project = ResponseStateProj)]
@@ -51,23 +54,28 @@ where
     Tmp,
 }
 
-impl<S1, S2, Request> ResponseFuture<S1, S2, Request>
+impl<S1, S2, Request, F> ResponseFuture<S1, S2, Request, F>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    F: FallbackPolicy<<S1 as Service<Request>>::Response>,
+    S1::Error: Into<BoxedError>,
     S2::Error: Into<BoxedError>,
 {
-    pub(crate) fn new(fut: S1::Future, req: Request, svc2: S2) -> Self {
+    pub(crate) fn new(fut: S1::Future, req: Request, svc2: S2, policy: F) -> Self {
         ResponseFuture {
             state: ResponseState::PollResponse1 { fut, req, svc2 },
+            policy,
         }
     }
 }
 
-impl<S1, S2, Request> Future for ResponseFuture<S1, S2, Request>
+impl<S1, S2, Request, F> Future for ResponseFuture<S1, S2, Request, F>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    F: FallbackPolicy<<S1 as Service<Request>>::Response>,
+    S1::Error: Into<BoxedError>,
     S2::Error: Into<BoxedError>,
 {
     type Output = Result<<S1 as Service<Request>>::Response, BoxedError>;
@@ -83,10 +91,11 @@ where
         // only returns Pending when a future or service returns Pending.
         loop {
             match this.state.as_mut().project() {
-                ResponseStateProj::PollResponse1 { fut, .. } => match ready!(fut.poll(cx)) {
-                    Ok(rsp) => return Poll::Ready(Ok(rsp)),
-                    Err(_) => {
-                        tracing::debug!("got error from svc1, retrying on svc2");
+                ResponseStateProj::PollResponse1 { fut, .. } => {
+                    let result = ready!(fut.poll(cx)).map_err(Into::into);
+
+                    if this.policy.should_fallback(&result) {
+                        tracing::debug!("fallback policy selected svc2");
                         if let __ResponseStateProjectionOwned::PollResponse1 { req, svc2, .. } =
                             this.state.as_mut().project_replace(ResponseState::Tmp)
                         {
@@ -94,8 +103,10 @@ where
                         } else {
                             unreachable!();
                         }
+                    } else {
+                        return Poll::Ready(result);
                     }
-                },
+                }
                 ResponseStateProj::PollReady2 { svc2, .. } => match ready!(svc2.poll_ready(cx)) {
                     Err(e) => return Poll::Ready(Err(e.into())),
                     Ok(()) => {
@@ -119,10 +130,12 @@ where
     }
 }
 
-impl<S1, S2, Request> Debug for ResponseFuture<S1, S2, Request>
+impl<S1, S2, Request, F> Debug for ResponseFuture<S1, S2, Request, F>
 where
     S1: Service<Request>,
     S2: Service<Request, Response = <S1 as Service<Request>>::Response>,
+    F: FallbackPolicy<<S1 as Service<Request>>::Response>,
+    S1::Error: Into<BoxedError>,
     Request: Debug,
     S1::Future: Debug,
     S2: Debug,

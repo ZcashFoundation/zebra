@@ -38,7 +38,21 @@ jobs:
     # Fork PRs do not receive repository secrets on pull_request events.
     # Skip the job on fork PRs; maintainers can still run it manually via
     # workflow_dispatch with the PR number as input.
-    if: ${{ (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) || (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch' }}
+    # Mergify queue candidates reuse the source PR's integration result.
+    if: >-
+      ${{
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.user.login != 'mergify[bot]' ||
+          github.event.pull_request.head.repo.full_name != github.repository ||
+          !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+        ) &&
+        (
+          (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
+          (github.event_name == 'push' && github.ref_name == 'main') ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       # Needed to post a sticky comment on the PR when triggered manually.
