@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "12.0.0"
+version = "12.0.1"
 authors.workspace = true
 description = "Implementation of Zcash consensus checks"
 license.workspace = true
@@ -69,7 +69,7 @@ tower-fallback = { path = "../tower-fallback/", version = "0.2.43" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.1.1" }
 
 zebra-script = { path = "../zebra-script", version = "10.1.1" }
-zebra-state = { path = "../zebra-state", version = "11.0.0" }
+zebra-state = { path = "../zebra-state", version = "11.1.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "9.1.1" }
 zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
 

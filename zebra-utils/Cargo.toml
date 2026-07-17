@@ -1,6 +1,6 @@
 [package]
 name = "zebra-utils"
-version = "9.1.1"
+version = "9.1.2"
 authors.workspace = true
 description = "Developer tools for Zebra maintenance and testing"
 license.workspace = true
@@ -64,7 +64,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "9.1.1" }
 zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "12.0.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "12.1.0" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
