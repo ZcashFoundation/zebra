@@ -7,13 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
+### Added
 
-- `methods::RpcServer` has a new required `generate_to_address` method, serving the
-  Regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase to a
-  caller-specified address. Downstream implementations of the trait must add it;
-  `RpcImpl` users are unaffected
-  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+- `methods::RpcServer::generate_to_address`, the regtest-only
+  `generatetoaddress` RPC handler that mines a requested number of blocks paying
+  coinbase to a caller-supplied address
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
 
 ## [12.0.0] - 2026-07-17
 

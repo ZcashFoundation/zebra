@@ -758,9 +758,15 @@ pub trait Rpc {
     /// tags: generating
     async fn generate_to_address(
         &self,
-        num_blocks: u32,
-        address: String,
-    ) -> Result<Vec<GetBlockHashResponse>>;
+        _num_blocks: u32,
+        _address: String,
+    ) -> Result<Vec<GetBlockHashResponse>> {
+        Err(ErrorObject::borrowed(
+            ErrorCode::MethodNotFound.code(),
+            "generatetoaddress is not implemented",
+            None,
+        ))
+    }
 
     #[method(name = "addnode")]
     /// Add or remove a node from the address book.
