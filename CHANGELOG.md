@@ -5,6 +5,30 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- New regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase
+  to a caller-specified address, instead of the configured `mining.miner_address`.
+  This lets a test harness fund several wallets from one node; it is used by the
+  zcashd wallet-conformance harness
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+- New _EXPERIMENTAL_ zcashd-compat mode (`zebrad start --zcashd-compat` or
+  `[zcashd_compat]` config section) for operators migrating from `zcashd` while
+  keeping its wallet and RPC surface: Zebra faces the Zcash network and always
+  includes the configured sidecar peers in block gossip (reserving them an
+  inbound connection slot), while a hard-locked `zcashd` wallet build runs as a
+  P2P sidecar with a single outbound connection to the local Zebra node. Zebra
+  can optionally download (SHA256-pinned), spawn, and supervise the sidecar
+  (`manage_zcashd = true`). Includes an interactive installer
+  (`scripts/install-zebra.sh`) with binary, Docker, and build-from-source modes,
+  a `runtime-zcashd-compat` Docker image stage, make targets, a sync-check
+  script, and a Zebra Book chapter (`user/zcashd-compat.md`)
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)). Credits to
+  [zakura](https://github.com/zakura-core/zakura) authors for the major part of
+  this implementation.
+
 ## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
 
 ### Added

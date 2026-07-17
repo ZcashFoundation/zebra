@@ -240,3 +240,32 @@ CMD ["zebrad"]
 # - with mining enabled using S-nomp and `nheqminer`.
 #
 # We can add further functionality to this stage for further purposes.
+
+# zcashd-compat runtime image: the runtime image plus the hash-pinned zcashd
+# wallet sidecar (and its RPC client) from the ZcashFoundation/zcashd
+# `zebra-compat` release, for the supervised sidecar configuration
+# (`zebrad start --zcashd-compat` with `manage_zcashd = true`).
+#
+# The sidecar release only ships x86_64 Linux binaries, so this stage is
+# amd64-only (CI already builds non-`runtime` targets for amd64 only).
+# Override the ARGs to bake in a different sidecar release.
+FROM runtime AS runtime-zcashd-compat
+
+ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz"
+ARG ZCASHD_COMPAT_ARCHIVE_SHA256="b861ea94215647a69a944ded7c9d6c7c3dfd836e54e3e194103242935e6879f2"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# ca-certificates is needed for the HTTPS download: curl is installed above
+# with --no-install-recommends, which skips it.
+RUN apt-get -q update && \
+    apt-get -q install -y --no-install-recommends \
+    ca-certificates=20250419 \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache \
+    && curl -fsSL "${ZCASHD_COMPAT_ARCHIVE_URL}" -o /tmp/zcashd.tar.gz \
+    && echo "${ZCASHD_COMPAT_ARCHIVE_SHA256}  /tmp/zcashd.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/zcashd.tar.gz -C /tmp ./bin/zcashd ./bin/zcash-cli \
+    && install -m 0755 /tmp/bin/zcashd /tmp/bin/zcash-cli /usr/local/bin/ \
+    && rm -rf /tmp/zcashd.tar.gz /tmp/bin \
+    && /usr/local/bin/zcashd --version \
+    && /usr/local/bin/zcash-cli --version

@@ -52,6 +52,20 @@ slow-timeout = { period = "30m", terminate-after = 2 }
 
 [test-groups]
 serial-state = { max-threads = 1 }
+# zcashd-compat integration tests each spawn a zebrad + zcashd on
+# bind-probed-then-released ports, so they must never run concurrently, even
+# under a parallel profile invoked with --run-ignored=all.
+serial-zcashd-compat = { max-threads = 1 }
+
+# Force zcashd-compat integration tests serial in every profile, so a parallel
+# --run-ignored=all run cannot collide on their released RPC/P2P ports.
+[[profile.default.overrides]]
+filter = 'test(~integration::zcashd_compat::)'
+test-group = 'serial-zcashd-compat'
+
+[[profile.ci.overrides]]
+filter = 'test(~integration::zcashd_compat::)'
+test-group = 'serial-zcashd-compat'
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test
@@ -103,3 +117,29 @@ slow-timeout = { period = "90m", terminate-after = 1 }
 
 [profile.check-no-git-dependencies]
 default-filter = 'test(=unit::end_of_support::check_no_git_dependencies)'
+
+# --- zcashd-compat Profiles ---
+
+[profile.zcashd-compat-integration]
+# Run zcashd-compat tests one at a time to avoid port conflicts and resource exhaustion.
+test-threads = 1
+slow-timeout = { period = "15m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'
+
+[profile.zcashd-compat-soak]
+# Long-running local soak for the reorg churn stress test.
+test-threads = 1
+slow-timeout = { period = "4h", terminate-after = 1 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(=integration::zcashd_compat::zcashd_compat_reorg_churn)'
+
+[profile.zcashd-compat-external]
+# External mode: connect to pre-running mainnet/testnet zebrad + zcashd.
+# Set TEST_ZCASHD_COMPAT_NETWORK, TEST_ZEBRAD_RPC_ADDR,
+# TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
+# No block mining — 5 minutes per test is sufficient.
+test-threads = 1
+slow-timeout = { period = "5m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'
