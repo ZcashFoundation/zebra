@@ -140,13 +140,26 @@ impl Header {
         Hash::from(self)
     }
 
+    /// The serialized size of a block header on Mainnet and Testnet (except Regtest), in bytes:
+    /// the fields before the nonce, the 32-byte nonce, and the length-prefixed solution.
+    pub const SERIALIZED_SIZE: usize = Solution::INPUT_LENGTH + 32 + Solution::SERIALIZED_SIZE;
+
+    /// The serialized size of a block header on Regtest, in bytes:
+    /// the fields before the nonce, the 32-byte nonce, and the length-prefixed solution.
+    pub const REGTEST_SERIALIZED_SIZE: usize =
+        Solution::INPUT_LENGTH + 32 + Solution::REGTEST_SERIALIZED_SIZE;
+
     /// Returns the size of a serialized block header on `network`, in bytes.
     ///
     /// Every header field has a fixed size, except the Equihash solution,
-    /// whose size is constant per network, so this is also constant per network.
+    /// whose size is constant per network, so this is also constant per network:
+    /// [`Self::REGTEST_SERIALIZED_SIZE`] on Regtest, [`Self::SERIALIZED_SIZE`] everywhere else.
     pub fn serialized_size(network: &Network) -> usize {
-        // The fields before the nonce, the 32-byte nonce, and the length-prefixed solution.
-        Solution::INPUT_LENGTH + 32 + Solution::serialized_size(network)
+        if network.is_regtest() {
+            Self::REGTEST_SERIALIZED_SIZE
+        } else {
+            Self::SERIALIZED_SIZE
+        }
     }
 }
 
