@@ -164,6 +164,12 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Restore main branch context
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          git switch --force-create main "${TARGET_SHA}"
+          git branch --set-upstream-to=origin/main main
       - name: Validate release app token
         if: steps.app-token.outputs.token == ''
         run: |
