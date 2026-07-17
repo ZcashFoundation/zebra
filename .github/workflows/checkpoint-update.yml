@@ -1,6 +1,6 @@
 # Automated checkpoint updates.
 #
-# Triggered when the weekly integration tests complete successfully.
+# Triggered when the integration tests complete and both checkpoint artifacts exist.
 # Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
 # appends new entries to the checkpoint files, validates them, and opens a PR.
 #
@@ -15,7 +15,7 @@ on:
     types: [completed]
     branches: [main]
 
-  # Manual trigger for testing; resolves the latest successful integration test run automatically
+  # Manual trigger for testing; resolves the latest completed integration test run automatically
   workflow_dispatch:
 
 permissions: {}
@@ -24,9 +24,6 @@ jobs:
   update-checkpoints:
     name: Update checkpoint files
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     permissions:
       actions: read
       contents: read
@@ -51,7 +48,7 @@ jobs:
 
       # Resolve the integration test run ID.
       # For workflow_run: use the triggering run directly.
-      # For workflow_dispatch: find the latest successful run via the API.
+      # For workflow_dispatch: find the latest completed run via the API.
       - name: Resolve integration test run ID
         id: resolve-run
         env:
@@ -68,7 +65,7 @@ jobs:
             RUN_ID=$(gh run list \
               --workflow "Integration Tests on GCP" \
               --branch main \
-              --status success \
+              --status completed \
               --limit 1 \
               --json databaseId \
               --jq '.[0].databaseId')
@@ -76,7 +73,7 @@ jobs:
           fi
 
           if [ -z "$RUN_ID" ]; then
-            echo "No successful integration test run found"
+            echo "No completed integration test run found"
             exit 1
           fi
 
@@ -86,60 +83,33 @@ jobs:
 
       # Download checkpoint artifacts from the integration test run.
       - name: Download mainnet checkpoint artifact
-        id: mainnet-artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
           name: generate-checkpoints-mainnet-checkpoints
           run-id: ${{ steps.resolve-run.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
 
       - name: Download testnet checkpoint artifact
-        id: testnet-artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
           name: generate-checkpoints-testnet-checkpoints
           run-id: ${{ steps.resolve-run.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
 
-      # The generate-checkpoints-* jobs are skipped when no tip disk exists
-      # (e.g., full sync still in progress) or when the workflow runs in
-      # regenerate/sync-only mode. When skipped, no artifact is produced.
-      - name: Check if any artifacts were downloaded
-        id: check-artifacts
+      - name: Verify required checkpoint artifacts
         run: |
-          HAS_MAINNET="false"
-          HAS_TESTNET="false"
+          for artifact in main-checkpoints.txt test-checkpoints.txt; do
+            if [ ! -f "$artifact" ]; then
+              echo "::error::Required checkpoint artifact file is missing: ${artifact}"
+              exit 1
+            fi
 
-          # Artifact files use the same names as the repo files (new entries only)
-          if [ -f "main-checkpoints.txt" ]; then
-            LINES=$(wc -l < main-checkpoints.txt | tr -d ' ')
-            echo "Mainnet artifact: ${LINES} checkpoint lines"
-            HAS_MAINNET="true"
-          fi
-
-          if [ -f "test-checkpoints.txt" ]; then
-            LINES=$(wc -l < test-checkpoints.txt | tr -d ' ')
-            echo "Testnet artifact: ${LINES} checkpoint lines"
-            HAS_TESTNET="true"
-          fi
-
-          if [ "$HAS_MAINNET" = "false" ] && [ "$HAS_TESTNET" = "false" ]; then
-            echo "No checkpoint artifacts found, skipping update"
-            echo "has_updates=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          {
-            echo "has_mainnet=${HAS_MAINNET}"
-            echo "has_testnet=${HAS_TESTNET}"
-            echo "has_updates=true"
-          } >> "$GITHUB_OUTPUT"
+            LINES=$(wc -l < "$artifact" | tr -d ' ')
+            echo "${artifact}: ${LINES} checkpoint lines"
+          done
 
       # Append new mainnet checkpoints (entries with heights higher than current last)
       - name: Append new mainnet checkpoints
-        if: steps.check-artifacts.outputs.has_mainnet == 'true'
         run: |
           CURRENT_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
           echo "Current last mainnet checkpoint: ${CURRENT_LAST}"
@@ -156,7 +126,6 @@ jobs:
 
       # Append new testnet checkpoints
       - name: Append new testnet checkpoints
-        if: steps.check-artifacts.outputs.has_testnet == 'true'
         run: |
           CURRENT_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
           echo "Current last testnet checkpoint: ${CURRENT_LAST}"
@@ -172,7 +141,6 @@ jobs:
 
       # Validate the updated checkpoint files
       - name: Validate checkpoint files
-        if: steps.check-artifacts.outputs.has_updates == 'true'
         run: |
           .github/scripts/validate-checkpoints.sh "${MAINNET_CHECKPOINTS}"
           .github/scripts/validate-checkpoints.sh "${TESTNET_CHECKPOINTS}"
@@ -180,7 +148,6 @@ jobs:
       # Check if there are actual changes to commit
       - name: Check for changes
         id: changes
-        if: steps.check-artifacts.outputs.has_updates == 'true'
         run: |
           if git diff --quiet; then
             echo "No changes to commit"
@@ -203,7 +170,7 @@ jobs:
             zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
           title: "chore(chain): update checkpoints"
           body: |
-            Automated checkpoint update from the weekly integration test run.
+            Automated checkpoint update from the integration test run.
 
             **Source:** [Integration test run #${{ steps.resolve-run.outputs.run_id }}](${{ steps.resolve-run.outputs.run_url }})
 
