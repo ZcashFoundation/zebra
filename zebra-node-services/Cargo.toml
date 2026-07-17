@@ -1,6 +1,6 @@
 [package]
 name = "zebra-node-services"
-version = "9.1.0"
+version = "9.1.1"
 authors.workspace = true
 description = "The interfaces of some Zebra node services"
 license.workspace = true
@@ -31,7 +31,7 @@ rpc-client = [
 ]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" , version = "11.1.0" }
+zebra-chain = { path = "../zebra-chain" , version = "11.2.0" }
 tower = { workspace = true }
 
 # Optional dependencies
