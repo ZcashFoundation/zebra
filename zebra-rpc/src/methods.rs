@@ -758,9 +758,10 @@ pub trait Rpc {
     /// tags: generating
     async fn generate_to_address(
         &self,
-        _num_blocks: u32,
-        _address: String,
+        num_blocks: u32,
+        address: String,
     ) -> Result<Vec<GetBlockHashResponse>> {
+        let _ = (num_blocks, address);
         Err(ErrorObject::borrowed(
             ErrorCode::MethodNotFound.code(),
             "generatetoaddress is not implemented",
