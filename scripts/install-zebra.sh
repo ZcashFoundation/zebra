@@ -1982,9 +1982,43 @@ compat_prepare_docker_owned_directory() {
   fi
 }
 
+# Prepares a bind-mount datadir without a recursive chown, mirroring the
+# container entrypoint's create_owned_zcashd_datadir (docker/entrypoint.sh). A
+# pre-synced zcashd datadir can be a large tree (blocks/chainstate) that a host
+# zcashd may still use, so re-owning it recursively would be slow and would
+# break native rollback. Only the top-level directory is chowned so the
+# container can create files, and a failure warns instead of aborting -- zcashd
+# surfaces a real error if it truly cannot write.
+compat_prepare_docker_datadir() {
+  local label="$1"
+  local dir="$2"
+  local owner="${ZEBRA_DOCKER_RUNTIME_UID}:${ZEBRA_DOCKER_RUNTIME_GID}"
+
+  if ((DRY_RUN)); then
+    if ((USE_ANSI)); then
+      printf '%s %s\n' "$(style "$CYAN" "[file]")" "$(style "$DIM" "Dry run: would create $label at $dir and chown its top level to $owner")"
+    else
+      printf 'Dry run: would create %s at %s and chown its top level to %s\n' "$label" "$dir" "$owner"
+    fi
+    return
+  fi
+
+  if ! mkdir -p "$dir"; then
+    add_error "failed to create $label for Docker mount: $dir"
+    return
+  fi
+
+  if ! compat_run_privileged_or_current_user chown "$owner" "$dir"; then
+    add_warning "could not chown top level of $label $dir to Docker runtime user $owner; relying on existing permissions"
+  fi
+}
+
 # Both Docker modes bind-mount these directories into containers that run as
 # ZEBRA_DOCKER_RUNTIME_UID:GID, so both need the ownership fixed up -- not just
-# docker-supervised.
+# docker-supervised. The Zebra state directory is Zebra's own data (the
+# container re-owns it on every start anyway), so a recursive chown is fine; the
+# zcashd datadir may be a large, host-shared tree, so only its top level is
+# touched.
 compat_prepare_docker_mounts() {
   case "$MODE" in
     docker-supervised | docker-split-containers) ;;
@@ -1992,7 +2026,7 @@ compat_prepare_docker_mounts() {
   esac
 
   compat_prepare_docker_owned_directory "Zebra state directory" "$ZEBRA_STATE_DIR"
-  compat_prepare_docker_owned_directory "zcashd datadir" "$ZCASHD_DATADIR"
+  compat_prepare_docker_datadir "zcashd datadir" "$ZCASHD_DATADIR"
   finalize_checks
 }
 
@@ -2686,8 +2720,10 @@ case "$INSTALL_PROFILE" in
         default_prepare_binary_path
         ;;
       docker)
-        default_prepare_docker_mounts
+        # Validate/pull the image before touching on-disk ownership: a failed
+        # pull then aborts (via finalize_checks) without having re-owned data.
         default_prepare_docker_image
+        default_prepare_docker_mounts
         ;;
       build-from-source)
         ;;
@@ -2708,15 +2744,19 @@ case "$INSTALL_PROFILE" in
         compat_ensure_zcashd_conf
         ;;
       docker-split-containers)
-        # Bootstrap the standalone zcashd container's conf before compat_prepare_docker_mounts
-        # so its recursive chown to the container runtime user covers the new file.
+        # Validate/pull images before touching on-disk ownership: a failed pull
+        # then aborts (via finalize_checks) without having re-owned operator data.
+        compat_prepare_docker_images
+        # Bootstrap the standalone zcashd container's conf; it lives inside the
+        # datadir, so create it before compat_prepare_docker_mounts sets up the
+        # mount. zcashd only reads the conf, so its owner-agnostic default perms
+        # suffice -- the mount prep no longer recursively re-owns the datadir.
         compat_ensure_zcashd_conf
         compat_prepare_docker_mounts
-        compat_prepare_docker_images
         ;;
       docker-supervised)
-        compat_prepare_docker_mounts
         compat_prepare_docker_images
+        compat_prepare_docker_mounts
         ;;
       build-from-source)
         compat_ensure_zcashd_conf
