@@ -11,7 +11,7 @@ fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 UNITY_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
-ZEBRA_RELEASE_TAG="v6.0.0-zcashd-compat.1"
+ZEBRA_RELEASE_TAG="v6.2.0"
 ZEBRA_VERSION="${ZEBRA_RELEASE_TAG#v}"
 ZEBRA_ARCHIVE="zebrad-${ZEBRA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 ZEBRA_URL="https://github.com/ZcashFoundation/zebra/releases/download/${ZEBRA_RELEASE_TAG}/${ZEBRA_ARCHIVE}"
@@ -22,8 +22,8 @@ ZEBRA_MEMBER="zebrad"
 # tracks the release that published the image, which can differ from the
 # zebrad binary release pinned above. The image bundles zebrad and the
 # hash-pinned zcashd sidecar, so it serves both the plain and compat modes.
-ZEBRA_DOCKER_IMAGE="zfnd/zebra:6.0.0-zcashd-compat.2"
-ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:6.0.0-zcashd-compat.2"
+ZEBRA_DOCKER_IMAGE="zfnd/zebra:6.2.0"
+ZEBRA_COMPAT_DOCKER_IMAGE="zfnd/zebra:6.2.0"
 ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE="zfnd/zebra:zcashd-compat-latest"
 ZEBRA_DEFAULT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/zebra"
 ZEBRA_DOCKER_RUNTIME_UID=10001
