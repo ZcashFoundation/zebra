@@ -136,20 +136,20 @@ proptest = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "11.1.0", features = [
+zebra-chain = { path = "../zebra-chain", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "11.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "10.1.0", features = [
+zebra-network = { path = "../zebra-network", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "10.1.0", features = [
+zebra-state = { path = "../zebra-state", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "4.0.0" }
+zebra-test = { path = "../zebra-test" }
 
 [lints]
 workspace = true

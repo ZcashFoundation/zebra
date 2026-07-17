@@ -154,7 +154,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "4.0.0" }
+zebra-test = { path = "../zebra-test/" }
 
 [[bench]]
 name = "block"

@@ -46,10 +46,10 @@ rand = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-test = { workspace = true }
-tower-fallback = { path = "../tower-fallback/", version = "0.2.42" }
+tower-fallback = { path = "../tower-fallback/" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "4.0.0" }
+zebra-test = { path = "../zebra-test/" }
 
 [lints]
 workspace = true

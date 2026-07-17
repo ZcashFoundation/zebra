@@ -95,9 +95,9 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "10.1.0", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "11.1.0", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "4.0.0" }
+zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/" }
 
 criterion = { workspace = true, features = ["html_reports"] }
 
