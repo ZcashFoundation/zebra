@@ -361,7 +361,7 @@ fn sidecar_peer_always_receives_block_gossip() {
         assert_eq!(number_of_peers_to_broadcast, 20);
 
         let response_future =
-            peer_set.route_block_broadcast(Request::AdvertiseBlock(block_hash, None));
+            peer_set.route_sidecar_broadcast(Request::AdvertiseBlock(block_hash, None));
         std::mem::drop(response_future);
 
         let mut block_gossip_received = 0;

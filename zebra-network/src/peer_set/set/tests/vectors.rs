@@ -1096,7 +1096,7 @@ fn busy_sidecar_receives_queued_block_gossip() {
         // Advertise a block while the sidecar is busy: nothing can be sent yet,
         // so the advert must be queued for the sidecar.
         let advert_response = peer_set
-            .route_block_broadcast(Request::AdvertiseBlock(block_hash, None))
+            .route_sidecar_broadcast(Request::AdvertiseBlock(block_hash, None))
             .await;
         advert_response.expect("broadcast to zero ready peers succeeds");
         assert!(
