@@ -20,6 +20,16 @@ use crate::components::zcashd_compat::supervisor::is_command_resolvable;
 
 /// Maximum time a managed archive download is allowed to take.
 const MANAGED_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// Upper bound on a managed zcashd archive download, in bytes.
+///
+/// The SHA256 pin only detects bad content *after* the whole body is written,
+/// so without a cap a compromised or malfunctioning endpoint (for example one
+/// that omits `Content-Length` and streams indefinitely) could fill Zebra's
+/// state filesystem before verification runs and take the node down. Pinned
+/// release archives are far smaller than this; the bound exists only to fail
+/// fast on a runaway transfer.
+const MANAGED_DOWNLOAD_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 /// Maximum time a process waits for another live process to finish a managed install.
 const INSTALL_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// Stale age for legacy lock files that do not contain owner metadata.
@@ -303,8 +313,19 @@ fn download_archive(url: &str, out: &mut fs::File) -> Result<(), Report> {
         }
     }
 
-    std::io::copy(&mut response, out)
+    // Bound the write so a compromised or malfunctioning endpoint cannot fill
+    // the state filesystem before the SHA256 check runs. Reading one byte past
+    // the cap distinguishes "exactly at the limit" from "over the limit". On
+    // the error path the caller's `NamedTempFile` removes the partial file.
+    let mut limited = (&mut response).take(MANAGED_DOWNLOAD_MAX_BYTES.saturating_add(1));
+    let written = std::io::copy(&mut limited, out)
         .map_err(|err| eyre!("failed writing managed zcashd archive to cache: {err}"))?;
+    if written > MANAGED_DOWNLOAD_MAX_BYTES {
+        return Err(eyre!(
+            "managed zcashd archive exceeds the maximum allowed size of \
+             {MANAGED_DOWNLOAD_MAX_BYTES} bytes; aborting download"
+        ));
+    }
     Ok(())
 }
 

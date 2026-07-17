@@ -120,17 +120,24 @@ impl SupervisorConfig {
 
         // zcashd peers only with the local Zebra node: `-connect` pins the
         // single outbound peer, and zcashd itself then soft-disables DNS
-        // seeding, inbound listening, and discovery. The explicit flags are
+        // seeding, inbound listening, and discovery. `-daemon=0` keeps zcashd
+        // in the foreground so the supervisor's tracked child *is* the real
+        // process: a `daemon=1` left in the operator's zcash.conf (or passed in
+        // extra_args) would otherwise fork, let the tracked parent exit
+        // "successfully", and leave the supervisor unable to signal or reap the
+        // real daemon while it respawns fresh parents. The explicit flags are
         // defense in depth against operator zcash.conf values. They come after
         // extra_args because zcashd takes the *last* occurrence of a
-        // single-valued command-line argument. Multi-valued peer-selection
-        // options (-connect/-addnode/-seednode) accumulate instead, so
+        // single-valued command-line argument, and a command-line value
+        // overrides zcash.conf. Multi-valued peer-selection options
+        // (-connect/-addnode/-seednode) accumulate instead, so
         // [`reject_peer_selection_extra_args`] refuses them at startup.
         args.push(format!("-connect={}", self.zebra_p2p_addr));
         args.push("-listen=0".to_string());
         args.push("-dnsseed=0".to_string());
         args.push("-listenonion=0".to_string());
         args.push("-discover=0".to_string());
+        args.push("-daemon=0".to_string());
 
         args
     }
@@ -188,6 +195,16 @@ pub async fn run(
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), Report> {
     reject_peer_selection_extra_args(&config.extra_args)?;
+    // A zero base or maximum backoff collapses `restart_backoff_delay` to zero,
+    // so a zcashd that fails to spawn or crashes immediately would be respawned
+    // in a tight loop that burns CPU and floods the logs. Require both to be
+    // positive so the capped exponential backoff stays meaningful.
+    if config.restart_backoff.is_zero() || config.restart_backoff_max.is_zero() {
+        return Err(eyre!(
+            "zcashd_compat.restart_backoff and zcashd_compat.restart_backoff_max must both be \
+             greater than zero to avoid a hot zcashd restart loop"
+        ));
+    }
     ensure_zcashd_datadir(&config.zcashd_datadir, &config.extra_args)?;
     set_supervision_active_metrics();
 
@@ -281,6 +298,43 @@ pub async fn run(
                     "zcashd-compat zcashd child exited before shutdown, restarting"
                 );
 
+                let restart_delay = restart_backoff_delay(
+                    config.restart_backoff,
+                    config.restart_backoff_max,
+                    consecutive_restart_count,
+                );
+                if wait_for_delay_or_shutdown(restart_delay, &mut shutdown_rx).await {
+                    info!("zcashd-compat supervisor received shutdown during restart backoff");
+                    set_supervision_inactive_metrics();
+                    return Ok(());
+                }
+            }
+            ChildOutcome::WaitFailed => {
+                // A `child.wait()` error does not prove the process exited, so
+                // reap it before doing anything else: spawning a replacement
+                // while the original may still be alive would run two zcashd
+                // against one datadir and corrupt wallet.dat.
+                warn!(
+                    "failed waiting on zcashd-compat zcashd child; \
+                     terminating it before restart"
+                );
+                if let Err(error) =
+                    terminate_child(&mut child, config.shutdown_grace_period).await
+                {
+                    // The child's state is unknown and reaping was not
+                    // confirmed, so refuse to start a second instance. The
+                    // tracked pid stays armed for the post-runtime
+                    // `terminate_abandoned_zcashd` cleanup that runs once
+                    // zebrad exits.
+                    set_supervision_inactive_metrics();
+                    return Err(eyre!(
+                        "could not reap zcashd-compat zcashd after a wait error ({error}); \
+                         stopping supervision to avoid running two instances on one datadir"
+                    ));
+                }
+                SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+
+                consecutive_restart_count = consecutive_restart_count.saturating_add(1);
                 let restart_delay = restart_backoff_delay(
                     config.restart_backoff,
                     config.restart_backoff_max,
@@ -555,6 +609,9 @@ fn sanitize_child_log_line(line: &str) -> Cow<'_, str> {
 enum ChildOutcome {
     ShutdownRequested,
     Exited(std::process::ExitStatus),
+    /// Waiting on the child returned an error, so it is unknown whether the
+    /// process actually exited. The supervisor must reap it before restarting.
+    WaitFailed,
 }
 
 /// Waits for `delay` to elapse, returning `true` if shutdown is requested first.
@@ -592,8 +649,9 @@ async fn wait_for_delay_or_shutdown(
 
 /// Waits until either a shutdown request arrives or the child exits.
 ///
-/// If waiting on the child fails, returns a synthesized non-zero exit status so
-/// the supervisor can apply its restart policy.
+/// If waiting on the child fails, returns [`ChildOutcome::WaitFailed`] so the
+/// supervisor reaps the possibly-still-running child before restarting, rather
+/// than assuming it exited.
 async fn wait_for_child_or_shutdown(
     child: &mut Child,
     shutdown_rx: &mut watch::Receiver<bool>,
@@ -610,7 +668,7 @@ async fn wait_for_child_or_shutdown(
                 Ok(status) => ChildOutcome::Exited(status),
                 Err(error) => {
                     error!(?error, "failed waiting on zcashd-compat zcashd child");
-                    ChildOutcome::Exited(exit_status_failure())
+                    ChildOutcome::WaitFailed
                 }
             }
         }
@@ -685,26 +743,6 @@ async fn terminate_child(
             let _ = child.wait().await;
             Ok(())
         }
-    }
-}
-
-/// Returns a synthetic non-zero exit status for wait errors.
-fn exit_status_failure() -> std::process::ExitStatus {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        std::process::ExitStatus::from_raw(1 << 8)
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::ExitStatusExt;
-        std::process::ExitStatus::from_raw(1)
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        panic!("unsupported platform for zcashd-compat exit status synthesis")
     }
 }
 
@@ -794,6 +832,7 @@ mod tests {
         assert!(args.contains(&"-dnsseed=0".to_string()));
         assert!(args.contains(&"-listenonion=0".to_string()));
         assert!(args.contains(&"-discover=0".to_string()));
+        assert!(args.contains(&"-daemon=0".to_string()));
         assert!(args.contains(&"-printtoconsole".to_string()));
         assert!(args.contains(&"-debug=1".to_string()));
         assert!(
@@ -807,7 +846,13 @@ mod tests {
             .iter()
             .position(|a| a == "-debug=1")
             .expect("extra arg present");
-        for forced in ["-listen=0", "-dnsseed=0", "-listenonion=0", "-discover=0"] {
+        for forced in [
+            "-listen=0",
+            "-dnsseed=0",
+            "-listenonion=0",
+            "-discover=0",
+            "-daemon=0",
+        ] {
             let forced_idx = args
                 .iter()
                 .position(|a| a == forced)
