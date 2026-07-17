@@ -610,8 +610,8 @@ fn validate_expiry_height_mined(
     Ok(())
 }
 
-/// Accepts a transaction, block height, block UTXOs, and
-/// the transaction's spent UTXOs from the chain.
+/// Accepts a mempool transaction, the prospective block `height`, and the transaction's
+/// spent UTXOs from the best chain.
 ///
 /// Returns `Ok(())` if spent transparent coinbase outputs are
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
@@ -619,15 +619,13 @@ pub fn tx_transparent_coinbase_spends_maturity(
     network: &Network,
     tx: Arc<Transaction>,
     height: Height,
-    block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), TransactionError> {
     for spend in tx.spent_outpoints() {
-        let utxo = block_new_outputs
+        let utxo = spent_utxos
             .get(&spend)
-            .map(|ordered_utxo| ordered_utxo.utxo.clone())
-            .or_else(|| spent_utxos.get(&spend).cloned())
-            .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
+            .cloned()
+            .expect("mempool_spent_utxos should contain every transparent outpoint spent by the transaction");
 
         let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
