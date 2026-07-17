@@ -27,6 +27,13 @@ impl MempoolTxSubscriber {
 pub enum MempoolChangeKind {
     /// Transactions were added to the mempool.
     Added,
+    /// Transactions were added to the mempool in **Dandelion++ stem phase**.
+    ///
+    /// Recipients of this event MUST treat these transactions as stem-phase
+    /// and MUST NOT broadcast them to any peer other than the current epoch's
+    /// stem peer.  Stem-phase transactions are withheld from flood broadcast
+    /// until they time out or until the stem peer fails.
+    StemAdded,
     /// Transactions were invalidated or could not be verified and were rejected from the mempool.
     Invalidated,
     /// Transactions were mined onto the best chain and removed from the mempool.
@@ -58,6 +65,18 @@ impl MempoolChange {
         self.kind == MempoolChangeKind::Added
     }
 
+    /// Returns true if transactions were added to the mempool in Dandelion++
+    /// stem phase ([`MempoolChangeKind::StemAdded`]).
+    pub fn is_stem_added(&self) -> bool {
+        self.kind == MempoolChangeKind::StemAdded
+    }
+
+    /// Returns true if the change represents any kind of mempool addition
+    /// (either regular [`MempoolChangeKind::Added`] or [`MempoolChangeKind::StemAdded`]).
+    pub fn is_any_added(&self) -> bool {
+        matches!(self.kind, MempoolChangeKind::Added | MempoolChangeKind::StemAdded)
+    }
+
     /// Consumes self and returns the set of [`UnminedTxId`]s of transactions that were affected by the change.
     pub fn into_tx_ids(self) -> HashSet<UnminedTxId> {
         self.tx_ids
@@ -71,6 +90,12 @@ impl MempoolChange {
     /// Creates a new [`MempoolChange`] indicating that transactions were added to the mempool.
     pub fn added(tx_ids: HashSet<UnminedTxId>) -> Self {
         Self::new(MempoolChangeKind::Added, tx_ids)
+    }
+
+    /// Creates a new [`MempoolChange`] indicating that transactions were added
+    /// to the mempool in Dandelion++ stem phase.
+    pub fn stem_added(tx_ids: HashSet<UnminedTxId>) -> Self {
+        Self::new(MempoolChangeKind::StemAdded, tx_ids)
     }
 
     /// Creates a new [`MempoolChange`] indicating that transactions were invalidated or rejected from the mempool.

@@ -9,6 +9,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
+    transaction::UnminedTxId,
 };
 
 use crate::{
@@ -979,6 +980,133 @@ fn find_blocks_stall_count_preserved_across_tip_transition() {
         assert!(
             !handle.wants_connection_heartbeats(),
             "peer should be disconnected: stall count accumulated during sync was preserved"
+        );
+    });
+}
+
+// ── Dandelion++ stem-phase routing ────────────────────────────────────────────
+
+/// Verify that `route_to_peer` delivers a request to exactly the named peer
+/// and no other peer.
+#[test]
+fn dandelion_route_to_peer_unicast() {
+    let peer_version =
+        Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version, peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    assert_eq!(handles.len(), 2);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(usize::MAX)
+            .build();
+
+        // Wait for both peers to be ready.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 2);
+
+        // Target the first peer (port 1 — assigned by mock_peer_discovery).
+        let target: PeerSocketAddr =
+            SocketAddr::new([127, 0, 0, 1].into(), 1).into();
+
+        // Build a stem-phase unicast request.
+        let tx_id = UnminedTxId::Legacy(zebra_chain::transaction::Hash::from([1u8; 32]));
+        let sent_request =
+            Request::AdvertiseTransactionIdsToPeer(HashSet::from([tx_id]), target);
+        let _fut = peer_ready.call(sent_request.clone());
+
+        // The target peer (port 1, handles[0]) must have received the request;
+        // the other peer (port 2, handles[1]) must NOT have received anything.
+        let mut handles_iter = handles.into_iter();
+        let mut h0 = handles_iter.next().expect("handle 0 exists");
+        let mut h1 = handles_iter.next().expect("handle 1 exists");
+
+        let received_by_target = h0
+            .try_to_receive_outbound_client_request()
+            .request();
+        assert!(
+            received_by_target.is_some(),
+            "stem peer (port 1) should have received the request"
+        );
+        if let Some(ClientRequest { request, .. }) = received_by_target {
+            // At the connection layer, AdvertiseTransactionIdsToPeer is
+            // handled as AdvertiseTransactionIds (same wire message).
+            match request {
+                Request::AdvertiseTransactionIdsToPeer(ids, addr) => {
+                    assert_eq!(ids, HashSet::from([tx_id]));
+                    assert_eq!(addr, target);
+                }
+                other => panic!("unexpected request on stem peer: {other:?}"),
+            }
+        }
+
+        let received_by_other = h1
+            .try_to_receive_outbound_client_request()
+            .request();
+        assert!(
+            received_by_other.is_none(),
+            "non-stem peer (port 2) must not receive a stem-phase request"
+        );
+    });
+}
+
+/// Verify that `route_to_peer` fails with `PeerError::NoReadyPeers` when the
+/// target peer is not in the ready set.
+#[test]
+fn dandelion_route_to_peer_fails_when_not_ready() {
+    let peer_version =
+        Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(usize::MAX)
+            .build();
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set is always ready");
+
+        // Target an address that does NOT exist in the peer set.
+        let nonexistent: PeerSocketAddr =
+            SocketAddr::new([127, 0, 0, 1].into(), 9999).into();
+
+        let tx_id = UnminedTxId::Legacy(zebra_chain::transaction::Hash::from([2u8; 32]));
+        let req =
+            Request::AdvertiseTransactionIdsToPeer(HashSet::from([tx_id]), nonexistent);
+        let result = peer_ready.call(req).await;
+
+        assert!(
+            result.is_err(),
+            "routing to a non-existent peer must return an error"
         );
     });
 }

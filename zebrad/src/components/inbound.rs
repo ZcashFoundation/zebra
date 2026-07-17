@@ -24,6 +24,7 @@ use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, Service
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state::{self as zs};
 
+use zebra_network::dandelion::PropagationStateMap;
 use zebra_chain::{
     block::{self, Block},
     serialization::ZcashSerialize,
@@ -110,6 +111,10 @@ pub struct InboundSetupData {
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
     pub misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+
+    /// Dandelion++ propagation state — used to filter stem-phase transactions
+    /// from `MempoolTransactionIds` responses sent to remote peers.
+    pub dandelion_prop_state: Arc<tokio::sync::Mutex<PropagationStateMap>>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -155,6 +160,9 @@ pub enum Setup {
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
         misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+
+        /// Dandelion++ propagation state for filtering stem-phase txids.
+        dandelion_prop_state: Arc<tokio::sync::Mutex<PropagationStateMap>>,
     },
 
     /// Temporary state used in the inbound service's internal initialization code.
@@ -269,6 +277,7 @@ impl Service<zn::Request> for Inbound {
                         state,
                         latest_chain_tip,
                         misbehavior_sender,
+                        dandelion_prop_state,
                     } = setup_data;
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
@@ -288,6 +297,7 @@ impl Service<zn::Request> for Inbound {
                         mempool,
                         state,
                         misbehavior_sender,
+                        dandelion_prop_state,
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -324,6 +334,7 @@ impl Service<zn::Request> for Inbound {
                 mempool,
                 state,
                 misbehavior_sender,
+                dandelion_prop_state,
             } => {
                 // # Correctness
                 //
@@ -353,6 +364,7 @@ impl Service<zn::Request> for Inbound {
                     mempool,
                     state,
                     misbehavior_sender,
+                    dandelion_prop_state,
                 }
             }
         };
@@ -380,14 +392,15 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
-        let (cached_peer_addr_response, block_downloads, mempool, state) = match &mut self.setup {
+        let (cached_peer_addr_response, block_downloads, mempool, state, dandelion_prop_state) = match &mut self.setup {
             Setup::Initialized {
                 cached_peer_addr_response,
                 block_downloads,
                 mempool,
                 state,
                 misbehavior_sender: _,
-            } => (cached_peer_addr_response, block_downloads, mempool, state),
+                dandelion_prop_state,
+            } => (cached_peer_addr_response, block_downloads, mempool, state, dandelion_prop_state),
             _ => {
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
@@ -470,14 +483,37 @@ impl Service<zn::Request> for Inbound {
                     return async { Ok(zn::Response::Nil) }.boxed();
                 }
 
+                // Dandelion++ Phase 4: a peer that learned a stem txid (e.g. our
+                // stem peer, or an adversary that obtained the txid out-of-band)
+                // MUST NOT be able to fetch the full transaction from us while it
+                // is still in stem phase — that would reveal our node holds the tx
+                // before fluff. Filter active-stem txids out of the getdata request;
+                // they will be reported as `Missing`, exactly as if we didn't have them.
+                let prop_state = dandelion_prop_state.clone();
                 let request = mempool::Request::TransactionsById(req_tx_ids.clone());
-                mempool.clone().oneshot(request).map_ok(move |resp| {
+                let mempool_clone = mempool.clone();
+                async move {
+                    let stem_txids = {
+                        let ps = prop_state.lock().await;
+                        req_tx_ids.iter()
+                            .filter(|id| ps.get(id).map_or(false, |s| s.is_stem()))
+                            .copied()
+                            .collect::<HashSet<UnminedTxId>>()
+                    };
+
+                    let resp = mempool_clone.oneshot(request).await?;
                     let mut total_size = 0;
 
                     let transactions = match resp {
                         mempool::Response::Transactions(transactions) => transactions,
                         _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
                     };
+
+                    // Drop any transaction that is still in active stem phase.
+                    let transactions: Vec<_> = transactions
+                        .into_iter()
+                        .filter(|tx| !stem_txids.contains(&tx.id))
+                        .collect();
 
                     // Work out which transaction IDs were missing.
                     let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
@@ -502,8 +538,8 @@ impl Service<zn::Request> for Inbound {
 
                     // The network layer handles splitting this response into multiple `tx`
                     // messages, and a `notfound` message if needed.
-                    zn::Response::Transactions(available.chain(missing).collect())
-                }).boxed()
+                    Ok(zn::Response::Transactions(available.chain(missing).collect()))
+                }.boxed()
             }
             // Find* responses are already size-limited by the state.
             zn::Request::FindBlocks { known_blocks, stop } => {
@@ -568,18 +604,46 @@ impl Service<zn::Request> for Inbound {
             }
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
-                mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                    mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
-                    mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
-                })
-                    .boxed()
+                // Dandelion++ Phase 4: filter stem-phase transactions from the
+                // response.  A remote peer asking for our mempool contents MUST
+                // NOT learn about transactions that are still in the stem phase,
+                // because that would let a network-level observer correlate the
+                // originating node with the transaction before it enters fluff.
+                let prop_state = dandelion_prop_state.clone();
+                let mempool_clone = mempool.clone();
+                async move {
+                    let resp = mempool_clone.oneshot(mempool::Request::TransactionIds).await?;
+                    match resp {
+                        mempool::Response::TransactionIds(transaction_ids) => {
+                            // Dandelion++ Phase 4: snapshot propagation state and
+                            // filter out any txid that is still in active stem phase.
+                            // The lock is held briefly for the filter only.
+                            let stem_txids: HashSet<UnminedTxId> = {
+                                let ps = prop_state.lock().await;
+                                transaction_ids.iter()
+                                    .filter(|id| ps.get(id).map_or(false, |s| s.is_stem()))
+                                    .copied()
+                                    .collect()
+                            };
+                            let visible: Vec<_> = transaction_ids.into_iter()
+                                .filter(|id| !stem_txids.contains(id))
+                                .collect();
+                            if visible.is_empty() {
+                                Ok(zn::Response::Nil)
+                            } else {
+                                Ok(zn::Response::TransactionIds(visible.into_iter().collect()))
+                            }
+                        }
+                        _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
+                    }
+                }.boxed()
             }
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+            zn::Request::AdvertiseTransactionIdsToPeer(_, _) => unreachable!("Zebra-originated Dandelion++ stem request, never received from a peer"),
         }
     }
 }

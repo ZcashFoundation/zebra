@@ -152,6 +152,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub mod address_book_peers;
 pub mod config;
 pub mod constants;
+pub mod dandelion;
 
 mod address_book;
 mod address_book_updater;

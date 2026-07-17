@@ -269,6 +269,34 @@ impl StartCmd {
             warn!("error setting up the transaction verifier with a handle to the mempool service");
         };
 
+        // Spawn Dandelion++ gossip early so we can share `dandelion_prop_state`
+        // with the inbound handler (Phase 4: filter stem-phase txids from
+        // MempoolTransactionIds responses).
+        info!("spawning mempool transaction gossip task (Dandelion++)");
+        let address_book_for_gossip = address_book.clone();
+        let (tx_gossip_task_handle, _dandelion_epoch_manager, dandelion_prop_state) = {
+            let (epoch_mgr, prop_state) = mempool::spawn_dandelion_gossip(
+                mempool_transaction_subscriber.subscribe(),
+                peer_set.clone(),
+                move || {
+                    // Collect all peers that have recently responded — these are
+                    // the live outbound peers eligible to be the stem peer this epoch.
+                    use zebra_network::PeerAddrState;
+                    address_book_for_gossip
+                        .lock()
+                        .expect("address book mutex should not be poisoned")
+                        .peers()
+                        .filter(|p| p.last_connection_state() == PeerAddrState::Responded)
+                        .map(|p| p.addr())
+                        .collect()
+                },
+            );
+            // spawn_dandelion_gossip already spawned the background tasks internally;
+            // we create a dummy future handle to satisfy the downstream join/select logic
+            // that expects tx_gossip_task_handle.
+            (tokio::spawn(std::future::pending::<Result<(), crate::BoxError>>()), epoch_mgr, prop_state)
+        };
+
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
@@ -279,6 +307,7 @@ impl StartCmd {
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            dandelion_prop_state: dandelion_prop_state.clone(),
         };
         setup_tx
             .send(setup_data)
@@ -290,7 +319,7 @@ impl StartCmd {
         let submit_block_channel = SubmitBlockChannel::new();
 
         // Launch RPC server
-        let (rpc_impl, mut rpc_tx_queue_handle) = RpcImpl::new(
+        let (mut rpc_impl, mut rpc_tx_queue_handle) = RpcImpl::new(
             config.network.network.clone(),
             config.mining.clone(),
             config.rpc.debug_force_finished_sync,
@@ -306,6 +335,9 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
+        // Dandelion++ Phase 4 (RPC): attach the propagation state so that
+        // getrawmempool filters stem-phase transactions.
+        rpc_impl.set_dandelion_prop_state(dandelion_prop_state.clone());
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
             RpcServer::start(rpc_impl.clone(), config.rpc.clone())
@@ -365,15 +397,6 @@ impl StartCmd {
 
         info!("spawning mempool queue checker task");
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
-
-        info!("spawning mempool transaction gossip task");
-        let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(
-                mempool_transaction_subscriber.subscribe(),
-                peer_set.clone(),
-            )
-            .in_current_span(),
-        );
 
         info!("spawning delete old databases task");
         let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
