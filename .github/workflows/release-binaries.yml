@@ -34,10 +34,7 @@ jobs:
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
-      # zcashd-compat branch: releases publish the sidecar-bundled image
-      # (zebrad + the hash-pinned zcashd wallet sidecar, amd64-only).
-      # Revert to `runtime` before merging to main.
-      dockerfile_target: runtime-zcashd-compat
+      dockerfile_target: runtime
       image_name: zebra
       # Embed the release commit (the only source of git_commit(), since `.git` is excluded).
       short_sha: auto
