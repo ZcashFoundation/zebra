@@ -171,6 +171,17 @@ jobs:
           exit 1
       - name: Install libclang for librocksdb-sys bindgen
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Put the release commit on a tracked main branch for release-plz
+        # `command: release` resolves the current branch via `git rev-parse @{upstream}`
+        # to enforce `allow-branch`. The `ref: merge_commit_sha` checkout above leaves a
+        # detached HEAD with no upstream, so release-plz aborts with "cannot determine
+        # current branch" before publishing or tagging (this failed the v6.1.0 release).
+        # Recreate `main` at the exact release commit, with an upstream, so the check passes.
+        run: |
+          git fetch --no-tags origin main
+          git branch --force main "${{ github.event.pull_request.merge_commit_sha }}"
+          git switch main
+          git branch --set-upstream-to=origin/main main
       - name: Publish crates and create tags
         id: release-plz
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
