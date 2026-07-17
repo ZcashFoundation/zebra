@@ -2156,8 +2156,12 @@ compat_print_docker_supervised_command() {
   local container_zcashd_datadir="/home/zebra/.cache/zcashd"
   local p2p_port
   p2p_port="$(compat_p2p_port_from_addr "$ZEBRA_P2P_ADDR")"
-  # ZCASHD_COMPAT_ENABLED is the compat image's entrypoint opt-in: it enables
-  # the mode AND points zcashd_source at the vendored /usr/local/bin/zcashd.
+  # ZCASHD_COMPAT_ENABLED is the image entrypoint's opt-in. On compat images
+  # the entrypoint also sets zcashd_path to the vendored /usr/local/bin/zcashd,
+  # and an explicit zcashd_path always wins over zcashd_source. On the standard
+  # zebra image there is no vendored zcashd, so zcashd_source=embedded makes
+  # zebrad download the SHA256-pinned sidecar into the mounted state cache at
+  # first start; without it, the default path source fails at startup.
   # With --network host, keep the sidecar's wallet RPC on loopback: binding
   # 0.0.0.0 with rpcallowip=0.0.0.0/0 would expose it on every host interface.
   cat <<EOF
@@ -2168,6 +2172,7 @@ docker run --rm -it --network host \\
   -e ZEBRA_NETWORK__MAX_CONNECTIONS_PER_IP=8 \\
   -e ZEBRA_STATE__CACHE_DIR=$container_zebra_state_dir \\
   -e ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \\
+  -e ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=embedded \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=$container_zcashd_datadir \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=127.0.0.1","-rpcallowip=127.0.0.1"]' \\
   --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=$container_zebra_state_dir \\
