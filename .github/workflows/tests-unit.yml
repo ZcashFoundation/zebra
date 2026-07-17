@@ -8,11 +8,16 @@ on:
     branches: [main]
   merge_group:
 
-# Ensures that only one workflow task will run at a time. Previous builds, if
-# already in process, will get cancelled. Only the latest commit will be allowed
-# to run, cancelling any workflows in between
+# Cancel obsolete test runs after new commits. Unrelated label events use a
+# separate group so they cannot cancel the required unit test run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: >-
+    ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
+      github.event.action == 'labeled' &&
+      github.event.label.name != 'A-release' &&
+      'ignored-label' ||
+      'required'
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -98,6 +103,14 @@ jobs:
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   unit-tests:
+    # Keep skipped unrelated-label runs from replacing the required check.
+    name: >-
+      ${{
+        github.event.action == 'labeled' &&
+        github.event.label.name != 'A-release' &&
+        'Label does not require unit tests' ||
+        'unit-tests'
+      }}
     runs-on: ubuntu-latest
     if: >-
       always() &&
