@@ -1,6 +1,6 @@
 //! Test vectors and randomised property tests for UTXO contextual validation
 
-use std::{env, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc, time::Instant};
 
 use proptest::prelude::*;
 
@@ -21,7 +21,7 @@ use crate::{
         write::validate_and_commit_non_finalized,
     },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    CheckpointVerifiedBlock,
+    CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
     ValidateContextError::{
         DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
         MissingTransparentOutput, UnshieldedTransparentCoinbaseSpend,
@@ -116,6 +116,101 @@ fn reject_immature_coinbase_utxo_spend() {
             min_spend_height,
             created_height
         })
+    );
+}
+
+/// Verify that `remaining_transaction_value` scales linearly with the number
+/// of transactions in a block, completing well under 4 seconds for 10,000
+/// one-input transactions even in debug mode.
+#[test]
+fn remaining_transaction_value_scales_linearly() {
+    let _init_guard = zebra_test::init();
+
+    const TX_COUNT: usize = 10_000;
+    const MAX_SECONDS: u64 = 4;
+
+    let one_zatoshi: Amount<zebra_chain::amount::NonNegative> =
+        1.try_into().expect("1 zatoshi is valid");
+
+    let coinbase = Arc::new(Transaction::V4 {
+        inputs: vec![transparent::Input::Coinbase {
+            height: Height(1),
+            data: Vec::new(),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: one_zatoshi,
+            lock_script: transparent::Script::new(&[]),
+        }],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: Height(0),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    });
+
+    let mut transactions = Vec::with_capacity(TX_COUNT + 1);
+    let mut spent_utxos = HashMap::with_capacity(TX_COUNT);
+    transactions.push(coinbase);
+
+    for i in 0..TX_COUNT {
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes[..8].copy_from_slice(&(i as u64 + 1).to_le_bytes());
+        let outpoint = transparent::OutPoint {
+            hash: transaction::Hash(hash_bytes),
+            index: 0,
+        };
+
+        let output = transparent::Output {
+            value: one_zatoshi,
+            lock_script: transparent::Script::new(&[]),
+        };
+
+        let tx = Transaction::V4 {
+            inputs: vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            outputs: vec![output.clone()],
+            lock_time: LockTime::min_lock_time_timestamp(),
+            expiry_height: Height(0),
+            joinsplit_data: None,
+            sapling_shielded_data: None,
+        };
+
+        spent_utxos.insert(
+            outpoint,
+            transparent::OrderedUtxo::new(output, Height(0), 0),
+        );
+        transactions.push(Arc::new(tx));
+    }
+
+    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Block>()
+        .expect("genesis block must deserialize");
+
+    let block = Arc::new(Block {
+        header: genesis.header,
+        transactions,
+    });
+
+    let prepared = SemanticallyVerifiedBlock {
+        block: block.clone(),
+        hash: block.hash(),
+        height: Height(1),
+        new_outputs: HashMap::new(),
+        transaction_hashes: vec![transaction::Hash([0; 32]); TX_COUNT + 1].into(),
+    };
+
+    let start = Instant::now();
+    let result = check::utxo::remaining_transaction_value(&prepared, &spent_utxos);
+    let elapsed = start.elapsed();
+
+    assert!(result.is_ok(), "value balance check should succeed");
+    assert!(
+        elapsed.as_secs() < MAX_SECONDS,
+        "remaining_transaction_value with {TX_COUNT} transactions took {elapsed:.2?}, \
+         expected under {MAX_SECONDS}s (possible O(N^2) regression)"
     );
 }
 

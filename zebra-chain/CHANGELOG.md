@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Computing `transaction::Transaction::value_balance` no longer clones the entire UTXO map per
+  call (GHSA-4g24-549m-hp75).
+
 ### Added
 
 - `block::Header::{SERIALIZED_SIZE, REGTEST_SERIALIZED_SIZE, serialized_size}`
