@@ -1,6 +1,6 @@
 # Release workflow: crate publishing and GitHub Release creation.
 #
-# Changelog generation is handled by release-plz + git-cliff.
+# Changelogs are authored in source PRs and finalized before release.
 #
 # Pipeline:
 #   push to main                  → creates/updates the single Release PR
@@ -27,7 +27,7 @@ jobs:
   #
   # Runs on every push to main. Detects changed crates by comparing local
   # source against crates.io, bumps versions based on conventional commits,
-  # generates per-crate changelogs, and opens/updates a single Release PR.
+  # and opens or updates a single Release PR.
   release-pr:
     name: Create or update Release PR
     if: github.event_name == 'push'
@@ -56,11 +56,42 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Create or update Release PR
+        id: release-plz-pr
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Add zebrad version to Release PR title
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          RELEASE_PRS: ${{ steps.release-plz-pr.outputs.prs }}
+        run: |
+          set -euo pipefail
+
+          ZEBRAD_RELEASE_PR="$(jq -c '
+            map(select(any(.releases[]?; .package_name == "zebrad")))
+            | first // empty
+          ' <<< "${RELEASE_PRS:-[]}")"
+
+          if [ -z "${ZEBRAD_RELEASE_PR}" ]; then
+            echo "No zebrad release in release-plz output; keeping the generated title."
+            exit 0
+          fi
+
+          PR_NUMBER="$(jq -r '.number' <<< "${ZEBRAD_RELEASE_PR}")"
+          VERSION="$(jq -r '
+            .releases[] | select(.package_name == "zebrad") | .version
+          ' <<< "${ZEBRAD_RELEASE_PR}")"
+
+          if [ -z "${PR_NUMBER}" ] || [ "${PR_NUMBER}" = "null" ] || [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
+            echo "::error::release-plz did not return both the PR number and zebrad version: ${ZEBRAD_RELEASE_PR}"
+            exit 1
+          fi
+
+          gh pr edit "${PR_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "chore: release v${VERSION}"
 
   # ── Stage 2: Publish crates and create the public zebrad release ────────
   #
