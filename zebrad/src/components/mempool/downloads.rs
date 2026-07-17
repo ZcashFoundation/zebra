@@ -376,6 +376,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+        let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
 
@@ -431,7 +432,7 @@ where
                         "mempool.pushed.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    (tx, None)
+                    (tx, pushed_advertiser_addr)
                 }
             };
 

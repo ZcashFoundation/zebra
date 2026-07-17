@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [11.0.0] - 2026-07-17
+
+### Changed
+
+- Major version bump for the rocksdb 0.24 upgrade. `rocksdb::Error` is reachable through
+  `ZebraDb`'s public API, so the rocksdb 0.22 → 0.24 bump is a breaking change; 10.1.0
+  shipped it without a major and is yanked. Downstream code pinning an older rocksdb must
+  upgrade.
+
+### Security
+
+- Checking the remaining transaction value of a block is no longer quadratic in the number of
+  transactions (GHSA-4g24-549m-hp75).
+- The state service now accepts children of a block that was accepted and has the same
+  block header hash (due to [ZIP-244](https://zips.z.cash/zip-0244)) as a block that
+  was previously rejected
+  ([GHSA-8gxx-hc65-vv82](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82)).
+
 ## [10.1.0] - 2026-07-10
 
 ### Added

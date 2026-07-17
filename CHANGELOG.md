@@ -27,6 +27,29 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   sync-check script, and a Zebra Book chapter (`user/zcashd-compat.md`)
   ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
 
+## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
+
+### Added
+
+- Added the `getstandardfee` RPC, a parameterless method returning the
+  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
+  zatoshis) with a `version` field for future dynamic fee estimation
+  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717)).
+
+### Security
+
+- Reserve space for the block header and transaction count when selecting block template
+  transactions, so blocks mined from Zebra's templates can no longer exceed the consensus size
+  limit ([GHSA-95m2-vx53-v2jw](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-95m2-vx53-v2jw)).
+- Avoid quadratic validation work when checking the remaining transparent value of blocks with
+  many transactions ([GHSA-4g24-549m-hp75](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4g24-549m-hp75)).
+- Prevent a peer from stalling chain synchronization by delivering a rejected
+  block body that shares its header hash with a later valid block
+  ([GHSA-8gxx-hc65-vv82](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82)).
+- Score misbehavior for peers that directly push consensus-invalid transactions, matching the
+  treatment of peers that advertise them
+  ([GHSA-g7c4-2w6c-cr3r](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g7c4-2w6c-cr3r)).
+
 ## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
 
 ### Added
