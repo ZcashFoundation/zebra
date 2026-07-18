@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   source, so its generated command works with the published Zebra image
   ([#11008](https://github.com/ZcashFoundation/zebra/pull/11008)).
 
+### Security
+
+- Allow chain synchronization to immediately retry an honest block body after
+  rejecting a body with the same header hash, without waiting for a child block
+  to trigger cleanup.
+
 ## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
 
 ### Added
