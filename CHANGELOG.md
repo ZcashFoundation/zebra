@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   [zakura](https://github.com/zakura-core/zakura) authors for the major part of
   this implementation.
 
-## Changed
+### Changed
 
 - On Testnet, the `getblocktemplate` RPC no longer switches to a
   minimum-difficulty block template early. Zebra previously treated a template
