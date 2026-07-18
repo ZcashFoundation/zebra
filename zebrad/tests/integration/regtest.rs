@@ -162,43 +162,23 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         "the poisoned block body must be rejected"
     );
 
-    // The rejected hash is still marked as sent until the state service drains the write task's
-    // rejection notification. For now this same-hash block is considered a duplicate.
     let valid_block_data = hex::encode(valid_block.zcash_serialize_to_vec()?);
-    let first_valid_response: SubmitBlockResponse = client
+    let valid_block_response: SubmitBlockResponse = client
         .json_result_from_call("submitblock", format!(r#"["{valid_block_data}"]"#))
         .await
         .map_err(|err| eyre!(err))?;
     assert_eq!(
-        first_valid_response,
-        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Duplicate),
-        "the first valid block submission must wait for the rejected hash to be drained"
+        valid_block_response,
+        SubmitBlockResponse::Accepted,
+        "KnownBlock must drain rejected hashes before checking sent hashes"
     );
 
-    // The child submission below triggers another state request and drains the previous
-    // notification, which means the block can then be resubmitted.
     let valid_child = blocks[3].clone();
     let valid_child_data = hex::encode(valid_child.zcash_serialize_to_vec()?);
-    let submit_child = client.json_result_from_call::<SubmitBlockResponse>(
-        "submitblock",
-        format!(r#"["{valid_child_data}"]"#),
-    );
-
-    let resubmit_valid_block = async {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        client
-            .json_result_from_call::<SubmitBlockResponse>(
-                "submitblock",
-                format!(r#"["{valid_block_data}"]"#),
-            )
-            .await
-    };
-    let (valid_child_response, valid_block_response) =
-        tokio::join!(submit_child, resubmit_valid_block);
-    let valid_child_response = valid_child_response.map_err(|err| eyre!(err))?;
-    let valid_block_response = valid_block_response.map_err(|err| eyre!(err))?;
-
-    assert_eq!(valid_block_response, SubmitBlockResponse::Accepted);
+    let valid_child_response: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{valid_child_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
     assert_eq!(
         valid_child_response,
         SubmitBlockResponse::Accepted,
