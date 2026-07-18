@@ -134,7 +134,7 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest || steps.docker_build_no_attestations.outputs.digest }}
-      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata || steps.docker_build_no_attestations.outputs.metadata)['image.name'] }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata || steps.docker_build_no_attestations.outputs.metadata || '{}')['image.name'] }}
     permissions:
       contents: read
       id-token: write

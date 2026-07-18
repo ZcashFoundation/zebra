@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `methods::RpcServer::generate_to_address`, the regtest-only
+  `generatetoaddress` RPC handler that mines a requested number of blocks paying
+  coinbase to a caller-supplied address
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+
+## [12.0.0] - 2026-07-17
+
+### Added
+
+- `methods::RpcServer::get_standard_fee`, the `getstandardfee` RPC returning the ZIP-317
+  marginal fee ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717)).
+
+### Changed
+
+- Requires `zebra-state` 11.0.0 and `zebra-consensus` 12.0.0, whose types appear in this
+  crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+
+### Fixed
+
+- Block template transaction selection now reserves space for the block header and the
+  transaction count, so assembled blocks can no longer exceed the consensus size limit
+  (GHSA-95m2-vx53-v2jw).
+
 ## [11.1.0] - 2026-07-10
 
 ### Changed

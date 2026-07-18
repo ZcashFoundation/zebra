@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.1] - 2026-07-17
+
+### Changed
+
+- Dependencies bumped: `zebra-chain` to `11.2.0`, `zebra-rpc` to `12.0.0`, and
+  `zebra-node-services` to `9.1.1`.
+
 ## [9.1.0] - 2026-07-10
 
 ### Changed

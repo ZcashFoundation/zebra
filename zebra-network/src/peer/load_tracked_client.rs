@@ -2,6 +2,7 @@
 //! reported protocol version.
 
 use std::{
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -13,8 +14,8 @@ use tower::{
 
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
-    peer::{Client, ConnectionInfo},
-    protocol::external::types::Version,
+    peer::{Client, ConnectedAddr, ConnectionInfo},
+    protocol::external::{canonical_socket_addr, types::Version},
 };
 
 /// A client service wrapper that keeps track of its load.
@@ -52,6 +53,17 @@ impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
+    }
+
+    /// Returns true if this peer connected directly to us from `ip`.
+    pub fn is_inbound_direct_from_ip(&self, ip: &IpAddr) -> bool {
+        let expected_ip = canonical_socket_addr(SocketAddr::new(*ip, 0)).ip();
+
+        matches!(
+            self.connection_info.connected_addr,
+            ConnectedAddr::InboundDirect { addr }
+                if canonical_socket_addr(addr.remove_socket_addr_privacy()).ip() == expected_ip
+        )
     }
 }
 

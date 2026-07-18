@@ -1,0 +1,58 @@
+name: zcashd-compat Regtest
+
+# Runs the managed zcashd-compat Regtest integration suite.
+#
+# The test harness spawns a fresh zebrad and zcashd on randomised ports, so no
+# external infrastructure is required. The sidecar zcashd binary is the
+# SHA256-pinned build from zebrad/zcashd-compat-manifest.json.
+#
+# Manual and scheduled only for now: the suite is new and not yet required.
+# Add a pull_request paths trigger once it has a green track record.
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 04:00 UTC.
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LIB_BACKTRACE: 1
+  RUST_LOG: info
+  COLORBT_SHOW_HIDDEN: 1
+
+jobs:
+  zcashd-compat-regtest:
+    name: zcashd-compat regtest suite
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-key: zcashd-compat-regtest
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+        with:
+          tool: cargo-nextest
+
+      - name: Fetch the pinned sidecar zcashd
+        run: make compat-zcashd-prepare
+
+      - name: Run zcashd-compat regtest suite
+        run: make compat-test-regtest TEST_ZCASHD_PATH="$PWD/target/zcashd-compat/extracted/bin/zcashd"

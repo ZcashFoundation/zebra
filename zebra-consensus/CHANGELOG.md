@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tx`, `height`, `network`, and `spent_utxos` directly instead of `&Request`.
   ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843))
 
+## [12.0.0] - 2026-07-17
+
+### Changed
+
+- Requires `zebra-state` 11.0.0. `zebra-state` types (`error::ValidateContextError`,
+  `request::Request`, `response::{Response, KnownBlock}`) appear in this crate's public API,
+  so `zebra-state`'s major bump is breaking here too.
+
 ## [11.0.0] - 2026-07-10
 
 ### Added

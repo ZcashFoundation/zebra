@@ -3,15 +3,21 @@ name: Unit Tests
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   merge_group:
 
-# Ensures that only one workflow task will run at a time. Previous builds, if
-# already in process, will get cancelled. Only the latest commit will be allowed
-# to run, cancelling any workflows in between
+# Cancel obsolete test runs after new commits. Unrelated label events use a
+# separate group so they cannot cancel the required unit test run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: >-
+    ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
+      github.event.action == 'labeled' &&
+      github.event.label.name != 'A-release' &&
+      'ignored-label' ||
+      'required'
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +33,7 @@ env:
 
 jobs:
   changes:
+    if: github.event.action != 'labeled' || github.event.label.name == 'A-release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -43,7 +50,7 @@ jobs:
           filters: .github/path-filters.yml
 
   run-unit-tests:
-    name: ${{ matrix.rust-version }}
+    name: stable 1.97.0
     needs: changes
     if: needs.changes.outputs.unit_tests == 'true'
     permissions:
@@ -52,11 +59,6 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        rust-version: [stable, beta]
-        features: [default-release-binaries]
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -64,8 +66,8 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: ${{ matrix.rust-version }}
-          cache-key: unit-tests-${{ matrix.rust-version }}-${{ matrix.features }}
+          toolchain: 1.97.0
+          cache-key: unit-tests-1.97.0-default-release-binaries
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
@@ -73,7 +75,7 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Run unit tests
-        run: cargo nextest run --profile ci --locked --release --features "${{ matrix.features }}" --run-ignored=all
+        run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
   check-no-git-dependencies:
     name: Check no git dependencies
@@ -91,7 +93,7 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           cache-on-failure: true
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
@@ -101,8 +103,19 @@ jobs:
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   unit-tests:
+    # Keep skipped unrelated-label runs from replacing the required check.
+    name: >-
+      ${{
+        github.event.action == 'labeled' &&
+        github.event.label.name != 'A-release' &&
+        'Label does not require unit tests' ||
+        'unit-tests'
+      }}
     runs-on: ubuntu-latest
-    if: always()
+    if: >-
+      always() &&
+      (github.event.action != 'labeled' ||
+      github.event.label.name == 'A-release')
     needs:
       - changes
       - run-unit-tests

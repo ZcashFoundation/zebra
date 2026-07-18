@@ -1,10 +1,13 @@
 //! Randomised property tests for the peer set.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use futures::FutureExt;
+use futures::{stream, FutureExt, StreamExt};
 use proptest::prelude::*;
-use tower::{discover::Discover, BoxError, ServiceExt};
+use tower::{
+    discover::{Change, Discover},
+    BoxError, ServiceExt,
+};
 
 use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashDeserializeInto,
@@ -12,10 +15,13 @@ use zebra_chain::{
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
-    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion, ReceiveRequestAttempt},
+    peer::{
+        ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
+        ReceiveRequestAttempt,
+    },
     peer_set::PeerSet,
     protocol::external::types::Version,
-    PeerSocketAddr, Request,
+    Config, PeerSocketAddr, Request,
 };
 
 use super::{BlockHeightPairAcrossNetworkUpgrades, PeerSetBuilder, PeerVersions};
@@ -287,6 +293,106 @@ proptest! {
             Ok::<_, TestCaseError>(())
         })?;
     }
+}
+
+/// Production nodes often accept an IPv4 zcashd sidecar through an IPv6 dual-stack
+/// listener, which reports its address as IPv4-mapped IPv6. Fractional
+/// `AdvertiseBlock` gossip can miss an unrecognized sidecar for many blocks in a
+/// row, so canonical address matching must always include it.
+#[test]
+fn sidecar_peer_always_receives_block_gossip() {
+    const TOTAL_PEERS: usize = 59;
+    const SIDECAR_INDEX: usize = 0;
+
+    let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block::Hash::from(&block);
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let config = Config::default();
+    let block_gossip_peer_ips = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+
+    let mut handles = Vec::with_capacity(TOTAL_PEERS);
+    let discovered_peers: Vec<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> = (0
+        ..TOTAL_PEERS)
+        .map(|index| {
+            let ip = if index == SIDECAR_INDEX {
+                IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped())
+            } else {
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, index as u8))
+            };
+            let peer_address: PeerSocketAddr = SocketAddr::new(ip, index as u16 + 1).into();
+            let (client, harness) = ClientTestHarness::build()
+                .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+                .with_connected_addr(ConnectedAddr::new_inbound_direct(peer_address))
+                .finish();
+
+            handles.push(harness);
+
+            Ok::<_, BoxError>(Change::Insert(peer_address, client.into()))
+        })
+        .collect();
+    let discovered_peers = stream::iter(discovered_peers).chain(stream::pending());
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_config(config)
+            .with_block_gossip_peer_ips(block_gossip_peer_ips)
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(usize::MAX)
+            .build();
+
+        let total_number_of_active_peers = check_if_only_up_to_date_peers_are_live(
+            &mut peer_set,
+            &mut handles,
+            CURRENT_NETWORK_PROTOCOL_VERSION,
+        )
+        .expect("all mock peers should connect");
+
+        assert_eq!(total_number_of_active_peers, TOTAL_PEERS);
+
+        let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
+        assert_eq!(number_of_peers_to_broadcast, 20);
+
+        let response_future =
+            peer_set.route_sidecar_broadcast(Request::AdvertiseBlock(block_hash, None));
+        std::mem::drop(response_future);
+
+        let mut block_gossip_received = 0;
+        let mut sidecar_received = false;
+        for (index, handle) in handles.iter_mut().enumerate() {
+            if let ReceiveRequestAttempt::Request(client_request) =
+                handle.try_to_receive_outbound_client_request()
+            {
+                assert_eq!(
+                    client_request.request,
+                    Request::AdvertiseBlock(block_hash, None)
+                );
+                block_gossip_received += 1;
+                sidecar_received |= index == SIDECAR_INDEX;
+            }
+        }
+
+        assert!(
+            sidecar_received,
+            "configured sidecar must receive block gossip"
+        );
+        assert_eq!(
+            block_gossip_received,
+            number_of_peers_to_broadcast + 1,
+            "block gossip should include sampled peers plus the sidecar"
+        );
+        assert!(
+            block_gossip_received < TOTAL_PEERS,
+            "sidecar block gossip must not broadcast to every connected peer"
+        );
+    });
 }
 
 /// Check if only peers with up-to-date protocol versions are live.

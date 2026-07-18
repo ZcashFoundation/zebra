@@ -518,7 +518,12 @@ impl Service<zn::Request> for Inbound {
             zn::Request::FindHeaders { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHeaders { known_blocks, stop };
                 state.clone().oneshot(request).map_ok(|resp| match resp {
-                    zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
+                    // Always reply with a `headers` message, even when empty: the
+                    // `getheaders` protocol requires a `headers` response, and
+                    // returning `Nil` (which sends nothing) leaves a peer's
+                    // `getheaders` request pending forever. A zcashd sidecar
+                    // following Zebra defers every later inv-triggered
+                    // `getheaders` behind that stuck request and never syncs.
                     zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
                     _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
                 })

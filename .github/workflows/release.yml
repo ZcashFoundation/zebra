@@ -1,12 +1,11 @@
 # Release workflow: crate publishing and GitHub Release creation.
 #
-# Changelog generation is handled by release-plz + git-cliff.
+# Changelogs are authored in source PRs and finalized before release.
 #
-# Pipeline (release-pr and release both run on every push to main, independently):
-#   release-pr → creates/updates the single Release PR
-#   release    → on a Release PR merge, publishes crates + tags and creates the
-#                app-authored zebrad GitHub Release; downstream workflows fire
-#                from that release event (exits early on non-release commits)
+# Pipeline:
+#   push to main                  → creates/updates the single Release PR
+#   merged, approved Release PR   → publishes crates + tags and creates the
+#                                   app-authored zebrad GitHub Release
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:released  → release-binaries.yml (Docker Hub)
@@ -16,6 +15,9 @@ name: Release
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+    types: [closed]
 
 # Deny all at workflow level — each job declares minimum permissions
 permissions: {}
@@ -25,9 +27,10 @@ jobs:
   #
   # Runs on every push to main. Detects changed crates by comparing local
   # source against crates.io, bumps versions based on conventional commits,
-  # generates per-crate changelogs, and opens/updates a single Release PR.
+  # and opens or updates a single Release PR.
   release-pr:
     name: Create or update Release PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # Avoid racing updates to the single release-plz Release PR branch when
     # multiple commits land on main while a previous release-pr job is running.
@@ -53,17 +56,48 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Create or update Release PR
+        id: release-plz-pr
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Add zebrad version to Release PR title
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          RELEASE_PRS: ${{ steps.release-plz-pr.outputs.prs }}
+        run: |
+          set -euo pipefail
+
+          ZEBRAD_RELEASE_PR="$(jq -c '
+            map(select(any(.releases[]?; .package_name == "zebrad")))
+            | first // empty
+          ' <<< "${RELEASE_PRS:-[]}")"
+
+          if [ -z "${ZEBRAD_RELEASE_PR}" ]; then
+            echo "No zebrad release in release-plz output; keeping the generated title."
+            exit 0
+          fi
+
+          PR_NUMBER="$(jq -r '.number' <<< "${ZEBRAD_RELEASE_PR}")"
+          VERSION="$(jq -r '
+            .releases[] | select(.package_name == "zebrad") | .version
+          ' <<< "${ZEBRAD_RELEASE_PR}")"
+
+          if [ -z "${PR_NUMBER}" ] || [ "${PR_NUMBER}" = "null" ] || [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
+            echo "::error::release-plz did not return both the PR number and zebrad version: ${ZEBRAD_RELEASE_PR}"
+            exit 1
+          fi
+
+          gh pr edit "${PR_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "chore: release v${VERSION}"
 
   # ── Stage 2: Publish crates and create the public zebrad release ────────
   #
-  # Runs on every push to main, but exits early for non-Release-PR commits
-  # (release_always = false in .release-plz.toml). When a Release PR merge
-  # is detected:
+  # Runs only when an approved Release PR from the release-plz branch is
+  # merged into main. The merged commit is the immutable release target.
+  # The job:
   #   1. Publishes changed crates to crates.io in dependency order
   #   2. Uses trusted publishing (OIDC) — no static API tokens
   #   3. Creates per-crate git tags
@@ -73,17 +107,48 @@ jobs:
   # with a GitHub App installation token because release events created by the
   # repository GITHUB_TOKEN do not trigger downstream workflows.
   #
-  # No `needs: release-pr`: this job self-detects the merge and must publish even
-  # when release-pr's concurrency group cancels its superseded pending run.
   release:
     name: Publish crates and GitHub Release
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       pull-requests: read
     environment: release
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     steps:
+      - name: Verify approved Release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_PR="$(gh pr view "${PR_NUMBER}" \
+            --repo "${REPOSITORY}" \
+            --json baseRefName,headRefName,labels,mergeCommit,reviewDecision,state)"
+
+          if ! jq -e --arg target_sha "${TARGET_SHA}" '
+            .state == "MERGED" and
+            .reviewDecision == "APPROVED" and
+            .baseRefName == "main" and
+            (.headRefName | startswith("release-plz-")) and
+            .mergeCommit.oid == $target_sha and
+            any(.labels[]; .name == "A-release")
+          ' <<< "${RELEASE_PR}" >/dev/null; then
+            echo "::error::PR #${PR_NUMBER} is not an approved A-release Release PR merged into main at ${TARGET_SHA}."
+            exit 1
+          fi
       - name: Generate release app token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
@@ -97,27 +162,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-      - name: Detect Release PR merge
-        id: release-pr
+      - name: Restore main branch context
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-          REPOSITORY: ${{ github.repository }}
-          TARGET_SHA: ${{ github.sha }}
+          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
-          set -euo pipefail
-
-          ASSOCIATED_PRS="$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${REPOSITORY}/commits/${TARGET_SHA}/pulls")"
-
-          if jq -e 'map(select(.head.ref | startswith("release-plz-"))) | length > 0' <<< "${ASSOCIATED_PRS}" >/dev/null; then
-            echo "merged=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "merged=false" >> "${GITHUB_OUTPUT}"
-          fi
+          git switch --force-create main "${TARGET_SHA}"
+          git branch --set-upstream-to=origin/main main
       - name: Validate release app token
-        if: steps.release-pr.outputs.merged == 'true' && steps.app-token.outputs.token == ''
+        if: steps.app-token.outputs.token == ''
         run: |
           echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
@@ -158,6 +212,11 @@ jobs:
             echo "released=true"
             echo "version=${VERSION}"
             echo "tag=${TAG}"
+            if [[ "${VERSION}" == *-* ]]; then
+              echo "prerelease=true"
+            else
+              echo "prerelease=false"
+            fi
           } >> "${GITHUB_OUTPUT}"
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         if: steps.zebrad-release.outputs.released == 'true'
@@ -281,12 +340,18 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
-          TARGET_SHA: ${{ github.sha }}
+          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           TAG: ${{ steps.zebrad-release.outputs.tag }}
+          PRERELEASE: ${{ steps.zebrad-release.outputs.prerelease }}
         run: |
           set -euo pipefail
 
           notes_file="${RUNNER_TEMP}/release-notes.final.md"
+          release_flags=(--latest --prerelease=false)
+
+          if [ "${PRERELEASE}" = "true" ]; then
+            release_flags=(--latest=false --prerelease)
+          fi
 
           if gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${TAG}" \
@@ -294,7 +359,7 @@ jobs:
               --title "Zebra ${TAG}" \
               --notes-file "${notes_file}" \
               --target "${TARGET_SHA}" \
-              --latest
+              "${release_flags[@]}"
           else
             gh release create "${TAG}" \
               --repo "${REPOSITORY}" \
@@ -302,5 +367,5 @@ jobs:
               --notes-file "${notes_file}" \
               --target "${TARGET_SHA}" \
               --verify-tag \
-              --latest
+              "${release_flags[@]}"
           fi
