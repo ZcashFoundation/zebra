@@ -217,6 +217,118 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
     Ok(())
 }
 
+/// A contextually rejected block must not remain known as sent.
+///
+/// Sync checks [`zebra_state::Request::KnownBlock`] before downloading a block body. If a rejected
+/// block remains in the state's sent hashes, an honest block body with the same header hash is
+/// incorrectly reported as a duplicate and never reaches contextual verification.
+#[tokio::test]
+async fn rejected_block_is_not_known_as_sent() -> Result<()> {
+    const EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+    config.mining.extra_coinbase_data =
+        Some(ExtraCoinbaseData::try_from(EXTRA_COINBASE_DATA.to_owned())?);
+
+    let mut block_builder = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for expected_height in 1..=3 {
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height.0, expected_height);
+        client.submit_block(block.clone()).await?;
+        blocks.push(block);
+    }
+
+    block_builder.kill(false)?;
+    let output = block_builder.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+    client.submit_block(blocks[0].clone()).await?;
+    client.submit_block(blocks[1].clone()).await?;
+
+    let valid_block = blocks[2].clone();
+    let mut poisoned_block = valid_block.clone();
+    let coinbase = Arc::make_mut(
+        poisoned_block
+            .transactions
+            .first_mut()
+            .expect("block templates contain a coinbase transaction"),
+    );
+    let transparent::Input::Coinbase { data, .. } = coinbase
+        .inputs_mut()
+        .first_mut()
+        .expect("coinbase transactions contain a transparent input")
+    else {
+        panic!("the first coinbase transaction input must be a coinbase input");
+    };
+    assert!(
+        data.ends_with(EXTRA_COINBASE_DATA.as_bytes()),
+        "the coinbase transaction must contain the configured extra data"
+    );
+    *data
+        .last_mut()
+        .expect("configured extra coinbase data is non-empty") = b'a';
+
+    assert_eq!(
+        poisoned_block.hash(),
+        valid_block.hash(),
+        "changing a NU5 coinbase scriptSig must not change the block header hash"
+    );
+
+    let poisoned_block_data = hex::encode(poisoned_block.zcash_serialize_to_vec()?);
+    let poisoned_response: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{poisoned_block_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        poisoned_response,
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
+        "the poisoned block body must be rejected"
+    );
+
+    let valid_block_data = hex::encode(valid_block.zcash_serialize_to_vec()?);
+    let valid_response: SubmitBlockResponse = client
+        .json_result_from_call("submitblock", format!(r#"["{valid_block_data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        valid_response,
+        SubmitBlockResponse::Accepted,
+        "KnownBlock must drain rejected hashes before checking sent hashes"
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
 /// Regression test for <https://github.com/ZcashFoundation/zebra/issues/10470>.
 ///
 /// `getrawtransaction` must count confirmations against the full best-chain tip
