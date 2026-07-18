@@ -1230,6 +1230,9 @@ impl Service<Request> for StateService {
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
+
+                self.drain_non_finalized_rejected_hashes();
+
                 let sent_hash_response = self.known_sent_hash(&hash);
                 let read_service = self.read_service.clone();
 
