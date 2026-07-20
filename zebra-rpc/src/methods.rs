@@ -119,12 +119,13 @@ use types::{
         },
         proposal::proposal_block_from_template,
         BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
-        GetBlockTemplateParameters, GetBlockTemplateResponse,
+        GetBlockTemplateParameters, GetBlockTemplateResponse, MinerParams,
     },
     get_blockchain_info::GetBlockchainInfoBalance,
     get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
+    get_standard_fee::GetStandardFeeResponse,
     long_poll::LongPollInput,
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
@@ -647,6 +648,16 @@ pub trait Rpc {
     #[method(name = "z_validateaddress")]
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
 
+    /// Returns the recommended standard fee per logical action, in zatoshis.
+    ///
+    /// Currently returns a static fee with `version` 0; this will be replaced by
+    /// a dynamic estimate without changing the parameters or result shape.
+    ///
+    /// method: post
+    /// tags: wallet
+    #[method(name = "getstandardfee")]
+    async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse>;
+
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
     ///
@@ -724,6 +735,39 @@ pub trait Rpc {
     /// method: post
     /// tags: generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>>;
+
+    #[method(name = "generatetoaddress")]
+    /// Mine blocks immediately, paying the coinbase to `address`. Returns the
+    /// block hashes of the generated blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `num_blocks`: (numeric, required, example=1) Number of blocks to generate.
+    /// - `address`: (string, required) The transparent or shielded address to
+    ///   pay the coinbase subsidy and fees to.
+    ///
+    /// # Notes
+    ///
+    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// Unlike [`Self::generate`], the coinbase is paid to `address` instead of
+    /// the configured `mining.miner_address`, which lets a test harness fund
+    /// several wallets from one node.
+    ///
+    /// zcashd reference: [`generatetoaddress`](https://zcash.github.io/rpc/generatetoaddress.html)
+    /// method: post
+    /// tags: generating
+    async fn generate_to_address(
+        &self,
+        num_blocks: u32,
+        address: String,
+    ) -> Result<Vec<GetBlockHashResponse>> {
+        let _ = (num_blocks, address);
+        Err(ErrorObject::borrowed(
+            ErrorCode::MethodNotFound.code(),
+            "generatetoaddress is not implemented",
+            None,
+        ))
+    }
 
     #[method(name = "addnode")]
     /// Add or remove a node from the address book.
@@ -2858,6 +2902,14 @@ where
         z_validate_address(network, raw_address)
     }
 
+    async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
+        use zebra_chain::transaction::zip317::MARGINAL_FEE;
+
+        const VERSION: u32 = 0;
+
+        Ok(GetStandardFeeResponse::new(MARGINAL_FEE, VERSION))
+    }
+
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
         let net = self.network.clone();
 
@@ -3068,6 +3120,41 @@ where
         }
 
         Ok(block_hashes)
+    }
+
+    async fn generate_to_address(
+        &self,
+        num_blocks: u32,
+        address: String,
+    ) -> Result<Vec<GetBlockHashResponse>> {
+        if !self.network.disable_pow() {
+            return Err(ErrorObject::borrowed(
+                0,
+                "generatetoaddress is only supported on networks where PoW is disabled",
+                None,
+            ));
+        }
+
+        // Build miner parameters that pay the coinbase to the requested address,
+        // reusing the same coinbase-data and marker handling as configured mining.
+        let miner_address = address
+            .parse()
+            .map_error(server::error::LegacyCode::default())?;
+        let miner_params = MinerParams::new(
+            &self.network,
+            crate::config::mining::Config {
+                miner_address: Some(miner_address),
+                ..Default::default()
+            },
+        )
+        .map_error(server::error::LegacyCode::default())?;
+
+        // Override the miner params on a clone, then reuse the whole `generate`
+        // path — it mines through its own `self.clone()`, which preserves the
+        // override, so the configured `mining.miner_address` is untouched.
+        let mut rpc = self.clone();
+        rpc.gbt.set_miner_params(miner_params);
+        rpc.generate(num_blocks).await
     }
 
     async fn add_node(

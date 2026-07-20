@@ -15,9 +15,12 @@ use rand::{
 
 use zebra_chain::{
     amount::Amount,
-    block::{Height, MAX_BLOCK_BYTES},
+    block::{Header, Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
+    serialization::{CompactSizeMessage, ZcashSerialize},
+    transaction::{
+        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx, MIN_TRANSPARENT_TX_SIZE,
+    },
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
@@ -96,6 +99,12 @@ pub fn select_mempool_transactions(
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
     let mut remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
 
+    // `MAX_BLOCK_BYTES` limits the whole serialized block, so reserve space for the block header
+    // and the transaction count before budgeting transactions, or the assembled block could
+    // exceed the consensus size limit (GHSA-95m2-vx53-v2jw).
+    remaining_block_bytes -= Header::serialized_size(net);
+    remaining_block_bytes -= max_transaction_count_size();
+
     // Adjust the limits based on the coinbase transaction
     remaining_block_bytes -= fake_coinbase_tx.data.as_ref().len();
     remaining_block_sigops -= fake_coinbase_tx.sigops;
@@ -136,6 +145,25 @@ pub fn select_mempool_transactions(
     }
 
     selected_txs
+}
+
+/// Returns the maximum possible serialized size of a block's transaction count, in bytes.
+///
+/// The transaction count is a CompactSize whose width grows with the count. A serialized
+/// transaction takes at least [`MIN_TRANSPARENT_TX_SIZE`] bytes, so a block can never contain
+/// more than `MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE` transactions, which bounds the width.
+fn max_transaction_count_size() -> usize {
+    let max_transaction_count: usize = (MAX_BLOCK_BYTES / MIN_TRANSPARENT_TX_SIZE)
+        .try_into()
+        .expect("fits in memory");
+
+    let max_transaction_count = CompactSizeMessage::try_from(max_transaction_count)
+        .expect("the maximum transaction count is below the CompactSize message limit");
+
+    max_transaction_count
+        .zcash_serialize_to_vec()
+        .expect("serialization into a vec can't fail")
+        .len()
 }
 
 /// Returns a fee-weighted index and the total weight of `transactions`.

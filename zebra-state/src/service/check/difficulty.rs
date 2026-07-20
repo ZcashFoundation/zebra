@@ -186,6 +186,14 @@ impl AdjustedDifficulty {
     /// Implements `ThresholdBits` from the Zcash specification, and the Testnet
     /// minimum difficulty adjustment from ZIPs 205 and 208.
     pub fn expected_difficulty_threshold(&self) -> CompactDifficulty {
+        // Regtest uses fixed minimum difficulty with no retargeting, matching
+        // zcashd's and Bitcoin's `fPowNoRetargeting`. This keeps every regtest
+        // block at the powLimit, so a zcashd sidecar following a Zebra regtest
+        // chain accepts its headers instead of rejecting them as "bad-diffbits".
+        if self.network.is_regtest() {
+            return self.network.target_difficulty_limit().to_compact();
+        }
+
         if NetworkUpgrade::is_testnet_min_difficulty_block(
             &self.network,
             self.candidate_height,

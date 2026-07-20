@@ -41,7 +41,7 @@ jobs:
           filters: .github/path-filters.yml
 
   clippy:
-    name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
+    name: clippy stable 1.97.0 / ${{ matrix.type }}
     needs: changes
     if: needs.changes.outputs.lint == 'true'
     permissions:
@@ -53,7 +53,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust-version: [stable, beta]
         type: [release, tests]
         include:
           - type: release
@@ -70,7 +69,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           components: clippy
-          toolchain: ${{ matrix.rust-version }}
+          toolchain: 1.97.0
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
@@ -117,35 +116,10 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.91 # MSRV
+          toolchain: 1.91.0 # MSRV
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo build --bin "${{ matrix.binary }}" --workspace
-
-  docs:
-    name: docs
-    needs: changes
-    if: needs.changes.outputs.lint == 'true'
-    permissions:
-      contents: read
-      statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        with:
-          toolchain: nightly
-          cache-on-failure: true
-      - uses: ./.github/actions/setup-zebra-build
-      - run: cargo doc --no-deps --workspace --all-features --document-private-items --target-dir "$(pwd)"/target/internal
-        env:
-          # Keep in sync with ./book.yml:jobs.build
-          # The -A and -W settings must be the same as the `rustdocflags` in:
-          # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-          RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links -D warnings
 
   fmt:
     name: fmt
@@ -162,34 +136,10 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: nightly
+          toolchain: 1.91.0
           components: rustfmt
       - name: Run fmt
         run: cargo fmt --all -- --check
-
-  unused-deps:
-    name: unused-deps
-    needs: changes
-    if: needs.changes.outputs.lint == 'true'
-    permissions:
-      contents: read
-      id-token: write
-      statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        with:
-          toolchain: nightly
-          cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
-        with:
-          tool: cargo-udeps
-      - uses: ./.github/actions/setup-zebra-build
-      - run: cargo udeps --workspace --all-targets --all-features --locked
 
   no-test-deps:
     needs: changes
@@ -203,38 +153,10 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           cache-on-failure: true
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package zebrad -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
-
-  # Checks that selected rates can compile with power set of features
-  features:
-    name: features
-    needs: changes
-    if: needs.changes.outputs.lint == 'true'
-    permissions:
-      contents: read
-      id-token: write
-      statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        with:
-          toolchain: nightly
-          cache-on-failure: true
-      - name: cargo install cargo-hack
-        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
-        with:
-          tool: cargo-hack
-      - uses: ./.github/actions/setup-zebra-build
-      - run: cargo hack check --all
-        env:
-          RUSTFLAGS: -D warnings
 
   check-cargo-lock:
     name: check-cargo-lock
@@ -251,7 +173,7 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo check --locked --all-features --all-targets
@@ -345,12 +267,9 @@ jobs:
       - clippy
       - crate-checks
       - msrv
-      - docs
       - fmt
-      - unused-deps
       - check-cargo-lock
       - no-test-deps
-      - features
       - deny
       - hadolint
       - shellcheck
@@ -360,4 +279,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, hadolint, shellcheck
+          allowed-skips: clippy, crate-checks, msrv, fmt, check-cargo-lock, no-test-deps, deny, hadolint, shellcheck

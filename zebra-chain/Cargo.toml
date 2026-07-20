@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "11.1.0"
+version = "11.2.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -154,7 +154,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "4.0.0" }
+zebra-test = { path = "../zebra-test/" }
 
 [[bench]]
 name = "block"

@@ -674,6 +674,14 @@ where
         self.miner_params.as_ref()
     }
 
+    /// Overrides the miner parameters used to build coinbase transactions.
+    ///
+    /// Used by the regtest `generatetoaddress` RPC to mine to a caller-specified
+    /// address on a cloned handler, without changing the configured default.
+    pub fn set_miner_params(&mut self, miner_params: MinerParams) {
+        self.miner_params = Some(miner_params);
+    }
+
     /// Returns a handle to the coinbase transaction cache.
     pub(crate) fn coinbase_cache(&self) -> CoinbaseCache {
         self.coinbase_cache.clone()
