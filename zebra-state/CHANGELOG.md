@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured from the same chain snapshot used to compute `confirmations`. `MinedTx::new` now takes this hash as its fifth argument. Consumers should pin follow-up state queries to this hash (or to the resolved block hash) instead of issuing a separate `Tip` / `BestChainBlockHash` request. See [#10550](https://github.com/ZcashFoundation/zebra/issues/10550).
+
 ## [11.0.0] - 2026-07-17
 
 ### Changed
@@ -41,7 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured from the same chain snapshot used to compute `confirmations`. `MinedTx::new` now takes this hash as its fifth argument. Consumers should pin follow-up state queries to this hash (or to the resolved block hash) instead of issuing a separate `Tip` / `BestChainBlockHash` request. See [#10550](https://github.com/ZcashFoundation/zebra/issues/10550).
 - The finalized-state open functions now return `Result<_, StateInitError>` instead
   of panicking when a read-only state cannot be opened: `FinalizedState::new`,
   `init_read_only`, `spawn_init_read_only`, and the lower-level `ZebraDb::new`.

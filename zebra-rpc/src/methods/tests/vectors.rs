@@ -1027,7 +1027,15 @@ async fn rpc_getblock_verbosity_2_side_chain_no_panic() {
         zebra_chain::orchard::tree::NoteCommitmentTree::default(),
     ))));
 
-    // 6 & 7. BlockInfo for previous and current block.
+    // 6. IronwoodTree.
+    let response_handler = read_state
+        .expect_request(zebra_state::ReadRequest::IronwoodTree(block_hash.into()))
+        .await;
+    response_handler.respond(zebra_state::ReadResponse::IronwoodTree(Some(Arc::new(
+        zebra_chain::orchard::tree::NoteCommitmentTree::default(),
+    ))));
+
+    // 7 & 8. BlockInfo for previous and current block.
     let response_handler = read_state
         .expect_request(zebra_state::ReadRequest::BlockInfo(
             previous_block_hash.into(),

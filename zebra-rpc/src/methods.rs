@@ -1343,7 +1343,6 @@ where
             // best chain. Avoid panicking on `try_into()` in the verbosity-2 path,
             // and label such transactions as not in the active chain.
             let in_active_chain = confirmations >= 0;
-            let confirmations_u32 = u32::try_from(confirmations).ok();
 
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
@@ -1390,7 +1389,7 @@ where
                                 TransactionObject::from_transaction(
                                     tx.clone(),
                                     Some(height),
-                                    confirmations_u32,
+                                    Some(confirmations),
                                     &network,
                                     Some(block_time),
                                     Some(hash),
