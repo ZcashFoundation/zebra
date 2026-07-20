@@ -6,6 +6,7 @@ pub mod get_blockchain_info;
 pub mod get_mempool_info;
 pub mod get_mining_info;
 pub mod get_raw_mempool;
+pub mod get_standard_fee;
 pub mod long_poll;
 pub mod network_info;
 pub mod peer_info;

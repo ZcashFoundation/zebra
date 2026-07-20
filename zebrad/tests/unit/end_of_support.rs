@@ -8,7 +8,9 @@ use zebra_chain::{
     parameters::{Network, Network::*},
 };
 use zebra_test::{args, prelude::*};
-use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
+use zebrad::components::sync::end_of_support::{
+    self, EOS_PANIC_AFTER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
+};
 
 use crate::common::{
     config::{default_test_config, testdir},
@@ -71,9 +73,8 @@ fn end_of_support_panic() {
 #[test]
 #[tracing_test::traced_test]
 fn end_of_support_function() {
-    // We are away from warn or panic
-    let no_warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY)
-        - (30 * ESTIMATED_BLOCKS_PER_DAY);
+    // One day before the warn range opens
+    let no_warn = ESTIMATED_RELEASE_HEIGHT + ((EOS_WARN_AFTER - 1) * ESTIMATED_BLOCKS_PER_DAY);
 
     end_of_support::check(Height(no_warn), &Network::Mainnet);
     assert!(logs_contain(
@@ -81,8 +82,8 @@ fn end_of_support_function() {
     ));
     assert!(logs_contain("Zebra release is supported"));
 
-    // We are in warn range
-    let warn = ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * 1152) - (3 * ESTIMATED_BLOCKS_PER_DAY);
+    // One day into the warn range
+    let warn = ESTIMATED_RELEASE_HEIGHT + ((EOS_WARN_AFTER + 1) * ESTIMATED_BLOCKS_PER_DAY);
 
     end_of_support::check(Height(warn), &Network::Mainnet);
     assert!(logs_contain(

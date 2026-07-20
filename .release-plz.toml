@@ -28,21 +28,50 @@ release_commits = "^(feat|fix|perf|refactor|build)"
 pr_labels = ["A-release"]
 
 pr_body = """
-## Review the Release PR
-
-- [ ] Version bumps match user-visible changes for each crate (`major` for network upgrades or breaking API, `minor` for new API/behavior/RPC/config, `patch` otherwise)
-- [ ] Each changed crate's `[Unreleased]` entries follow the Changelog Guidelines (operator-focused in the root `CHANGELOG.md`, crate-consumer-focused per crate)
-- [ ] `[Unreleased]` has been renamed to the release heading (`## [Zebra <version>]` in the root, `## [<version>]` per crate)
-- [ ] No git dependencies remain in crates publishing to crates.io (`check-no-git-dependencies`)
-- [ ] Any required checkpoint, end-of-support height, README, or operational changes already landed
-- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are configured at repository or organization scope
-- [ ] Merge only when crates should publish and the public `zebrad` GitHub Release should be created
-
-## Release Summary
+## Release summary
 
 {% for release in releases %}
-- `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} -> {% endif %}{{ release.next_version }}
+- `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} → {% endif %}{{ release.next_version }}
 {%- endfor %}
+
+## Review this release
+
+Review the latest commit after all intended changes have landed on `main` and release-plz has finished updating this PR.
+
+### Release prerequisites
+
+- [ ] No unintended prerelease dependency versions remain.
+
+For releases that include `zebrad`:
+
+- [ ] A full sync completed after the latest state change, or no new full sync is required.
+- [ ] Mainnet and Testnet checkpoints are current for this release.
+
+### Release contents
+
+- [ ] If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
+- [ ] Each crate changelog covers every consumer-visible change since that crate's previous release.
+- [ ] Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
+
+### Versions
+
+- [ ] If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
+- [ ] Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
+- [ ] Every release heading matches the corresponding version in the release summary.
+
+### Release data and documentation
+
+For releases that include `zebrad`:
+
+- [ ] The end-of-support height matches the intended release date.
+- [ ] Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
+- [ ] README, installation, compatibility, and operational documentation match the release.
+
+### Approval
+
+- [ ] This exact commit is ready to publish.
+
+Merging this PR publishes the listed crates and creates their git tags. If `zebrad` is listed, the workflow also creates the public GitHub Release and starts the binary, Docker, and GCP release workflows.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).

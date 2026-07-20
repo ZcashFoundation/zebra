@@ -61,7 +61,7 @@ If `miner_address` is a Unified Address with more than one receiver, Zebra sends
 
 [#extra-coinbase-data]: #extra-coinbase-data
 
-Zebra does not tag its blocks by default. If you don't set `extra_coinbase_data`, the blocks you mine carry no identifying data. Setting this option fixes that:
+Zebra prepends a `🦓` marker to the coinbase input of every block it builds. Setting `extra_coinbase_data` adds your own tag (such as a pool name) after it, separated by `": "`:
 
 ```toml
 [mining]
@@ -69,14 +69,13 @@ miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 extra_coinbase_data = "/MyPoolName/"
 ```
 
-A few important details about how this value is used:
+How it's used:
 
-- The string is inserted into the transparent input script of the coinbase transaction, immediately after the encoded block height.
-- The string is always encoded as raw UTF-8 bytes. It is **not** hex-decoded, even if it looks like a valid hex string — `extra_coinbase_data = "deadbeef"` puts the eight ASCII characters `deadbeef` in the coinbase script, not the four bytes `0xde 0xad 0xbe 0xef`. This option only carries UTF-8 text, so arbitrary non-UTF-8 byte sequences can't be embedded. In practice most mining tags are short, human-readable pool names or identifiers, so this is usually what you want anyway.
-- The encoded value, including Zebra's script push overhead, is limited to 94 bytes. Because that limit includes 1-2 bytes of push-opcode overhead, keep your tag at 92 bytes or less to be safe. If the limit is exceeded, Zebra refuses to build a block template until the value is shortened.
-- This field is optional. Leaving it unset is valid — Zebra just won't tag the block.
+- Inserted into the coinbase input script, after the block height, `🦓` marker, and `": "` separator.
+- Limited to 86 bytes. If exceeded, Zebra refuses to start.
+- Optional. If unset, the block still carries the `🦓` marker, just no extra data.
 
-You can confirm the tag is being applied by calling `getblocktemplate` and checking the `coinbasetxn.data` field (see [Testing the setup](#testing-the-setup)): the hex string after the height bytes should decode back to your configured text.
+You can confirm the marker is applied by calling `getblocktemplate` and checking the `coinbasetxn.data` field (see [Testing the setup](#testing-the-setup)): after the height bytes you'll see the `🦓` marker (`f0 9f a6 93`), then — if `extra_coinbase_data` is set — the `": "` separator (`3a 20`) and your text.
 
 ### Miner memo
 

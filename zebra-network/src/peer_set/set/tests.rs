@@ -2,7 +2,10 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};
 use proptest::{collection::vec, prelude::*};
@@ -121,6 +124,7 @@ struct PeerSetBuilder<D, C> {
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
     minimum_peer_version: Option<MinimumPeerVersion<C>>,
     max_conns_per_ip: Option<usize>,
+    block_gossip_peer_ips: Vec<IpAddr>,
 }
 
 impl PeerSetBuilder<(), ()> {
@@ -131,6 +135,25 @@ impl PeerSetBuilder<(), ()> {
 }
 
 impl<D, C> PeerSetBuilder<D, C> {
+    /// Use the provided [`Config`] when constructing the [`PeerSet`] instance.
+    pub fn with_config(self, config: Config) -> PeerSetBuilder<D, C> {
+        PeerSetBuilder {
+            config: Some(config),
+            ..self
+        }
+    }
+
+    /// Always include these inbound peer IPs in block inventory broadcasts.
+    pub fn with_block_gossip_peer_ips(
+        self,
+        block_gossip_peer_ips: Vec<IpAddr>,
+    ) -> PeerSetBuilder<D, C> {
+        PeerSetBuilder {
+            block_gossip_peer_ips,
+            ..self
+        }
+    }
+
     /// Use the provided `discover` parameter when constructing the [`PeerSet`] instance.
     pub fn with_discover<NewD>(self, discover: NewD) -> PeerSetBuilder<NewD, C> {
         PeerSetBuilder {
@@ -142,6 +165,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: self.max_conns_per_ip,
+            block_gossip_peer_ips: self.block_gossip_peer_ips,
         }
     }
 
@@ -159,6 +183,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             address_book: self.address_book,
             minimum_peer_version: Some(minimum_peer_version),
             max_conns_per_ip: self.max_conns_per_ip,
+            block_gossip_peer_ips: self.block_gossip_peer_ips,
         }
     }
 
@@ -178,6 +203,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: Some(max_conns_per_ip),
+            block_gossip_peer_ips: self.block_gossip_peer_ips,
         }
     }
 }
@@ -217,6 +243,7 @@ where
 
         let peer_set = PeerSet::new(
             &config,
+            self.block_gossip_peer_ips,
             discover,
             demand_signal,
             handle_rx,

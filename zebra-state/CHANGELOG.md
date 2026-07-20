@@ -5,15 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [11.0.0] - 2026-07-17
+
+### Changed
+
+- Major version bump for the rocksdb 0.24 upgrade. `rocksdb::Error` is reachable through
+  `ZebraDb`'s public API, so the rocksdb 0.22 → 0.24 bump is a breaking change; 10.1.0
+  shipped it without a major and is yanked. Downstream code pinning an older rocksdb must
+  upgrade.
+
+### Security
+
+- Checking the remaining transaction value of a block is no longer quadratic in the number of
+  transactions (GHSA-4g24-549m-hp75).
+- The state service now accepts children of a block that was accepted and has the same
+  block header hash (due to [ZIP-244](https://zips.z.cash/zip-0244)) as a block that
+  was previously rejected
+  ([GHSA-8gxx-hc65-vv82](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82)).
+
+## [10.1.0] - 2026-07-10
+
+### Added
+
+- `CommitCheckpointVerifiedError` re-exported from the crate root
+- `CommitCheckpointVerifiedError::inner()` and `CommitSemanticallyVerifiedError::inner()`
+  accessors for the underlying `CommitBlockError`
+  ([#10916](https://github.com/ZcashFoundation/zebra/pull/10916))
+
+### Changed
+
+- MSRV is now 1.88
+- Migrated to `rocksdb 0.24`
+
+## [10.0.0] - 2026-07-02
 
 ### Breaking Changes
 
 - `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured from the same chain snapshot used to compute `confirmations`. `MinedTx::new` now takes this hash as its fifth argument. Consumers should pin follow-up state queries to this hash (or to the resolved block hash) instead of issuing a separate `Tip` / `BestChainBlockHash` request. See [#10550](https://github.com/ZcashFoundation/zebra/issues/10550).
 - The finalized-state open functions now return `Result<_, StateInitError>` instead
   of panicking when a read-only state cannot be opened: `FinalizedState::new`,
-  `FinalizedState::new_with_debug`, `init_read_only`, `spawn_init_read_only`, and the
-  lower-level `ZebraDb::new` / `DiskDb::new`. A read-only open against a missing or
+  `init_read_only`, `spawn_init_read_only`, and the lower-level `ZebraDb::new`.
+  A read-only open against a missing or
   unreadable cache directory, with no existing database on disk, or with an ephemeral
   database also configured (a read-only secondary must not delete the primary's
   files), now returns the new public `StateInitError` rather than panicking. The
@@ -21,14 +53,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#10741](https://github.com/ZcashFoundation/zebra/pull/10741))
 - `ReadRequest::NonFinalizedBlocksListener` is now a struct variant carrying the
   caller's `known_chain_tips`, so the non-finalized blocks listener streams only the
-  blocks above the chain tips the caller already has. `MAX_NON_FINALIZED_CHAIN_FORKS`
-  is now re-exported from the crate root.
+  blocks above the chain tips the caller already has. `NonFinalizedBlocksListener::spawn`
+  takes the same `known_chain_tips` set and no longer takes a `Network`.
+  `MAX_NON_FINALIZED_CHAIN_FORKS` is now re-exported from the crate root.
 - Added `ReadRequest::FindForkPoint { known_blocks }` request and the corresponding
   `ReadResponse::ForkPoint(Option<(block::Height, block::Hash)>)` response. The
   server returns the most recent block in the caller-supplied locator that is
   on the best chain (the fork point) to assist in reorg handling for clients
   that track only a single chain tip at a time.
   ([#10764](https://github.com/ZcashFoundation/zebra/pull/10764)).
+
+### Added
+
+- `request::Spend::Ironwood`
+- `impl From<ironwood::Nullifier> for Spend`
+- `ReadRequest::IronwoodTree` and `ReadRequest::IronwoodSubtrees { start_index, limit }`, with
+  the corresponding `ReadResponse::{IronwoodTree, IronwoodSubtrees}` responses.
+- `ValidateContextError::{DuplicateIronwoodNullifier, UnknownIronwoodAnchor}`
+- `DiskWriteBatch::{create_ironwood_tree, insert_ironwood_subtree}`
+- `ZebraDb`:
+  - `contains_ironwood_anchor`
+  - `contains_ironwood_nullifier`
+  - `ironwood_revealing_tx_loc`
+  - `ironwood_subtree_list_by_index_range`
+  - `ironwood_tree_by_hash_or_height`
+  - `ironwood_tree_by_height`
+  - `ironwood_tree_by_height_range`
+  - `ironwood_tree_for_tip`
+- `impl IntoDisk for ironwood::Nullifier`
+- `impl DuplicateNullifierError for ironwood::Nullifier`
+
+### Changed
+
+- Bumped the on-disk database format version (27 → 28) for the Ironwood note
+  commitment tree, anchors, subtrees, and nullifier set.
+- `IntoDisk for ValueBalance<NonNegative>` now serializes to `[u8; 48]`
+  (was `[u8; 40]`), for the added Ironwood pool balance.
+
+### Fixed
+
+- Read-only secondary databases no longer attempt to flush on shutdown, which RocksDB
+  rejects and which was logged as an unexpected error
+  ([#10784](https://github.com/ZcashFoundation/zebra/pull/10784))
+- Finalizing a block no longer re-inserts an emptied side chain into the chain set
+  ([#10818](https://github.com/ZcashFoundation/zebra/pull/10818))
 
 ## [9.0.1] - 2026-06-18
 
