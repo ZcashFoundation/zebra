@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           components: clippy
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
@@ -115,7 +115,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           components: clippy
           cache-key: crate-build-${{ matrix.crate }}
           cache-on-failure: true
@@ -179,7 +179,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-          components: clippy
           cache-key: crate-build-msrv-${{ matrix.crate }}
           cache-on-failure: true
 
@@ -188,10 +187,9 @@ jobs:
       - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
         # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
         if: matrix.crate != 'zebrad'
-        run: |
-          cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
-          cargo build --package ${{ matrix.crate }} --all-features --all-targets
-
+        env:
+          CRATE: ${{ matrix.crate }}
+        run: cargo build --package "$CRATE" --all-features --all-targets
 
   test-crates:
     runs-on: ubuntu-latest

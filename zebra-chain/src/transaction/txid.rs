@@ -28,8 +28,10 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 { .. } => self.txid_v6(),
+            // V7 (tachyon) reuses the v6 txid path. NOTE: this does not yet fold the tachyon
+            // bundle into the txid; finalize once the tachyon txid digest is specified.
+            Transaction::V7 { .. } => self.txid_v6(),
         }
     }
 
@@ -52,7 +54,6 @@ impl<'a> TxIdBuilder<'a> {
     }
 
     /// Passthrough to txid_v5 for V6 transactions.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn txid_v6(self) -> Option<Hash> {
         self.txid_v5()
     }

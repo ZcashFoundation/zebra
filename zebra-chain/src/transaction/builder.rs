@@ -9,16 +9,14 @@ use crate::{
 };
 
 impl Transaction {
-    /// Returns a new version 6 coinbase transaction for `network` and `height`,
+    /// Returns a new version 7 (tachyon) coinbase transaction for `network` and `height`,
     /// which contains the specified `outputs`.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    pub fn new_v6_coinbase(
+    pub fn new_v7_coinbase(
         network: &Network,
         height: Height,
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
         miner_data: Vec<u8>,
-        zip233_amount: Option<Amount<NonNegative>>,
-        #[cfg(zcash_unstable = "zip235")] miner_fee: Amount<NonNegative>,
     ) -> Transaction {
         // # Consensus
         //
@@ -71,7 +69,7 @@ impl Transaction {
             "invalid coinbase transaction: must have at least one output"
         );
 
-        Transaction::V6 {
+        Transaction::V7 {
             // > The transaction version number MUST be 4 or 5. ...
             // > If the transaction version number is 5 then the version group ID
             // > MUST be 0x26A7270A.
@@ -87,13 +85,6 @@ impl Transaction {
             // > block height.
             expiry_height: height,
 
-            // > The NSM zip233_amount field [ZIP-233] must be set at minimum to 60% of miner fees [ZIP-235].
-            #[cfg(zcash_unstable = "zip235")]
-            zip233_amount: zip233_amount
-                .unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap()),
-            #[cfg(not(zcash_unstable = "zip235"))]
-            zip233_amount: zip233_amount.unwrap_or(Amount::zero()),
-
             inputs,
             outputs,
 
@@ -106,6 +97,7 @@ impl Transaction {
             // See the Zcash spec for additional shielded coinbase consensus rules.
             sapling_shielded_data: None,
             orchard_shielded_data: None,
+            ironwood_shielded_data: None,
             tachyon_shielded_data: None,
         }
     }
