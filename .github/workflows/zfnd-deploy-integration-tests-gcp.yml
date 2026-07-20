@@ -172,6 +172,7 @@ jobs:
       cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
       state_version: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.state_version || '' }}
       container_id: ${{ steps.find-container.outputs.CONTAINER_ID }}
+      instance_zone: ${{ steps.create-instance.outputs.instance_zone }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
@@ -244,29 +245,10 @@ jobs:
         id: create-instance
         env:
           WORKFLOW_ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          PRIMARY_ZONE: ${{ vars.GCP_ZONE }}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
-
-          # Create disk separately if using cached image, or prepare params for --create-disk if new
-          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
-            # Check if disk already exists (from a previous failed run)
-            if gcloud compute disks describe "${NAME}" --zone=${{ vars.GCP_ZONE }} &>/dev/null; then
-              echo "Disk ${NAME} already exists, reusing it"
-            else
-              # Create disk from cached image separately (allows partition mounting)
-              echo "Creating disk ${NAME} from cached image ${{ env.CACHED_DISK_NAME }}"
-              gcloud compute disks create "${NAME}" \
-                --size=400GB \
-                --type=pd-balanced \
-                --image="${{ env.CACHED_DISK_NAME }}" \
-                --zone=${{ vars.GCP_ZONE }}
-            fi
-            DISK_ATTACH_PARAMS="--disk=name=${NAME},device-name=${NAME}"
-          else
-            # Use --create-disk for new disks (no partition support)
-            DISK_PARAMS="size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
-            DISK_ATTACH_PARAMS="--create-disk=${DISK_PARAMS}"
-          fi
+          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
 
@@ -281,27 +263,90 @@ jobs:
           # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
 
-          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
-          --boot-disk-size=50GB \
-          --boot-disk-type=pd-ssd \
-          --image-project=cos-cloud \
-          --image-family=cos-stable \
-          ${DISK_ATTACH_PARAMS} \
-          ${CONTAINER_MOUNT_DISKS} \
-          --container-stdin \
-          --container-tty \
-          --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
-          --container-env="${CONTAINER_ENV}" \
-          --container-restart-policy=never \
-          --subnet=${{ vars.GCP_SUBNETWORK }} \
-          --scopes cloud-platform \
-          --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
-          --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-          --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
-          --tags ${{ inputs.app_name }} \
-          --zone ${{ vars.GCP_ZONE }}
+          # Sequential capacity failover across the region's zones. The primary zone
+          # is tried first, then the others as fallbacks, so a zonal stockout no
+          # longer fails the test. This is a SEQUENTIAL fallback: contrast
+          # zfnd-deploy-nodes-gcp.yml, which spreads nodes across the same zones as a
+          # PARALLEL matrix.
+          ORDERED_ZONES="${PRIMARY_ZONE}"
+          for z in us-east1-b us-east1-c us-east1-d; do
+            [ "${z}" = "${PRIMARY_ZONE}" ] || ORDERED_ZONES="${ORDERED_ZONES} ${z}"
+          done
+
+          # Creates the data disk (when using a cached image) and the instance in one
+          # zone. Returns non-zero if either call fails, leaving the caller to inspect
+          # the captured output and decide whether to fail over.
+          create_in_zone() {
+            zone="$1"
+            if [ -n "${CACHED_DISK_NAME}" ]; then
+              if gcloud compute disks describe "${NAME}" --zone="${zone}" &>/dev/null; then
+                echo "Disk ${NAME} already exists in ${zone}, reusing it"
+              elif ! gcloud compute disks create "${NAME}" \
+                --size=400GB \
+                --type=pd-balanced \
+                --image="${CACHED_DISK_NAME}" \
+                --zone="${zone}"; then
+                return 1
+              fi
+              DISK_ATTACH_PARAMS="--disk=name=${NAME},device-name=${NAME}"
+            else
+              DISK_ATTACH_PARAMS="--create-disk=size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
+            fi
+
+            gcloud compute instances create-with-container "${INSTANCE_NAME}" \
+            --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
+            --boot-disk-size=50GB \
+            --boot-disk-type=pd-ssd \
+            --image-project=cos-cloud \
+            --image-family=cos-stable \
+            ${DISK_ATTACH_PARAMS} \
+            ${CONTAINER_MOUNT_DISKS} \
+            --container-stdin \
+            --container-tty \
+            --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
+            --container-env="${CONTAINER_ENV}" \
+            --container-restart-policy=never \
+            --subnet=${{ vars.GCP_SUBNETWORK }} \
+            --scopes cloud-platform \
+            --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
+            --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+            --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
+            --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+            --tags ${{ inputs.app_name }} \
+            --zone "${zone}"
+          }
+
+          # One pass over the zones, then a single short backoff sweep, then give up.
+          for sweep in 1 2; do
+            for zone in ${ORDERED_ZONES}; do
+              echo "::group::Creating instance in ${zone} (sweep ${sweep})"
+              if OUTPUT=$(create_in_zone "${zone}" 2>&1); then
+                echo "${OUTPUT}"
+                echo "::endgroup::"
+                echo "Created ${INSTANCE_NAME} in ${zone}"
+                echo "instance_zone=${zone}" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              echo "${OUTPUT}"
+              echo "::endgroup::"
+              # Remove any partial instance or disk before the next zone: the
+              # disk-reuse check is zone-scoped and would otherwise mask an orphan.
+              gcloud compute instances delete "${INSTANCE_NAME}" --zone="${zone}" --delete-disks=all --quiet &>/dev/null || true
+              gcloud compute disks delete "${NAME}" --zone="${zone}" --quiet &>/dev/null || true
+              if echo "${OUTPUT}" | grep -qiE 'ZONE_RESOURCE_POOL_EXHAUSTED|does not have enough resources|stockout'; then
+                echo "::warning::Zone ${zone} is out of capacity; trying the next zone"
+                continue
+              fi
+              echo "::error::Instance creation in ${zone} failed for a non-capacity reason"
+              exit 1
+            done
+            if [ "${sweep}" -eq 1 ]; then
+              echo "All candidate zones are out of capacity; backing off 45s before a final sweep"
+              sleep 45
+            fi
+          done
+          echo "::error::All candidate zones (${ORDERED_ZONES}) remain out of capacity after 2 sweeps"
+          exit 1
 
       # Find the container ID and save it for use in subsequent steps
       - name: Find container ID
@@ -316,7 +361,7 @@ jobs:
           for attempt in {1..30}; do
             echo "Attempt ${attempt}/30: Checking for running container..."
             CONTAINER_ID=$(gcloud compute ssh ${INSTANCE_NAME} \
-              --zone ${{ vars.GCP_ZONE }} \
+              --zone ${{ steps.create-instance.outputs.instance_zone }} \
               --ssh-flag="-o ServerAliveInterval=5" \
               --ssh-flag="-o ConnectionAttempts=20" \
               --ssh-flag="-o ConnectTimeout=5" \
@@ -338,7 +383,7 @@ jobs:
         if: ${{ failure() }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
+          --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -364,7 +409,7 @@ jobs:
           CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           echo "Using pre-discovered container ID: ${CONTAINER_ID}"
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
+          --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -393,7 +438,7 @@ jobs:
         env:
           CONTAINER_ID: ${{ steps.find-container.outputs.CONTAINER_ID }}
           INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
-          GCP_ZONE: ${{ vars.GCP_ZONE }}
+          GCP_ZONE: ${{ steps.create-instance.outputs.instance_zone }}
         run: |
           gcloud compute ssh "${INSTANCE_NAME}" \
             --zone "${GCP_ZONE}" \
@@ -416,7 +461,7 @@ jobs:
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
     env:
       TEST_ID: ${{ inputs.test_id }}
-      GCP_ZONE: ${{ vars.GCP_ZONE }}
+      GCP_ZONE: ${{ needs.test-result.outputs.instance_zone }}
     permissions:
       contents: read
       id-token: write
@@ -592,7 +637,7 @@ jobs:
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
-          --zone ${{ vars.GCP_ZONE }} \
+          --zone ${{ needs.test-result.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -689,7 +734,7 @@ jobs:
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
-          --zone ${{ vars.GCP_ZONE }} \
+          --zone ${{ needs.test-result.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -803,7 +848,7 @@ jobs:
               "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-              --source-disk-zone=${{ vars.GCP_ZONE }} \
+              --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
               --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
@@ -853,12 +898,21 @@ jobs:
       # previous jobs have run, no matter the outcome of the job.
       - name: Delete test instance
         continue-on-error: true
+        env:
+          INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
         run: |
-          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          # The test job fails over across zones, so discover the zone the instance
+          # actually landed in instead of assuming the primary zone.
+          # `|| true` keeps `set -e` from aborting on an empty result: with no match,
+          # read hits EOF and returns non-zero, and the "nothing to delete" case is
+          # handled below.
+          read -r INSTANCE ZONE < <(gcloud compute instances list \
+            --filter="name=${INSTANCE_NAME}" \
+            --format='value(name,zone.basename())') || true
           if [ -z "${INSTANCE}" ]; then
             echo "No instance to delete"
           else
-            gcloud compute instances delete "${INSTANCE}" --zone "${{ vars.GCP_ZONE }}" --delete-disks all --quiet
+            gcloud compute instances delete "${INSTANCE}" --zone "${ZONE}" --delete-disks all --quiet
           fi
 
   deployment-success:

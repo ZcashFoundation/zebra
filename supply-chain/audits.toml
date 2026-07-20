@@ -798,6 +798,11 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.0.0-beta.39 -> 1.0.0-beta.40"
 
+[[audits.zebra-test]]
+who = "Janito Vaqueiro Ferreira Filho <janito.vff@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.0.0 -> 4.0.0"
+
 [[audits.zebra-utils]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -880,13 +885,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-chain]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-chain]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -916,13 +921,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-consensus]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-consensus]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -952,13 +957,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-network]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-network]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -988,13 +993,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-node-services]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-node-services]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -1024,13 +1029,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-rpc]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-rpc]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -1060,13 +1065,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-script]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-script]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -1096,13 +1101,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-state]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-state]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -1132,13 +1137,13 @@ end = "2027-06-11"
 
 [[trusted.zebra-utils]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebra-utils]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 
@@ -1168,13 +1173,13 @@ end = "2027-06-11"
 
 [[trusted.zebrad]]
 criteria = "safe-to-deploy"
-user-id = 228785 # Alfredo Garcia (oxarbitrage)
+user-id = 228785
 start = "2023-09-02"
 end = "2027-06-11"
 
 [[trusted.zebrad]]
 criteria = "safe-to-deploy"
-user-id = 235397
+user-id = 235397 # Marek (upbqdn)
 start = "2023-09-02"
 end = "2027-06-11"
 

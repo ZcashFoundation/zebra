@@ -15,6 +15,8 @@ exclude = [
     "^https?://example\\.com",
     # Rate-limited or auth-required
     "^https://crates\\.io/crates/",
+    # Arti GitLab rejects automated link checks
+    "^https://gitlab\\.torproject\\.org/tpo/core/arti/-/blob/main/CONTRIBUTING\\.md",
     # GitHub pages requiring authentication
     "^https://github.com/.*/settings",
     "^https://github.com/organizations/.*/settings",

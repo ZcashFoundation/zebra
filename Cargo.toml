@@ -73,7 +73,7 @@ dirs = "6.0"
 ed25519-zebra = "4.2"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
 ff = "0.13"
-futures = "0.3.31"
+futures = "0.3.32"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
 group = "0.13"
@@ -128,7 +128,7 @@ regex = "1.11"
 reqwest = { version = "0.12", default-features = false }
 ripemd = "0.1"
 rlimit = "0.10"
-rocksdb = { version = "0.22", default-features = false }
+rocksdb = { version = "0.24", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
 sentry = { version = "0.47", default-features = false }
@@ -146,6 +146,7 @@ anyhow = "1.0"
 strum = "0.27"
 strum_macros = "0.27"
 syn = "2.0.100"
+subtle = { version = "2.6", default-features = false }
 tempfile = "3.20"
 thiserror = "2.0"
 thread-priority = "1.2"
@@ -334,7 +335,7 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
 ] }
 
 # High-risk code

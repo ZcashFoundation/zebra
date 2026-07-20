@@ -9,8 +9,8 @@
 [advisories]
 version = 2
 yanked = "deny"
-# Unmaintained-crate advisories. Each entry is a transitive dep we can't upgrade
-# yet, or a direct dep. Remove each entry as its dependency chain is upgraded.
+# Ignored advisories. Each entry is a transitive dep we can't upgrade yet, or a
+# direct dep. Remove each entry as its dependency chain is upgraded.
 ignore = [
     "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained): via librustzcash orchard -> getset
     "RUSTSEC-2025-0119", # number_prefix: transitive via indicatif
@@ -135,9 +135,6 @@ skip-tree = [
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
-
-    # wait for librocksdb-sys to update bindgen
-    { name = "bindgen", version = "=0.69.5" },
 
     # wait for halo2_gadgets and primitive-types to update uint
     { name = "uint", version = "=0.9.5" },

@@ -25,7 +25,7 @@ On `main` branch merge:
 
 For an up-to-date list, see:
 
-- <https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs>
+- <https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/main.rs>
 - <https://github.com/ZcashFoundation/zebra/tree/main/.github/workflows>
 
 Design strategies:

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.1] - 2026-07-17
+
+### Changed
+
+- `zebra-chain` dependency bumped to `11.2.0`.
+
+## [9.1.0] - 2026-07-10
+
+### Added
+
+- `RpcRequestClient::new_with_timeout()` for constructing a client with a custom
+  request timeout ([#10468](https://github.com/ZcashFoundation/zebra/pull/10468)).
+
+### Changed
+
+- MSRV is now 1.88
+- `RpcRequestClient::new()` now applies a default 180-second request timeout, so RPC
+  calls fail instead of hanging when a server accepts the connection but never responds.
+
+## [9.0.0] - 2026-07-02
+
+### Breaking Changes
+
+- `mempool::Request::QueueFromPeer` now carries `candidates: Vec<Gossip>` instead of
+  `txids: HashSet<UnminedTxId>`, so directly pushed transactions (`Tx` messages) are
+  attributed to the sending peer and routed through the same per-peer admission
+  accounting as advertised transaction IDs
+  ([GHSA-m9xx-8rcj-vmgp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m9xx-8rcj-vmgp)).
+
 ## [8.0.0] - 2026-06-10
 
 ### Changed

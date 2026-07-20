@@ -56,6 +56,38 @@ pub struct ShieldedData {
     pub binding_sig: Signature<Binding>,
 }
 
+/// A v6 (NU6.3) Orchard-protocol shielded bundle — used for both the Orchard and the Ironwood pool.
+///
+/// This newtype wraps [`ShieldedData`] to give it the NU6.3 flag-byte serialization
+/// ([`FlagsV6`], which permits the `enableCrossAddress` flag), distinct from the
+/// pre-NU6.3 serialization that the bare [`ShieldedData`] uses for v5 Orchard bundles. The two
+/// formats differ only in which flag bits are reserved; encoding the format in the type keeps the
+/// v5 and v6 (de)serialization paths from being confused.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ShieldedDataV6(ShieldedData);
+
+impl ShieldedDataV6 {
+    /// Wraps a v5-shaped Orchard [`ShieldedData`] as a v6 (NU6.3) Orchard bundle.
+    pub fn new(shielded_data: ShieldedData) -> Self {
+        Self(shielded_data)
+    }
+
+    /// Returns the inner Orchard [`ShieldedData`].
+    pub fn data(&self) -> &ShieldedData {
+        &self.0
+    }
+
+    /// Returns the inner Orchard [`ShieldedData`], mutably.
+    pub fn data_mut(&mut self) -> &mut ShieldedData {
+        &mut self.0
+    }
+
+    /// Consumes the wrapper, returning the inner Orchard [`ShieldedData`].
+    pub fn into_inner(self) -> ShieldedData {
+        self.0
+    }
+}
+
 impl fmt::Display for ShieldedData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");
@@ -261,6 +293,54 @@ bitflags! {
         const ENABLE_SPENDS = 0b00000001;
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
+        /// `enableCrossAddress` (NU6.3, bit 2): allow output notes to use a different
+        /// protocol-level address than the spending key.
+        ///
+        /// Reserved (MUST be 0) for the Orchard pool in every tx version. Valid only for the
+        /// Ironwood pool (v6), parsed via the `FlagsV6` newtype.
+        const ENABLE_CROSS_ADDRESS = 0b00000100;
+    }
+}
+
+/// The Orchard flags of an Ironwood (v6) bundle.
+///
+/// Newtype over [`Flags`] whose [`ZcashDeserialize`] impl uses the NU6.3 Ironwood flag-byte format:
+/// bit 2 (`enableCrossAddress`) is valid and only bits 3..7 are reserved. The bare [`Flags`] codec
+/// is the format for every Orchard-pool bundle (v5 *and* v6), where bits 2..7 are all reserved —
+/// `enableCrossAddress` is permitted only for the Ironwood pool. Encoding the format in the type
+/// keeps the two flag-parsing paths from being confused (parallels [`ShieldedDataV6`]).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct FlagsV6(Flags);
+
+impl From<FlagsV6> for Flags {
+    fn from(flags: FlagsV6) -> Self {
+        flags.0
+    }
+}
+
+impl Flags {
+    /// The flag bits that are reserved (MUST be zero) in the pre-NU6.3 format.
+    const PRE_NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits() | Self::ENABLE_OUTPUTS.bits());
+
+    /// The flag bits that are reserved (MUST be zero) in the NU6.3 format.
+    const NU6_3_RESERVED: u8 = !(Self::ENABLE_SPENDS.bits()
+        | Self::ENABLE_OUTPUTS.bits()
+        | Self::ENABLE_CROSS_ADDRESS.bits());
+
+    /// Parses a flags byte, rejecting any bit set in the `reserved` mask.
+    ///
+    /// This is a generic helper that enforces whatever `reserved` mask the caller passes. The
+    /// specific consensus rule for which bits must be zero depends on the bundle format and is
+    /// documented at each call site (see the [`ZcashDeserialize`] impls for [`Flags`] and
+    /// [`FlagsV6`]).
+    fn from_byte(byte: u8, reserved: u8) -> Result<Self, SerializationError> {
+        if byte & reserved != 0 {
+            return Err(SerializationError::Parse("invalid reserved orchard flags"));
+        }
+
+        // `from_bits_truncate` keeps only known bits; the reserved-bit check above already
+        // rejected any bit not permitted by this format.
+        Ok(Self::from_bits_truncate(byte))
     }
 }
 
@@ -295,11 +375,37 @@ impl ZcashSerialize for Flags {
 }
 
 impl ZcashDeserialize for Flags {
+    /// # Consensus
+    ///
+    /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
+    /// > field MUST be zero.
+    ///
+    /// From NU6.3, the Ironwood flag byte uses bit 2 as `enableCrossAddress`, so only bits 3..7 are
+    /// reserved (see [`FlagsV6`]); the Orchard pool keeps bit 2 reserved in every tx version.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Consensus rule: "In a version 5 transaction,
-        // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-        Flags::from_bits(reader.read_u8()?)
-            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
+        // The default codec is the pre-NU6.3 format, used by v5 *and* v6 Orchard bundles, where
+        // bits 2..7 (including `enableCrossAddress`) are reserved and MUST be zero. Only the Ironwood
+        // bundle deserializes via the `FlagsV6` newtype, which permits bit 2.
+        Flags::from_byte(reader.read_u8()?, Flags::PRE_NU6_3_RESERVED)
+    }
+}
+
+impl ZcashDeserialize for FlagsV6 {
+    /// # Consensus
+    ///
+    /// From NU6.3, the Ironwood flag byte uses bit 2 as `enableCrossAddress`, so only bits 3..7 are
+    /// reserved and MUST be zero (cf. the Orchard-pool rule on [`Flags`], which keeps bit 2
+    /// reserved).
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // The NU6.3 Ironwood format: bit 2 (`enableCrossAddress`) is valid and only bits 3..7 are
+        // reserved.
+        Ok(FlagsV6(Flags::from_byte(
+            reader.read_u8()?,
+            Flags::NU6_3_RESERVED,
+        )?))
     }
 }
