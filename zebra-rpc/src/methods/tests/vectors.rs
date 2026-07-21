@@ -920,9 +920,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         .await
         .respond(ReadResponse::IronwoodTree(Some(Default::default())));
     read_state
-        .expect_request(ReadRequest::BlockInfo(
-            previous_block_hash.into(),
-        ))
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(None));
     read_state
