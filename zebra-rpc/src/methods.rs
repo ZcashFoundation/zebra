@@ -1339,6 +1339,11 @@ where
                 _other => panic!("get_block_header_fut should be none"),
             };
 
+            // Confirmations is `-1` when the resolved header is no longer on the
+            // best chain. Avoid panicking on `try_into()` in the verbosity-2 path,
+            // and label such transactions as not in the active chain.
+            let in_active_chain = confirmations >= 0;
+
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
                 //
@@ -1388,7 +1393,7 @@ where
                                     &network,
                                     Some(block_time),
                                     Some(hash),
-                                    Some(true),
+                                    Some(in_active_chain),
                                     tx.hash(),
                                 ),
                             ))
