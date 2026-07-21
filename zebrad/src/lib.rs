@@ -17,33 +17,35 @@
 //!
 //! ## Alternative Implementations
 //!
-//! The original Zcash node is named `zcashd` and is developed by the Electric Coin
-//! Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
-//! an independent Zcash node implementation developed from scratch. Since they
-//! implement the same protocol, `zcashd` and Zebra nodes can communicate with each
-//! other and maintain the Zcash network together.
+//! The first Zcash node, `zcashd`, was originally created as a fork of Bitcoin
+//! Core and is no longer maintained. Zebra is an independent Zcash node
+//! implementation, written from scratch, and is the actively maintained node
+//! for the network. Other implementations built on or alongside Zebra also
+//! exist. Because they implement the same protocol, conforming nodes
+//! interoperate and maintain the Zcash network together.
 //!
 //! ## Zebra Advantages
 //!
 //! These are some of the advantages or benefits of Zebra:
 //!
-//! - Better performance: since it was implemented from scratch in an async, parallelized way, Zebra
-//!   is currently faster than `zcashd`.
-//! - Better security: since it is developed in a memory-safe language (Rust), Zebra
-//!   is less likely to be affected by memory-safety and correctness security bugs that
-//!   could compromise the environment where it is run.
-//! - Better governance: with a new node deployment, there will be more developers
-//!   who can implement different features for the Zcash network.
-//! - Dev accessibility: supports more developers, which gives new developers
-//!   options for contributing to Zcash protocol development.
-//! - Runtime safety: with an independent implementation, the detection of consensus bugs
-//!   can happen quicker, reducing the risk of consensus splits.
-//! - Spec safety: with several node implementations, it is much easier to notice
-//!   bugs and ambiguity in protocol specification.
-//! - User options: different nodes present different features and tradeoffs for
-//!   users to decide on their preferred options.
-//! - Additional contexts: wider target deployments for people to use a consensus
-//!   node in more contexts e.g. mobile, wasm, etc.
+//! - **Performance**: Zebra is built from scratch in an async, parallelized
+//!   design, giving it high throughput for block validation and syncing.
+//! - **Security**: Zebra is written in Rust, a memory-safe language, which
+//!   reduces the risk of memory-safety and correctness bugs that could
+//!   compromise the node or the environment it runs in.
+//! - **Modularity**: Zebra is organized as a set of reusable crates
+//!   (`zebra-chain`, `zebra-consensus`, `zebra-network`, `zebra-state`,
+//!   `zebra-rpc`, and more). Wallets, indexers, and other tools can build on
+//!   these directly instead of reimplementing core Zcash logic.
+//! - **Broader deployment targets**: Its modular design makes it possible to run
+//!   Zcash consensus code in a wider range of environments, including mobile and
+//!   WebAssembly.
+//! - **Open contribution**: A modern, well-documented Rust codebase lowers the
+//!   barrier for new contributors, widening the pool of developers who can
+//!   review, maintain, and extend the Zcash protocol.
+//! - **Ecosystem foundation**: Because Zebra is independent and openly developed,
+//!   other teams can build implementations, forks, and services on top of it,
+//!   supporting a healthy and decentralized network.
 //!
 //! ## Configuration
 //!
