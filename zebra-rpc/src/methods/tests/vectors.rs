@@ -857,6 +857,8 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_hash = block.hash();
     let block_header = block.header.clone();
     let block_size = block.zcash_serialized_size();
+    let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
 
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -897,7 +899,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
             next_block_hash: None,
         });
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::SaplingTree(_)))
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
         .await
         .respond(ReadResponse::SaplingTree(Some(Default::default())));
     read_state
@@ -907,151 +909,30 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
 
     // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
+        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
         .await
         .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
         .await
         .respond(ReadResponse::OrchardTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::IronwoodTree(_)))
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
         .await
         .respond(ReadResponse::IronwoodTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(None));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
 
-    block_future
+    let block_response = block_future
         .await
         .expect("task should not panic")
         .expect("getblock should succeed for side-chain blocks");
-}
-
-/// Regression test for issue #10550: previously, requesting verbosity-2
-/// `getblock` for a block that is no longer on the best chain panicked
-/// during transaction serialization, because `confirmations = -1`
-/// could not be converted to `u32`.
-///
-/// The fix labels the response as "not in the active chain" and returns
-/// a normal RPC result instead of aborting the process.
-#[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblock_verbosity_2_side_chain_no_panic() {
-    let _init_guard = zebra_test::init();
-
-    // Pick a real test block to feed back as the side-chain block.
-    let block: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .values()
-        .next()
-        .expect("at least one test block")
-        .zcash_deserialize_into()
-        .expect("test block deserializes");
-    let block_hash = block.hash();
-    let block_height = block
-        .coinbase_height()
-        .expect("test block has coinbase height");
-    let block_size = block.zcash_serialized_size();
-    let previous_block_hash = block.header.previous_block_hash;
-
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _rpc_tx_queue) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        NoChainTip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    // Drive `getblock(hash, verbosity=2)` in the background while we
-    // sequentially respond to the read-state queries it issues.
-    let request_hash = block_hash.to_string();
-    let block_future = tokio::spawn(async move { rpc.get_block(request_hash, Some(2u8)).await });
-
-    // 1. `get_block_header` resolves the header.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::BlockHeader {
-        header: Arc::new(*block.header.as_ref()),
-        hash: block_hash,
-        height: block_height,
-        next_block_hash: None,
-    });
-
-    // 2. SaplingTree lookup — must use the resolved hash.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::SaplingTree(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::SaplingTree(Some(Arc::new(
-        zebra_chain::sapling::tree::NoteCommitmentTree::default(),
-    ))));
-
-    // 3. Depth = None drives `confirmations = -1`, the panic-prone path.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::Depth(block_hash))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::Depth(None));
-
-    // 4. BlockAndSize uses the resolved hash thanks to the consistency fix.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::BlockAndSize(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::BlockAndSize(Some((
-        block.clone(),
-        block_size,
-    ))));
-
-    // 5. OrchardTree.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::OrchardTree(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::OrchardTree(Some(Arc::new(
-        zebra_chain::orchard::tree::NoteCommitmentTree::default(),
-    ))));
-
-    // 6. IronwoodTree.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::IronwoodTree(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::IronwoodTree(Some(Arc::new(
-        zebra_chain::orchard::tree::NoteCommitmentTree::default(),
-    ))));
-
-    // 7 & 8. BlockInfo for previous and current block.
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::BlockInfo(
-            previous_block_hash.into(),
-        ))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::BlockInfo(None));
-
-    let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::BlockInfo(block_hash.into()))
-        .await;
-    response_handler.respond(zebra_state::ReadResponse::BlockInfo(None));
-
-    let block_response = block_future
-        .await
-        .expect("get_block must not panic when confirmations = -1")
-        .expect("get_block must return a value");
 
     let GetBlockResponse::Object(obj) = block_response else {
         panic!("expected verbosity-2 getblock to return an object");
