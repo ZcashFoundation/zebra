@@ -17,11 +17,7 @@
 //!
 //! ## Alternative Implementations
 //!
-//! The original Zcash node is named `zcashd` and is developed by the Electric Coin
-//! Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
-//! an independent Zcash node implementation developed from scratch. Since they
-//! implement the same protocol, `zcashd` and Zebra nodes can communicate with each
-//! other and maintain the Zcash network together.
+//! The first Zcash node, zcashd, was originally created as a fork of Bitcoin Core and is no longer maintained. Zebra is an independent Zcash node implementation, written from scratch, and is the actively maintained node for the network. Other implementations built on or alongside Zebra also exist. Because they implement the same protocol, conforming nodes interoperate and maintain the Zcash network together.
 //!
 //! ## Zebra Advantages
 //!
