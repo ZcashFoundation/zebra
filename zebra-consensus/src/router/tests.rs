@@ -47,22 +47,8 @@ pub fn block_no_transactions() -> Block {
 async fn verifiers_from_network(
     network: Network,
 ) -> (
-    impl Service<
-            Request,
-            Response = block::Hash,
-            Error = BoxError,
-            Future = impl Future<Output = Result<block::Hash, BoxError>>,
-        > + Send
-        + Clone
-        + 'static,
-    impl Service<
-            zs::Request,
-            Response = zs::Response,
-            Error = BoxError,
-            Future = impl Future<Output = Result<zs::Response, BoxError>>,
-        > + Send
-        + Clone
-        + 'static,
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<BoxService<zs::Request, zs::Response, BoxError>, zs::Request>,
 ) {
     let state_service = zs::init_test(&network).await;
     let (

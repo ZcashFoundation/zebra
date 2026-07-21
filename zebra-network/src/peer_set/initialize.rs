@@ -44,6 +44,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    protocol::external::canonical_socket_addr,
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
@@ -99,6 +100,39 @@ pub async fn init<S, C>(
     inbound_service: S,
     latest_chain_tip: C,
     user_agent: String,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<(PeerSocketAddr, u32)>,
+)
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    init_with_block_gossip_peer_ips(
+        config,
+        inbound_service,
+        latest_chain_tip,
+        user_agent,
+        Vec::new(),
+    )
+    .await
+}
+
+/// Initialize a peer set like [`init`], additionally pinning block inventory
+/// broadcasts to the inbound peers at `block_gossip_peer_ips`.
+///
+/// Inbound peers connecting from these IP addresses always receive block
+/// inventory broadcasts, and one inbound connection slot is reserved for them.
+/// This is used by zcashd-compat mode, where a zcashd wallet sidecar makes a
+/// single P2P connection to this node and must reliably learn about new blocks.
+pub async fn init_with_block_gossip_peer_ips<S, C>(
+    config: Config,
+    inbound_service: S,
+    latest_chain_tip: C,
+    user_agent: String,
+    block_gossip_peer_ips: Vec<IpAddr>,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -218,6 +252,7 @@ where
     // Connect the rx end to a PeerSet, wrapping new peers in load instruments.
     let peer_set = PeerSet::new(
         &config,
+        block_gossip_peer_ips.clone(),
         discovered_peers,
         demand_tx.clone(),
         handle_rx,
@@ -239,6 +274,7 @@ where
         listen_handshaker,
         peerset_tx.clone(),
         bans_receiver,
+        block_gossip_peer_ips,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -602,6 +638,7 @@ async fn accept_inbound_connections<S>(
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    zcashd_compat_peer_ips: Vec<IpAddr>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
@@ -615,6 +652,26 @@ where
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
     );
+    let zcashd_compat_peer_ips: HashSet<_> = zcashd_compat_peer_ips
+        .into_iter()
+        .map(|ip| canonical_socket_addr(SocketAddr::new(ip, 0)).ip())
+        .collect();
+    // Reserve one inbound slot per configured sidecar IP, always leaving at
+    // least one public slot. Reserved slots are a fast path, not a cap:
+    // when they are taken, further connections from listed IPs compete for
+    // public slots like any other peer, so an unrelated local process (or a
+    // sidecar reconnecting before its dead connection is noticed) can never
+    // lock the real sidecar out of the node.
+    let zcashd_compat_reserved_slots = zcashd_compat_peer_ips
+        .len()
+        .min(config.peerset_inbound_connection_limit().saturating_sub(1));
+    let mut active_zcashd_compat_connections = ActiveConnectionCounter::new_counter_with(
+        zcashd_compat_reserved_slots,
+        "zcashd-compat Inbound Connections",
+    );
+    let public_inbound_connection_limit = config
+        .peerset_inbound_connection_limit()
+        .saturating_sub(zcashd_compat_reserved_slots);
 
     let mut handshakes: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
         FuturesUnordered::new();
@@ -638,14 +695,42 @@ where
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
 
-            if bans_receiver.borrow().clone().contains_key(&addr.ip()) {
+            // # Security
+            //
+            // Check bans in both the raw and canonical representations: on a
+            // dual-stack listener, an IPv4 peer can connect as IPv4-mapped IPv6,
+            // and it must not dodge a ban stored for its IPv4 address and then
+            // be granted the zcashd-compat sidecar privileges below.
+            let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
+            let bans = bans_receiver.borrow().clone();
+            if bans.contains_key(&addr.ip()) || bans.contains_key(&canonical_ip) {
                 debug!(?addr, "banned inbound connection attempt");
                 std::mem::drop(tcp_stream);
                 continue;
             }
 
-            if active_inbound_connections.update_count()
-                >= config.peerset_inbound_connection_limit()
+            let active_public_inbound_connections = active_inbound_connections.update_count();
+            let active_zcashd_compat_inbound_connections =
+                active_zcashd_compat_connections.update_count();
+            let active_total_inbound_connections =
+                active_public_inbound_connections + active_zcashd_compat_inbound_connections;
+            let is_zcashd_compat_peer = zcashd_compat_peer_ips.contains(&canonical_ip);
+
+            // The peer already opened a connection to us.
+            // So we want to increment the connection count as soon as possible.
+            //
+            // Sidecar-listed IPs use a reserved slot when one is free, and
+            // otherwise fall back to competing for a public slot (including
+            // the recent-IP rate limit), so a taken reserved slot delays a
+            // sidecar rather than locking it out.
+            let use_reserved_slot = is_zcashd_compat_peer
+                && active_zcashd_compat_inbound_connections < zcashd_compat_reserved_slots
+                && active_total_inbound_connections < config.peerset_inbound_connection_limit();
+
+            let connection_tracker = if use_reserved_slot {
+                active_zcashd_compat_connections.track_connection()
+            } else if active_public_inbound_connections >= public_inbound_connection_limit
+                || active_total_inbound_connections >= config.peerset_inbound_connection_limit()
                 || recent_inbound_connections.is_past_limit_or_add(addr.ip())
             {
                 // Too many open inbound connections or pending handshakes already.
@@ -655,13 +740,12 @@ where
                 // but still put a limit on our CPU and network usage from failed connections.
                 tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
                 continue;
-            }
-
-            // The peer already opened a connection to us.
-            // So we want to increment the connection count as soon as possible.
-            let connection_tracker = active_inbound_connections.track_connection();
+            } else {
+                active_inbound_connections.track_connection()
+            };
             debug!(
-                inbound_connections = ?active_inbound_connections.update_count(),
+                inbound_connections = ?active_total_inbound_connections,
+                ?is_zcashd_compat_peer,
                 "handshaking on an open inbound peer connection"
             );
 

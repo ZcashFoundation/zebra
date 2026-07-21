@@ -79,6 +79,21 @@ impl RuntimeRun for Runtime {
         );
         self.shutdown_timeout(TOKIO_SHUTDOWN_TIMEOUT);
 
+        // On SIGINT/SIGTERM the select above drops `fut` — including the
+        // zcashd-compat supervisor task — without running its graceful
+        // shutdown path, and on errors `APPLICATION.shutdown` below never
+        // returns. Terminate any abandoned supervised zcashd synchronously,
+        // now that the runtime has shut down. This is a no-op when no
+        // supervised child is running.
+        {
+            let config = APPLICATION.config();
+            if config.zcashd_compat.enabled && config.zcashd_compat.manage_zcashd {
+                crate::components::zcashd_compat::terminate_abandoned_zcashd(
+                    config.zcashd_compat.shutdown_grace_period,
+                );
+            }
+        }
+
         match result {
             Ok(()) => {
                 info!("shutting down Zebra");

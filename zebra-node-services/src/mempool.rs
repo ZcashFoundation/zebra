@@ -85,13 +85,17 @@ pub enum Request {
     /// The transaction downloader checks for duplicates across IDs and transactions.
     Queue(Vec<Gossip>),
 
-    /// Queue transaction IDs advertised by a specific peer via an `Inv`
-    /// message, tagging each one with the announcing peer so the downloader
-    /// can enforce a per-peer queue cap. See `GHSA-4fc2-h7jh-287c`.
+    /// Queue candidate transactions received from a specific peer — either
+    /// transaction IDs advertised via an `Inv` message, or a full transaction
+    /// pushed via a `Tx` message — tagging each one with the sending peer so the
+    /// downloader can enforce a per-peer queue cap. This routes every
+    /// peer-originated candidate through the same per-peer admission accounting,
+    /// so a single peer cannot crowd out honest peers' transaction relay.
+    /// See `GHSA-4fc2-h7jh-287c` and `GHSA-m9xx-8rcj-vmgp`.
     QueueFromPeer {
-        /// The transaction IDs advertised by the peer.
-        txids: HashSet<UnminedTxId>,
-        /// The address of the peer that advertised them.
+        /// The candidate transactions received from the peer.
+        candidates: Vec<Gossip>,
+        /// The address of the peer that sent them.
         source: SocketAddr,
     },
 

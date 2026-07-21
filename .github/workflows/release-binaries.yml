@@ -64,9 +64,6 @@ jobs:
 
   dockerhub-description:
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
-    # Updating Docker Hub metadata must not turn a successfully published
-    # release image into a failed release.
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -74,10 +71,12 @@ jobs:
           persist-credentials: false
 
       - name: Docker Hub Description
+        # This metadata-only update is advisory.
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa #v5.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: zfnd/zebra
           short-description: ${{ github.event.repository.description }}
 

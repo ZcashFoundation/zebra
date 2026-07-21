@@ -1586,6 +1586,10 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::IronwoodTree(hash_or_height) => Ok(ReadResponse::IronwoodTree(
+                read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
                     .and_then(|limit| start_index.0.checked_add(limit.0))
@@ -1622,6 +1626,25 @@ impl Service<ReadRequest> for ReadStateService {
                 };
 
                 Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
+            }
+
+            ReadRequest::IronwoodSubtrees { start_index, limit } => {
+                let end_index = limit
+                    .and_then(|limit| start_index.0.checked_add(limit.0))
+                    .map(NoteCommitmentSubtreeIndex);
+
+                let best_chain = state.latest_best_chain();
+                let ironwood_subtrees = if let Some(end_index) = end_index {
+                    read::ironwood_subtrees(best_chain, &state.db, start_index..end_index)
+                } else {
+                    // If there is no end bound, just return all the trees.
+                    // If the end bound would overflow, just returns all the trees, because that's what
+                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+                    // the trees run out.)
+                    read::ironwood_subtrees(best_chain, &state.db, start_index..)
+                };
+
+                Ok(ReadResponse::IronwoodSubtrees(ironwood_subtrees))
             }
 
             // For the get_address_balance RPC.

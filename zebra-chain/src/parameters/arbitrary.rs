@@ -30,13 +30,13 @@ impl NetworkUpgrade {
 
     /// Generates network upgrades from a reduced set
     pub fn reduced_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
-        // We use this strategy to test legacy chain
-        // TODO: We can add Canopy after we have a NU5 activation height
+        // Used to give a transaction a consensus branch id that is inconsistent with its block
+        // height. The upgrades must be NU5 or later so the resulting v5 transactions are still
+        // well-formed and can be assigned a txid by `zcash_primitives`.
         prop_oneof![
-            Just(NetworkUpgrade::Overwinter),
-            Just(NetworkUpgrade::Sapling),
-            Just(NetworkUpgrade::Blossom),
-            Just(NetworkUpgrade::Heartwood),
+            Just(NetworkUpgrade::Nu6),
+            Just(NetworkUpgrade::Nu6_1),
+            Just(NetworkUpgrade::Nu6_2),
         ]
         .boxed()
     }
