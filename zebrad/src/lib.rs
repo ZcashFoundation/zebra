@@ -17,14 +17,19 @@
 //!
 //! ## Alternative Implementations
 //!
-//! The first Zcash node, zcashd, was originally created as a fork of Bitcoin Core and is no longer maintained. Zebra is an independent Zcash node implementation, written from scratch, and is the actively maintained node for the network. Other implementations built on or alongside Zebra also exist. Because they implement the same protocol, conforming nodes interoperate and maintain the Zcash network together.
+//! The first Zcash node, `zcashd`, was originally created as a fork of Bitcoin
+//! Core and is no longer maintained. Zebra is an independent Zcash node
+//! implementation, written from scratch, and is the actively maintained node
+//! for the network. Other implementations built on or alongside Zebra also
+//! exist. Because they implement the same protocol, conforming nodes
+//! interoperate and maintain the Zcash network together.
 //!
 //! ## Zebra Advantages
 //!
 //! These are some of the advantages or benefits of Zebra:
 //!
 //! - **Performance**: Zebra is built from scratch in an async, parallelized
-//!  design, giving it high throughput for block validation and syncing.
+//!   design, giving it high throughput for block validation and syncing.
 //! - **Security**: Zebra is written in Rust, a memory-safe language, which
 //!   reduces the risk of memory-safety and correctness bugs that could
 //!   compromise the node or the environment it runs in.
