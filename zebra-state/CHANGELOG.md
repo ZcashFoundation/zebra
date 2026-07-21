@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ZebraDb`'s public API, so the rocksdb 0.22 → 0.24 bump is a breaking change; 10.1.0
   shipped it without a major and is yanked. Downstream code pinning an older rocksdb must
   upgrade.
+- `zebra-chain` dependency bumped to `11.2.0`.
+- `zebra-node-services` dependency bumped to `9.1.1`.
 
 ### Security
 
