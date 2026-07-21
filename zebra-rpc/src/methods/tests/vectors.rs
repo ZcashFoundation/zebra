@@ -857,7 +857,6 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_hash = block.hash();
     let block_header = block.header.clone();
     let block_size = block.zcash_serialized_size();
-    let block_size = block.zcash_serialized_size();
     let previous_block_hash = block.header.previous_block_hash;
 
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
