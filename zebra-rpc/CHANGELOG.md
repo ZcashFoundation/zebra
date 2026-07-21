@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Requires `zebra-state` 11.0.0 and `zebra-consensus` 12.0.0, whose types appear in this
   crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+- `zebra-chain` dependency bumped to `11.2.0`.
+- `zebra-network` dependency bumped to `10.1.1`.
+- `zebra-node-services` dependency bumped to `9.1.1`.
+- `zebra-script` dependency bumped to `10.1.1`.
 
 ### Fixed
 
