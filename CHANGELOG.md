@@ -51,9 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to
   the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg
   or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
-- `getblock` verbosity 2 no longer panics during transaction serialization when the requested block
-  is no longer on the best chain (`confirmations = -1`); the response is now labeled as not in the
-  active chain instead ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
 
 ### Removed
 
