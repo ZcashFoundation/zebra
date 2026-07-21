@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- `transaction::Verifier::check_maturity_height` is now private and takes
+  `tx`, `height`, `network`, and `spent_utxos` directly instead of `&Request`.
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843))
+
 ## [12.0.0] - 2026-07-17
 
 ### Changed
