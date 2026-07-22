@@ -19,8 +19,6 @@ mod unmined;
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub use tachyon_shielded::TachyonShieldedData;
 
-pub mod builder;
-
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(clippy::unwrap_in_result)]
 pub mod arbitrary;
