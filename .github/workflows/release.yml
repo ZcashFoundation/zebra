@@ -175,16 +175,25 @@ jobs:
         run: |
           echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
-      - name: Validate zebrad release notes
+      - name: Validate release changelogs
         id: notes
         env:
           TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
 
-          if git diff --quiet "${TARGET_SHA}^" "${TARGET_SHA}" -- zebrad/Cargo.toml; then
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+          expected_releases="${RUNNER_TEMP}/expected-releases.tsv"
+          # Zebra allows only squash merges, so the parent is main immediately before this Release PR.
+          .github/scripts/validate-release-changelogs.sh \
+            "${TARGET_SHA}^" \
+            "${TARGET_SHA}" \
+            "${notes_file}" \
+            "${expected_releases}"
+
+          if [ ! -s "${notes_file}" ]; then
             echo "required=false" >> "${GITHUB_OUTPUT}"
-            echo "This Release PR does not publish zebrad; skipping release-note validation."
+            echo "This Release PR does not publish zebrad; skipping GitHub Release notes."
             exit 0
           fi
 
@@ -209,35 +218,13 @@ jobs:
             exit 1
           fi
 
-          awk -v version="${VERSION}" '
-            BEGIN {
-              heading = "## [Zebra " version "]"
-            }
-            /^##[[:space:]]+\[/ {
-              if (found) {
-                exit
-              }
-              if (index($0, heading) == 1) {
-                found = 1
-              }
-            }
-            found {
-              print
-            }
-          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
-
-          if ! awk 'NR > 1 && NF && $0 !~ /^[[:space:]]*#/ { found = 1 } END { exit !found }' "${RUNNER_TEMP}/release-notes.md"; then
-            echo "::error::CHANGELOG.md must contain a non-empty '## [Zebra ${VERSION}]' section before publishing zebrad ${VERSION}."
-            exit 1
-          fi
-
           delim="SECTION_$(openssl rand -hex 8)"
           {
             echo "required=true"
             echo "version=${VERSION}"
             echo "tag=v${VERSION}"
             echo "section<<${delim}"
-            cat "${RUNNER_TEMP}/release-notes.md"
+            cat "${notes_file}"
             echo "${delim}"
           } >> "${GITHUB_OUTPUT}"
       - name: Install libclang for librocksdb-sys bindgen
@@ -249,7 +236,7 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-      - name: Extract zebrad release metadata
+      - name: Verify published package versions
         id: zebrad-release
         env:
           EXPECTED_TAG: ${{ steps.notes.outputs.tag }}
@@ -258,6 +245,24 @@ jobs:
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
           set -euo pipefail
+
+          EXPECTED_RELEASES="$(jq -Rsc '
+            split("\n")
+            | map(select(length > 0) | split("\t") | {package_name: .[0], version: .[1]})
+            | sort_by(.package_name)
+          ' "${RUNNER_TEMP}/expected-releases.tsv")"
+          ACTUAL_RELEASES="$(jq -c '
+            map({
+              package_name: (.package_name // .package // .name),
+              version: .version
+            })
+            | sort_by(.package_name)
+          ' <<< "${RELEASES:-[]}")"
+
+          if [ "${ACTUAL_RELEASES}" != "${EXPECTED_RELEASES}" ]; then
+            echo "::error::release-plz returned ${ACTUAL_RELEASES}, but the validated Release PR contains ${EXPECTED_RELEASES}."
+            exit 1
+          fi
 
           ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES:-[]}")"
 
@@ -320,8 +325,6 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Distills the summary and a brief update-priority line from the GitHub Release Format in
-          # book/src/dev/changelog-guidelines.md; How to Upgrade and Compatibility are added at release time.
           prompt: |
             Rewrite the changelog section below into operator-facing GitHub Release
             notes for Zebra ${{ steps.zebrad-release.outputs.tag }}.
