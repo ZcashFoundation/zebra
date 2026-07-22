@@ -24,6 +24,9 @@ use crate::{block::MAX_BLOCK_SIGOPS, transaction::check::MAX_STANDARD_SCRIPTSIG_
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+#[cfg(test)]
+mod tests;
+
 /// Workaround for format string identifier rules.
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
 
@@ -161,8 +164,13 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedPallas(zebra_chain::primitives::reddsa::Error),
 
-    // temporary error type until #1186 is fixed
-    #[error("Downcast from BoxError to redjubjub::Error failed: {0}")]
+    #[error("Sapling proof or signature verification failed")]
+    SaplingVerificationFailed,
+
+    #[error("Orchard or Ironwood Halo2 proof verification failed")]
+    Halo2VerificationFailed,
+
+    #[error("could not convert an asynchronous verification error: {0}")]
     InternalDowncastError(String),
 
     #[error("either vpub_old or vpub_new must be zero")]
@@ -335,9 +343,23 @@ impl From<amount::Error> for TransactionError {
 // TODO: use a dedicated variant and From impl for each concrete type, and update callers (#5732)
 impl From<BoxError> for TransactionError {
     fn from(mut err: BoxError) -> Self {
-        // TODO: handle redpallas::Error, ScriptInvalid, InvalidSignature
+        // Preserve the concrete shielded proof/signature verification error types so they keep
+        // their mempool misbehaviour score. Without these downcasts a failed Orchard/Ironwood
+        // Halo2 proof, Orchard binding signature, or Sprout JoinSplit signature would collapse to
+        // `InternalDowncastError` (score 0), letting a peer force verification without being banned.
+        // See <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2p4c-3q4q-p463>.
+        match err.downcast::<zebra_chain::primitives::ed25519::Error>() {
+            Ok(e) => return TransactionError::Ed25519(*e),
+            Err(e) => err = e,
+        }
+
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => return TransactionError::RedJubjub(*e),
+            Err(e) => err = e,
+        }
+
+        match err.downcast::<zebra_chain::primitives::reddsa::Error>() {
+            Ok(e) => return TransactionError::RedPallas(*e),
             Err(e) => err = e,
         }
 
@@ -394,6 +416,10 @@ impl TransactionError {
             | Ed25519(_)
             | RedJubjub(_)
             | RedPallas(_)
+            | SaplingVerificationFailed
+            | Halo2VerificationFailed
+            | OrchardProofSize
+            | IronwoodProofSize
             | BothVPubsNonZero
             | DisabledAddToSproutPool
             | NegativeOrchardValueBalance

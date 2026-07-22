@@ -1174,6 +1174,8 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
+                self.drain_non_finalized_rejected_hashes();
+
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
@@ -1230,6 +1232,9 @@ impl Service<Request> for StateService {
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
+
+                self.drain_non_finalized_rejected_hashes();
+
                 let sent_hash_response = self.known_sent_hash(&hash);
                 let read_service = self.read_service.clone();
 

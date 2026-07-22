@@ -484,7 +484,12 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
+            let miner_fee = if tx.is_coinbase() {
+                None
+            } else {
+                Some(Self::miner_fee(tx.as_ref(), &spent_utxos)?)
+            };
+            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
 
             Ok(Response::Block {
                 tx_id,
@@ -577,6 +582,11 @@ where
             // the script interpreter.
             check::mempool_standard_input_scripts(tx.as_ref(), &spent_outputs)?;
 
+            // Apply ZIP-317 policy before expensive cryptographic verification.
+            let miner_fee = Self::miner_fee(tx.as_ref(), &spent_utxos)?;
+            let unpaid_actions = transaction::zip317::unpaid_actions(&unmined_tx, miner_fee);
+            transaction::zip317::mempool_checks(unpaid_actions, miner_fee, unmined_tx.size)?;
+
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
 
@@ -611,7 +621,7 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            let (miner_fee, sigops) = Self::compute_fee_and_sigops(tx.as_ref(), &spent_utxos)?;
+            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
 
             // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
             // spends both chain and mempool UTXOs (mempool outputs are appended last by
@@ -622,7 +632,7 @@ where
 
             let transaction = VerifiedUnminedTx::new(
                 unmined_tx,
-                miner_fee.expect("fee should have been checked earlier"),
+                miner_fee,
                 sigops,
                 cached_ffi_transaction.p2sh_sigops(),
                 spent_outputs.into(),
@@ -1483,32 +1493,17 @@ where
         async_checks
     }
 
-    /// Computes the miner fee and transaction sigop count for `tx`.
-    ///
-    /// Returns `None` for coinbase transaction fees.
-    fn compute_fee_and_sigops(
+    /// Calculate the miner fee from the transaction's value balance.
+    fn miner_fee(
         tx: &Transaction,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<(Option<Amount<NonNegative>>, u32), TransactionError> {
-        // Get the `value_balance` to calculate the transaction fee.
-        let value_balance = tx.value_balance(spent_utxos);
-
-        // Calculate the fee only for non-coinbase transactions.
-        let mut miner_fee = None;
-        if !tx.is_coinbase() {
-            // TODO: deduplicate this code with remaining_transaction_value()?
-            miner_fee = match value_balance {
-                Ok(vb) => match vb.remaining_transaction_value() {
-                    Ok(tx_rtv) => Some(tx_rtv),
-                    Err(_) => return Err(TransactionError::IncorrectFee),
-                },
-                Err(_) => return Err(TransactionError::IncorrectFee),
-            };
+    ) -> Result<Amount<NonNegative>, TransactionError> {
+        match tx.value_balance(spent_utxos) {
+            Ok(value_balance) => value_balance
+                .remaining_transaction_value()
+                .map_err(|_| TransactionError::IncorrectFee),
+            Err(_) => Err(TransactionError::IncorrectFee),
         }
-
-        let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
-
-        Ok((miner_fee, sigops))
     }
 }
 

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [11.1.1] - 2026-07-22
+
+### Security
+
+- Known block queries now clear notifications for rejected non-finalized blocks before
+  checking sent hashes, allowing an honest block body with the same header hash to be
+  retried immediately.
+
+## [11.1.0] - 2026-07-17
+
+### Changed
+
+- On Regtest, `expected_difficulty_threshold` now returns the fixed minimum
+  difficulty (the `powLimit`) with no retargeting, matching zcashd's
+  `fPowNoRetargeting`. Every Regtest block stays at the `powLimit`, so a zcashd
+  sidecar following a Zebra Regtest chain accepts its headers instead of
+  rejecting them as `bad-diffbits`
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+- Regtest now advances the block time minimally, keeping mined timestamps just
+  above the median-time-past instead of clamping the current time into the valid
+  range. This stops Regtest chain time from racing ~90 minutes per block and
+  outrunning a following zcashd sidecar's acceptable block-time window
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+
 ## [11.0.0] - 2026-07-17
 
 ### Changed
