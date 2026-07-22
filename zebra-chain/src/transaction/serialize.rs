@@ -853,12 +853,13 @@ impl ZcashSerialize for Transaction {
                 network_upgrade,
                 lock_time,
                 expiry_height,
+                zip233_amount,
                 inputs,
                 outputs,
                 sapling_shielded_data,
                 orchard_shielded_data,
                 ironwood_shielded_data,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 tachyon_shielded_data,
             } => {
                 // Transaction V7 (tachyon): the v6 (Ironwood) body followed by a tachyon bundle.
@@ -879,6 +880,9 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
+                // Denoted as `zip233_amount` in the spec (matches librustzcash's v7 header).
+                zip233_amount.zcash_serialize(&mut writer)?;
+
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
 
@@ -896,7 +900,7 @@ impl ZcashSerialize for Transaction {
 
                 // Tachyon bundle: `TachyonBundle::write` writes the 0x01/0x02 state byte itself,
                 // so the absent case writes 0x00 explicitly.
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 match tachyon_shielded_data {
                     None => writer.write_u8(0)?,
                     Some(wrapped) => wrapped.0.write(&mut writer)?,
@@ -1271,7 +1275,7 @@ impl ZcashDeserialize for Transaction {
 
                 Ok(tx)
             }
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             (7, true) => {
                 // Transaction V7 (tachyon): the v6 (Ironwood) body followed by a tachyon bundle.
                 // This branch only exists in tachyon builds; in other builds version 7 falls
@@ -1296,6 +1300,9 @@ impl ZcashDeserialize for Transaction {
 
                 // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
+
+                // Denoted as `zip233_amount` in the spec (matches librustzcash's v7 header).
+                let zip233_amount = (&mut limited_reader).zcash_deserialize_into()?;
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
@@ -1329,6 +1336,7 @@ impl ZcashDeserialize for Transaction {
                     network_upgrade,
                     lock_time,
                     expiry_height,
+                    zip233_amount,
                     inputs,
                     outputs,
                     sapling_shielded_data,

@@ -1014,6 +1014,10 @@ fn binding_signatures() {
                     Transaction::V6 {
                         sapling_shielded_data,
                         ..
+                    }
+                    | Transaction::V7 {
+                        sapling_shielded_data,
+                        ..
                     } => {
                         if let Some(sapling_shielded_data) = sapling_shielded_data {
                             // V6 txs have the outputs spent by their transparent inputs hashed into
@@ -1192,7 +1196,7 @@ fn test_coinbase_script() -> Result<()> {
 
 // Transaction V6 test vectors
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod v6_tests {
     use super::*;
     use group::ff::FromUniformBytes;
@@ -1238,7 +1242,7 @@ mod v6_tests {
 
     lazy_static! {
         /// An empty V6 transaction with no bundles at all.
-        pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
+        pub static ref EMPTY_V7_TX: Transaction = Transaction::V7 {
             network_upgrade: NetworkUpgrade::Nu7,
             lock_time: LockTime::min_lock_time_timestamp(),
             expiry_height: block::Height(0),
@@ -1247,11 +1251,12 @@ mod v6_tests {
             outputs: Vec::new(),
             sapling_shielded_data: None,
             orchard_shielded_data: None,
+            ironwood_shielded_data: None,
             tachyon_shielded_data: None,
         };
 
         /// V6 transaction with a stripped tachyon bundle (post-aggregation, no stamp).
-        pub static ref V6_TX_TACHYON_STRIPPED: Transaction = {
+        pub static ref V7_TX_TACHYON_STRIPPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
@@ -1264,7 +1269,7 @@ mod v6_tests {
                 binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
                 stamp: adjunct_with_wtxid([0xEEu8; 64]),
             });
-            Transaction::V6 {
+            Transaction::V7 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
@@ -1273,12 +1278,13 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
+                ironwood_shielded_data: None,
                 tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
 
         /// V6 transaction with a stamped tachyon bundle (autonome with proof + tachygrams).
-        pub static ref V6_TX_TACHYON_STAMPED: Transaction = {
+        pub static ref V7_TX_TACHYON_STAMPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
@@ -1297,7 +1303,7 @@ mod v6_tests {
                     proof: Box::new(ragu::Proof::trivial()),
                 },
             });
-            Transaction::V6 {
+            Transaction::V7 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
@@ -1306,12 +1312,13 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
+                ironwood_shielded_data: None,
                 tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
 
         /// V6 transaction with a stamped bundle, multiple actions and multiple tachygrams.
-        pub static ref V6_TX_TACHYON_MULTI_ACTION: Transaction = {
+        pub static ref V7_TX_TACHYON_MULTI_ACTION: Transaction = {
             let rk1 = rk_from_seed([0x42u8; 64]);
             let rk2 = rk_from_seed([0x43u8; 64]);
             let action1 = zcash_tachyon::Action {
@@ -1338,7 +1345,7 @@ mod v6_tests {
                     proof: Box::new(ragu::Proof::trivial()),
                 },
             });
-            Transaction::V6 {
+            Transaction::V7 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
@@ -1347,6 +1354,7 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
+                ironwood_shielded_data: None,
                 tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
@@ -1354,10 +1362,10 @@ mod v6_tests {
 
     /// An empty V6 transaction round-trip test.
     #[test]
-    fn empty_v6_round_trip() {
+    fn empty_v7_round_trip() {
         let _init_guard = zebra_test::init();
 
-        let tx: &Transaction = &EMPTY_V6_TX;
+        let tx: &Transaction = &EMPTY_V7_TX;
 
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx2: &Transaction = &data
@@ -1375,14 +1383,14 @@ mod v6_tests {
 
     /// Generate and print V6 tachyon test vectors as hex.
     #[test]
-    fn generate_v6_tachyon_test_vectors() {
+    fn generate_v7_tachyon_test_vectors() {
         let _init_guard = zebra_test::init();
 
         let test_cases: &[(&str, &Transaction)] = &[
-            ("EMPTY_V6_TX", &EMPTY_V6_TX),
-            ("V6_TX_TACHYON_STRIPPED", &V6_TX_TACHYON_STRIPPED),
-            ("V6_TX_TACHYON_STAMPED", &V6_TX_TACHYON_STAMPED),
-            ("V6_TX_TACHYON_MULTI_ACTION", &V6_TX_TACHYON_MULTI_ACTION),
+            ("EMPTY_V7_TX", &EMPTY_V7_TX),
+            ("V7_TX_TACHYON_STRIPPED", &V7_TX_TACHYON_STRIPPED),
+            ("V7_TX_TACHYON_STAMPED", &V7_TX_TACHYON_STAMPED),
+            ("V7_TX_TACHYON_MULTI_ACTION", &V7_TX_TACHYON_MULTI_ACTION),
         ];
 
         for (name, tx) in test_cases {
@@ -1403,21 +1411,21 @@ mod v6_tests {
     /// `PROOF_SIZE_COMPRESSED` (~23KB) of mostly-zero padding — the
     /// round-trip test below covers the encoding without ~46KB of inline hex.
     #[test]
-    fn v6_tachyon_test_vectors_exact_encoding() {
+    fn v7_tachyon_test_vectors_exact_encoding() {
         let _init_guard = zebra_test::init();
 
         // To regenerate after intentional wire-format changes, run
-        // `generate_v6_tachyon_test_vectors` and paste the printed hex below.
+        // `generate_v7_tachyon_test_vectors` and paste the printed hex below.
         let test_cases: &[(&str, &Transaction, &str)] = &[
             (
-                "EMPTY_V6_TX",
-                &EMPTY_V6_TX,
-                "06000080ffffffffffffffff0065cd1d000000000000000000000000000000000000",
+                "EMPTY_V7_TX",
+                &EMPTY_V7_TX,
+                "0700008068636174d80a19770065cd1d00000000000000000000000000000000000000",
             ),
             (
-                "V6_TX_TACHYON_STRIPPED",
-                &V6_TX_TACHYON_STRIPPED,
-                "06000080ffffffffffffffff0065cd1d00000000000000000000000000000000000200000000000000000100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "V7_TX_TACHYON_STRIPPED",
+                &V7_TX_TACHYON_STRIPPED,
+                "0700008068636174d80a19770065cd1d0000000000000000000000000000000000000200000000000000000100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             ),
         ];
 
@@ -1436,14 +1444,14 @@ mod v6_tests {
     /// format encodes and decodes losslessly. Independent of the hardcoded
     /// hex check above so it stays meaningful even before the hex is pinned.
     #[test]
-    fn v6_tachyon_round_trip_fixtures() {
+    fn v7_tachyon_round_trip_fixtures() {
         let _init_guard = zebra_test::init();
 
         for (name, tx) in &[
-            ("EMPTY_V6_TX", &*EMPTY_V6_TX),
-            ("V6_TX_TACHYON_STRIPPED", &*V6_TX_TACHYON_STRIPPED),
-            ("V6_TX_TACHYON_STAMPED", &*V6_TX_TACHYON_STAMPED),
-            ("V6_TX_TACHYON_MULTI_ACTION", &*V6_TX_TACHYON_MULTI_ACTION),
+            ("EMPTY_V7_TX", &*EMPTY_V7_TX),
+            ("V7_TX_TACHYON_STRIPPED", &*V7_TX_TACHYON_STRIPPED),
+            ("V7_TX_TACHYON_STAMPED", &*V7_TX_TACHYON_STAMPED),
+            ("V7_TX_TACHYON_MULTI_ACTION", &*V7_TX_TACHYON_MULTI_ACTION),
         ] {
             let bytes = tx.zcash_serialize_to_vec().expect("serialize");
             let decoded: Transaction = bytes
