@@ -57,7 +57,6 @@ For releases that include `zebrad`:
 
 - [ ] If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
 - [ ] Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
-- [ ] Every release heading matches the corresponding version in the release summary.
 
 ### Release data and documentation
 
