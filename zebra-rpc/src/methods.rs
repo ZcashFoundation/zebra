@@ -2491,7 +2491,7 @@ where
                             height,
                             &params,
                             Amount::zero(),
-                            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                             None,
                         )
                         .expect("valid coinbase tx")
@@ -2587,7 +2587,7 @@ where
                         server_long_poll_id,
                         vec![],
                         submit_old,
-                        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                         None,
                     )
                     .into())

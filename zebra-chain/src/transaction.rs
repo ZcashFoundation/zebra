@@ -11,12 +11,12 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod tachyon_shielded;
 mod txid;
 mod unmined;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub use tachyon_shielded::TachyonShieldedData;
 
 pub mod builder;
@@ -187,7 +187,7 @@ pub enum Transaction {
     ///
     /// V7 reuses the v6 (Ironwood) field layout and additionally carries a tachyon bundle. It is
     /// only constructed and accepted in tachyon builds
-    /// (`cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))`); in other builds the variant still
+    /// (`cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))`); in other builds the variant still
     /// exists but its tachyon field is compiled out, so it behaves like a v6 transaction with a
     /// distinct version group ID.
     V7 {
@@ -210,8 +210,13 @@ pub enum Transaction {
         orchard_shielded_data: Option<orchard::ShieldedDataV6>,
         /// The Ironwood data for this transaction, if any (NU6.3 onward).
         ironwood_shielded_data: Option<ironwood::ShieldedData>,
+        /// The ZIP-233 burn amount for this transaction.
+        ///
+        /// Serialized in the header (after `expiry_height`) to match librustzcash's v7 wire
+        /// format; see [`crate::transaction::serialize`].
+        zip233_amount: Amount<NonNegative>,
         /// The tachyon data for this transaction, if any.
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
         tachyon_shielded_data: Option<TachyonShieldedData>,
     },
 }
@@ -460,7 +465,8 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
-            Transaction::V6 { .. } | Transaction::V7 { .. } => 6,
+            Transaction::V6 { .. } => 6,
+            Transaction::V7 { .. } => 7,
         }
     }
 

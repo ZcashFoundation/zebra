@@ -11,7 +11,7 @@ use crate::{
 impl Transaction {
     /// Returns a new version 7 (tachyon) coinbase transaction for `network` and `height`,
     /// which contains the specified `outputs`.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     pub fn new_v7_coinbase(
         network: &Network,
         height: Height,
@@ -98,6 +98,10 @@ impl Transaction {
             sapling_shielded_data: None,
             orchard_shielded_data: None,
             ironwood_shielded_data: None,
+
+            // Coinbase transactions burn nothing via ZIP-233.
+            zip233_amount: Amount::zero(),
+
             tachyon_shielded_data: None,
         }
     }

@@ -43,6 +43,10 @@ internal-miner = ["equihash/solver"]
 # Experimental elasticsearch support
 elasticsearch = []
 
+# Experimental tachyon (v7) transaction support; only meaningful with
+# `--cfg zcash_unstable="nu7"`.
+tx_v7 = []
+
 # Test-only features
 
 proptest-impl = [
