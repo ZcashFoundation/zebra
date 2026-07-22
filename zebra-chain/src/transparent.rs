@@ -10,9 +10,7 @@ mod utxo;
 use std::{collections::HashMap, fmt, iter, ops::AddAssign};
 
 use zcash_script::{opcode::Evaluable as _, pattern::push_num};
-use zcash_transparent::{
-    address::TransparentAddress, bundle::TxOut, coinbase::MAX_COINBASE_SCRIPT_LEN,
-};
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -157,53 +155,6 @@ impl fmt::Display for Input {
 }
 
 impl Input {
-    /// Returns a new coinbase input for `height` with optional `data` and `sequence`.
-    ///
-    /// # Consensus
-    ///
-    /// The combined serialized size of the encoded `height` and the `data` (i.e. the coinbase
-    /// script) can be at most [`MAX_COINBASE_SCRIPT_LEN`] bytes.
-    ///
-    /// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    ///
-    /// # Panics
-    ///
-    /// If the resulting coinbase script would exceed [`MAX_COINBASE_SCRIPT_LEN`] bytes.
-    pub fn new_coinbase(height: block::Height, data: Vec<u8>, sequence: Option<u32>) -> Input {
-        // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
-        // that only if the data is empty to stay compliant with the following consensus rule:
-        //
-        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-        //
-        // ## Rationale
-        //
-        // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
-        // the script of a coinbase tx with such a height would consist only of this single byte,
-        // violating the consensus rule.
-        let data = if data.is_empty() { vec![0] } else { data };
-
-        // The coinbase script is the encoded height followed by `data`, so the data limit is the
-        // maximum script length minus the serialized height length.
-        let height_len = push_num(height.into()).to_bytes().len();
-        let data_limit = MAX_COINBASE_SCRIPT_LEN - height_len;
-
-        assert!(
-            data.len() <= data_limit,
-            "miner data has {} bytes, which exceeds the limit of {data_limit} bytes",
-            data.len(),
-        );
-
-        Input::Coinbase {
-            height,
-            data,
-            // If the caller does not specify the sequence number, use a sequence number that
-            // activates the LockTime.
-            sequence: sequence.unwrap_or(0),
-        }
-    }
-
     /// Returns the miner data in this input, if it is an [`Input::Coinbase`].
     pub fn miner_data(&self) -> Option<&Vec<u8>> {
         match self {
