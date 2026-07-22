@@ -50,14 +50,14 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Create or update Release PR
         id: release-plz-pr
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release-pr
         env:
@@ -158,7 +158,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: read
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -230,7 +230,7 @@ jobs:
       - name: Install libclang for librocksdb-sys bindgen
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Validate release packages without publishing
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release
           dry_run: true
@@ -238,7 +238,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Publish crates and create tags
         id: release-plz
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release
         env:
@@ -307,7 +307,7 @@ jobs:
               echo "prerelease=false"
             fi
           } >> "${GITHUB_OUTPUT}"
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         if: steps.zebrad-release.outputs.released == 'true'
         with:
           toolchain: stable
@@ -327,7 +327,7 @@ jobs:
         id: enhance
         if: steps.zebrad-release.outputs.released == 'true' && vars.CLAUDE_ENABLED != ''
         continue-on-error: true
-        uses: anthropics/claude-code-action@11ba60486e4aec9ddfeafcf4bb3f00b028ac2c16 # v1.0.142
+        uses: anthropics/claude-code-action@fa7e2f0a29a126f0b81cdcf360561b36e44cf608 # v1.0.180
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
