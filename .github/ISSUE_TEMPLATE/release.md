@@ -46,19 +46,10 @@ Here's how we make sure we got everything:
 
 # Prepare and Publish the Release
 
-The automated release workflow creates the Release PR and embeds its checklist from `.release-plz.toml`. If the automated workflow is not usable, follow the [legacy manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md):
+The automated release workflow creates the Release PR and embeds its checklist from `.release-plz.toml`. Review and merge that generated PR to start publication from its immutable merge commit.
 
-Release PR:
+- [ ] Review and approve the complete generated Release PR checklist.
+- [ ] Merge the exact approved Release PR commit.
+- [ ] Confirm the Release workflow publishes every planned crate, reconciles every tag, verifies `zebrad` installation when applicable, and creates the public GitHub Release last.
 
-- [ ] Update Changelog
-- [ ] Update README
-- [ ] Update Zebra Versions
-- [ ] Update Crate Versions and Crate Change Logs
-- [ ] Update End of Support Height
-
-Publish Release:
-
-- [ ] Create & Test GitHub Pre-Release
-- [ ] Publish GitHub Release
-- [ ] Publish Rust Crates
-- [ ] Publish Docker Images
+If the workflow is interrupted, rerun the **Release** workflow with the merged Release PR number. Do not publish crates, replace tags, or create the GitHub Release manually. Escalate any provenance mismatch, wrong-target tag, release-channel conflict, invalid Release PR, or exhausted crates.io retry instead of overwriting external state.

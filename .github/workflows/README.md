@@ -159,7 +159,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and generated Release PR changelogs
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates/updates release-plz Release PRs, then publishes crates, tags, and one app-authored `zebrad` GitHub Release after a Release PR merge
+- **Release** (`release.yml`): Creates or updates release-plz Release PRs, then uses native Cargo and an idempotent controller to reconcile crates, tags, and one app-authored `zebrad` GitHub Release; manual recovery accepts a merged Release PR number
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 

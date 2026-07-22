@@ -3,17 +3,17 @@
 # The `home` crate pin (0.5.11) would break if cargo update runs.
 dependencies_update = false
 
-# Only publish when the Release PR is merged, not on every push.
-# release-plz checks if the current commit is from a release-plz- branch.
+# Do not ask release-plz to execute a release on ordinary pushes. Zebra owns all
+# post-merge execution in the release workflow.
 release_always = false
 
-# release-plz still publishes crates and creates git tags. Zebra creates the
-# single public `zebrad` GitHub Release in .github/workflows/release.yml so
-# release-triggered Docker and GCP workflows only run once, for the node binary.
+# release-plz only creates and updates Release PRs. After merge, native Cargo
+# publishes crates and Zebra reconciles tags and the public `zebrad` GitHub
+# Release in .github/workflows/release.yml.
 git_release_enable = false
 
 # Changelogs are authored per PR in each crate's `[Unreleased]` section; release-plz
-# only versions, tags, and publishes.
+# turns those changes into versioned Release PRs.
 changelog_update = false
 
 # Breaking-change detection runs per PR via ziff, not in the release-pr job.
@@ -70,7 +70,7 @@ For releases that include `zebrad`:
 
 - [ ] This exact commit is ready to publish.
 
-Merging this PR publishes the listed crates and creates their git tags. If `zebrad` is listed, the workflow also creates the public GitHub Release and starts the binary, Docker, and GCP release workflows.
+Merging this PR starts the release controller. It publishes any missing crates with native Cargo, reconciles their git tags, and, when `zebrad` is listed, creates the public GitHub Release that starts the binary, Docker, and GCP release workflows. If execution is interrupted, rerun the Release workflow with this PR number.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).
@@ -79,17 +79,14 @@ This PR was generated with [release-plz](https://github.com/release-plz/release-
 # Repository URL.
 repo_url = "https://github.com/ZcashFoundation/zebra"
 
-# Timeout for waiting for each crate to appear on crates.io after publish
-publish_timeout = "30m"
-
-# zebrad uses the legacy v-prefixed tag format (v4.3.1); GCP deployment parses
-# the tag to extract the semver.
+# The Zebra release controller preserves zebrad's legacy v-prefixed tag format
+# (v4.3.1); GCP deployment parses the tag to extract the semver.
 [[package]]
 name = "zebrad"
 git_tag_name = "v{{ version }}"
 
 # ── Library crates ──────────────────────────────────────────────
-# No special config needed. release-plz defaults:
+# No special config needed. The controller preserves release-plz's defaults:
 # - Tag format: <crate>-v<version> (e.g., zebra-chain-v6.0.2)
 # - Change detection: file-path-based (only files in crate directory)
 # - Version bump: from conventional commits touching the crate's files
