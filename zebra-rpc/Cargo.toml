@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "12.1.1"
+version = "13.0.0"
 authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license.workspace = true

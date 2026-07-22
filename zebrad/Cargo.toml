@@ -161,7 +161,7 @@ zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
 zebra-consensus = { path = "../zebra-consensus", version = "13.0.0" }
 zebra-network = { path = "../zebra-network", version = "10.2.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "9.1.1", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "12.1.1" }
+zebra-rpc = { path = "../zebra-rpc", version = "13.0.0" }
 zebra-state = { path = "../zebra-state", version = "11.1.1" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of

@@ -64,7 +64,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "9.1.1" }
 zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "12.1.1" }
+zebra-rpc = { path = "../zebra-rpc", version = "13.0.0" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
