@@ -5,7 +5,7 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
 
 ### Changed
 
@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   each minimum-difficulty block into a large difficulty drop (tracked in
   [zcash/zips#1321](https://github.com/zcash/zips/issues/1321))
   ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
+
+### Security
+
+- Allow chain synchronization to immediately retry an honest block body after rejecting a body
+  with the same header hash, without waiting for a child block to trigger cleanup.
+- Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
+  underpaying and structurally invalid shielded mempool transactions before their expensive proof
+  verification, and disconnect peers that send transactions with invalid shielded proofs.
 
 ## [Zebra 6.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.0) - 2026-07-17
 
