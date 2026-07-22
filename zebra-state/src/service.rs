@@ -1174,6 +1174,8 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
+                self.drain_non_finalized_rejected_hashes();
+
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
