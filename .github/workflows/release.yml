@@ -175,6 +175,71 @@ jobs:
         run: |
           echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
           exit 1
+      - name: Validate zebrad release notes
+        id: notes
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet "${TARGET_SHA}^" "${TARGET_SHA}" -- zebrad/Cargo.toml; then
+            echo "required=false" >> "${GITHUB_OUTPUT}"
+            echo "This Release PR does not publish zebrad; skipping release-note validation."
+            exit 0
+          fi
+
+          VERSION="$(awk '
+            /^\[package\]$/ {
+              in_package = 1
+              next
+            }
+            /^\[/ {
+              in_package = 0
+            }
+            in_package && /^[[:space:]]*version[[:space:]]*=/ {
+              sub(/^[^=]*=[[:space:]]*"/, "")
+              sub(/".*$/, "")
+              print
+              exit
+            }
+          ' zebrad/Cargo.toml)"
+
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Could not read the zebrad package version from zebrad/Cargo.toml."
+            exit 1
+          fi
+
+          awk -v version="${VERSION}" '
+            BEGIN {
+              heading = "## [Zebra " version "]"
+            }
+            /^##[[:space:]]+\[/ {
+              if (found) {
+                exit
+              }
+              if (index($0, heading) == 1) {
+                found = 1
+              }
+            }
+            found {
+              print
+            }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
+
+          if ! awk 'NR > 1 && NF && $0 !~ /^[[:space:]]*#/ { found = 1 } END { exit !found }' "${RUNNER_TEMP}/release-notes.md"; then
+            echo "::error::CHANGELOG.md must contain a non-empty '## [Zebra ${VERSION}]' section before publishing zebrad ${VERSION}."
+            exit 1
+          fi
+
+          delim="SECTION_$(openssl rand -hex 8)"
+          {
+            echo "required=true"
+            echo "version=${VERSION}"
+            echo "tag=v${VERSION}"
+            echo "section<<${delim}"
+            cat "${RUNNER_TEMP}/release-notes.md"
+            echo "${delim}"
+          } >> "${GITHUB_OUTPUT}"
       - name: Install libclang for librocksdb-sys bindgen
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Publish crates and create tags
@@ -186,8 +251,10 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Extract zebrad release metadata
         id: zebrad-release
-        if: steps.release-plz.outputs.releases_created == 'true'
         env:
+          EXPECTED_TAG: ${{ steps.notes.outputs.tag }}
+          EXPECTED_VERSION: ${{ steps.notes.outputs.version }}
+          NOTES_REQUIRED: ${{ steps.notes.outputs.required }}
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
           set -euo pipefail
@@ -195,6 +262,11 @@ jobs:
           ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES:-[]}")"
 
           if [ -z "${ZEBRAD_RELEASE}" ]; then
+            if [ "${NOTES_REQUIRED}" = "true" ]; then
+              echo "::error::release-plz did not return the required zebrad ${EXPECTED_VERSION} (${EXPECTED_TAG}) release."
+              exit 1
+            fi
+
             echo "released=false" >> "${GITHUB_OUTPUT}"
             echo "No zebrad release in release-plz output; skipping GitHub Release."
             exit 0
@@ -205,6 +277,11 @@ jobs:
 
           if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ] || [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
             echo "::error::release-plz did not return both version and tag for zebrad: ${ZEBRAD_RELEASE}"
+            exit 1
+          fi
+
+          if [ "${NOTES_REQUIRED}" != "true" ] || [ "${VERSION}" != "${EXPECTED_VERSION}" ] || [ "${TAG}" != "${EXPECTED_TAG}" ]; then
+            echo "::error::release-plz returned zebrad ${VERSION} (${TAG}), but the validated release notes were for ${EXPECTED_VERSION:-none} (${EXPECTED_TAG:-none})."
             exit 1
           fi
 
@@ -233,54 +310,6 @@ jobs:
 
           cargo install --locked --force --version "${VERSION}" zebrad
           ~/.cargo/bin/zebrad --version
-      - name: Build release notes
-        id: notes
-        if: steps.zebrad-release.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          VERSION: ${{ steps.zebrad-release.outputs.version }}
-          TAG: ${{ steps.zebrad-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
-            exit 1
-          fi
-
-          awk -v version="${VERSION}" '
-            BEGIN {
-              heading = "## [Zebra " version "]"
-            }
-            /^##[[:space:]]+\[/ {
-              if (found) {
-                exit
-              }
-              if (index($0, heading) == 1) {
-                found = 1
-              }
-            }
-            found {
-              print
-            }
-          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
-
-          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
-            {
-              echo "Zebra ${TAG}"
-              echo
-              echo "See CHANGELOG.md for release details."
-            } > "${RUNNER_TEMP}/release-notes.md"
-          fi
-
-          # Pass the extracted section to the optional Claude step. The content is
-          # this repo's own curated CHANGELOG, so the random delimiter is precautionary.
-          delim="SECTION_$(openssl rand -hex 8)"
-          {
-            echo "section<<${delim}"
-            cat "${RUNNER_TEMP}/release-notes.md"
-            echo "${delim}"
-          } >> "${GITHUB_OUTPUT}"
 
       - name: Enhance release notes with Claude
         id: enhance
