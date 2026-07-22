@@ -1197,7 +1197,7 @@ fn test_coinbase_script() -> Result<()> {
 // Transaction V6 test vectors
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-mod v6_tests {
+mod v7_tests {
     use super::*;
     use group::ff::FromUniformBytes;
     use group::ff::PrimeField;
@@ -1241,7 +1241,7 @@ mod v6_tests {
     }
 
     lazy_static! {
-        /// An empty V6 transaction with no bundles at all.
+        /// An empty V7 transaction with no bundles at all.
         pub static ref EMPTY_V7_TX: Transaction = Transaction::V7 {
             network_upgrade: NetworkUpgrade::Nu7,
             lock_time: LockTime::min_lock_time_timestamp(),
@@ -1255,7 +1255,7 @@ mod v6_tests {
             tachyon_shielded_data: None,
         };
 
-        /// V6 transaction with a stripped tachyon bundle (post-aggregation, no stamp).
+        /// V7 transaction with a stripped tachyon bundle (post-aggregation, no stamp).
         pub static ref V7_TX_TACHYON_STRIPPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
@@ -1283,7 +1283,7 @@ mod v6_tests {
             }
         };
 
-        /// V6 transaction with a stamped tachyon bundle (autonome with proof + tachygrams).
+        /// V7 transaction with a stamped tachyon bundle (autonome with proof + tachygrams).
         pub static ref V7_TX_TACHYON_STAMPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
@@ -1317,7 +1317,7 @@ mod v6_tests {
             }
         };
 
-        /// V6 transaction with a stamped bundle, multiple actions and multiple tachygrams.
+        /// V7 transaction with a stamped bundle, multiple actions and multiple tachygrams.
         pub static ref V7_TX_TACHYON_MULTI_ACTION: Transaction = {
             let rk1 = rk_from_seed([0x42u8; 64]);
             let rk2 = rk_from_seed([0x43u8; 64]);
@@ -1360,7 +1360,7 @@ mod v6_tests {
         };
     }
 
-    /// An empty V6 transaction round-trip test.
+    /// An empty V7 transaction round-trip test.
     #[test]
     fn empty_v7_round_trip() {
         let _init_guard = zebra_test::init();
@@ -1381,7 +1381,7 @@ mod v6_tests {
         assert_eq!(data, data2, "data must be equal if structs are equal");
     }
 
-    /// Generate and print V6 tachyon test vectors as hex.
+    /// Generate and print V7 tachyon test vectors as hex.
     #[test]
     fn generate_v7_tachyon_test_vectors() {
         let _init_guard = zebra_test::init();
@@ -1406,7 +1406,7 @@ mod v6_tests {
         }
     }
 
-    /// Pin the exact wire encoding for the small V6 fixtures. Stamped
+    /// Pin the exact wire encoding for the small V7 fixtures. Stamped
     /// fixtures are not pinned here because their proof field carries
     /// `PROOF_SIZE_COMPRESSED` (~23KB) of mostly-zero padding — the
     /// round-trip test below covers the encoding without ~46KB of inline hex.
@@ -1440,7 +1440,7 @@ mod v6_tests {
         }
     }
 
-    /// Round-trip every V6 fixture to confirm the new TachyonBundle wire
+    /// Round-trip every V7 fixture to confirm the new TachyonBundle wire
     /// format encodes and decodes losslessly. Independent of the hardcoded
     /// hex check above so it stays meaningful even before the hex is pinned.
     #[test]
