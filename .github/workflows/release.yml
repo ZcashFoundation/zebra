@@ -229,13 +229,11 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
       - name: Install libclang for librocksdb-sys bindgen
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
-      - name: Validate release packages without publishing
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
-        with:
-          command: release
-          dry_run: true
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+      # No `release --dry-run` pre-check: it packages each crate and resolves its dependencies
+      # against crates.io, so a release that bumps interdependent workspace crates together fails
+      # (a crate's being-released dependency, e.g. zebra-consensus needing the new zebra-state, is
+      # not on crates.io yet). The publish step below is topologically ordered and handles this,
+      # and `Verify published package versions` checks the result. See the v6.2.1 release.
       - name: Publish crates and create tags
         id: release-plz
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
