@@ -4169,16 +4169,8 @@ async fn mempool_zip317_error() {
                     .map(|utxo| utxo.utxo.clone()),
             ));
 
-        state
-            .expect_request_that(|req| {
-                matches!(
-                    req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                )
-            })
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+        // ZIP-317 policy is checked before expensive cryptographic verification, so the
+        // verifier never reaches the anchor/nullifier check for this transaction.
     });
 
     let verifier_response = verifier
