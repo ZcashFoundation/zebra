@@ -117,8 +117,8 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags origin "$BASE_REF"
-          echo "rev=$(git merge-base FETCH_HEAD HEAD)" >> "$GITHUB_OUTPUT"
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
@@ -152,8 +152,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          git fetch --no-tags origin "$BASE_REF"
-          merge_base="$(git merge-base FETCH_HEAD HEAD)"
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
 
           allowed_type=false
           case "$DECLARED_TYPE" in
