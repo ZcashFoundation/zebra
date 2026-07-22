@@ -229,6 +229,13 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
       - name: Install libclang for librocksdb-sys bindgen
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Validate release packages without publishing
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        with:
+          command: release
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Publish crates and create tags
         id: release-plz
         uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
