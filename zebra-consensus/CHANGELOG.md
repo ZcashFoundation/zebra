@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `transaction::Verifier::check_maturity_height` is now private and takes `tx`, `height`,
-  `network`, and `spent_utxos` directly instead of `&Request`
-  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
 - `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
 
 ### Security
 
