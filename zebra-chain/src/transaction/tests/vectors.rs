@@ -1194,7 +1194,7 @@ fn test_coinbase_script() -> Result<()> {
     Ok(())
 }
 
-// Transaction V6 test vectors
+// Transaction V7 test vectors
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod v7_tests {
