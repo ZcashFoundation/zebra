@@ -158,7 +158,10 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .await
         .map_err(|err| eyre!(err))?;
     assert!(
-        matches!(poisoned_response, SubmitBlockResponse::ErrorResponse(_)),
+        matches!(
+            poisoned_response,
+            SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected)
+        ),
         "the poisoned block body must be rejected"
     );
 
