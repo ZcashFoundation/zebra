@@ -46,9 +46,11 @@ impl<'de> serde::Deserialize<'de> for TachyonShieldedData {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error as _;
         let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
-        TachyonBundle::read(&bytes[..])
-            .map_err(D::Error::custom)?
-            .map(Self)
-            .ok_or_else(|| D::Error::custom("tachyon bundle absent in wrapped serialization"))
+        match TachyonBundle::read(&bytes[..]).map_err(D::Error::custom)? {
+            TachyonBundle::NoBundle => {
+                Err(D::Error::custom("tachyon bundle absent in wrapped serialization"))
+            }
+            bundle => Ok(Self(bundle)),
+        }
     }
 }

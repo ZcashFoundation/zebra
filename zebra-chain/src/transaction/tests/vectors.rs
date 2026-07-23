@@ -1202,6 +1202,7 @@ mod v7_tests {
     use group::ff::FromUniformBytes;
     use group::ff::PrimeField;
     use group::prime::PrimeCurveAffine;
+    use group::GroupEncoding;
     use halo2::pasta::pallas;
     use reddsa::{orchard::SpendAuth, SigningKey, VerificationKey};
 
@@ -1211,7 +1212,12 @@ mod v7_tests {
         let sk_bytes = sk_scalar.to_repr();
         let sk = SigningKey::<SpendAuth>::try_from(sk_bytes).unwrap();
         let pk = VerificationKey::<SpendAuth>::from(&sk);
-        zcash_tachyon::keys::public::ActionVerificationKey::try_from(<[u8; 32]>::from(pk)).unwrap()
+        let pk_bytes = <[u8; 32]>::from(pk);
+        let point = Option::<pasta_curves::EpAffine>::from(pasta_curves::EpAffine::from_bytes(
+            &pk_bytes,
+        ))
+        .expect("verification key is a valid curve point");
+        zcash_tachyon::keys::public::ActionVerificationKey::try_from(point).unwrap()
     }
 
     /// Helper: derive Fp from a 64-byte seed.
@@ -1227,17 +1233,10 @@ mod v7_tests {
         zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap()
     }
 
-    /// Helper: build an `AggregateId` with the given wtxid (covering-aggregate
+    /// Helper: build a `PointerStamp` with the given wtxid (covering-aggregate
     /// reference for stripped/adjunct bundles).
-    fn adjunct_with_wtxid(wtxid: [u8; 64]) -> zcash_tachyon::stamp::AggregateId {
-        zcash_tachyon::stamp::AggregateId::try_from(wtxid).unwrap()
-    }
-
-    /// Helper: build a deterministic `ActionSetCommit` for stamp fixtures. The
-    /// commitment value is not asserted by consumers; it only needs to be a
-    /// valid, round-trippable curve point, so we use the `Eq` generator.
-    fn default_action_set() -> zcash_tachyon::ActionSetCommit {
-        zcash_tachyon::ActionSetCommit::from(pasta_curves::EqAffine::generator().to_curve())
+    fn adjunct_with_wtxid(wtxid: [u8; 64]) -> zcash_tachyon::PointerStamp {
+        zcash_tachyon::PointerStamp::try_from(wtxid).unwrap()
     }
 
     lazy_static! {
@@ -1261,12 +1260,12 @@ mod v7_tests {
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk,
-                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+                sig: zcash_tachyon::action::Signature::read(&[0x01u8; 64][..]).unwrap(),
             };
             let bundle = zcash_tachyon::TachyonBundle::Adjunct(zcash_tachyon::Bundle {
                 actions: vec![action],
-                value_balance: 0i64,
-                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                value_balance: zcash_tachyon::value::Balance::ZERO,
+                binding_sig: zcash_tachyon::bundle::Signature::read(&[0x02u8; 64][..]).unwrap(),
                 stamp: adjunct_with_wtxid([0xEEu8; 64]),
             });
             Transaction::V7 {
@@ -1289,15 +1288,17 @@ mod v7_tests {
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk,
-                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+                sig: zcash_tachyon::action::Signature::read(&[0x01u8; 64][..]).unwrap(),
             };
             let tachygram = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
-            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Bundle {
+            let bundle = zcash_tachyon::TachyonBundle::Proven(zcash_tachyon::Bundle {
                 actions: vec![action],
-                value_balance: 100i64,
-                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
-                stamp: zcash_tachyon::Stamp {
-                    action_set: default_action_set(),
+                value_balance: zcash_tachyon::value::Balance::try_from(100i64).unwrap(),
+                binding_sig: zcash_tachyon::bundle::Signature::read(&[0x02u8; 64][..]).unwrap(),
+                stamp: zcash_tachyon::ProofStamp {
+                    // Covered-actions digest is not asserted by fixture consumers;
+                    // it only needs to round-trip through the wire format.
+                    actions: [0u8; 32],
                     tachygrams: vec![tachygram],
                     anchor: default_anchor(),
                     proof: Box::new(ragu::Proof::trivial()),
@@ -1324,23 +1325,31 @@ mod v7_tests {
             let action1 = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk: rk1,
-                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+                sig: zcash_tachyon::action::Signature::read(&[0x01u8; 64][..]).unwrap(),
             };
             let action2 = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk: rk2,
-                sig: zcash_tachyon::action::Signature::from([0x03u8; 64]),
+                sig: zcash_tachyon::action::Signature::read(&[0x03u8; 64][..]).unwrap(),
             };
             let tg1 = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
             let tg2 = zcash_tachyon::Tachygram::from(fp_from_seed([0xCCu8; 64]));
             let tg3 = zcash_tachyon::Tachygram::from(fp_from_seed([0xDDu8; 64]));
-            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Bundle {
-                actions: vec![action1, action2],
-                value_balance: 300i64,
-                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
-                stamp: zcash_tachyon::Stamp {
-                    action_set: default_action_set(),
-                    tachygrams: vec![tg1, tg2, tg3],
+            // Tachyon wire format requires actions and tachygrams to
+            // be in canonical (sorted) order, so sort before constructing.
+            let mut actions = vec![action1, action2];
+            actions.sort();
+            let mut tachygrams = vec![tg1, tg2, tg3];
+            tachygrams.sort();
+            let bundle = zcash_tachyon::TachyonBundle::Proven(zcash_tachyon::Bundle {
+                actions,
+                value_balance: zcash_tachyon::value::Balance::try_from(300i64).unwrap(),
+                binding_sig: zcash_tachyon::bundle::Signature::read(&[0x02u8; 64][..]).unwrap(),
+                stamp: zcash_tachyon::ProofStamp {
+                    // Covered-actions digest is not asserted by fixture consumers;
+                    // it only needs to round-trip through the wire format.
+                    actions: [0u8; 32],
+                    tachygrams,
                     anchor: default_anchor(),
                     proof: Box::new(ragu::Proof::trivial()),
                 },
