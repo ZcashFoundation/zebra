@@ -11,8 +11,7 @@ This document provides a comprehensive overview of Zebra's Continuous Integratio
 5. [Test Execution Strategy](#test-execution-strategy)
 6. [Infrastructure Details](#infrastructure-details)
 7. [Best Practices](#best-practices)
-8. [Release Operations](#release-operations)
-9. [Known Issues](#known-issues)
+8. [Known Issues](#known-issues)
 
 ## System Overview
 
@@ -160,7 +159,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release
+- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
@@ -174,34 +173,6 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - Helper scripts in `.github/workflows/scripts/` used by the above
 
 Required-check workflows follow a `changes` (paths-filter) + gated workers + aggregator pattern. File-to-workflow mapping lives in [`.github/path-filters.yml`](../path-filters.yml). The aggregator job ID matches the workflow basename and the GitHub ruleset context (`lint`, `unit-tests`, `test-crates`, ...). See [`book/src/dev/continuous-integration.md`](../../book/src/dev/continuous-integration.md).
-
-## Release Operations
-
-The normal path has 2 maintainer actions: review the latest Release PR after every required check passes, then approve and merge that exact commit. release-plz creates and updates the PR, `PR Gate / Release readiness` validates every new commit automatically, and `release.yml` publishes and finalizes the approved release after merge.
-
-The readiness job confirms that the PR includes current `main`, validates every versioned changelog, runs Cargo's complete multi-package dry-run, and observes crates.io and GitHub without writing external state. Before publication, a green report with `reason: "incomplete"` is expected because the planned crates, tags, or GitHub Release are still missing. [`.github/cargo-release.yml`](../cargo-release.yml) is the single source of tag and GitHub Release policy.
-
-After merge, `release.yml` publishes missing crates, verifies that `zebrad` installs when it is part of the plan, then finalizes tags and the public GitHub Release.
-
-### Recovery
-
-When readiness fails, use its job summary to fix the Release PR; the next PR update reruns the complete check. If no readiness run is available, rerun the PR checks in GitHub or start the read-only fallback:
-
-```sh
-gh workflow run release.yml --ref main \
-  -f operation=check \
-  -f release_pr_number=<PR>
-```
-
-To recover interrupted post-merge publication, run:
-
-```sh
-gh workflow run release.yml --ref main \
-  -f operation=resume \
-  -f release_pr_number=<PR>
-```
-
-`resume` requires `.github/cargo-release.yml` in the merged release commit. It can repair configured mutable GitHub Release metadata, but stops on conflicting crate provenance, tag targets, or release channels. Escalate those conflicts; do not overwrite external release state. For a maintainer-authorized manual fallback, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
 
 ## Test Execution Strategy
 

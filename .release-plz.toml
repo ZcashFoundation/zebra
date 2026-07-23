@@ -35,11 +35,9 @@ pr_body = """
 {%- endfor %}
 
 > [!IMPORTANT]
-> **Normal path:** Wait for every required check, review the considerations below, then approve and merge the exact checked commit. Publication and finalization start automatically after merge.
+> Wait for every required check, review this checklist, then approve and merge the exact checked commit.
 
-## Review considerations
-
-Review the latest commit after all intended changes have landed on `main` and release-plz has finished updating this PR. GitHub approval attests that the following considerations are satisfied.
+## Release checklist
 
 ### Release prerequisites
 
@@ -69,13 +67,19 @@ For releases that include `zebrad`:
 - Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
 - README, installation, compatibility, and operational documentation match the release.
 
-## Publish this release
+### Publish
 
-When `PR Gate / Release readiness` and every other required check pass for the latest commit, approve this PR with a GitHub review and merge that exact commit.
+1. Approve the latest commit after `PR Gate / Release readiness` and every other required check pass.
+2. Merge that exact commit.
 
-No manual preflight command is required. Every new commit starts the read-only release readiness check, whose job summary contains the complete release plan and observed external state.
+## If automation fails
 
-If a check fails, open its job summary and fix the reported issue before approval. After merge, the Release workflow publishes missing crates, verifies `zebrad` installation, and finalizes tags and the public GitHub Release. Manual check and resume commands are documented in the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for exceptional recovery.
+- If Release readiness fails, open its job summary and fix the reported issue.
+- If the automatic readiness check does not start, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
+- If publication stops after merge, run `gh workflow run release.yml --ref main -f operation=resume -f release_pr_number=<PR>`.
+- If published crates, tags, or release channels conflict with the plan, stop and ask a maintainer to investigate.
+
+See the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for workflow details and recovery guidance.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).
