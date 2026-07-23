@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `HandshakeError::MissingRequiredServices`, returned when an outbound handshake is rejected
+  because the remote peer's `version` message doesn't advertise `NODE_NETWORK`
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
+### Changed
+
+- Outbound connections to peers that don't advertise `NODE_NETWORK` are rejected during the
+  handshake, and the peer's advertised services are recorded in the address book, so the peer is
+  no longer re-dialed or gossiped. Inbound and isolated connections are unaffected
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
 ## [10.2.0] - 2026-07-17
 
 ### Added

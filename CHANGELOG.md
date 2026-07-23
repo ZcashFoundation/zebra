@@ -5,6 +5,15 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- Outbound peer slots no longer fill up with peers that advertise no services, which could stall
+  a fresh sync at genesis when most reachable listeners are non-serving. Zebra now rejects such
+  peers during the outbound handshake and remembers their advertised services, so it doesn't
+  re-dial or gossip them ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
+
 ## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
 
 ### Changed
