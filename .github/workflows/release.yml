@@ -19,8 +19,16 @@ on:
     types: [closed]
   workflow_dispatch:
     inputs:
+      operation:
+        description: "Check an open Release PR or resume a merged one"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - resume
       release_pr_number:
-        description: "Merged Release PR number to recover"
+        description: "Release PR number"
         required: true
         type: string
 
@@ -91,6 +99,199 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "chore: release v${VERSION}"
 
+  release-target:
+    name: Verify Release PR
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+       contains(github.event.pull_request.labels.*.name, 'A-release'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # verify that the selected merge commit is on main
+      pull-requests: read # validate the selected Release PR
+    concurrency:
+      group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
+      cancel-in-progress: false
+    outputs:
+      base_sha: ${{ steps.release-target.outputs.base_sha }}
+      operation: ${{ steps.release-target.outputs.operation }}
+      pr_number: ${{ steps.release-target.outputs.pr_number }}
+      target_sha: ${{ steps.release-target.outputs.target_sha }}
+    steps:
+      - name: Resolve immutable release target
+        id: release-target
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 #v9.0.0
+        env:
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_PR_NUMBER: ${{ inputs.release_pr_number }}
+        with:
+          script: |
+            const requestedOperation =
+              context.eventName === "workflow_dispatch"
+                ? process.env.INPUT_OPERATION
+                : "resume";
+            const rawPrNumber =
+              context.eventName === "workflow_dispatch"
+                ? process.env.INPUT_PR_NUMBER
+                : String(context.payload.pull_request?.number ?? "");
+            const prNumber = Number(rawPrNumber);
+
+            if (
+              !Number.isSafeInteger(prNumber) ||
+              prNumber <= 0 ||
+              !["check", "resume"].includes(requestedOperation)
+            ) {
+              throw new Error("operation and Release PR number are invalid");
+            }
+
+            const result = await github.graphql(
+              `query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    baseRefName
+                    baseRefOid
+                    headRefName
+                    headRefOid
+                    headRepository { nameWithOwner }
+                    labels(first: 100) { nodes { name } }
+                    mergeCommit { oid }
+                    merged
+                    reviewDecision
+                    state
+                  }
+                }
+              }`,
+              { ...context.repo, number: prNumber },
+            );
+            const pr = result.repository.pullRequest;
+            const expectedRepository = `${context.repo.owner}/${context.repo.repo}`;
+            const isReleasePr =
+              pr?.baseRefName === "main" &&
+              pr.headRepository?.nameWithOwner === expectedRepository &&
+              pr.headRefName.startsWith("release-plz-") &&
+              pr.labels.nodes.some(({ name }) => name === "A-release");
+
+            if (!isReleasePr || (pr.state !== "OPEN" && !pr.merged)) {
+              throw new Error(
+                `PR #${prNumber} is not an open or merged internal A-release Release PR`,
+              );
+            }
+
+            let baseSha;
+            let targetSha;
+            if (requestedOperation === "check" && !pr.merged) {
+              const comparison =
+                await github.rest.repos.compareCommitsWithBasehead({
+                  ...context.repo,
+                  basehead: `${pr.baseRefOid}...${pr.headRefOid}`,
+                });
+              baseSha = comparison.data.merge_base_commit.sha;
+              targetSha = pr.headRefOid;
+            } else {
+              if (
+                !pr.merged ||
+                pr.reviewDecision !== "APPROVED" ||
+                pr.mergeCommit?.oid === undefined
+              ) {
+                throw new Error(
+                  `PR #${prNumber} is not an approved merged Release PR`,
+                );
+              }
+              targetSha = pr.mergeCommit.oid;
+              const commit = await github.rest.repos.getCommit({
+                ...context.repo,
+                ref: targetSha,
+              });
+              baseSha = commit.data.parents[0]?.sha;
+              if (baseSha === undefined) {
+                throw new Error(
+                  `release target ${targetSha} has no first parent`,
+                );
+              }
+              const comparison =
+                await github.rest.repos.compareCommitsWithBasehead({
+                  ...context.repo,
+                  basehead: `${targetSha}...${pr.baseRefName}`,
+                });
+              if (comparison.data.merge_base_commit.sha !== targetSha) {
+                throw new Error(
+                  `release target ${targetSha} is not an ancestor of current main`,
+                );
+              }
+            }
+
+            core.setOutput("base_sha", baseSha);
+            core.setOutput("operation", requestedOperation);
+            core.setOutput("pr_number", String(prNumber));
+            core.setOutput("target_sha", targetSha);
+
+  release-check:
+    name: Check release without publishing
+    needs: release-target
+    if: needs.release-target.outputs.operation == 'check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    concurrency:
+      group: release-check-${{ needs.release-target.outputs.pr_number }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out current release policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          path: controller
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Check out immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-source
+          persist-credentials: false
+          ref: ${{ needs.release-target.outputs.target_sha }}
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Check desired release state
+        id: cargo-release
+        uses: ZcashFoundation/cargo-release@2df8f3c8030169e9a9b756528a841fc59a7e5c25
+        with:
+          phase: check
+          source-directory: release-source
+          base-sha: ${{ needs.release-target.outputs.base_sha }}
+          target-sha: ${{ needs.release-target.outputs.target_sha }}
+          config-path: controller/.github/cargo-release.yml
+          github-token: ${{ github.token }}
+      - name: Summarize release check
+        if: always()
+        env:
+          PLAN: ${{ steps.cargo-release.outputs.plan }}
+          REPORT: ${{ steps.cargo-release.outputs.report }}
+        run: |
+          {
+            echo "## Cargo Release check"
+            if [[ -n "${PLAN}" ]]; then
+              echo '### Plan'
+              echo '```json'
+              jq . <<< "${PLAN}"
+              echo '```'
+            fi
+            if [[ -n "${REPORT}" ]]; then
+              echo '### Report'
+              echo '```json'
+              jq . <<< "${REPORT}"
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   # The Release PR merge is the human gate. The controller always runs from
   # current main, while release source comes from the immutable merge commit.
   release:
@@ -101,7 +302,7 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository &&
        startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
        contains(github.event.pull_request.labels.*.name, 'A-release')) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && inputs.operation == 'resume')
     runs-on: ubuntu-latest
     permissions:
       contents: write # reconcile repository tags and GitHub Releases
