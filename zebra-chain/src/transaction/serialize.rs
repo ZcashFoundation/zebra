@@ -1326,9 +1326,12 @@ impl ZcashDeserialize for Transaction {
                     .zcash_deserialize_into::<Option<ironwood::ShieldedData>>()?;
 
                 // Tachyon bundle. `TachyonBundle::read` consumes the `tachyonBundleState` byte and
-                // returns `None` for 0x00 or `Some(stamped|stripped)` for 0x01/0x02.
-                let tachyon_shielded_data = zcash_tachyon::TachyonBundle::read(&mut limited_reader)?
-                    .map(crate::transaction::TachyonShieldedData);
+                // returns `NoBundle` for 0x00 or a `Proven`/`Adjunct` bundle for 0x01/0x02.
+                let tachyon_shielded_data =
+                    match zcash_tachyon::TachyonBundle::read(&mut limited_reader)? {
+                        zcash_tachyon::TachyonBundle::NoBundle => None,
+                        bundle => Some(crate::transaction::TachyonShieldedData(bundle)),
+                    };
 
                 // NOTE: unlike the v6 arm, v7 does not round-trip through `to_librustzcash`: the
                 // tachyon bundle has no librustzcash representation, so that check does not apply.
