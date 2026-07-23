@@ -46,11 +46,36 @@ Here's how we make sure we got everything:
 
 # Prepare and Publish the Release
 
-release-plz creates and updates the Release PR. After it is merged, `ZcashFoundation/cargo-release` reconciles the planned release from its immutable merge commit. Tag and GitHub Release policy lives only in `.github/cargo-release.yml`.
+The normal release path requires 2 maintainer actions:
 
-## Check Before Merge
+1. Review the latest Release PR after its required checks pass.
+2. Approve and merge that exact commit.
 
-Run this read-only check against the open Release PR:
+The automation handles the rest. release-plz creates and updates the Release PR, `PR Gate / Release readiness` validates every new commit, and the Release workflow publishes and finalizes the approved release after merge.
+
+- [ ] After `PR Gate / Release readiness` and every other required check pass, review the generated checklist, release plan, versions, changelogs, and release data.
+- [ ] Approve and merge the exact checked commit.
+
+## What Release Readiness Checks
+
+Every new Release PR commit automatically:
+
+- Confirms that the PR includes current `main`.
+- Validates every versioned changelog.
+- Reconstructs the complete release plan and runs Cargo's multi-package dry-run.
+- Observes crates.io, tags, and GitHub Releases.
+
+The job does not publish or modify anything. Before publication, a green report with `reason: "incomplete"` is expected because the planned external state does not exist yet.
+
+## After Merge
+
+The Release workflow publishes missing crates, verifies that the published `zebrad` installs when applicable, then finalizes tags and the public GitHub Release. The GitHub Release starts the binary, Docker, and GCP release workflows.
+
+## If Automation Needs Attention
+
+If Release readiness fails, open its job summary and fix the reported changelog, Cargo dry-run, or external-state problem in the Release PR. A new Release PR commit starts the check again.
+
+If the automatic check did not start, first rerun the PR checks in GitHub. Use this fallback only when no readiness run is available:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -58,17 +83,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-The check runs Cargo's complete multi-package dry-run and observes crates.io, tags, and GitHub Releases. It never publishes a crate, creates a tag, or edits a GitHub Release. Before the first publication, a green result with `reason: "incomplete"` is expected: it confirms that the plan is valid while the planned external state is still missing.
-
-- [ ] Review and approve the complete generated Release PR checklist.
-- [ ] Run the read-only check and review its plan and report.
-- [ ] Merge the exact approved Release PR commit.
-
-## Publish and Recover
-
-After merge, the Release workflow publishes missing crates, verifies that the published `zebrad` installs when applicable, then finalizes tags and the public GitHub Release. The GitHub Release starts the binary, Docker, and GCP release workflows.
-
-If this post-merge workflow is interrupted, resume the same Release PR:
+If post-merge publication is interrupted, resume the same Release PR:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -76,6 +91,6 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` is available only for releases whose merge commit contains `.github/cargo-release.yml`. It can repair configured mutable GitHub Release metadata, but it stops on immutable contradictions such as mismatched crate provenance, a tag that targets another commit, or a release-channel conflict. Do not publish crates, replace tags, or create the GitHub Release manually; escalate those conflicts for maintainer review.
+`resume` is available only for releases whose merge commit contains `.github/cargo-release.yml`. It can repair configured mutable GitHub Release metadata, but it stops on immutable contradictions such as mismatched crate provenance, a tag that targets another commit, or a release-channel conflict.
 
-For a maintainer-authorized manual fallback, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+Do not publish crates manually, replace tags, or overwrite conflicting release state. Escalate immutable conflicts for maintainer review. If a maintainer authorizes a fully manual release, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).

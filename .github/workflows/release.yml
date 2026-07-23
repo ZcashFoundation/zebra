@@ -4,7 +4,7 @@
 #   push to main                  -> creates or updates the Release PR
 #   merged, approved Release PR   -> reconciles crates, tags, and the public
 #                                   zebrad GitHub Release
-#   workflow_dispatch            -> resumes the same merged Release PR by number
+#   workflow_dispatch            -> fallback check or post-merge recovery
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:released  -> release-binaries.yml (Docker Hub)
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Check an open Release PR or resume a merged one"
+        description: "Fallback check for an open Release PR or resume a merged one"
         required: true
         default: check
         type: choice
@@ -189,7 +189,12 @@ jobs:
                   ...context.repo,
                   basehead: `${pr.baseRefOid}...${pr.headRefOid}`,
                 });
-              baseSha = comparison.data.merge_base_commit.sha;
+              if (comparison.data.merge_base_commit.sha !== pr.baseRefOid) {
+                throw new Error(
+                  `PR #${prNumber} is behind main; wait for release-plz to update it`,
+                );
+              }
+              baseSha = pr.baseRefOid;
               targetSha = pr.headRefOid;
             } else {
               if (

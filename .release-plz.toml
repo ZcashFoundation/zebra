@@ -34,6 +34,9 @@ pr_body = """
 - `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} → {% endif %}{{ release.next_version }}
 {%- endfor %}
 
+> [!IMPORTANT]
+> **Normal path:** Wait for every required check, review this checklist, then approve and merge the exact checked commit. Publication and finalization start automatically after merge.
+
 ## Review this release
 
 Review the latest commit after all intended changes have landed on `main` and release-plz has finished updating this PR.
@@ -68,11 +71,12 @@ For releases that include `zebrad`:
 
 ### Approval
 
+- [ ] `PR Gate / Release readiness` and every other required check pass for the latest commit.
 - [ ] This exact commit is ready to publish.
 
-Before merging, run the read-only Release workflow check for this PR. A green check with `reason: "incomplete"` is expected before publication, because the planned crates, tags, and GitHub Release do not exist yet.
+No manual preflight command is required. Every new commit starts the read-only release readiness check, whose job summary contains the complete release plan and observed external state.
 
-After merge, the Release workflow uses `ZcashFoundation/cargo-release` to publish missing crates, verify `zebrad` installation, and finalize tags and the public GitHub Release. If execution is interrupted, rerun the Release workflow with `operation=resume` and this PR number.
+If a check fails, open its job summary and fix the reported issue before approval. After merge, the Release workflow publishes missing crates, verifies `zebrad` installation, and finalizes tags and the public GitHub Release. Manual check and resume commands are documented in the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for exceptional recovery.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).

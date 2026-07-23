@@ -157,7 +157,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
-- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and generated Release PR changelogs
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release
@@ -177,9 +177,15 @@ Required-check workflows follow a `changes` (paths-filter) + gated workers + agg
 
 ## Release Operations
 
-release-plz only generates and updates Release PRs. The reusable `ZcashFoundation/cargo-release` action owns post-merge planning and reconciliation. [`.github/cargo-release.yml`](../cargo-release.yml) is the single source of tag and GitHub Release policy.
+The normal path has 2 maintainer actions: review the latest Release PR after every required check passes, then approve and merge that exact commit. release-plz creates and updates the PR, `PR Gate / Release readiness` validates every new commit automatically, and `release.yml` publishes and finalizes the approved release after merge.
 
-Before merging an open Release PR, run the read-only check from `main`:
+The readiness job confirms that the PR includes current `main`, validates every versioned changelog, runs Cargo's complete multi-package dry-run, and observes crates.io and GitHub without writing external state. Before publication, a green report with `reason: "incomplete"` is expected because the planned crates, tags, or GitHub Release are still missing. [`.github/cargo-release.yml`](../cargo-release.yml) is the single source of tag and GitHub Release policy.
+
+After merge, `release.yml` publishes missing crates, verifies that `zebrad` installs when it is part of the plan, then finalizes tags and the public GitHub Release.
+
+### Recovery
+
+When readiness fails, use its job summary to fix the Release PR; the next PR update reruns the complete check. If no readiness run is available, rerun the PR checks in GitHub or start the read-only fallback:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -187,9 +193,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-The check runs the full Cargo multi-package dry-run and observes external release state. It does not publish crates, create tags, or edit GitHub Releases. Before publication, a green report with `reason: "incomplete"` is the expected result.
-
-After merge, `release.yml` publishes missing crates, verifies that `zebrad` installs when it is part of the plan, then finalizes tags and the public GitHub Release. To recover an interrupted post-cutover release, run:
+To recover interrupted post-merge publication, run:
 
 ```sh
 gh workflow run release.yml --ref main \
