@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - Allow chain synchronization to immediately retry an honest block body after rejecting a body
-  with the same header hash, without waiting for a child block to trigger cleanup.
+  with the same header hash, without waiting for a child block to trigger cleanup
+  ([GHSA-x93j-mj2f-q338](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x93j-mj2f-q338)).
 - Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
   underpaying and structurally invalid shielded mempool transactions before their expensive proof
   verification, and disconnect peers that send transactions with invalid shielded proofs.

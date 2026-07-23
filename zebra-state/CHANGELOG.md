@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Known block queries now clear notifications for rejected non-finalized blocks before
   checking sent hashes, allowing an honest block body with the same header hash to be
-  retried immediately.
+  retried immediately
+  ([GHSA-x93j-mj2f-q338](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x93j-mj2f-q338)).
 
 ## [11.1.0] - 2026-07-17
 
