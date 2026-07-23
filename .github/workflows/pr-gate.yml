@@ -202,6 +202,7 @@ jobs:
             exit 1
           fi
 
+  # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
   release-readiness:
     name: Release readiness
     if: >-
@@ -270,13 +271,13 @@ jobs:
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
               echo '```json'
-              jq . <<< "${PLAN}"
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
               echo '```'
             fi
             if [[ -n "${REPORT}" ]]; then
               echo '### External state'
               echo '```json'
-              jq . <<< "${REPORT}"
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"

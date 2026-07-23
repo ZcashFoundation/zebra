@@ -263,12 +263,6 @@ jobs:
       group: release-check-${{ needs.release-target.outputs.pr_number }}
       cancel-in-progress: true
     steps:
-      - name: Check out current release policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
-        with:
-          path: controller
-          persist-credentials: false
-          ref: ${{ github.sha }}
       - name: Check out immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
@@ -300,7 +294,7 @@ jobs:
           source-directory: release-source
           base-sha: ${{ needs.release-target.outputs.base_sha }}
           target-sha: ${{ needs.release-target.outputs.target_sha }}
-          config-path: controller/.github/cargo-release.yml
+          config-path: release-source/.github/cargo-release.yml
           github-token: ${{ github.token }}
       - name: Summarize release check
         if: always()
@@ -319,13 +313,13 @@ jobs:
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
               echo '```json'
-              jq . <<< "${PLAN}"
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
               echo '```'
             fi
             if [[ -n "${REPORT}" ]]; then
               echo '### Report'
               echo '```json'
-              jq . <<< "${REPORT}"
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -354,12 +348,6 @@ jobs:
       group: release-publish
       cancel-in-progress: false
     steps:
-      - name: Check out current release policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
-        with:
-          path: controller
-          persist-credentials: false
-          ref: main
       - name: Check out immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
@@ -404,7 +392,7 @@ jobs:
           source-directory: release-source
           base-sha: ${{ needs.release-target.outputs.base_sha }}
           target-sha: ${{ needs.release-target.outputs.target_sha }}
-          config-path: controller/.github/cargo-release.yml
+          config-path: release-source/.github/cargo-release.yml
           github-token: ${{ github.token }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
@@ -450,7 +438,7 @@ jobs:
           source-directory: release-source
           base-sha: ${{ needs.release-target.outputs.base_sha }}
           target-sha: ${{ needs.release-target.outputs.target_sha }}
-          config-path: controller/.github/cargo-release.yml
+          config-path: release-source/.github/cargo-release.yml
           github-token: ${{ steps.app-token.outputs.token }}
       - name: Summarize release
         if: always()
@@ -471,7 +459,7 @@ jobs:
               if [[ -n "${value}" ]]; then
                 echo "### ${label}"
                 echo '```json'
-                jq . <<< "${value}"
+                jq . <<< "${value}" || printf '%s\n' "${value}"
                 echo '```'
               fi
             done
