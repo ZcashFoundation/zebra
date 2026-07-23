@@ -35,44 +35,43 @@ pr_body = """
 {%- endfor %}
 
 > [!IMPORTANT]
-> **Normal path:** Wait for every required check, review this checklist, then approve and merge the exact checked commit. Publication and finalization start automatically after merge.
+> **Normal path:** Wait for every required check, review the considerations below, then approve and merge the exact checked commit. Publication and finalization start automatically after merge.
 
-## Review this release
+## Review considerations
 
-Review the latest commit after all intended changes have landed on `main` and release-plz has finished updating this PR.
+Review the latest commit after all intended changes have landed on `main` and release-plz has finished updating this PR. GitHub approval attests that the following considerations are satisfied.
 
 ### Release prerequisites
 
-- [ ] No unintended prerelease dependency versions remain.
+- No unintended prerelease dependency versions remain.
 
 For releases that include `zebrad`:
 
-- [ ] A full sync completed after the latest state change, or no new full sync is required.
-- [ ] Mainnet and Testnet checkpoints are current for this release.
+- A full sync completed after the latest state change, or no new full sync is required.
+- Mainnet and Testnet checkpoints are current for this release.
 
 ### Release contents
 
-- [ ] If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
-- [ ] Each crate changelog covers every consumer-visible change since that crate's previous release.
-- [ ] Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
+- If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
+- Each crate changelog covers every consumer-visible change since that crate's previous release.
+- Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
 
 ### Versions
 
-- [ ] If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
-- [ ] Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
+- If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
+- Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
 
 ### Release data and documentation
 
 For releases that include `zebrad`:
 
-- [ ] The end-of-support height matches the intended release date.
-- [ ] Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
-- [ ] README, installation, compatibility, and operational documentation match the release.
+- The end-of-support height matches the intended release date.
+- Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
+- README, installation, compatibility, and operational documentation match the release.
 
-### Approval
+## Publish this release
 
-- [ ] `PR Gate / Release readiness` and every other required check pass for the latest commit.
-- [ ] This exact commit is ready to publish.
+When `PR Gate / Release readiness` and every other required check pass for the latest commit, approve this PR with a GitHub review and merge that exact commit.
 
 No manual preflight command is required. Every new commit starts the read-only release readiness check, whose job summary contains the complete release plan and observed external state.
 

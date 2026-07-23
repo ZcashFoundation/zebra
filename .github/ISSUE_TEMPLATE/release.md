@@ -53,7 +53,7 @@ The normal release path requires 2 maintainer actions:
 
 The automation handles the rest. release-plz creates and updates the Release PR, `PR Gate / Release readiness` validates every new commit, and the Release workflow publishes and finalizes the approved release after merge.
 
-- [ ] After `PR Gate / Release readiness` and every other required check pass, review the generated checklist, release plan, versions, changelogs, and release data.
+- [ ] After `PR Gate / Release readiness` and every other required check pass, review the generated considerations, release plan, versions, changelogs, and release data.
 - [ ] Approve and merge the exact checked commit.
 
 ## What Release Readiness Checks
