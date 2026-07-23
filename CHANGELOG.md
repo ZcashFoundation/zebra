@@ -5,7 +5,35 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
+
+### Changed
+
+- On Testnet, the `getblocktemplate` RPC no longer switches to a
+  minimum-difficulty block template early. Zebra previously treated a template
+  as minimum-difficulty as soon as its `cur_time` came within a fixed 150
+  seconds (`2 * PoWTargetSpacing` after Blossom) of the consensus
+  minimum-difficulty threshold, clamping `cur_time` up to just past the
+  threshold. On Testnet this future-dated the block's timestamp and produced
+  spurious minimum-difficulty blocks that depress difficulty far below its
+  equilibrium. Templates now switch to minimum difficulty only once `cur_time`
+  reaches the consensus threshold itself. This is a Testnet-only,
+  template-construction (non-consensus) change: it does not alter block
+  validity, and it does not change the difficulty-averaging rule that amplifies
+  each minimum-difficulty block into a large difficulty drop (tracked in
+  [zcash/zips#1321](https://github.com/zcash/zips/issues/1321))
+  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
+
+### Security
+
+- Allow chain synchronization to immediately retry an honest block body after rejecting a body
+  with the same header hash, without waiting for a child block to trigger cleanup
+  ([GHSA-x93j-mj2f-q338](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x93j-mj2f-q338)).
+- Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
+  underpaying and structurally invalid shielded mempool transactions before their expensive proof
+  verification, and disconnect peers that send transactions with invalid shielded proofs.
+
+## [Zebra 6.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.0) - 2026-07-17
 
 ### Added
 
@@ -29,28 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   [zakura](https://github.com/zakura-core/zakura) authors for the major part of
   this implementation.
 
-### Changed
+### Fixed
 
-- On Testnet, the `getblocktemplate` RPC no longer switches to a
-  minimum-difficulty block template early. Zebra previously treated a template
-  as minimum-difficulty as soon as its `cur_time` came within a fixed 150
-  seconds (`2 * PoWTargetSpacing` after Blossom) of the consensus
-  minimum-difficulty threshold, clamping `cur_time` up to just past the
-  threshold. On Testnet this future-dated the block's timestamp and produced
-  spurious minimum-difficulty blocks that depress difficulty far below its
-  equilibrium. Templates now switch to minimum difficulty only once `cur_time`
-  reaches the consensus threshold itself. This is a Testnet-only,
-  template-construction (non-consensus) change: it does not alter block
-  validity, and it does not change the difficulty-averaging rule that amplifies
-  each minimum-difficulty block into a large difficulty drop (tracked in
-  [zcash/zips#1321](https://github.com/zcash/zips/issues/1321))
-  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
-
-### Removed
-
-- The public constant `EXTRA_TIME_TO_MINE_A_BLOCK` in `zebra-state`, made unused by
-  the Testnet `getblocktemplate` change above
-  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
+- The installer's `docker-supervised` mode now configures the embedded sidecar
+  source, so its generated command works with the published Zebra image
+  ([#11008](https://github.com/ZcashFoundation/zebra/pull/11008)).
 
 ## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
 

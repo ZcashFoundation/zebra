@@ -37,7 +37,7 @@ mod tests;
 
 pub use config::{
     check_and_delete_old_databases, check_and_delete_old_state_databases,
-    database_format_version_on_disk, state_database_format_version_on_disk, Config,
+    database_format_version_on_disk, state_database_format_version_on_disk, Config, RedactedString,
 };
 pub use constants::{
     state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS,

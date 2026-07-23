@@ -117,8 +117,8 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags origin "$BASE_REF"
-          echo "rev=$(git merge-base FETCH_HEAD HEAD)" >> "$GITHUB_OUTPUT"
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
@@ -152,8 +152,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          git fetch --no-tags origin "$BASE_REF"
-          merge_base="$(git merge-base FETCH_HEAD HEAD)"
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
 
           allowed_type=false
           case "$DECLARED_TYPE" in
@@ -203,14 +203,32 @@ jobs:
             exit 1
           fi
 
+  release-readiness:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'A-release')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Validate release changelogs
+        run: |
+          # actions/checkout provides the synthetic merge commit, whose first parent is current main.
+          .github/scripts/validate-release-changelogs.sh HEAD^1 HEAD
+
   pr-gate-result:
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, semver-checks, changelog-gate]
+    needs: [changes, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: semver-checks, changelog-gate
+          allowed-skips: semver-checks, changelog-gate, release-readiness
