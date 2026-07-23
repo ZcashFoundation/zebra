@@ -143,7 +143,7 @@ Approve and merge only when every required check passes for that exact commit. A
 
 ### What Release Readiness Reports
 
-Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
+Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 

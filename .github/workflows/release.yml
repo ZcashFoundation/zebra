@@ -277,6 +277,8 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.release-target.outputs.target_sha }}
       - name: Validate release changelogs
+        id: changelogs
+        continue-on-error: true
         working-directory: release-source
         env:
           BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
@@ -291,6 +293,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Check desired release state
         id: cargo-release
+        continue-on-error: true
         uses: ZcashFoundation/cargo-release@4e7314bbb675465e1b1ffd2d9cc9e1c55da12816
         with:
           phase: check
@@ -302,11 +305,17 @@ jobs:
       - name: Summarize release check
         if: always()
         env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
           PLAN: ${{ steps.cargo-release.outputs.plan }}
           REPORT: ${{ steps.cargo-release.outputs.report }}
         run: |
           {
             echo "## Cargo Release check"
+            echo "| Validation | Result |"
+            echo "| --- | --- |"
+            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
               echo '```json'
@@ -320,6 +329,16 @@ jobs:
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+        run: |
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release check failed::Review each failed validation step and the job summary."
+            exit 1
+          fi
 
   release:
     name: Publish crates and GitHub Release

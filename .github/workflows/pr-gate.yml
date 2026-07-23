@@ -231,6 +231,8 @@ jobs:
           fi
           echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
       - name: Validate release changelogs
+        id: changelogs
+        continue-on-error: true
         env:
           BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha }}
@@ -244,6 +246,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
       - name: Check desired release state
         id: cargo-release
+        continue-on-error: true
         uses: ZcashFoundation/cargo-release@4e7314bbb675465e1b1ffd2d9cc9e1c55da12816
         with:
           phase: check
@@ -253,11 +256,17 @@ jobs:
       - name: Summarize release readiness
         if: always()
         env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
           PLAN: ${{ steps.cargo-release.outputs.plan }}
           REPORT: ${{ steps.cargo-release.outputs.report }}
         run: |
           {
             echo "## Release readiness"
+            echo "| Validation | Result |"
+            echo "| --- | --- |"
+            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
               echo '```json'
@@ -271,6 +280,16 @@ jobs:
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+        run: |
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release readiness failed::Review each failed validation step and the job summary."
+            exit 1
+          fi
 
   pr-gate-result:
     runs-on: ubuntu-latest
