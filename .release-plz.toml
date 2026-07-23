@@ -70,14 +70,9 @@ For releases that include `zebrad`:
 
 - [ ] This exact commit is ready to publish.
 
-Before merging, run the read-only Release workflow check for this PR. A green
-check with `reason: "incomplete"` is expected before publication, because the
-planned crates, tags, and GitHub Release do not exist yet.
+Before merging, run the read-only Release workflow check for this PR. A green check with `reason: "incomplete"` is expected before publication, because the planned crates, tags, and GitHub Release do not exist yet.
 
-After merge, the Release workflow uses `ZcashFoundation/cargo-release` to
-publish missing crates, verify `zebrad` installation, and finalize tags and the
-public GitHub Release. If execution is interrupted, rerun the Release workflow
-with `operation=resume` and this PR number.
+After merge, the Release workflow uses `ZcashFoundation/cargo-release` to publish missing crates, verify `zebrad` installation, and finalize tags and the public GitHub Release. If execution is interrupted, rerun the Release workflow with `operation=resume` and this PR number.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).

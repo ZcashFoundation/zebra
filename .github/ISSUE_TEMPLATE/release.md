@@ -46,10 +46,7 @@ Here's how we make sure we got everything:
 
 # Prepare and Publish the Release
 
-release-plz creates and updates the Release PR. After it is merged,
-`ZcashFoundation/cargo-release` reconciles the planned release from its
-immutable merge commit. Tag and GitHub Release policy lives only in
-`.github/cargo-release.yml`.
+release-plz creates and updates the Release PR. After it is merged, `ZcashFoundation/cargo-release` reconciles the planned release from its immutable merge commit. Tag and GitHub Release policy lives only in `.github/cargo-release.yml`.
 
 ## Check Before Merge
 
@@ -61,11 +58,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-The check runs Cargo's complete multi-package dry-run and observes crates.io,
-tags, and GitHub Releases. It never publishes a crate, creates a tag, or edits a
-GitHub Release. Before the first publication, a green result with
-`reason: "incomplete"` is expected: it confirms that the plan is valid while
-the planned external state is still missing.
+The check runs Cargo's complete multi-package dry-run and observes crates.io, tags, and GitHub Releases. It never publishes a crate, creates a tag, or edits a GitHub Release. Before the first publication, a green result with `reason: "incomplete"` is expected: it confirms that the plan is valid while the planned external state is still missing.
 
 - [ ] Review and approve the complete generated Release PR checklist.
 - [ ] Run the read-only check and review its plan and report.
@@ -73,10 +66,7 @@ the planned external state is still missing.
 
 ## Publish and Recover
 
-After merge, the Release workflow publishes missing crates, verifies that the
-published `zebrad` installs when applicable, then finalizes tags and the public
-GitHub Release. The GitHub Release starts the binary, Docker, and GCP release
-workflows.
+After merge, the Release workflow publishes missing crates, verifies that the published `zebrad` installs when applicable, then finalizes tags and the public GitHub Release. The GitHub Release starts the binary, Docker, and GCP release workflows.
 
 If this post-merge workflow is interrupted, resume the same Release PR:
 
@@ -86,12 +76,6 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` is available only for releases whose merge commit contains
-`.github/cargo-release.yml`. It can repair configured mutable GitHub Release
-metadata, but it stops on immutable contradictions such as mismatched crate
-provenance, a tag that targets another commit, or a release-channel conflict.
-Do not publish crates, replace tags, or create the GitHub Release manually;
-escalate those conflicts for maintainer review.
+`resume` is available only for releases whose merge commit contains `.github/cargo-release.yml`. It can repair configured mutable GitHub Release metadata, but it stops on immutable contradictions such as mismatched crate provenance, a tag that targets another commit, or a release-channel conflict. Do not publish crates, replace tags, or create the GitHub Release manually; escalate those conflicts for maintainer review.
 
-For a maintainer-authorized manual fallback, use the
-[legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+For a maintainer-authorized manual fallback, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).

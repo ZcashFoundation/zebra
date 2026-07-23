@@ -177,10 +177,7 @@ Required-check workflows follow a `changes` (paths-filter) + gated workers + agg
 
 ## Release Operations
 
-release-plz only generates and updates Release PRs. The reusable
-`ZcashFoundation/cargo-release` action owns post-merge planning and
-reconciliation. [`.github/cargo-release.yml`](../cargo-release.yml) is the
-single source of tag and GitHub Release policy.
+release-plz only generates and updates Release PRs. The reusable `ZcashFoundation/cargo-release` action owns post-merge planning and reconciliation. [`.github/cargo-release.yml`](../cargo-release.yml) is the single source of tag and GitHub Release policy.
 
 Before merging an open Release PR, run the read-only check from `main`:
 
@@ -190,14 +187,9 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-The check runs the full Cargo multi-package dry-run and observes external
-release state. It does not publish crates, create tags, or edit GitHub Releases.
-Before publication, a green report with `reason: "incomplete"` is the expected
-result.
+The check runs the full Cargo multi-package dry-run and observes external release state. It does not publish crates, create tags, or edit GitHub Releases. Before publication, a green report with `reason: "incomplete"` is the expected result.
 
-After merge, `release.yml` publishes missing crates, verifies that `zebrad`
-installs when it is part of the plan, then finalizes tags and the public GitHub
-Release. To recover an interrupted post-cutover release, run:
+After merge, `release.yml` publishes missing crates, verifies that `zebrad` installs when it is part of the plan, then finalizes tags and the public GitHub Release. To recover an interrupted post-cutover release, run:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -205,11 +197,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` requires `.github/cargo-release.yml` in the merged release commit. It
-can repair configured mutable GitHub Release metadata, but stops on conflicting
-crate provenance, tag targets, or release channels. Escalate those conflicts;
-do not overwrite external release state. For a maintainer-authorized manual
-fallback, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+`resume` requires `.github/cargo-release.yml` in the merged release commit. It can repair configured mutable GitHub Release metadata, but stops on conflicting crate provenance, tag targets, or release channels. Escalate those conflicts; do not overwrite external release state. For a maintainer-authorized manual fallback, use the [legacy release checklist](../PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
 
 ## Test Execution Strategy
 
