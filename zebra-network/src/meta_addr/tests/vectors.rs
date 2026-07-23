@@ -566,3 +566,44 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
     assert_eq!(updated.addr(), canonical_addr);
     assert_eq!(updated.misbehavior(), 100);
 }
+
+/// Make sure the services advertised by a peer that failed its handshake are stored in the
+/// address book, exclude the peer from outbound connections, and survive a later
+/// services-less failure update (like the crawler's generic `report_failed`).
+#[test]
+fn failed_handshake_services_are_stored_and_survive_later_failures() {
+    let _init_guard = zebra_test::init();
+
+    let instant_now = Instant::now();
+    let chrono_now = Utc::now();
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
+
+    // The crawler attempts an outbound connection to the peer.
+    let peer = MetaAddr::new_reconnect(address)
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .expect("attempt change applies to a never-attempted peer");
+
+    // The handshake rejects the peer, recording the services it advertised.
+    let peer = MetaAddr::new_errored(address, PeerServices::empty())
+        .apply_to_meta_addr(peer, instant_now, chrono_now)
+        .expect("failure change applies to an attempted peer");
+
+    assert_eq!(peer.services, Some(PeerServices::empty()));
+    assert!(!peer.last_known_info_is_valid_for_outbound(&Mainnet));
+
+    // Much later, a services-less failure must not erase the stored services.
+    let instant_later = instant_now + CONCURRENT_ADDRESS_CHANGE_PERIOD * 2;
+    let chrono_later = chrono_now
+        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 2)
+            .expect("constant fits in a chrono::Duration");
+
+    let peer = MetaAddr::new_errored(address, None)
+        .apply_to_meta_addr(peer, instant_later, chrono_later)
+        .expect("failure change applies to a failed peer");
+
+    assert_eq!(peer.services, Some(PeerServices::empty()));
+    assert!(!peer.last_known_info_is_valid_for_outbound(&Mainnet));
+}

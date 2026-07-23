@@ -783,6 +783,39 @@ where
         return Err(HandshakeError::ObsoleteVersion(remote.version));
     }
 
+    // # Security
+    //
+    // Require `NODE_NETWORK` from outbound peers, because peers without it can't serve us
+    // blocks or transactions, but still occupy outbound slots and receive syncer block
+    // requests. When many reachable listeners are non-serving, those slots can fill up and
+    // stall a fresh sync (#11061).
+    //
+    // Inbound and isolated connections are exempt, so light clients can still connect to us.
+    if matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
+        && !remote.services.contains(PeerServices::NODE_NETWORK)
+    {
+        debug!(
+            remote_ip = ?their_addr,
+            ?remote.services,
+            ?remote.user_agent,
+            "disconnecting from non-serving peer",
+        );
+
+        // the value is the number of rejected handshakes, by peer IP and advertised services
+        metrics::counter!(
+            "zcash.net.peers.missing_services",
+            "remote_ip" => their_addr.to_string(),
+            "remote_services" => format!("{:?}", remote.services),
+            "user_agent" => remote.user_agent.clone(),
+        )
+        .increment(1);
+
+        // Disconnect if the outbound peer doesn't advertise the required services.
+        return Err(HandshakeError::MissingRequiredServices {
+            services: remote.services,
+        });
+    }
+
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
 
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
@@ -961,6 +994,9 @@ where
                         HandshakeError::Io(_) => "io_error",
                         HandshakeError::Serialization(_) => "serialization",
                         HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+                        HandshakeError::MissingRequiredServices { .. } => {
+                            "missing_required_services"
+                        }
                         HandshakeError::Timeout => "timeout",
                     };
                     metrics::histogram!(
@@ -973,6 +1009,19 @@ where
                         "reason" => reason
                     )
                     .increment(1);
+
+                    // Record the services advertised by a non-serving peer, so the crawler
+                    // stops re-dialing it (#11061). Other handshake errors don't tell us the
+                    // peer's services, so they leave the address book unchanged, and the peer
+                    // can be attempted again later.
+                    if let HandshakeError::MissingRequiredServices { services } = &err {
+                        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                            let _ = address_book_updater
+                                .send(MetaAddr::new_errored(book_addr, *services))
+                                .await;
+                        }
+                    }
+
                     return Err(err);
                 }
             };
