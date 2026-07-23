@@ -258,6 +258,8 @@ jobs:
           find . -type f -name '*.sh' \
             -not -path './target/*' \
             -print0 | xargs -0 -r shellcheck --color=always
+      - name: Test release changelog validator
+        run: .github/scripts/test-validate-release-changelogs.sh
 
   lint:
     runs-on: ubuntu-latest
