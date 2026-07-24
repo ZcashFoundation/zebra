@@ -805,33 +805,7 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    // zcashd sometimes appends an unrelated hash at the start
-                    // or end of its response.
-                    //
-                    // We can't discard the first hash, because it might be a
-                    // block we want to download. So we just accept any
-                    // out-of-order first hashes.
-
-                    // We use the last hash for the tip, and we want to avoid bad
-                    // tips from zcashd's quirk of appending an unrelated hash.
-                    // So we discard the last hash on mainnet/testnet.
-                    // (We don't need to worry about missed downloads, because we
-                    // will pick them up again in ExtendTips.)
-                    //
-                    // In regtest we only connect to Zebra nodes, not zcashd,
-                    // so we trust all hashes in the response and keep them all.
-                    // This is necessary when there are only a small number of
-                    // blocks to sync (e.g. 2 new blocks), where stripping the
-                    // last hash leaves only 1 unknown hash and rchunks_exact(2)
-                    // would discard the entire response.
-                    let hashes = if self.is_regtest {
-                        hashes.as_slice()
-                    } else {
-                        match hashes.as_slice() {
-                            [] => continue,
-                            [rest @ .., _last] => rest,
-                        }
-                    };
+                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
@@ -993,15 +967,6 @@ where
                                                 "discarding response that starts with two unexpected hashes");
                                 continue;
                             }
-                        };
-
-                        // We use the last hash for the tip, and we want to avoid
-                        // bad tips. So we discard the last hash. (We don't need
-                        // to worry about missed downloads, because we will pick
-                        // them up again in the next ExtendTips.)
-                        let unknown_hashes = match unknown_hashes {
-                            [] => continue,
-                            [rest @ .., _last] => rest,
                         };
 
                         let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
