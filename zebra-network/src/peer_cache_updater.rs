@@ -27,26 +27,45 @@ pub async fn peer_cache_updater(
     //       and allow it to be set in tests
     sleep(DNS_LOOKUP_TIMEOUT * 4).await;
 
+    let mut wrote_cache = false;
+
     loop {
         // Ignore errors because updating the cache is optional.
         // Errors are already logged by the functions we're calling.
-        let _ = update_peer_cache_once(&config, &address_book).await;
+        wrote_cache |= update_peer_cache_once(&config, &address_book)
+            .await
+            .unwrap_or(false);
 
-        sleep(PEER_DISK_CACHE_UPDATE_INTERVAL).await;
+        // Right after a cold start, the address book can still be empty at the first attempt,
+        // and the cache is only written once there are cacheable peers. Retry soon until the
+        // first write, so the cache exists shortly after the node finds its first peers.
+        let interval = if wrote_cache {
+            PEER_DISK_CACHE_UPDATE_INTERVAL
+        } else {
+            DNS_LOOKUP_TIMEOUT * 4
+        };
+
+        sleep(interval).await;
     }
 }
 
 /// Caches peers from the current `address_book` to disk, based on `config`.
+///
+/// Returns `true` if the cache was written, and `false` if the cacheable peer list was empty,
+/// keeping any previous cache.
 pub async fn update_peer_cache_once(
     config: &Config,
     address_book: &Arc<Mutex<AddressBook>>,
-) -> io::Result<()> {
-    let peer_list = cacheable_peers(address_book)
+) -> io::Result<bool> {
+    let peer_list: std::collections::HashSet<_> = cacheable_peers(address_book)
         .iter()
         .map(|meta_addr| meta_addr.addr)
         .collect();
+    let has_peers = !peer_list.is_empty();
 
-    config.update_peer_cache(peer_list).await
+    config.update_peer_cache(peer_list).await?;
+
+    Ok(has_peers)
 }
 
 /// Returns a list of cacheable peers, blocking for as short a time as possible.
