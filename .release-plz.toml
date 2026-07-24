@@ -26,6 +26,7 @@ release_commits = "^(feat|fix|perf|refactor|build)"
 # Release PR metadata. Keep the generated long-lived PR out of the urgent queue
 # until maintainers are ready to publish.
 pr_labels = ["A-release"]
+pr_name = "chore: release{% if package and version %} v{{ version }}{% endif %}"
 
 pr_body = """
 ## Release summary
@@ -35,7 +36,8 @@ pr_body = """
 {%- endfor %}
 
 > [!IMPORTANT]
-> Wait for every required check, review this checklist, then approve and merge the exact checked commit.
+> Wait for every required check, review this checklist, then approve the latest commit.
+> Mergify will merge it from the queue after all queue conditions remain satisfied.
 
 ## Release checklist
 
@@ -70,13 +72,14 @@ For releases that include `zebrad`:
 ### Publish
 
 1. Approve the latest commit after `PR Gate / Release readiness` and every other required check pass.
-2. Merge that exact commit.
+2. Let Mergify merge the approved commit from the queue. Do not bypass the queue with a manual merge.
 
 ## If automation fails
 
 - If Release readiness fails, open its job summary and fix the reported issue.
-- If the automatic readiness check does not start, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
+- If no automatic readiness run is available after rerunning the PR checks, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
 - If publication stops after merge, run `gh workflow run release.yml --ref main -f operation=resume -f release_pr_number=<PR>`.
+- If the PR bypassed the Mergify queue, automatic publication will remain blocked. Stop and ask a maintainer to authorize break-glass recovery.
 - If published crates, tags, or release channels conflict with the plan, stop and ask a maintainer to investigate.
 
 See the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for workflow details and recovery guidance.

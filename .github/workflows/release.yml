@@ -1,10 +1,10 @@
 # Release workflow: Release PR planning and resumable publication.
 #
 # Pipeline:
-#   push to main                  -> creates or updates the Release PR
+#   non-release push to main      -> creates or updates the Release PR
 #   merged, approved Release PR   -> reconciles crates, tags, and the public
 #                                   zebrad GitHub Release
-#   workflow_dispatch            -> fallback check or post-merge recovery
+#   workflow_dispatch            -> manual readiness check or post-merge recovery
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:released  -> release-binaries.yml (Docker Hub)
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Fallback check for an open Release PR or resume a merged one"
+        description: "Check an open Release PR or resume a merged one"
         required: true
         default: check
         type: choice
@@ -36,11 +36,14 @@ on:
 permissions: {}
 
 jobs:
-  # Runs on every push to main and leaves post-merge execution to Zebra's
-  # release controller.
+  # A merged Release PR is already owned by the post-merge controller, so its
+  # squash commit must not create the next Release PR.
   release-pr:
     name: Create or update Release PR
-    if: github.event_name == 'push'
+    if: >-
+      github.event_name == 'push' &&
+      github.event.head_commit.author.username != 'zebra-release[bot]' &&
+      !startsWith(github.event.head_commit.message, 'chore: release')
     runs-on: ubuntu-latest
     concurrency:
       group: release-plz-${{ github.ref }}
@@ -161,7 +164,7 @@ jobs:
                     labels(first: 100) { nodes { name } }
                     mergeCommit { oid }
                     merged
-                    reviewDecision
+                    mergedBy { login __typename }
                     state
                   }
                 }
@@ -198,15 +201,19 @@ jobs:
               baseSha = pr.baseRefOid;
               targetSha = pr.headRefOid;
             } else {
+              if (!pr.merged || pr.mergeCommit?.oid === undefined) {
+                throw new Error(`PR #${prNumber} is not merged`);
+              }
+
               if (
-                !pr.merged ||
-                pr.reviewDecision !== "APPROVED" ||
-                pr.mergeCommit?.oid === undefined
+                pr.mergedBy?.__typename !== "Bot" ||
+                pr.mergedBy.login !== "mergify"
               ) {
                 throw new Error(
-                  `PR #${prNumber} is not an approved merged Release PR`,
+                  `PR #${prNumber} was not merged through the Mergify queue`,
                 );
               }
+
               targetSha = pr.mergeCommit.oid;
               const commit = await github.rest.repos.getCommit({
                 ...context.repo,
