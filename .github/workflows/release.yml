@@ -68,6 +68,7 @@ jobs:
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release-pr
+          version: "0.3.160"
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Add zebrad version to Release PR title
