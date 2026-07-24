@@ -12,15 +12,22 @@ use vergen_git2::{CargoBuilder, Emitter, Git2Builder, RustcBuilder};
 #[allow(clippy::print_stderr)]
 fn main() {
     let mut emitter = Emitter::default();
+    // Dependency instructions run nested `cargo metadata`, which cannot resolve
+    // unpublished workspace versions during a multi-package publish.
+    let cargo = CargoBuilder::default()
+        .debug(true)
+        .features(true)
+        .opt_level(true)
+        .target_triple(true)
+        .build()
+        .expect("requested cargo instructions should build successfully");
 
     // Configures an [`Emitter`] for everything except for `git` env vars.
     // This builder fails the build on error.
     emitter
         .fail_on_error()
-        .add_instructions(
-            &CargoBuilder::all_cargo().expect("all_cargo() should build successfully"),
-        )
-        .expect("adding all_cargo() instructions should succeed")
+        .add_instructions(&cargo)
+        .expect("adding cargo instructions should succeed")
         .add_instructions(
             &RustcBuilder::all_rustc().expect("all_rustc() should build successfully"),
         )

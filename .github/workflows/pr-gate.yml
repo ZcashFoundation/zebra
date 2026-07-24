@@ -22,8 +22,7 @@ concurrency:
 
 permissions:
   contents: read
-  # dorny/paths-filter reads the changed-file list from the pull request API.
-  pull-requests: read
+  pull-requests: read # dorny/paths-filter reads the changed-file list
 
 env:
   CLICOLOR: 1
@@ -203,23 +202,95 @@ jobs:
             exit 1
           fi
 
+  # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
   release-readiness:
+    name: Release readiness
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
-      - name: Validate release changelogs
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Resolve release comparison
+        id: release-target
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # actions/checkout provides the synthetic merge commit, whose first parent is current main.
-          .github/scripts/validate-release-changelogs.sh HEAD^1 HEAD
+          base_tip="$(git rev-parse "origin/${BASE_REF}")"
+          base_sha="$(git merge-base "${base_tip}" "${TARGET_SHA}")"
+          if [[ "${base_sha}" != "${base_tip}" ]]; then
+            echo "::error title=Release PR is behind main::Wait for release-plz to update this PR before review."
+            exit 1
+          fi
+          echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Validate release changelogs
+        id: changelogs
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Check desired release state
+        id: cargo-release
+        continue-on-error: true
+        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
+        with:
+          phase: check
+          base-sha: ${{ steps.release-target.outputs.base_sha }}
+          target-sha: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
+      - name: Summarize release readiness
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+          PLAN: ${{ steps.cargo-release.outputs.plan }}
+          REPORT: ${{ steps.cargo-release.outputs.report }}
+        run: |
+          {
+            echo "## Release readiness"
+            echo "| Validation | Result |"
+            echo "| --- | --- |"
+            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
+            if [[ -n "${PLAN}" ]]; then
+              echo '### Plan'
+              echo '```json'
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
+              echo '```'
+            fi
+            if [[ -n "${REPORT}" ]]; then
+              echo '### External state'
+              echo '```json'
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+        run: |
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release readiness failed::Review each failed validation step and the job summary."
+            exit 1
+          fi
 
   pr-gate-result:
     runs-on: ubuntu-latest

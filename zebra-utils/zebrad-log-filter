@@ -10,22 +10,18 @@ set -euo pipefail
 #   zebrad start | zebrad-log-filter
 #   ZCASH_CLI="zcash-cli -testnet" zebrad start | zebrad-log-filter
 
-# Find GNU sed
-if command -v gsed > /dev/null; then
-    GNU_SED=${GNU_SED:-gsed}
-else
-    # Just assume it's GNU sed
-    GNU_SED=${GNU_SED:-sed}
-fi
+HASH_REGEX='[0-9a-f]{64}'
 
-while read line; do
-    # Put each hash on a separate line, then expand them
-    echo "$line" | \
-        $GNU_SED -r \
-            's/([0-9a-f]{64})/\n\1/g' | \
-        $GNU_SED -r \
-            's/(.*)([0-9a-f]{64})(.*)/ \
-                echo -n '\''\1'\''; \
-                echo '\''\2'\'' | zebrad-hash-lookup; \
-                echo -n '\''\3'\''; /e'
+while IFS= read -r line; do
+    # Expand each hash in place, leaving the surrounding log text untouched
+    while [[ $line =~ $HASH_REGEX ]]; do
+        hash=${BASH_REMATCH[0]}
+
+        printf '%s\n' "${line%%"$hash"*}"
+        printf '%s\n' "$hash" | zebrad-hash-lookup
+
+        line=${line#*"$hash"}
+    done
+
+    printf '%s\n' "$line"
 done < "${1:-/dev/stdin}"
