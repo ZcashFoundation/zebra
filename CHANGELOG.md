@@ -5,6 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to
+  the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg
+  or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
+
 ## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
 
 ### Changed
