@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.0] - 2026-07-24
+
+
+
+
+
+
+
+
 ### Breaking Changes
 
 - `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured

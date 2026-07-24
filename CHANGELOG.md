@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
+
+
+
+
+
+
+
+
 ### Changed
 
 - The first peer disk-cache write is retried every 20 seconds until it succeeds, instead of waiting the full 5-minute update interval, so a cold-started node caches its peers soon after finding them ([#11073](https://github.com/ZcashFoundation/zebra/pull/11073)).
