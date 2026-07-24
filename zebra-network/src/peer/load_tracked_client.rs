@@ -12,6 +12,8 @@ use tower::{
     Service,
 };
 
+use zebra_chain::block;
+
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
@@ -64,6 +66,17 @@ impl LoadTrackedClient {
             ConnectedAddr::InboundDirect { addr }
                 if canonical_socket_addr(addr.remove_socket_addr_privacy()).ip() == expected_ip
         )
+    }
+
+    /// Retrieve the block height the peer reported in its version handshake.
+    ///
+    /// This is the peer's best height at the time it connected. It is not updated as the peer
+    /// syncs, so it under-reports a peer that advanced after handshake. For stall detection this
+    /// errs toward not tracking: it can stop tracking a peer early (missing a stall), but never
+    /// falsely tracks a peer that is not ahead of us (see
+    /// [`PeerSet::route_p2c`](crate::peer_set::PeerSet::route_p2c)).
+    pub fn remote_start_height(&self) -> block::Height {
+        self.connection_info.remote.start_height
     }
 }
 

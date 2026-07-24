@@ -125,7 +125,11 @@ use tower::{
     Service,
 };
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{
+    block,
+    chain_tip::{ChainTip, AT_OR_NEAR_TIP_THRESHOLD},
+    parameters::Network,
+};
 
 use crate::{
     address_book::AddressMetrics,
@@ -1046,16 +1050,31 @@ where
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
             );
-            let is_syncing = || {
-                !self
+            // Only penalise empty or failed find responses from a peer that advertised a height
+            // meaningfully above our own tip. A peer at or below our tip legitimately has nothing
+            // beyond it to send, so its empty responses are expected — including when our own tip
+            // is stale (mining paused, or the whole network parked at a shared tip), where
+            // extrapolating the distance to the network tip from wall-clock time (as
+            // `ChainTip::is_at_or_near_network_tip` does) would wrongly report us as still syncing
+            // and re-arm the stall tracker. Deciding per-peer, rather than from a single global
+            // tip estimate, also means a peer lying high about its height can only get itself
+            // dropped, never an honest peer. The trade-off: a peer claiming a height at or below
+            // our tip is never tracked, so its empty responses go unpunished; #11080 tracks
+            // measuring per-peer contribution instead, which closes that gap.
+            let peer_claims_ahead = || {
+                let our_tip = self
                     .minimum_peer_version
                     .chain_tip()
-                    .is_at_or_near_network_tip(&self.network)
+                    .best_tip_height()
+                    .unwrap_or(block::Height(0));
+                svc.remote_start_height() - our_tip > AT_OR_NEAR_TIP_THRESHOLD
             };
-            // zcashd-compat sidecars are exempt: they sync *from* this node,
-            // so they can legitimately trail it without being stalled peers.
-            let track_stalls =
-                is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
+            // zcashd-compat sidecars are exempt: they sync *from* this node, so they can
+            // legitimately return nothing — including when their handshake height exceeds a fresh
+            // local tip before this node loads its state.
+            let track_stalls = is_find_request
+                && !self.zcashd_compat_peer_keys.contains(&p2c_key)
+                && peer_claims_ahead();
 
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);

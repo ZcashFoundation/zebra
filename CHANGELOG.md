@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   never selected as a reconnection candidate. Previously an entry on a different port could survive
   the ban and occupy the first candidate slot until the node restarted
   ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+- Empty `FindBlocks` and `FindHeaders` responses are now only counted against peers
+  that advertised a height above the local tip in their handshake, instead of being
+  counted whenever a wall-clock estimate reports the node as far from the network
+  tip. Peers at or below the local tip are no longer disconnected when the local
+  tip is stale (mining paused, or the whole network parked at a shared tip)
+  ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).
 
 ### Security
 
