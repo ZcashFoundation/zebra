@@ -35,19 +35,41 @@ case "$declared_type" in
     ;;
 esac
 
-if [[ "$requires_changelog" != "true" && "$breaking" != "true" ]]; then
+if [[ "$breaking" == "true" ]]; then
+  requires_changelog=true
+fi
+
+if [[ "$requires_changelog" != "true" ]]; then
   exit 0
 fi
 
-changelog_changed() {
+unreleased_entries() {
+  local revision="$1"
+  local changelog="$2"
+
+  if ! git cat-file -e "${revision}:${changelog}" 2>/dev/null; then
+    return 0
+  fi
+
+  git show "${revision}:${changelog}" | awk '
+    $0 == "## [Unreleased]" { unreleased = 1; next }
+    unreleased && /^## / { exit }
+    unreleased && /^-[[:space:]]+/ {
+      gsub(/[[:space:]]+/, " ")
+      sub(/[[:space:]]+$/, "")
+      print
+    }
+  ' | sort -u
+}
+
+has_new_changelog_entry() {
   local changelog="$1"
 
   git cat-file -e "${head_revision}:${changelog}" 2>/dev/null &&
-    git show "${head_revision}:${changelog}" | awk '
-      $0 == "## [Unreleased]" { found = 1 }
-      END { exit !found }
-    ' &&
-    ! git diff --quiet "$base_revision" "$head_revision" -- "$changelog"
+    comm -13 \
+      <(unreleased_entries "$base_revision" "$changelog") \
+      <(unreleased_entries "$head_revision" "$changelog") |
+      awk 'NF { found = 1 } END { exit !found }'
 }
 
 has_breaking_changes_heading() {
@@ -104,9 +126,9 @@ while IFS=$'\t' read -r package_name package_directory; do
     changelog="${package_path}/CHANGELOG.md"
   fi
 
-  if [[ "$requires_changelog" == "true" ]] && ! changelog_changed "$changelog"; then
+  if ! has_new_changelog_entry "$changelog"; then
     printf 'Missing or invalid changelog for package %s: %s\n' "$package_name" "$changelog" >&2
-    echo "::error title=Missing or invalid package changelog::Each directly changed publishable package needs a changed changelog with a ## [Unreleased] section." >&2
+    echo "::error title=Missing package changelog entry::Each directly changed publishable package needs a new bullet under ## [Unreleased]." >&2
     failed=true
   fi
 
@@ -126,9 +148,9 @@ while IFS= read -r -d '' path; do
 done < <(git diff --name-only -z "$base_revision" "$head_revision")
 
 if [[ "$root_manifest_changed" == "true" && "$root_changelog_checked" != "true" ]]; then
-  if [[ "$requires_changelog" == "true" ]] && ! changelog_changed "CHANGELOG.md"; then
-    echo "Root Cargo.toml or Cargo.lock changed without a valid root CHANGELOG.md change." >&2
-    echo "::error title=Missing or invalid root changelog::Root Cargo.toml or Cargo.lock changes require a changed root CHANGELOG.md with a ## [Unreleased] section." >&2
+  if ! has_new_changelog_entry "CHANGELOG.md"; then
+    echo "Root Cargo.toml or Cargo.lock changed without a new root changelog entry." >&2
+    echo "::error title=Missing root changelog entry::Root Cargo.toml or Cargo.lock changes require a new bullet under ## [Unreleased] in CHANGELOG.md." >&2
     failed=true
   fi
 
