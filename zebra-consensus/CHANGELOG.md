@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
 ## [13.0.0] - 2026-07-22
 
 ### Added

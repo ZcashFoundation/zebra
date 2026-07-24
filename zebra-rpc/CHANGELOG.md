@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.0] - 2026-07-24
+
 ### Breaking Changes
 
 - `getblock` verbosity 2 now returns transaction objects for side-chain blocks with `height` set to `-1` and `confirmations` set to `0`, instead of panicking while serializing them ([#10606](https://github.com/ZcashFoundation/zebra/pull/10606)).
+
+### Changed
+
+- Requires `zebra-consensus` 14.0.0 and `zebra-state` 12.0.0, whose types appear in this
+  crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+- `zebra-network` dependency bumped to `10.2.1`.
 
 ### Fixed
 
