@@ -1021,8 +1021,14 @@ where
             Transaction::V6 { .. } => {
                 Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
-            // V7 (tachyon) is verified via the v6 path for its shared components. NOTE: tachyon
-            // bundle verification is not yet wired in here; finalize with the tachyon consensus rules.
+            // V7 (tachyon) verifies the v6-shaped components plus the tachyon bundle.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+            Transaction::V7 { .. } => {
+                Self::verify_v7_transaction(tx, nu, script_verifier, cached_ffi_transaction)
+            }
+            // Without tachyon support compiled in, V7 is verified via the v6 path for its shared
+            // components only, and the tachyon bundle is ignored.
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
             Transaction::V7 { .. } => {
                 Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
@@ -1260,6 +1266,127 @@ where
                 network_upgrade,
             )),
         }
+    }
+
+    /// Verifies a V7 (NU7 / tachyon) transaction.
+    ///
+    /// Runs the v6 checks on the shared components (transparent, Sapling, Orchard, and Ironwood
+    /// bundles), plus the tachyon bundle's transaction-level semantic checks:
+    ///
+    /// - no action `cv`/`rk` is the identity point ([`check::tachyon_actions_have_valid_digests`])
+    /// - proof-stamp tachygrams are distinct ([`check::tachyon_tachygrams_are_distinct`])
+    /// - the action and binding signatures verify over the transaction sighash
+    ///   ([`Self::verify_tachyon_signatures`])
+    ///
+    /// The block-level tachyon rules (block-wide tachygram distinctness, pointer-stamp coverage,
+    /// covered-actions digests, and proof verification) need whole-block context, so they run in
+    /// the block verifier instead; see `block::tachyon`.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+    fn verify_v7_transaction(
+        tx: &Transaction,
+        nu: NetworkUpgrade,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        Self::verify_v7_transaction_network_upgrade(tx, nu)?;
+
+        check::tachyon_actions_have_valid_digests(tx)?;
+        check::tachyon_tachygrams_are_distinct(tx)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+        let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
+
+        // TODO: the NU7 sighash does not yet commit to the tachyon bundle
+        // (`TachyonBundle::commitment()`). Fold it in (together with the tachyon `auth_digest`
+        // contribution) once the tachyon transaction digests are specified, and regenerate the
+        // signed test fixtures.
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            tx,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(orchard_bundle, &sighash))
+        .and(Self::verify_orchard_v6_bundle(ironwood_bundle, &sighash))
+        .and(Self::verify_tachyon_signatures(tx, &sighash)))
+    }
+
+    /// Verifies that a V7 `transaction` is supported by `network_upgrade`.
+    ///
+    /// V7 transactions are only valid from NU7 onward.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+    fn verify_v7_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // V7 transactions are not valid before NU7.
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
+    }
+
+    /// Queues verification of a V7 transaction's tachyon bundle signatures.
+    ///
+    /// # Consensus
+    ///
+    /// > Every action signature MUST verify over the transaction sighash under its action's rk
+    ///
+    /// > bindingSigTachyon MUST verify over the transaction sighash under the derived bvk
+    ///
+    /// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
+    ///
+    /// Both stamp states carry actions and signatures, so proof-stamped and pointer-stamped
+    /// bundles are checked the same way. RedPallas signature verification is CPU-bound, so it runs
+    /// on the rayon threadpool.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+    fn verify_tachyon_signatures(tx: &Transaction, sighash: &SigHash) -> AsyncChecks {
+        use zcash_tachyon::TachyonBundle;
+
+        let mut async_checks = AsyncChecks::new();
+
+        let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
+            return async_checks;
+        };
+
+        let bundle = tachyon_shielded_data.0.clone();
+        let sighash_bytes = sighash.0;
+
+        async_checks.push(primitives::spawn_fifo_and_convert(move || {
+            match &bundle {
+                // Zebra stores an absent bundle as `None`, so this variant is unreachable here,
+                // and an empty bundle has no signatures to check anyway.
+                TachyonBundle::NoBundle => Ok(()),
+                TachyonBundle::Proven(bundle) => bundle.verify_signatures(&sighash_bytes),
+                TachyonBundle::Adjunct(bundle) => bundle.verify_signatures(&sighash_bytes),
+            }
+            .map_err(|err| TransactionError::TachyonSignatureInvalid(err.to_string()))
+        }));
+
+        async_checks
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided

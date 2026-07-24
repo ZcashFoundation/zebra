@@ -19,6 +19,13 @@ keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies"]
 
+# `zcash_tachyon` is only used behind the `cfg(zcash_unstable = "nu7")` gate (set via
+# RUSTFLAGS, not a cargo feature), so cargo-udeps — which builds without that cfg —
+# reports it as unused. Ignore this known false positive.
+[package.metadata.cargo-udeps.ignore]
+normal = ["zcash_tachyon"]
+development = ["ragu"]
+
 [features]
 default = []
 
@@ -28,6 +35,14 @@ progress-bar = [
     "howudoin",
     "zebra-state/progress-bar",
 ]
+
+# Experimental tachyon (v7) transaction verification; only meaningful with
+# `--cfg zcash_unstable="nu7"`.
+#
+# Note: zebrad does not forward this feature yet. A build that enables only
+# `zebra-chain/tx_v7` parses tachyon bundles but skips their verification, so
+# nodes that enable tachyon support must enable this feature too.
+tx_v7 = ["zebra-chain/tx_v7"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
@@ -74,6 +89,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "9.1.1" }
 zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
 
 zcash_protocol.workspace = true
+zcash_tachyon = { workspace = true }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
@@ -95,9 +111,13 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# The `zebra-test` feature provides the placeholder NU7 consensus branch id, which the
+# tachyon (V7) tests need to convert transactions through librustzcash.
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl", "zebra-test"] }
 zebra-test = { path = "../zebra-test/" }
+# Used by tachyon (V7) tests to construct mock proof stamps.
+ragu = { workspace = true }
 
 criterion = { workspace = true, features = ["html_reports"] }
 

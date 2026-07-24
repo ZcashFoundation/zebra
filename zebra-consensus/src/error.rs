@@ -288,6 +288,21 @@ pub enum TransactionError {
     #[error("Ironwood proof has a non-canonical size")]
     IronwoodProofSize,
 
+    // TODO: the underlying error is zcash_tachyon's ActionDigestError, but it does not implement
+    // Arbitrary as required here.
+    #[error(
+        "tachyon action value commitment and verification key MUST NOT be the identity point: {0}"
+    )]
+    TachyonIdentityAction(String),
+
+    #[error("tachygrams within a tachyon proof stamp MUST be distinct")]
+    TachyonDuplicateTachygram,
+
+    // TODO: the underlying error is zcash_tachyon's SignatureError, but it does not implement
+    // Arbitrary as required here.
+    #[error("tachyon action and binding signatures MUST verify over the transaction sighash: {0}")]
+    TachyonSignatureInvalid(String),
+
     #[error("unexpected error")]
     Other(String),
 }
@@ -420,6 +435,9 @@ impl TransactionError {
             | Halo2VerificationFailed
             | OrchardProofSize
             | IronwoodProofSize
+            | TachyonIdentityAction(_)
+            | TachyonDuplicateTachygram
+            | TachyonSignatureInvalid(_)
             | BothVPubsNonZero
             | DisabledAddToSproutPool
             | NegativeOrchardValueBalance
@@ -511,6 +529,26 @@ pub enum BlockError {
         source: amount::Error,
     },
 
+    #[error("all tachygrams in a block MUST be distinct")]
+    DuplicateTachygram,
+
+    #[error(
+        "tachyon pointer stamp MUST refer to a proof-stamped transaction in the same block \
+         covering its actions"
+    )]
+    TachyonAggregateNotFound,
+
+    #[error(
+        "tachyon proof stamp's covered-actions digest MUST match its own actions and those of \
+         every pointer-stamped transaction naming it"
+    )]
+    TachyonCoverageMismatch,
+
+    // TODO: the underlying error is zcash_tachyon's stamp::VerificationError, but it does not
+    // implement Clone/PartialEq as required here.
+    #[error("tachyon proof stamp MUST verify: {0}")]
+    TachyonProofInvalid(String),
+
     #[error("unexpected error occurred: {0}")]
     Other(String),
 }
@@ -547,7 +585,11 @@ impl BlockError {
             | NoTransactions
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
-            | TooManyTransparentSignatureOperations { .. } => 100,
+            | TooManyTransparentSignatureOperations { .. }
+            | DuplicateTachygram
+            | TachyonAggregateNotFound
+            | TachyonCoverageMismatch
+            | TachyonProofInvalid(_) => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             _other => 0,
         }
