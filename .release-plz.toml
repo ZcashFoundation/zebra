@@ -12,9 +12,9 @@ release_always = false
 # `zebrad` GitHub Release in .github/workflows/release.yml.
 git_release_enable = false
 
-# Changelogs are authored per PR in each crate's `[Unreleased]` section; release-plz
-# turns those changes into versioned Release PRs.
-changelog_update = false
+# Source PRs author curated `[Unreleased]` entries. Release PRs finalize those
+# entries under versioned headings and add dependency-only release notes.
+changelog_update = true
 
 # Breaking-change detection runs per PR via ziff, not in the release-pr job.
 semver_check = false
@@ -87,3 +87,26 @@ This PR was generated with [release-plz](https://github.com/release-plz/release-
 
 # Repository URL.
 repo_url = "https://github.com/ZcashFoundation/zebra"
+
+[changelog]
+# Keep source-authored entries authoritative. The exact pinned release-plz
+# version represents dependency-only releases as commits with this sentinel ID.
+body = """
+{% if package == "zebrad" %}
+## [Zebra {{ version }}](https://github.com/ZcashFoundation/zebra/releases/tag/v{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% endif %}
+{% for commit in commits %}
+{% if commit.id == "0000000" %}
+### Changed
+
+- {{ commit.message | upper_first }}
+{% endif %}
+{% endfor %}
+"""
+
+[[package]]
+name = "zebrad"
+changelog_path = "CHANGELOG.md"
+git_tag_name = "v{{ version }}"

@@ -3,7 +3,7 @@
 name: PR Gate
 
 on:
-  # `edited`, `labeled`, and `unlabeled` re-run the gate when the declaration or changelog waiver changes.
+  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main]
@@ -141,66 +141,17 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Check declaration and changelog narrative
+      - name: Check declaration and package changelogs
         env:
           BASE_REF: ${{ github.base_ref }}
           BREAKING: ${{ needs.changes.outputs.breaking }}
           CONVENTIONAL: ${{ needs.changes.outputs.conventional }}
           DECLARED_TYPE: ${{ needs.changes.outputs.type }}
-          CHANGELOG_WAIVED: ${{ contains(github.event.pull_request.labels.*.name, 'C-trivial') || contains(github.event.pull_request.labels.*.name, 'C-exclude-from-changelog') }}
         run: |
-          set -euo pipefail
-
           # `fetch-depth: 0` populates the base branch without persisting credentials.
           merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
-
-          allowed_type=false
-          case "$DECLARED_TYPE" in
-            feat|fix|perf|refactor|build|chore|docs|test|ci|style|revert|release)
-              allowed_type=true
-              ;;
-          esac
-
-          has_changelog=false
-          has_breaking_heading=false
-          code_changed=false
-          while IFS= read -r -d '' path; do
-            if [[ "${path##*/}" == "CHANGELOG.md" ]]; then
-              has_changelog=true
-              # Only the unreleased section counts, and its heading may predate this PR's diff.
-              if [[ -f "$path" ]] && awk '
-                /^## / { unreleased = ($0 ~ /^## \[Unreleased\]/) }
-                unreleased && /^### Breaking Changes/ { found = 1 }
-                END { exit !found }
-              ' "$path"; then
-                has_breaking_heading=true
-              fi
-            fi
-            if [[ "$path" == *.rs || "${path##*/}" == "Cargo.toml" || "${path##*/}" == "Cargo.lock" ]]; then
-              code_changed=true
-            fi
-          done < <(git diff --name-only -z "$merge_base"..HEAD)
-
-          failed=false
-
-          if [[ "$CONVENTIONAL" != "true" || "$allowed_type" != "true" ]]; then
-            echo "::error title=Invalid PR title::Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
-            failed=true
-          fi
-
-          if [[ "$DECLARED_TYPE" =~ ^(feat|fix|perf)$ && "$code_changed" == "true" && "$has_changelog" != "true" && "$CHANGELOG_WAIVED" != "true" ]]; then
-            echo "::error title=Missing changelog entry::Add a CHANGELOG.md entry, or label the PR C-trivial or C-exclude-from-changelog."
-            failed=true
-          fi
-
-          if [[ "$BREAKING" == "true" && "$has_breaking_heading" != "true" ]]; then
-            echo "::error title=Missing breaking changes heading::Add a ### Breaking Changes section under ## [Unreleased] in a CHANGELOG.md changed by this PR."
-            failed=true
-          fi
-
-          if [[ "$failed" == "true" ]]; then
-            exit 1
-          fi
+          bash .github/scripts/validate-pr-changelogs.sh \
+            "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
   # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
   release-readiness:
