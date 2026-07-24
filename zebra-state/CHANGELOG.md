@@ -22,16 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needs `.into()`. Only applies to builds with the `elasticsearch` feature
   ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
 
-### Security
-
-- The startup config dump no longer prints the Elasticsearch password. It previously appeared
-  in cleartext in logs and journald on `elasticsearch`-feature builds with a password set
-  ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
-
 ### Added
 
 - `RedactedString`, a `String` wrapper whose `Debug` output is `[REDACTED]`, for config fields
   that hold secrets
+  ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
+
+### Security
+
+- The startup config dump no longer prints the Elasticsearch password. It previously appeared
+  in cleartext in logs and journald on `elasticsearch`-feature builds with a password set
   ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
 
 ## [11.1.1] - 2026-07-22

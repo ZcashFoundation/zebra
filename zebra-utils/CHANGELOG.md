@@ -9,16 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [9.1.4] - 2026-07-24
 
-### Security
-
-- `zebrad-log-filter` no longer runs log text as a shell command. Previously a log line
-  containing a single quote could execute arbitrary commands as the user running the filter
-  ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050))
-
 ### Changed
 
 - `zebrad-log-filter` no longer requires GNU sed, and no longer reads the `GNU_SED`
   environment variable. Backslashes in log lines are now printed as-is
+  ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050))
+- `zebra-rpc` dependency bumped to `14.0.0`.
+
+### Security
+
+- `zebrad-log-filter` no longer runs log text as a shell command. Previously a log line
+  containing a single quote could execute arbitrary commands as the user running the filter
   ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050))
 
 ## [9.1.3] - 2026-07-22

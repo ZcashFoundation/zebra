@@ -158,7 +158,7 @@ comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
-zebra-consensus = { path = "../zebra-consensus", version = "13.0.1" }
+zebra-consensus = { path = "../zebra-consensus", version = "14.0.0" }
 zebra-network = { path = "../zebra-network", version = "10.2.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "9.1.1", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "14.0.0" }
