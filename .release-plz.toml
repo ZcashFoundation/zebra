@@ -3,17 +3,17 @@
 # The `home` crate pin (0.5.11) would break if cargo update runs.
 dependencies_update = false
 
-# Only publish when the Release PR is merged, not on every push.
-# release-plz checks if the current commit is from a release-plz- branch.
+# Do not ask release-plz to execute a release on ordinary pushes. Zebra owns all
+# post-merge execution in the release workflow.
 release_always = false
 
-# release-plz still publishes crates and creates git tags. Zebra creates the
-# single public `zebrad` GitHub Release in .github/workflows/release.yml so
-# release-triggered Docker and GCP workflows only run once, for the node binary.
+# release-plz only creates and updates Release PRs. After merge,
+# ZcashFoundation/cargo-release reconciles crates, tags, and the public
+# `zebrad` GitHub Release in .github/workflows/release.yml.
 git_release_enable = false
 
 # Changelogs are authored per PR in each crate's `[Unreleased]` section; release-plz
-# only versions, tags, and publishes.
+# turns those changes into versioned Release PRs.
 changelog_update = false
 
 # Breaking-change detection runs per PR via ziff, not in the release-pr job.
@@ -28,21 +28,58 @@ release_commits = "^(feat|fix|perf|refactor|build)"
 pr_labels = ["A-release"]
 
 pr_body = """
-## Review the Release PR
-
-- [ ] Version bumps match user-visible changes for each crate (`major` for network upgrades or breaking API, `minor` for new API/behavior/RPC/config, `patch` otherwise)
-- [ ] Each changed crate's `[Unreleased]` entries follow the Changelog Guidelines (operator-focused in the root `CHANGELOG.md`, crate-consumer-focused per crate)
-- [ ] `[Unreleased]` has been renamed to the release heading (`## [Zebra <version>]` in the root, `## [<version>]` per crate)
-- [ ] No git dependencies remain in crates publishing to crates.io (`check-no-git-dependencies`)
-- [ ] Any required checkpoint, end-of-support height, README, or operational changes already landed
-- [ ] `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are configured at repository or organization scope
-- [ ] Merge only when crates should publish and the public `zebrad` GitHub Release should be created
-
-## Release Summary
+## Release summary
 
 {% for release in releases %}
-- `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} -> {% endif %}{{ release.next_version }}
+- `{{ release.package }}`: {% if release.previous_version and release.previous_version != release.next_version %}{{ release.previous_version }} → {% endif %}{{ release.next_version }}
 {%- endfor %}
+
+> [!IMPORTANT]
+> Wait for every required check, review this checklist, then approve and merge the exact checked commit.
+
+## Release checklist
+
+### Release prerequisites
+
+- No unintended prerelease dependency versions remain.
+
+For releases that include `zebrad`:
+
+- A full sync completed after the latest state change, or no new full sync is required.
+- Mainnet and Testnet checkpoints are current for this release.
+
+### Release contents
+
+- If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
+- Each crate changelog covers every consumer-visible change since that crate's previous release.
+- Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
+
+### Versions
+
+- If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
+- Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
+
+### Release data and documentation
+
+For releases that include `zebrad`:
+
+- The end-of-support height matches the intended release date.
+- Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
+- README, installation, compatibility, and operational documentation match the release.
+
+### Publish
+
+1. Approve the latest commit after `PR Gate / Release readiness` and every other required check pass.
+2. Merge that exact commit.
+
+## If automation fails
+
+- If Release readiness fails, open its job summary and fix the reported issue.
+- If the automatic readiness check does not start, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
+- If publication stops after merge, run `gh workflow run release.yml --ref main -f operation=resume -f release_pr_number=<PR>`.
+- If published crates, tags, or release channels conflict with the plan, stop and ask a maintainer to investigate.
+
+See the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for workflow details and recovery guidance.
 
 ---
 This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).
@@ -50,18 +87,3 @@ This PR was generated with [release-plz](https://github.com/release-plz/release-
 
 # Repository URL.
 repo_url = "https://github.com/ZcashFoundation/zebra"
-
-# Timeout for waiting for each crate to appear on crates.io after publish
-publish_timeout = "30m"
-
-# zebrad uses the legacy v-prefixed tag format (v4.3.1); GCP deployment parses
-# the tag to extract the semver.
-[[package]]
-name = "zebrad"
-git_tag_name = "v{{ version }}"
-
-# ── Library crates ──────────────────────────────────────────────
-# No special config needed. release-plz defaults:
-# - Tag format: <crate>-v<version> (e.g., zebra-chain-v6.0.2)
-# - Change detection: file-path-based (only files in crate directory)
-# - Version bump: from conventional commits touching the crate's files

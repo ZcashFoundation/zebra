@@ -69,7 +69,7 @@ ed25519-zebra = "4.2"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
 equihash = "0.3"
 ff = "0.13"
-futures = "0.3.31"
+futures = "0.3.32"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
 group = "0.13"

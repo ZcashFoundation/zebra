@@ -1,0 +1,1469 @@
+//! Linux hardware preflight checks for zcashd-compat mode.
+
+#[cfg(target_os = "linux")]
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs, io,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+    thread::available_parallelism,
+};
+
+#[cfg(target_os = "linux")]
+use color_eyre::eyre::{eyre, Report};
+#[cfg(target_os = "linux")]
+use nix::unistd::{access, AccessFlags};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::MetadataExt;
+#[cfg(target_os = "linux")]
+use tracing::warn;
+#[cfg(target_os = "linux")]
+use zebra_chain::parameters::{Network, NetworkKind};
+
+#[cfg(target_os = "linux")]
+use super::{
+    datadir::resolve_zcashd_conf_path,
+    effective_zcashd_datadir, effective_zcashd_source, ensure_zcashd_datadir,
+    is_command_resolvable,
+    managed::{cached_managed_zcashd_binary_is_present, managed_zcashd_binary_path},
+    resolve_zcashd_datadir_path, ZcashdBinarySource,
+};
+use crate::config::ZebradConfig;
+
+#[cfg(target_os = "linux")]
+const GIB: u64 = 1024 * 1024 * 1024;
+#[cfg(target_os = "linux")]
+const TIB: u64 = 1024 * GIB;
+
+#[cfg(target_os = "linux")]
+const MIN_CPU_LOGICAL: usize = 4;
+#[cfg(target_os = "linux")]
+const RECOMMENDED_CPU_LOGICAL: usize = 8;
+
+#[cfg(target_os = "linux")]
+const MIN_RAM_BYTES: u64 = 16 * GIB;
+#[cfg(target_os = "linux")]
+const RECOMMENDED_RAM_BYTES: u64 = 32 * GIB;
+
+#[cfg(target_os = "linux")]
+const MAINNET_MIN_ZEBRA_PROVISIONED_BYTES: u64 = 275 * GIB;
+#[cfg(target_os = "linux")]
+const MAINNET_MIN_ZCASHD_PROVISIONED_BYTES: u64 = 275 * GIB;
+#[cfg(target_os = "linux")]
+const MAINNET_RECOMMENDED_COMBINED_TOTAL_BYTES: u64 = TIB;
+
+#[cfg(target_os = "linux")]
+const TESTNET_MIN_ZEBRA_PROVISIONED_BYTES: u64 = 30 * GIB;
+#[cfg(target_os = "linux")]
+const TESTNET_MIN_ZCASHD_PROVISIONED_BYTES: u64 = 30 * GIB;
+#[cfg(target_os = "linux")]
+const TESTNET_RECOMMENDED_COMBINED_TOTAL_BYTES: u64 = 100 * GIB;
+
+/// Runs zcashd-compat hardware preflight checks.
+///
+/// On Linux, checks CPU, effective memory and mount-aware disk provisioning.
+/// On non-Linux, startup fails unless `unsafe_low_specs` is explicitly set.
+pub fn run_preflight(
+    config: &ZebradConfig,
+    unsafe_low_specs: bool,
+) -> Result<(), color_eyre::eyre::Report> {
+    #[cfg(target_os = "linux")]
+    {
+        run_linux_preflight(config, unsafe_low_specs)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, unsafe_low_specs);
+        let message = "zcashd-compat mode is supported on Linux only";
+
+        if unsafe_low_specs {
+            tracing::warn!(
+                "{message}. continuing because --unsafe-low-specs was explicitly provided"
+            );
+            Ok(())
+        } else {
+            Err(color_eyre::eyre::eyre!(message))
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+enum DiskRole {
+    ZebraState,
+    ZcashdData,
+}
+
+#[cfg(target_os = "linux")]
+impl DiskRole {
+    fn label(self) -> &'static str {
+        match self {
+            DiskRole::ZebraState => "zebra state",
+            DiskRole::ZcashdData => "zcashd datadir",
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct PathRequirement {
+    role: DiskRole,
+    target_path: PathBuf,
+    min_provisioned_bytes: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct DiskThresholds {
+    min_zebra_bytes: u64,
+    min_zcashd_bytes: u64,
+    recommended_combined_bytes: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+enum PermissionRole {
+    ZebraState,
+    ZcashdDatadir,
+    ZcashdConf,
+    ManagedZcashdCache,
+}
+
+#[cfg(target_os = "linux")]
+impl PermissionRole {
+    fn label(self) -> &'static str {
+        match self {
+            PermissionRole::ZebraState => "zebra state directory",
+            PermissionRole::ZcashdDatadir => "zcashd datadir",
+            PermissionRole::ZcashdConf => "zcashd config directory",
+            PermissionRole::ManagedZcashdCache => "embedded zcashd cache directory",
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct WriteRequirement {
+    role: PermissionRole,
+    target_path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Default)]
+struct PermissionRequirements {
+    roles: Vec<PermissionRole>,
+    target_paths: Vec<PathBuf>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Default)]
+struct FilesystemRequirements {
+    roles: Vec<DiskRole>,
+    target_paths: Vec<PathBuf>,
+    min_provisioned_sum_bytes: u64,
+    provisioned_bytes: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Default)]
+struct PreflightSummary {
+    errors: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn run_linux_preflight(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<(), Report> {
+    let mut zcashd_datadir =
+        effective_zcashd_datadir(&config.zcashd_compat, &config.state.cache_dir);
+
+    if config.zcashd_compat.manage_zcashd {
+        zcashd_datadir =
+            resolve_zcashd_datadir_path(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args);
+    }
+
+    // Only check zcashd disk capacity against a datadir Zebra actually knows:
+    // the resolved managed datadir, or an explicitly configured external one.
+    // An unmanaged sidecar without `zcashd_datadir` set can keep its data on a
+    // filesystem (or host) Zebra never uses.
+    let zcashd_datadir_for_disk_check = (config.zcashd_compat.manage_zcashd
+        || config.zcashd_compat.zcashd_datadir.is_some())
+    .then_some(zcashd_datadir.as_path());
+
+    let mut summary = PreflightSummary::default();
+
+    // A check that errors at the I/O level (unreadable cgroup file, statvfs
+    // failure on a network mount, a datadir path Zebra cannot probe) must be
+    // overridable by `--unsafe-low-specs`, just like a failed minimum. Collect
+    // these errors into the summary instead of propagating them, so the bypass
+    // flag can downgrade them to warnings.
+    let check_results = [
+        check_permissions(&mut summary, config, &zcashd_datadir),
+        check_cpu(&mut summary),
+        check_memory(&mut summary),
+        check_disk(
+            &mut summary,
+            &config.network.network,
+            &config.state.cache_dir,
+            zcashd_datadir_for_disk_check,
+        ),
+    ];
+    for error in check_results.into_iter().filter_map(Result::err) {
+        summary
+            .errors
+            .push(format!("preflight check could not run: {error}"));
+    }
+
+    for warning in finalize_preflight(summary, unsafe_low_specs)? {
+        warn!("{warning}");
+    }
+
+    // Filesystem bootstrap happens only after preflight has reported every
+    // blocking issue, unless the operator explicitly bypassed the checks.
+    if config.zcashd_compat.manage_zcashd {
+        ensure_zcashd_datadir(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn disk_thresholds(network: &Network) -> DiskThresholds {
+    match network.kind() {
+        NetworkKind::Mainnet => DiskThresholds {
+            min_zebra_bytes: MAINNET_MIN_ZEBRA_PROVISIONED_BYTES,
+            min_zcashd_bytes: MAINNET_MIN_ZCASHD_PROVISIONED_BYTES,
+            recommended_combined_bytes: MAINNET_RECOMMENDED_COMBINED_TOTAL_BYTES,
+        },
+        NetworkKind::Testnet | NetworkKind::Regtest => DiskThresholds {
+            min_zebra_bytes: TESTNET_MIN_ZEBRA_PROVISIONED_BYTES,
+            min_zcashd_bytes: TESTNET_MIN_ZCASHD_PROVISIONED_BYTES,
+            recommended_combined_bytes: TESTNET_RECOMMENDED_COMBINED_TOTAL_BYTES,
+        },
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn finalize_preflight(
+    mut summary: PreflightSummary,
+    unsafe_low_specs: bool,
+) -> Result<Vec<String>, Report> {
+    if !summary.errors.is_empty() {
+        if unsafe_low_specs {
+            summary
+                .warnings
+                .extend(summary.errors.into_iter().map(|error| {
+                    format!(
+                        "{error}. continuing because --unsafe-low-specs was explicitly provided"
+                    )
+                }));
+        } else {
+            return Err(eyre!(
+                "zcashd-compat preflight failed:\n- {}",
+                summary.errors.join("\n- ")
+            ));
+        }
+    }
+
+    Ok(summary.warnings)
+}
+
+#[cfg(target_os = "linux")]
+fn check_permissions(
+    summary: &mut PreflightSummary,
+    config: &ZebradConfig,
+    zcashd_datadir: &Path,
+) -> Result<(), Report> {
+    let mut requirements = vec![WriteRequirement {
+        role: PermissionRole::ZebraState,
+        target_path: config.state.cache_dir.clone(),
+    }];
+
+    if config.zcashd_compat.manage_zcashd {
+        requirements.push(WriteRequirement {
+            role: PermissionRole::ZcashdDatadir,
+            target_path: zcashd_datadir.to_path_buf(),
+        });
+
+        let conf_path =
+            resolve_zcashd_conf_path(zcashd_datadir, &config.zcashd_compat.zcashd_extra_args);
+        check_conf_access(summary, &mut requirements, &conf_path)?;
+        check_zcashd_binary(
+            summary,
+            &mut requirements,
+            &config.zcashd_compat,
+            &config.state.cache_dir,
+        );
+    }
+
+    check_write_requirements(summary, &requirements)
+}
+
+#[cfg(target_os = "linux")]
+fn check_conf_access(
+    summary: &mut PreflightSummary,
+    requirements: &mut Vec<WriteRequirement>,
+    conf_path: &Path,
+) -> Result<(), Report> {
+    let metadata = match fs::symlink_metadata(conf_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                match fs::metadata(conf_path) {
+                    Ok(target_metadata) => target_metadata,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        summary.errors.push(format!(
+                            "zcashd config {} is a symlink to a missing target",
+                            conf_path.display()
+                        ));
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        summary.errors.push(format!(
+                            "failed to inspect zcashd config symlink target {}: {error}",
+                            conf_path.display()
+                        ));
+                        return Ok(());
+                    }
+                }
+            } else {
+                metadata
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = conf_path.parent().ok_or_else(|| {
+                eyre!(
+                    "zcashd config path has no parent directory: {}",
+                    conf_path.display()
+                )
+            })?;
+
+            requirements.push(WriteRequirement {
+                role: PermissionRole::ZcashdConf,
+                target_path: parent.to_path_buf(),
+            });
+
+            return Ok(());
+        }
+        Err(error) => {
+            summary.errors.push(format!(
+                "failed to inspect zcashd config {}: {error}",
+                conf_path.display()
+            ));
+            return Ok(());
+        }
+    };
+
+    if metadata.is_dir() {
+        summary.errors.push(format!(
+            "zcashd config path {} is a directory, expected a file",
+            conf_path.display()
+        ));
+        return Ok(());
+    }
+
+    if access(conf_path, AccessFlags::R_OK).is_err() {
+        summary.errors.push(format!(
+            "zcashd config {} exists but is not readable by the current user",
+            conf_path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn check_zcashd_binary(
+    summary: &mut PreflightSummary,
+    requirements: &mut Vec<WriteRequirement>,
+    zcashd_compat_config: &super::Config,
+    state_cache_dir: &Path,
+) {
+    match effective_zcashd_source(zcashd_compat_config) {
+        Ok(ZcashdBinarySource::Path(path)) => {
+            if !is_command_resolvable(&path) {
+                summary.errors.push(format!(
+                    "zcashd binary {} does not exist or is not executable by the current user",
+                    path.display()
+                ));
+            }
+        }
+        Ok(ZcashdBinarySource::Embedded) => {
+            let Some(binary_path) = managed_zcashd_binary_path(state_cache_dir) else {
+                return;
+            };
+            let cache_is_current =
+                cached_managed_zcashd_binary_is_present(state_cache_dir).unwrap_or(false);
+
+            if binary_path.exists() && !is_command_resolvable(&binary_path) {
+                summary.errors.push(format!(
+                    "zcashd binary {} does not exist or is not executable by the current user",
+                    binary_path.display()
+                ));
+            }
+
+            if !cache_is_current {
+                let Some(parent) = binary_path.parent() else {
+                    return;
+                };
+
+                requirements.push(WriteRequirement {
+                    role: PermissionRole::ManagedZcashdCache,
+                    target_path: parent.to_path_buf(),
+                });
+            }
+        }
+        Err(error) => summary.errors.push(error.to_string()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn check_write_requirements(
+    summary: &mut PreflightSummary,
+    requirements: &[WriteRequirement],
+) -> Result<(), Report> {
+    let mut grouped = BTreeMap::<PathBuf, PermissionRequirements>::new();
+
+    for requirement in requirements {
+        let probed_path = nearest_existing_ancestor(&requirement.target_path)?;
+        let entry = grouped.entry(probed_path).or_default();
+
+        if !entry.roles.contains(&requirement.role) {
+            entry.roles.push(requirement.role);
+        }
+
+        if !entry.target_paths.contains(&requirement.target_path) {
+            entry.target_paths.push(requirement.target_path.clone());
+        }
+    }
+
+    for (probed_path, requirements) in grouped {
+        let metadata = fs::metadata(&probed_path).map_err(|error| {
+            eyre!(
+                "failed to read metadata for {}: {error}",
+                probed_path.display()
+            )
+        })?;
+
+        if !metadata.is_dir() {
+            summary.errors.push(format!(
+                "{} (paths: {}) requires a directory at {}, which exists but is not a directory",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths),
+                probed_path.display()
+            ));
+            continue;
+        }
+
+        if path_is_writable_dir(&probed_path) {
+            continue;
+        }
+
+        if requirements
+            .target_paths
+            .iter()
+            .all(|target_path| target_path == &probed_path)
+        {
+            summary.errors.push(format!(
+                "{} (paths: {}) is not writable by the current user",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths)
+            ));
+        } else {
+            summary.errors.push(format!(
+                "{} (paths: {}) cannot be created: nearest existing ancestor {} is not writable by the current user",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths),
+                probed_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn path_is_writable_dir(path: &Path) -> bool {
+    access(path, AccessFlags::W_OK | AccessFlags::X_OK).is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn check_cpu(summary: &mut PreflightSummary) -> Result<(), Report> {
+    let cpu_count = available_parallelism()
+        .map(NonZeroUsize::get)
+        .map_err(|error| eyre!("failed to read available logical CPU count: {error}"))?;
+
+    if cpu_count < MIN_CPU_LOGICAL {
+        summary.errors.push(format!(
+            "detected {cpu_count} logical CPUs, minimum required is {MIN_CPU_LOGICAL}"
+        ));
+    } else if cpu_count < RECOMMENDED_CPU_LOGICAL {
+        summary.warnings.push(format!(
+            "detected {cpu_count} logical CPUs, recommended is {RECOMMENDED_CPU_LOGICAL}"
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn check_memory(summary: &mut PreflightSummary) -> Result<(), Report> {
+    let mem_total = meminfo_total_bytes()?;
+    let cgroup_limit = cgroup_memory_limit_bytes()?;
+    let effective_memory = cgroup_limit.map_or(mem_total, |limit| limit.min(mem_total));
+
+    if effective_memory < MIN_RAM_BYTES {
+        summary.errors.push(format!(
+            "detected effective memory {}, minimum required is {}",
+            human_gib(effective_memory),
+            human_gib(MIN_RAM_BYTES)
+        ));
+    } else if effective_memory < RECOMMENDED_RAM_BYTES {
+        summary.warnings.push(format!(
+            "detected effective memory {}, recommended is {}",
+            human_gib(effective_memory),
+            human_gib(RECOMMENDED_RAM_BYTES)
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn check_disk(
+    summary: &mut PreflightSummary,
+    network: &Network,
+    zebra_cache_dir: &Path,
+    zcashd_datadir: Option<&Path>,
+) -> Result<(), Report> {
+    let thresholds = disk_thresholds(network);
+    let mut requirements = vec![PathRequirement {
+        role: DiskRole::ZebraState,
+        target_path: zebra_cache_dir.to_path_buf(),
+        min_provisioned_bytes: thresholds.min_zebra_bytes,
+    }];
+
+    // In externally managed mode without a configured `zcashd_datadir`, the
+    // sidecar's datadir location is unknown to Zebra (it can be on another
+    // host or filesystem), so there is no path to check capacity against.
+    if let Some(zcashd_datadir) = zcashd_datadir {
+        requirements.push(PathRequirement {
+            role: DiskRole::ZcashdData,
+            target_path: zcashd_datadir.to_path_buf(),
+            min_provisioned_bytes: thresholds.min_zcashd_bytes,
+        });
+    }
+
+    let grouped_filesystems = grouped_requirements_by_filesystem(&requirements)?;
+    evaluate_disk_thresholds(
+        summary,
+        &grouped_filesystems,
+        thresholds.recommended_combined_bytes,
+    );
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn evaluate_disk_thresholds(
+    summary: &mut PreflightSummary,
+    grouped_filesystems: &HashMap<u64, FilesystemRequirements>,
+    recommended_combined_bytes: u64,
+) {
+    // Saturate rather than risk a debug-build overflow panic on a broken
+    // statvfs that reports a near-`u64::MAX` capacity, matching the per-entry
+    // accumulation elsewhere in this module.
+    let combined_provisioned_capacity = grouped_filesystems
+        .values()
+        .map(|filesystem| filesystem.provisioned_bytes)
+        .fold(0u64, u64::saturating_add);
+
+    for filesystem in grouped_filesystems.values() {
+        if filesystem.provisioned_bytes < filesystem.min_provisioned_sum_bytes {
+            summary.errors.push(format!(
+                "{} mount (paths: {}) has provisioned capacity {}, minimum required is {}",
+                role_labels(&filesystem.roles),
+                display_paths(&filesystem.target_paths),
+                human_gib(filesystem.provisioned_bytes),
+                human_gib(filesystem.min_provisioned_sum_bytes),
+            ));
+        }
+    }
+
+    if combined_provisioned_capacity < recommended_combined_bytes {
+        summary.warnings.push(format!(
+            "combined zcashd-compat filesystem capacity is {}, recommended is {}",
+            human_gib(combined_provisioned_capacity),
+            human_gib(recommended_combined_bytes)
+        ));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn grouped_requirements_by_filesystem(
+    requirements: &[PathRequirement],
+) -> Result<HashMap<u64, FilesystemRequirements>, Report> {
+    let mut grouped = HashMap::new();
+
+    for requirement in requirements {
+        let probed_path = nearest_existing_ancestor(&requirement.target_path)?;
+        let metadata = fs::metadata(&probed_path).map_err(|error| {
+            eyre!(
+                "failed to read metadata for {}: {error}",
+                probed_path.display()
+            )
+        })?;
+        let device_id = metadata.dev();
+        let provisioned_bytes = statvfs_provisioned_bytes(&probed_path)?;
+
+        let entry = grouped
+            .entry(device_id)
+            .or_insert_with(|| FilesystemRequirements {
+                provisioned_bytes,
+                ..FilesystemRequirements::default()
+            });
+
+        if !entry.roles.contains(&requirement.role) {
+            entry.roles.push(requirement.role);
+        }
+        entry.target_paths.push(requirement.target_path.clone());
+        entry.min_provisioned_sum_bytes = entry
+            .min_provisioned_sum_bytes
+            .saturating_add(requirement.min_provisioned_bytes);
+    }
+
+    Ok(grouped)
+}
+
+#[cfg(target_os = "linux")]
+fn nearest_existing_ancestor(path: &Path) -> Result<PathBuf, Report> {
+    let mut current = path.to_path_buf();
+
+    loop {
+        if current.exists() {
+            return Ok(current);
+        }
+
+        if let Some(parent) = current.parent() {
+            current = parent.to_path_buf();
+            continue;
+        }
+
+        return Err(eyre!(
+            "no existing ancestor path found for {}",
+            path.display()
+        ));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn statvfs_provisioned_bytes(path: &Path) -> Result<u64, Report> {
+    let stats = nix::sys::statvfs::statvfs(path).map_err(|error| {
+        eyre!(
+            "failed to get filesystem stats for {}: {error}",
+            path.display()
+        )
+    })?;
+
+    let fragment_size = stats.fragment_size();
+
+    Ok(stats.blocks().saturating_mul(fragment_size))
+}
+
+#[cfg(target_os = "linux")]
+fn meminfo_total_bytes() -> Result<u64, Report> {
+    let meminfo = fs::read_to_string("/proc/meminfo")
+        .map_err(|error| eyre!("failed to read /proc/meminfo: {error}"))?;
+    let mem_total_kib = meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))
+        .and_then(|line| line.split_whitespace().next())
+        .ok_or_else(|| eyre!("MemTotal field missing in /proc/meminfo"))?
+        .parse::<u64>()
+        .map_err(|error| eyre!("failed to parse MemTotal from /proc/meminfo: {error}"))?;
+
+    Ok(mem_total_kib.saturating_mul(1024))
+}
+
+#[cfg(target_os = "linux")]
+/// Returns the effective cgroup memory limit for the current process, in bytes.
+///
+/// Specification:
+/// - Read `/proc/self/cgroup` and extract:
+///   - the cgroup v2 relative path (`0::...`) when present, and
+///   - the cgroup v1 `memory` controller relative path (`...:memory:...`) when present.
+/// - Probe candidate limit files in this order:
+///   - v2: process-specific `/sys/fs/cgroup/<path>/memory.max`, then root fallback
+///     `/sys/fs/cgroup/memory.max`;
+///   - v1: process-specific
+///     `/sys/fs/cgroup/memory/<path>/memory.limit_in_bytes`, then root fallback
+///     `/sys/fs/cgroup/memory/memory.limit_in_bytes`.
+/// - Missing files are treated as unavailable and skipped.
+/// - Unlimited values (`max` in v2, very large sentinel in v1) are treated as `None`.
+/// - If both v1 and v2 limits are available, return the tighter (`min`) limit.
+/// - If only one limit is available, return that limit; if neither is available, return `None`.
+fn cgroup_memory_limit_bytes() -> Result<Option<u64>, Report> {
+    let self_cgroup = fs::read_to_string("/proc/self/cgroup")
+        .map_err(|error| eyre!("failed to read /proc/self/cgroup: {error}"))?;
+    let (v2_relative_path, v1_memory_relative_path) = parse_self_cgroup_paths(&self_cgroup);
+
+    let v2_limit = parse_first_cgroup_limit(
+        &v2_relative_path
+            .iter()
+            .map(|relative_path| {
+                cgroup_limit_path(Path::new("/sys/fs/cgroup"), relative_path, "memory.max")
+            })
+            .chain(std::iter::once(PathBuf::from("/sys/fs/cgroup/memory.max")))
+            .collect::<Vec<_>>(),
+    )?;
+
+    let v1_limit = parse_first_cgroup_limit(
+        &v1_memory_relative_path
+            .iter()
+            .map(|relative_path| {
+                cgroup_limit_path(
+                    Path::new("/sys/fs/cgroup/memory"),
+                    relative_path,
+                    "memory.limit_in_bytes",
+                )
+            })
+            .chain(std::iter::once(PathBuf::from(
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            )))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(select_cgroup_memory_limit(v2_limit, v1_limit))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_self_cgroup_paths(self_cgroup: &str) -> (Option<String>, Option<String>) {
+    let mut v2_relative_path = None;
+    let mut v1_memory_relative_path = None;
+
+    for line in self_cgroup.lines() {
+        let mut fields = line.splitn(3, ':');
+        let _hierarchy_id = fields.next();
+        let controllers = fields.next();
+        let relative_path = fields.next();
+
+        let (Some(controllers), Some(relative_path)) = (controllers, relative_path) else {
+            continue;
+        };
+
+        if controllers.is_empty() {
+            v2_relative_path = Some(relative_path.to_string());
+        } else if controllers
+            .split(',')
+            .any(|controller| controller == "memory")
+        {
+            v1_memory_relative_path = Some(relative_path.to_string());
+        }
+    }
+
+    (v2_relative_path, v1_memory_relative_path)
+}
+
+#[cfg(target_os = "linux")]
+fn cgroup_limit_path(base_path: &Path, relative_path: &str, file_name: &str) -> PathBuf {
+    let normalized_relative_path = relative_path.trim_start_matches('/');
+
+    if normalized_relative_path.is_empty() {
+        base_path.join(file_name)
+    } else {
+        base_path.join(normalized_relative_path).join(file_name)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_first_cgroup_limit(candidate_paths: &[PathBuf]) -> Result<Option<u64>, Report> {
+    for path in candidate_paths {
+        if let Some(limit) = parse_cgroup_limit(path)? {
+            return Ok(Some(limit));
+        }
+    }
+
+    Ok(None)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_cgroup_limit(path: &Path) -> Result<Option<u64>, Report> {
+    let raw_limit = match fs::read_to_string(path) {
+        Ok(raw_limit) => raw_limit,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(eyre!("failed to read {}: {error}", path.display())),
+    };
+
+    let trimmed = raw_limit.trim();
+    if trimmed.eq_ignore_ascii_case("max") {
+        return Ok(None);
+    }
+
+    let parsed_limit = trimmed.parse::<u64>().map_err(|error| {
+        eyre!(
+            "failed to parse cgroup memory limit from {}: {error}",
+            path.display()
+        )
+    })?;
+
+    // cgroup v1 can report very large sentinel values for "unlimited".
+    if parsed_limit >= 0x7fff_ffff_ffff_f000 {
+        return Ok(None);
+    }
+
+    Ok(Some(parsed_limit))
+}
+
+#[cfg(target_os = "linux")]
+fn select_cgroup_memory_limit(v2_limit: Option<u64>, v1_limit: Option<u64>) -> Option<u64> {
+    match (v2_limit, v1_limit) {
+        (Some(v2), Some(v1)) => Some(v2.min(v1)),
+        (Some(v2), None) => Some(v2),
+        (None, Some(v1)) => Some(v1),
+        (None, None) => None,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn role_labels(roles: &[DiskRole]) -> String {
+    roles
+        .iter()
+        .map(|role| role.label())
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+#[cfg(target_os = "linux")]
+fn permission_role_labels(roles: &[PermissionRole]) -> String {
+    roles
+        .iter()
+        .map(|role| role.label())
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+#[cfg(target_os = "linux")]
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(target_os = "linux")]
+fn human_gib(bytes: u64) -> String {
+    // Cast is safe: these are display-only values, and f64 represents all
+    // disk/memory sizes below 2^53 bytes (8 PiB) exactly enough for one
+    // decimal place of GiB.
+    format!("{:.1} GiB", bytes as f64 / GIB as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use super::*;
+    #[cfg(target_os = "linux")]
+    use std::{
+        fs as std_fs,
+        os::unix::fs::{symlink, PermissionsExt},
+        path::Path,
+        process::Command,
+    };
+    #[cfg(target_os = "linux")]
+    use tempfile::TempDir;
+
+    #[cfg(target_os = "linux")]
+    use crate::components::zcashd_compat::{zcashd_target_triple, ConfigZcashdBinarySource};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disk_thresholds_mainnet_returns_existing_limits() {
+        assert_eq!(
+            disk_thresholds(&Network::Mainnet),
+            DiskThresholds {
+                min_zebra_bytes: 275 * GIB,
+                min_zcashd_bytes: 275 * GIB,
+                recommended_combined_bytes: TIB,
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disk_thresholds_testnet_returns_lower_limits() {
+        assert_eq!(
+            disk_thresholds(&Network::new_default_testnet()),
+            DiskThresholds {
+                min_zebra_bytes: 30 * GIB,
+                min_zcashd_bytes: 30 * GIB,
+                recommended_combined_bytes: 100 * GIB,
+            }
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn merges_provisioned_requirement_when_paths_share_filesystem() {
+        let requirements = vec![
+            PathRequirement {
+                role: DiskRole::ZebraState,
+                target_path: PathBuf::from("/tmp"),
+                min_provisioned_bytes: MAINNET_MIN_ZEBRA_PROVISIONED_BYTES,
+            },
+            PathRequirement {
+                role: DiskRole::ZcashdData,
+                target_path: PathBuf::from("/tmp"),
+                min_provisioned_bytes: MAINNET_MIN_ZCASHD_PROVISIONED_BYTES,
+            },
+        ];
+
+        let grouped = grouped_requirements_by_filesystem(&requirements)
+            .expect("filesystem grouping should succeed");
+        let filesystem = grouped.values().next().expect("group should not be empty");
+
+        assert_eq!(
+            filesystem.min_provisioned_sum_bytes,
+            MAINNET_MIN_ZEBRA_PROVISIONED_BYTES + MAINNET_MIN_ZCASHD_PROVISIONED_BYTES
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_cgroup_max_as_unlimited() {
+        assert_eq!(parse_cgroup_value("max").expect("valid cgroup value"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_cgroup_numeric_value() {
+        assert_eq!(
+            parse_cgroup_value("17179869184").expect("valid cgroup value"),
+            Some(17_179_869_184)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn prefers_v1_when_v2_is_unavailable() {
+        assert_eq!(select_cgroup_memory_limit(None, Some(16)), Some(16));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn chooses_tighter_limit_when_both_are_available() {
+        assert_eq!(select_cgroup_memory_limit(Some(32), Some(16)), Some(16));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_v2_and_v1_process_cgroup_paths() {
+        let cgroup = "0::/user.slice/user-1000.slice/session-2.scope\n2:memory:/docker/abcdef";
+        let (v2_path, v1_path) = parse_self_cgroup_paths(cgroup);
+
+        assert_eq!(
+            v2_path,
+            Some("/user.slice/user-1000.slice/session-2.scope".to_string())
+        );
+        assert_eq!(v1_path, Some("/docker/abcdef".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn builds_cgroup_limit_paths_with_root_and_nested_relative_paths() {
+        assert_eq!(
+            cgroup_limit_path(Path::new("/sys/fs/cgroup"), "/", "memory.max"),
+            PathBuf::from("/sys/fs/cgroup/memory.max")
+        );
+        assert_eq!(
+            cgroup_limit_path(
+                Path::new("/sys/fs/cgroup/memory"),
+                "/docker/abcdef",
+                "memory.limit_in_bytes"
+            ),
+            PathBuf::from("/sys/fs/cgroup/memory/docker/abcdef/memory.limit_in_bytes")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_disk_failure_when_below_minimum_provisioned_capacity() {
+        let mut summary = PreflightSummary::default();
+        let mut grouped = HashMap::new();
+        grouped.insert(
+            1,
+            FilesystemRequirements {
+                roles: vec![DiskRole::ZebraState, DiskRole::ZcashdData],
+                target_paths: vec!["/zebra".into(), "/zcashd".into()],
+                min_provisioned_sum_bytes: MAINNET_MIN_ZEBRA_PROVISIONED_BYTES
+                    + MAINNET_MIN_ZCASHD_PROVISIONED_BYTES,
+                provisioned_bytes: 400 * GIB,
+            },
+        );
+
+        evaluate_disk_thresholds(
+            &mut summary,
+            &grouped,
+            MAINNET_RECOMMENDED_COMBINED_TOTAL_BYTES,
+        );
+
+        assert_eq!(summary.errors.len(), 1);
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("provisioned capacity")),
+            "expected provisioned capacity error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn evaluate_disk_thresholds_testnet_fails_below_60_gib_combined() {
+        let mut summary = PreflightSummary::default();
+        let mut grouped = HashMap::new();
+        grouped.insert(
+            1,
+            FilesystemRequirements {
+                roles: vec![DiskRole::ZebraState, DiskRole::ZcashdData],
+                target_paths: vec!["/zebra".into(), "/zcashd".into()],
+                min_provisioned_sum_bytes: TESTNET_MIN_ZEBRA_PROVISIONED_BYTES
+                    + TESTNET_MIN_ZCASHD_PROVISIONED_BYTES,
+                provisioned_bytes: 50 * GIB,
+            },
+        );
+
+        evaluate_disk_thresholds(
+            &mut summary,
+            &grouped,
+            TESTNET_RECOMMENDED_COMBINED_TOTAL_BYTES,
+        );
+
+        assert_eq!(summary.errors.len(), 1);
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("minimum required is 60.0 GiB")),
+            "expected testnet minimum error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn evaluate_disk_thresholds_testnet_warns_between_60_and_100_gib() {
+        let mut summary = PreflightSummary::default();
+        let mut grouped = HashMap::new();
+        grouped.insert(
+            1,
+            FilesystemRequirements {
+                roles: vec![DiskRole::ZebraState, DiskRole::ZcashdData],
+                target_paths: vec!["/zebra".into(), "/zcashd".into()],
+                min_provisioned_sum_bytes: TESTNET_MIN_ZEBRA_PROVISIONED_BYTES
+                    + TESTNET_MIN_ZCASHD_PROVISIONED_BYTES,
+                provisioned_bytes: 80 * GIB,
+            },
+        );
+
+        evaluate_disk_thresholds(
+            &mut summary,
+            &grouped,
+            TESTNET_RECOMMENDED_COMBINED_TOTAL_BYTES,
+        );
+
+        assert_eq!(summary.errors, Vec::<String>::new());
+        assert_eq!(summary.warnings.len(), 1);
+        assert!(
+            summary
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("recommended is 100.0 GiB")),
+            "expected testnet recommendation warning: {:?}",
+            summary.warnings
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bypass_turns_failures_into_warnings() {
+        let summary = PreflightSummary {
+            errors: vec!["cpu below minimum".to_string()],
+            warnings: vec!["disk below recommendation".to_string()],
+        };
+
+        let warnings = finalize_preflight(summary, true).expect("unsafe bypass should continue");
+
+        assert_eq!(warnings.len(), 2);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("--unsafe-low-specs")),
+            "expected unsafe bypass warning message: {warnings:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fails_when_below_minimum_without_bypass() {
+        let summary = PreflightSummary {
+            errors: vec!["ram below minimum".to_string()],
+            warnings: Vec::new(),
+        };
+
+        let error = finalize_preflight(summary, false)
+            .expect_err("preflight should fail without unsafe bypass");
+        assert!(
+            error.to_string().contains("preflight failed"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn permission_checks_pass_in_writable_tempdir() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        )
+        .expect("permission checks should succeed");
+
+        assert_eq!(summary.errors, Vec::<String>::new());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_unwritable_datadir_ancestor() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let protected = temp_dir.path().join("protected");
+        std_fs::create_dir(&protected).expect("protected dir should be created");
+
+        let mut config = permission_test_config(&temp_dir);
+        config.zcashd_compat.zcashd_datadir =
+            Some(protected.join("missing").join("zcashd-datadir"));
+
+        set_mode(&protected, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(&protected, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("nearest existing ancestor") && error.contains("zcashd datadir")
+            }),
+            "expected datadir ancestor error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dedups_roles_sharing_one_unwritable_directory() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let shared = temp_dir.path().join("shared");
+        std_fs::create_dir(&shared).expect("shared dir should be created");
+
+        let mut config = ZebradConfig::default();
+        config.state.cache_dir = shared.clone();
+        config.zcashd_compat.manage_zcashd = false;
+
+        set_mode(&shared, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(&mut summary, &config, temp_dir.path());
+        set_mode(&shared, 0o755);
+
+        result.expect("permission checks should complete");
+        assert_eq!(summary.errors.len(), 1, "errors: {:?}", summary.errors);
+        assert!(
+            summary.errors[0].contains("zebra state directory"),
+            "expected state-dir error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_unreadable_existing_conf() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        let conf_path = zcashd_datadir.join("zcash.conf");
+        std_fs::write(&conf_path, "").expect("conf should be written");
+
+        set_mode(&conf_path, 0o000);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(&mut summary, &config, &zcashd_datadir);
+        set_mode(&conf_path, 0o644);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("not readable")),
+            "expected unreadable conf error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_conf_path_that_is_a_directory() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(zcashd_datadir.join("zcash.conf"))
+            .expect("conf directory should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("is a directory")),
+            "expected directory conf error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_dangling_conf_symlink() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        symlink("missing.conf", zcashd_datadir.join("zcash.conf"))
+            .expect("dangling symlink should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("symlink to a missing target")),
+            "expected dangling symlink error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_nonexecutable_zcashd_path() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let mut config = permission_test_config(&temp_dir);
+        let zcashd_path = temp_dir.path().join("non-executable-zcashd");
+        std_fs::write(&zcashd_path, "#!/bin/sh\n").expect("zcashd file should be written");
+        set_mode(&zcashd_path, 0o644);
+        config.zcashd_compat.zcashd_path = Some(zcashd_path);
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        )
+        .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("not executable")),
+            "expected non-executable zcashd error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn missing_conf_requires_writable_parent() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert_eq!(summary.errors, Vec::<String>::new());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn embedded_source_checks_cache_dir_writability() {
+        if running_as_root() {
+            return;
+        }
+
+        if zcashd_target_triple().is_none() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let protected = temp_dir.path().join("protected");
+        std_fs::create_dir(&protected).expect("protected dir should be created");
+
+        let mut config = permission_test_config(&temp_dir);
+        config.state.cache_dir = protected.join("zebra-cache");
+        config.zcashd_compat.zcashd_datadir = Some(temp_dir.path().join("zcashd-datadir"));
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Embedded;
+        config.zcashd_compat.zcashd_path = None;
+
+        set_mode(&protected, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(&protected, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("embedded zcashd cache directory")
+                    && error.contains("nearest existing ancestor")
+            }),
+            "expected embedded cache writability error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stale_embedded_cache_checks_cache_dir_writability() {
+        if running_as_root() {
+            return;
+        }
+
+        if zcashd_target_triple().is_none() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let mut config = permission_test_config(&temp_dir);
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Embedded;
+        config.zcashd_compat.zcashd_path = None;
+
+        let binary_path =
+            managed_zcashd_binary_path(&config.state.cache_dir).expect("managed path should exist");
+        let cache_dir = binary_path.parent().expect("binary should have parent");
+        std_fs::create_dir_all(cache_dir).expect("managed cache dir should be created");
+        std_fs::write(&binary_path, "#!/bin/sh\n").expect("cached zcashd should be written");
+        std_fs::write(cache_dir.join("zcashd.sha256"), "stale\n")
+            .expect("stale provenance should be written");
+        set_mode(&binary_path, 0o755);
+
+        set_mode(cache_dir, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(cache_dir, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("embedded zcashd cache directory") && error.contains("not writable")
+            }),
+            "expected stale embedded cache writability error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn permission_test_config(temp_dir: &TempDir) -> ZebradConfig {
+        let mut config = ZebradConfig::default();
+        config.state.cache_dir = temp_dir.path().join("zebra-cache");
+        config.zcashd_compat.manage_zcashd = true;
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Path;
+        config.zcashd_compat.zcashd_datadir = Some(temp_dir.path().join("zcashd-datadir"));
+
+        let zcashd_path = temp_dir.path().join("zcashd");
+        std_fs::write(&zcashd_path, "#!/bin/sh\n").expect("zcashd file should be written");
+        set_mode(&zcashd_path, 0o755);
+        config.zcashd_compat.zcashd_path = Some(zcashd_path);
+
+        config
+    }
+
+    #[cfg(target_os = "linux")]
+    fn permission_test_zcashd_datadir(config: &ZebradConfig) -> PathBuf {
+        resolve_zcashd_datadir_path(
+            &effective_zcashd_datadir(&config.zcashd_compat, &config.state.cache_dir),
+            &config.zcashd_compat.zcashd_extra_args,
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_mode(path: &Path, mode: u32) {
+        std_fs::set_permissions(path, std_fs::Permissions::from_mode(mode))
+            .expect("permissions should be set");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn running_as_root() -> bool {
+        uid_command_reports_root(&["-u"]) || uid_command_reports_root(&["-r", "-u"])
+    }
+
+    #[cfg(target_os = "linux")]
+    fn uid_command_reports_root(args: &[&str]) -> bool {
+        Command::new("id")
+            .args(args)
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .is_some_and(|uid| uid.trim() == "0")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn parse_cgroup_value(value: &str) -> Result<Option<u64>, Report> {
+        if value.trim().eq_ignore_ascii_case("max") {
+            return Ok(None);
+        }
+
+        let parsed_limit = value
+            .trim()
+            .parse::<u64>()
+            .map_err(|error| eyre!("failed to parse cgroup memory limit: {error}"))?;
+
+        if parsed_limit >= 0x7fff_ffff_ffff_f000 {
+            return Ok(None);
+        }
+
+        Ok(Some(parsed_limit))
+    }
+}

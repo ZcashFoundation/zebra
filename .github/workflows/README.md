@@ -46,6 +46,7 @@ graph TB
     Coverage[coverage.yml]
     DockerCfg[test-docker.yml]
     CrateBuild[test-crates.yml]
+    PRGate[pr-gate.yml]
     Docs[book.yml]
     Security[zizmor.yml]
   end
@@ -60,8 +61,8 @@ graph TB
   end
 
   %% Trigger wiring
-  PR --> Unit & Lint & DockerCfg & CrateBuild & IT & Security
-  Push --> Unit & Lint & Coverage & Docs & Security & ReleaseWorkflow
+  PR --> Unit & Lint & DockerCfg & CrateBuild & PRGate & IT & Security
+  Push --> Unit & Lint & Coverage & PRGate & Docs & Security & ReleaseWorkflow
   ReleaseWorkflow --> ReleaseEvent
   ReleaseEvent --> ReleaseBinaries & DeployNodes
   Schedule --> IT
@@ -77,7 +78,7 @@ graph TB
   classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
   class BuildDocker primary
   class ReleaseWorkflow,ReleaseBinaries primary
-  class Unit,Lint,Coverage,DockerCfg,CrateBuild,Docs,Security secondary
+  class Unit,Lint,Coverage,DockerCfg,CrateBuild,PRGate,Docs,Security secondary
   class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
   class PR,Push,ReleaseEvent,Schedule,Manual trigger
 ```
@@ -155,9 +156,10 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates/updates release-plz Release PRs, then publishes crates, tags, and one app-authored `zebrad` GitHub Release after a Release PR merge
+- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 

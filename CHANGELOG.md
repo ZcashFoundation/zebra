@@ -5,6 +5,95 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to
+  the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg
+  or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
+
+## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
+
+### Changed
+
+- On Testnet, the `getblocktemplate` RPC no longer switches to a
+  minimum-difficulty block template early. Zebra previously treated a template
+  as minimum-difficulty as soon as its `cur_time` came within a fixed 150
+  seconds (`2 * PoWTargetSpacing` after Blossom) of the consensus
+  minimum-difficulty threshold, clamping `cur_time` up to just past the
+  threshold. On Testnet this future-dated the block's timestamp and produced
+  spurious minimum-difficulty blocks that depress difficulty far below its
+  equilibrium. Templates now switch to minimum difficulty only once `cur_time`
+  reaches the consensus threshold itself. This is a Testnet-only,
+  template-construction (non-consensus) change: it does not alter block
+  validity, and it does not change the difficulty-averaging rule that amplifies
+  each minimum-difficulty block into a large difficulty drop (tracked in
+  [zcash/zips#1321](https://github.com/zcash/zips/issues/1321))
+  ([#10873](https://github.com/ZcashFoundation/zebra/pull/10873))
+
+### Security
+
+- Allow chain synchronization to immediately retry an honest block body after rejecting a body
+  with the same header hash, without waiting for a child block to trigger cleanup
+  ([GHSA-x93j-mj2f-q338](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x93j-mj2f-q338)).
+- Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
+  underpaying and structurally invalid shielded mempool transactions before their expensive proof
+  verification, and disconnect peers that send transactions with invalid shielded proofs.
+
+## [Zebra 6.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.0) - 2026-07-17
+
+### Added
+
+- New regtest-only `generatetoaddress` RPC that mines blocks paying the coinbase
+  to a caller-specified address, instead of the configured `mining.miner_address`.
+  This lets a test harness fund several wallets from one node; it is used by the
+  zcashd wallet-conformance harness
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+- New _EXPERIMENTAL_ zcashd-compat mode (`zebrad start --zcashd-compat` or
+  `[zcashd_compat]` config section) for operators migrating from `zcashd` while
+  keeping its wallet and RPC surface: Zebra faces the Zcash network and always
+  includes the configured sidecar peers in block gossip (reserving them an
+  inbound connection slot), while a hard-locked `zcashd` wallet build runs as a
+  P2P sidecar with a single outbound connection to the local Zebra node. Zebra
+  can optionally download (SHA256-pinned), spawn, and supervise the sidecar
+  (`manage_zcashd = true`). Includes an interactive installer
+  (`scripts/install-zebra.sh`) with binary, Docker, and build-from-source modes,
+  a `runtime-zcashd-compat` Docker image stage, make targets, a sync-check
+  script, and a Zebra Book chapter (`user/zcashd-compat.md`)
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)). Credits to
+  [zakura](https://github.com/zakura-core/zakura) authors for the major part of
+  this implementation.
+
+### Fixed
+
+- The installer's `docker-supervised` mode now configures the embedded sidecar
+  source, so its generated command works with the published Zebra image
+  ([#11008](https://github.com/ZcashFoundation/zebra/pull/11008)).
+
+## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
+
+### Added
+
+- Added the `getstandardfee` RPC, a parameterless method returning the
+  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
+  zatoshis) with a `version` field for future dynamic fee estimation
+  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717)).
+
+### Security
+
+- Reserve space for the block header and transaction count when selecting block template
+  transactions, so blocks mined from Zebra's templates can no longer exceed the consensus size
+  limit ([GHSA-95m2-vx53-v2jw](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-95m2-vx53-v2jw)).
+- Avoid quadratic validation work when checking the remaining transparent value of blocks with
+  many transactions ([GHSA-4g24-549m-hp75](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4g24-549m-hp75)).
+- Prevent a peer from stalling chain synchronization by delivering a rejected
+  block body that shares its header hash with a later valid block
+  ([GHSA-8gxx-hc65-vv82](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8gxx-hc65-vv82)).
+- Score misbehavior for peers that directly push consensus-invalid transactions, matching the
+  treatment of peers that advertise them
+  ([GHSA-g7c4-2w6c-cr3r](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g7c4-2w6c-cr3r)).
+
 ## [Zebra 6.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.0.0) - 2026-07-10
 
 ### Added
@@ -57,10 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Added the `getstandardfee` RPC, a parameterless method returning the
-  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
-  zatoshis) with a `version` field for future dynamic fee estimation
-  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717))
 - Support for the NU6.3 "Ironwood" shielded pool and v6 transaction format,
   activating on Testnet at height 4,134,000. The consensus parameters (v6 version
   group ID, consensus branch ID, and Testnet activation height) match

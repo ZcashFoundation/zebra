@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The first peer disk-cache write is retried every 20 seconds until it succeeds, instead of
+  waiting the full 5-minute update interval, so a cold-started node caches its peers soon after
+  finding them ([#11073](https://github.com/ZcashFoundation/zebra/pull/11073)).
+
+## [10.2.0] - 2026-07-17
+
+### Added
+
+- `init_with_block_gossip_peer_ips`, an `init` variant that treats inbound peers
+  from the listed IP addresses as trusted zcashd-compat sidecars: they always receive
+  `AdvertiseBlock` inventory broadcasts (queued while the peer is busy), share a
+  reserved inbound connection pool of one slot per listed IP (falling back to public
+  slots and the normal rate limits when the pool is full), bypass the recent-IP
+  reconnection rate limit while a reserved slot is free, and are exempt from the
+  `FindBlocks`/`FindHeaders` stall detector. Callers must only list IPs where every
+  process is trusted
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+
+## [10.1.1] - 2026-07-17
+
+### Changed
+
+- `zebra-chain` dependency bumped to `11.2.0`.
+
 ## [10.1.0] - 2026-07-10
 
 ### Changed

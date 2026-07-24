@@ -2747,12 +2747,7 @@ fn v4_with_modified_joinsplit_is_rejected() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         v4_with_joinsplit_is_rejected_for_modification(
             JoinSplitModification::CorruptSignature,
-            // TODO: Fix error downcast
-            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
-            TransactionError::InternalDowncastError(
-                "downcast to known transaction error type failed, original error: InvalidSignature"
-                    .to_string(),
-            ),
+            TransactionError::Ed25519(ed25519::Error::InvalidSignature),
         )
         .await;
 
@@ -4169,16 +4164,8 @@ async fn mempool_zip317_error() {
                     .map(|utxo| utxo.utxo.clone()),
             ));
 
-        state
-            .expect_request_that(|req| {
-                matches!(
-                    req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                )
-            })
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+        // ZIP-317 policy is checked before expensive cryptographic verification, so the
+        // verifier never reaches the anchor/nullifier check for this transaction.
     });
 
     let verifier_response = verifier
