@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Fixed
 
 - Outbound peer slots no longer fill up with peers that advertise no services, which could stall
-  a fresh sync at genesis when most reachable listeners are non-serving. Zebra now rejects such
-  peers during the outbound handshake and remembers their advertised services, so it doesn't
-  re-dial or gossip them ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
+  a fresh sync at genesis when most reachable listeners are non-serving. While syncing, Zebra
+  now requires the `NODE_NETWORK` service from outbound peers; at or near the network tip it
+  accepts non-serving peers (like pruned nodes) again
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
 
 ## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
 

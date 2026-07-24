@@ -650,6 +650,12 @@ where
         .single()
         .expect("in-range number of seconds and valid nanosecond");
 
+    // Whether this node is still syncing, used below to decide whether outbound peers must
+    // advertise `NODE_NETWORK`. Read before the match below, which can move `config.network`.
+    let is_syncing = !minimum_peer_version
+        .chain_tip()
+        .is_at_or_near_network_tip(&config.network);
+
     let (their_addr, our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
@@ -785,13 +791,17 @@ where
 
     // # Security
     //
-    // Require `NODE_NETWORK` from outbound peers, because peers without it can't serve us
-    // blocks or transactions, but still occupy outbound slots and receive syncer block
-    // requests. When many reachable listeners are non-serving, those slots can fill up and
-    // stall a fresh sync (#11061).
+    // While syncing, require `NODE_NETWORK` from outbound peers: peers without it can't serve
+    // us historic blocks, but still occupy outbound slots and receive syncer block requests.
+    // When many reachable listeners are non-serving, those slots can fill up and stall a fresh
+    // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
+    // initial block download.
     //
-    // Inbound and isolated connections are exempt, so light clients can still connect to us.
-    if matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
+    // At or near the network tip the requirement is dropped, because non-serving peers (like
+    // pruned nodes) can still serve recent blocks and transactions. Inbound and isolated
+    // connections are always exempt, so light clients can still connect to us.
+    if is_syncing
+        && matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
         && !remote.services.contains(PeerServices::NODE_NETWORK)
     {
         debug!(
@@ -1010,18 +1020,9 @@ where
                     )
                     .increment(1);
 
-                    // Record the services advertised by a non-serving peer, so the crawler
-                    // stops re-dialing it (#11061). Other handshake errors don't tell us the
-                    // peer's services, so they leave the address book unchanged, and the peer
-                    // can be attempted again later.
-                    if let HandshakeError::MissingRequiredServices { services } = &err {
-                        if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                            let _ = address_book_updater
-                                .send(MetaAddr::new_errored(book_addr, *services))
-                                .await;
-                        }
-                    }
-
+                    // Rejected non-serving peers are reported by the crawler's `report_failed`
+                    // without their services, so they get the standard failure backoff and can
+                    // be dialed again once the node is near the network tip (#11061).
                     return Err(err);
                 }
             };

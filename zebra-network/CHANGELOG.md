@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Outbound connections to peers that don't advertise `NODE_NETWORK` are rejected during the
-  handshake, and the peer's advertised services are recorded in the address book, so the peer is
-  no longer re-dialed or gossiped. Inbound and isolated connections are unaffected
+- While the node is syncing, outbound connections to peers that don't advertise `NODE_NETWORK`
+  are rejected during the handshake, so a fresh sync's outbound slots aren't occupied by
+  non-serving peers. At or near the network tip, such peers (like pruned nodes, which can serve
+  recent blocks) are accepted again. Inbound and isolated connections are unaffected
   ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
 
 ## [10.2.0] - 2026-07-17

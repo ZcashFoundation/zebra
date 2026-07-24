@@ -61,10 +61,16 @@ fn spawn_remote_peer(
 }
 
 /// Negotiates a handshake with a scripted remote peer advertising `remote_services`,
-/// on a connection with the given `connected_addr` direction.
+/// on a connection with the given `connected_addr` direction, with the local node's sync
+/// state taken from `chain_tip`.
+///
+/// [`NoChainTip`] means the local node is still syncing; use a
+/// [`MockChainTip`](zebra_chain::chain_tip::mock::MockChainTip) with an estimated distance of
+/// zero for a node at the network tip.
 async fn negotiate_with_remote_services(
     connected_addr: ConnectedAddr,
     remote_services: PeerServices,
+    chain_tip: impl ChainTip + Clone + Send + 'static,
 ) -> Result<Arc<ConnectionInfo>, HandshakeError> {
     let network = Network::Mainnet;
     let config = Config {
@@ -90,7 +96,7 @@ async fn negotiate_with_remote_services(
             "/test-local/".to_string(),
             PeerServices::NODE_NETWORK,
             false,
-            MinimumPeerVersion::new(NoChainTip, &network),
+            MinimumPeerVersion::new(chain_tip, &network),
         ),
     )
     .await
@@ -101,13 +107,27 @@ async fn negotiate_with_remote_services(
     result
 }
 
-/// Outbound direct handshakes must reject peers that don't advertise `NODE_NETWORK`.
+/// Returns a [`ChainTip`] that reports the local node as being at the network tip,
+/// and the sender that keeps it alive.
+fn chain_tip_at_network_tip() -> (
+    zebra_chain::chain_tip::mock::MockChainTip,
+    zebra_chain::chain_tip::mock::MockChainTipSender,
+) {
+    let (chain_tip, sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+    sender.send_best_tip_height(block::Height(3_000_000));
+    sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    (chain_tip, sender)
+}
+
+/// While syncing, outbound direct handshakes must reject peers that don't advertise
+/// `NODE_NETWORK`.
 #[tokio::test]
-async fn outbound_direct_rejects_non_serving_peer() {
+async fn outbound_direct_rejects_non_serving_peer_while_syncing() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
-    let result = negotiate_with_remote_services(connected_addr, PeerServices::empty()).await;
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     assert!(
         matches!(
@@ -118,16 +138,18 @@ async fn outbound_direct_rejects_non_serving_peer() {
     );
 }
 
-/// Outbound proxy handshakes must reject peers that don't advertise `NODE_NETWORK`.
+/// While syncing, outbound proxy handshakes must reject peers that don't advertise
+/// `NODE_NETWORK`.
 #[tokio::test]
-async fn outbound_proxy_rejects_non_serving_peer() {
+async fn outbound_proxy_rejects_non_serving_peer_while_syncing() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_outbound_proxy(
         "127.0.0.1:9050".parse().unwrap(),
         "127.0.0.1:32000".parse().unwrap(),
     );
-    let result = negotiate_with_remote_services(connected_addr, PeerServices::empty()).await;
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     assert!(
         matches!(
@@ -145,7 +167,8 @@ async fn inbound_direct_accepts_non_serving_peer() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_inbound_direct("127.0.0.1:32000".parse().unwrap());
-    let result = negotiate_with_remote_services(connected_addr, PeerServices::empty()).await;
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     let connection_info = result.expect("inbound handshake with a non-serving peer succeeds");
     assert_eq!(connection_info.remote.services, PeerServices::empty());
@@ -157,9 +180,26 @@ async fn isolated_accepts_non_serving_peer() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_isolated();
-    let result = negotiate_with_remote_services(connected_addr, PeerServices::empty()).await;
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     result.expect("isolated handshake with a non-serving peer succeeds");
+}
+
+/// At or near the network tip, outbound handshakes must accept peers that don't advertise
+/// `NODE_NETWORK`, so Zebra can peer with pruned nodes that serve recent blocks.
+#[tokio::test]
+async fn outbound_direct_accepts_non_serving_peer_at_tip() {
+    let _init_guard = zebra_test::init();
+
+    let (chain_tip, _sender) = chain_tip_at_network_tip();
+    let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::empty(), chain_tip).await;
+
+    let connection_info =
+        result.expect("outbound handshake with a non-serving peer at the network tip succeeds");
+    assert_eq!(connection_info.remote.services, PeerServices::empty());
 }
 
 /// Outbound handshakes must accept peers that advertise `NODE_NETWORK`.
@@ -168,16 +208,20 @@ async fn outbound_direct_accepts_serving_peer() {
     let _init_guard = zebra_test::init();
 
     let connected_addr = ConnectedAddr::new_outbound_direct("127.0.0.1:8233".parse().unwrap());
-    let result = negotiate_with_remote_services(connected_addr, PeerServices::NODE_NETWORK).await;
+    let result =
+        negotiate_with_remote_services(connected_addr, PeerServices::NODE_NETWORK, NoChainTip)
+            .await;
 
     let connection_info = result.expect("outbound handshake with a serving peer succeeds");
     assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
 }
 
-/// A rejected non-serving outbound peer must have its advertised services recorded in the
-/// address book, so the crawler stops re-dialing it.
+/// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
+/// handshake: the rejection only applies while syncing, and storing non-serving services would
+/// permanently exclude the peer from outbound connections, so it could never be dialed once
+/// the node reaches the network tip. The crawler records a plain retryable failure instead.
 #[tokio::test]
-async fn rejected_non_serving_peer_is_recorded_in_address_book() {
+async fn rejected_non_serving_peer_is_not_recorded_with_services() {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
@@ -224,14 +268,10 @@ async fn rejected_non_serving_peer_is_recorded_in_address_book() {
         "outbound handshake with a non-serving peer must fail",
     );
 
-    let change = address_book_rx
-        .recv()
-        .await
-        .expect("the handshake sends an update for the rejected peer");
-    assert_eq!(change.addr(), book_addr);
-    assert_eq!(change.untrusted_services(), Some(PeerServices::empty()));
+    // Any address book update would have been sent before the handshake future returned, so
+    // an empty channel here means the handshake recorded nothing for the rejected peer.
     assert!(
-        matches!(change, MetaAddrChange::UpdateFailed { .. }),
-        "expected UpdateFailed, got: {change:?}",
+        address_book_rx.try_recv().is_err(),
+        "unexpected address book update from a rejected handshake for {book_addr}",
     );
 }
