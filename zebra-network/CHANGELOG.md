@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.2.1] - 2026-07-24
+
 ### Changed
 
 - The first peer disk-cache write is retried every 20 seconds until it succeeds, instead of

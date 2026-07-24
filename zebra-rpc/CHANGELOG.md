@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.0] - 2026-07-24
+
 ### Breaking Changes
 
 - `getblock` verbosity 2 now returns transaction objects for side-chain blocks with `height` set to `-1` and `confirmations` set to `0`, instead of panicking while serializing them ([#10606](https://github.com/ZcashFoundation/zebra/pull/10606)).

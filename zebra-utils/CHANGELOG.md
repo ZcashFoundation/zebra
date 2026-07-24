@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.4] - 2026-07-24
+
 ### Security
 
 - `zebrad-log-filter` no longer runs log text as a shell command. Previously a log line
