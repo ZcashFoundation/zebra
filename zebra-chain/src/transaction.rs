@@ -323,9 +323,9 @@ impl Transaction {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
             Transaction::V5 { .. } => Some(AuthDigest::from(self)),
-            // TODO: fold `TachyonBundle::auth_digest()` into the V7 auth digest once the tachyon
-            // digests are specified. Until then the tachyon bundle does not contribute to the
-            // auth digest (or the wtxid derived from it), consistent with the txid and sighash.
+            // The V7 auth digest (computed through librustzcash) includes the tachyon bundle's
+            // `auth_digest()` contribution: its action signatures, binding signature, and stamp
+            // digest. So V7 wtxids commit to the full tachyon bundle.
             Transaction::V6 { .. } | Transaction::V7 { .. } => Some(AuthDigest::from(self)),
         }
     }

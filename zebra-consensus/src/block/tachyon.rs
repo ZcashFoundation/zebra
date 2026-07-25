@@ -86,9 +86,9 @@ pub(crate) fn coherence(block: &Block) -> Result<Vec<AggregateCoverage>, BlockEr
                     }
                 }
 
-                // TODO: the V7 auth digest does not include the tachyon bundle's `auth_digest()`
-                // contribution yet, so these wtxids are provisional; they are internally
-                // consistent with the wtxids that pointer stamps in this Zebra fork carry.
+                // The V7 auth digest includes the tachyon bundle's `auth_digest()` contribution,
+                // so these wtxids commit to the aggregate's full bundle (signatures and stamp
+                // included), unambiguously pinning the specific auth state a pointer stamp names.
                 let wtxid = WtxId::from(transaction.as_ref()).as_bytes();
 
                 aggregates_by_wtxid.insert(wtxid, aggregates.len());

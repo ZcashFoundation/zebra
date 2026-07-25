@@ -1297,10 +1297,10 @@ where
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
         let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
 
-        // TODO: the NU7 sighash does not yet commit to the tachyon bundle
-        // (`TachyonBundle::commitment()`). Fold it in (together with the tachyon `auth_digest`
-        // contribution) once the tachyon transaction digests are specified, and regenerate the
-        // signed test fixtures.
+        // The NU7 sighash (computed through librustzcash) commits to the tachyon bundle's
+        // effecting data (`TachyonBundle::commitment()`: `hActionsTachyon` and
+        // `valueBalanceTachyon`), so the tachyon signatures verified below transitively commit
+        // to the bundle itself. The stamp is excluded as malleable authorizing data.
         let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
