@@ -8,8 +8,8 @@ To profile Zebra, you can use the [samply](https://github.com/mstange/samply)
 profiler. Once you have it installed, you can run:
 
 ```bash
-cargo build --release
-sudo samply record ./target/release/zebrad
+cargo build --profile profiling
+sudo samply record ./target/profiling/zebrad
 ```
 
 You can then press `Ctrl+c`, and the profiler will instruct you to navigate your
