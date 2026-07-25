@@ -198,8 +198,8 @@ impl FinalizedState {
             let transport = TransportBuilder::new(conn_pool)
                 .cert_validation(CertificateValidation::None)
                 .auth(Basic(
-                    config.clone().elasticsearch_username,
-                    config.clone().elasticsearch_password,
+                    config.elasticsearch_username.clone(),
+                    config.elasticsearch_password.as_str().to_string(),
                 ))
                 .build()
                 .expect("elasticsearch transport builder should not fail");

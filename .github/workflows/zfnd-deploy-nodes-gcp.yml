@@ -577,8 +577,32 @@ jobs:
             *) echo "::error::unsupported event"; exit 1 ;;
           esac
           MIG_NAME="zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+          {
+            echo "MIG_NAME=${MIG_NAME}"
+            echo "ZONE=${ZONE}"
+          } >> "$GITHUB_ENV"
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
             --stable --zone="${ZONE}" --timeout=5400
+
+      # Surface the failing instance's health state and container logs.
+      - name: Diagnose verify failure
+        if: failure()
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+        run: |
+          gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" \
+            --format='table(instance.basename(),instanceStatus,currentAction,instanceHealth[0].detailedHealthState,lastAttempt.errors.errors[0].message)' || true
+          INSTANCE=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" --format='value(instance.basename())' | head -1 || true)
+          if [ -z "${INSTANCE}" ]; then
+            echo "MIG ${MIG_NAME} has no instance"
+            exit 0
+          fi
+          INSTANCE_ID=$(gcloud compute instances describe "${INSTANCE}" \
+            --zone="${ZONE}" --format='value(id)' || true)
+          gcloud logging read "logName=\"projects/${GCP_PROJECT}/logs/cos_containers\" AND resource.labels.instance_id=\"${INSTANCE_ID}\"" \
+            --freshness=2h --limit=50 --format='value(jsonPayload.message)' | tac || true
 
   deploy-nodes-success:
     name: Deploy nodes success

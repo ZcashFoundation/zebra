@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
 ## [13.0.0] - 2026-07-22
 
 ### Added
@@ -15,10 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `transaction::Verifier::check_maturity_height` is now private and takes `tx`, `height`,
-  `network`, and `spent_utxos` directly instead of `&Request`
-  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
 - `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
 
 ### Security
 
