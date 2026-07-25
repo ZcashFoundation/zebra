@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
+  ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
