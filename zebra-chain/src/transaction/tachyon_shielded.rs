@@ -10,8 +10,34 @@
 
 use zcash_tachyon::TachyonBundle;
 
+/// The tachyon shielded data in a V7 transaction: a [`TachyonBundle`] in one of its wire states
+/// (proof-stamped or pointer-stamped; `NoBundle` is represented as `None` at the transaction
+/// level).
 #[derive(Clone, Debug)]
 pub struct TachyonShieldedData(pub TachyonBundle);
+
+impl TachyonShieldedData {
+    /// The bundle's actions, regardless of stamp state.
+    ///
+    /// Empty for `NoBundle`, which Zebra never stores here — `serialize.rs` maps it to a `None`
+    /// `tachyon_shielded_data` field instead.
+    pub fn actions(&self) -> &[zcash_tachyon::Action] {
+        match &self.0 {
+            TachyonBundle::NoBundle => &[],
+            TachyonBundle::Proven(bundle) => &bundle.actions,
+            TachyonBundle::Adjunct(bundle) => &bundle.actions,
+        }
+    }
+
+    /// The bundle's value balance (zero for `NoBundle`).
+    pub fn value_balance(&self) -> zcash_tachyon::value::Balance {
+        match &self.0 {
+            TachyonBundle::NoBundle => zcash_tachyon::value::Balance::ZERO,
+            TachyonBundle::Proven(bundle) => bundle.value_balance,
+            TachyonBundle::Adjunct(bundle) => bundle.value_balance,
+        }
+    }
+}
 
 impl From<TachyonBundle> for TachyonShieldedData {
     fn from(bundle: TachyonBundle) -> Self {
@@ -47,9 +73,9 @@ impl<'de> serde::Deserialize<'de> for TachyonShieldedData {
         use serde::de::Error as _;
         let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
         match TachyonBundle::read(&bytes[..]).map_err(D::Error::custom)? {
-            TachyonBundle::NoBundle => {
-                Err(D::Error::custom("tachyon bundle absent in wrapped serialization"))
-            }
+            TachyonBundle::NoBundle => Err(D::Error::custom(
+                "tachyon bundle absent in wrapped serialization",
+            )),
             bundle => Ok(Self(bundle)),
         }
     }

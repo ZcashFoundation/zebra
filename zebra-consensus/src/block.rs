@@ -36,6 +36,8 @@ use crate::{error::*, transaction as tx, BoxError};
 pub mod check;
 pub mod request;
 pub mod subsidy;
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+pub(crate) mod tachyon;
 
 pub use request::Request;
 
@@ -256,6 +258,20 @@ where
 
             check::merkle_root_validity(&network, &block, &transaction_hashes)?;
 
+            // Block-level tachyon coherence rules (cheap synchronous scan), then the resulting
+            // proof-stamp verification work items are pushed onto the rayon threadpool, so proofs
+            // verify concurrently with the per-transaction checks below.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+            let mut tachyon_checks = tachyon::coherence(&block)?
+                .into_iter()
+                .map(|aggregate| {
+                    crate::primitives::tachyon::verify_proof_stamp(
+                        aggregate.stamp,
+                        aggregate.covered_descriptors,
+                    )
+                })
+                .collect::<FuturesUnordered<_>>();
+
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
@@ -332,6 +348,12 @@ where
                 if let Some(miner_fee) = response.miner_fee() {
                     block_miner_fees += miner_fee;
                 }
+            }
+
+            // Get the tachyon proof-stamp verification results back from the rayon threadpool.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+            while let Some(result) = tachyon_checks.next().await {
+                result?;
             }
 
             // Check the summed block totals

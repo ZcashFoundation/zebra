@@ -1213,10 +1213,9 @@ mod v7_tests {
         let sk = SigningKey::<SpendAuth>::try_from(sk_bytes).unwrap();
         let pk = VerificationKey::<SpendAuth>::from(&sk);
         let pk_bytes = <[u8; 32]>::from(pk);
-        let point = Option::<pasta_curves::EpAffine>::from(pasta_curves::EpAffine::from_bytes(
-            &pk_bytes,
-        ))
-        .expect("verification key is a valid curve point");
+        let point =
+            Option::<pasta_curves::EpAffine>::from(pasta_curves::EpAffine::from_bytes(&pk_bytes))
+                .expect("verification key is a valid curve point");
         zcash_tachyon::keys::public::ActionVerificationKey::try_from(point).unwrap()
     }
 
@@ -1245,7 +1244,6 @@ mod v7_tests {
             network_upgrade: NetworkUpgrade::Nu7,
             lock_time: LockTime::min_lock_time_timestamp(),
             expiry_height: block::Height(0),
-            zip233_amount: Amount::try_from(0).unwrap(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             sapling_shielded_data: None,
@@ -1272,8 +1270,7 @@ mod v7_tests {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
-                zip233_amount: Amount::try_from(0).unwrap(),
-                inputs: Vec::new(),
+                    inputs: Vec::new(),
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
@@ -1308,8 +1305,7 @@ mod v7_tests {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
-                zip233_amount: Amount::try_from(0).unwrap(),
-                inputs: Vec::new(),
+                    inputs: Vec::new(),
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
@@ -1358,7 +1354,6 @@ mod v7_tests {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
                 expiry_height: block::Height(0),
-                zip233_amount: Amount::try_from(500).unwrap(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
@@ -1429,12 +1424,12 @@ mod v7_tests {
             (
                 "EMPTY_V7_TX",
                 &EMPTY_V7_TX,
-                "0700008068636174d80a19770065cd1d00000000000000000000000000000000000000",
+                "0700008068636174d80a19770065cd1d0000000000000000000000",
             ),
             (
                 "V7_TX_TACHYON_STRIPPED",
                 &V7_TX_TACHYON_STRIPPED,
-                "0700008068636174d80a19770065cd1d0000000000000000000000000000000000000200000000000000000100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "0700008068636174d80a19770065cd1d000000000000000000000200000000000000000100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             ),
         ];
 
@@ -1471,6 +1466,41 @@ mod v7_tests {
             let bytes2 = decoded.zcash_serialize_to_vec().expect("re-serialize");
             assert_eq!(bytes, bytes2, "{name} re-serialization differs");
         }
+    }
+
+    /// The V7 value balance includes the tachyon pool, so the remaining transaction value
+    /// (miner fee) accounts for the tachyon bundle's value balance.
+    #[test]
+    fn v7_value_balance_includes_tachyon() {
+        let _init_guard = zebra_test::init();
+
+        // Tachyon value balance +300.
+        let value_balance = V7_TX_TACHYON_MULTI_ACTION
+            .value_balance_from_outputs(&std::collections::HashMap::new())
+            .expect("value balance should be computable");
+
+        assert_eq!(
+            value_balance.tachyon_amount(),
+            Amount::<NegativeAllowed>::try_from(300).expect("valid amount"),
+        );
+        assert_eq!(
+            value_balance
+                .remaining_transaction_value()
+                .expect("remaining value is non-negative"),
+            Amount::<NonNegative>::try_from(300).expect("valid amount"),
+        );
+
+        // Tachyon value balance +100.
+        let value_balance = V7_TX_TACHYON_STAMPED
+            .value_balance_from_outputs(&std::collections::HashMap::new())
+            .expect("value balance should be computable");
+
+        assert_eq!(
+            value_balance
+                .remaining_transaction_value()
+                .expect("remaining value is non-negative"),
+            Amount::<NonNegative>::try_from(100).expect("valid amount"),
+        );
     }
 }
 

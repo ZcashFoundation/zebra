@@ -891,3 +891,59 @@ pub fn consensus_branch_id(
 
     Ok(())
 }
+
+/// Checks that no tachyon action's value commitment or verification key is the identity point.
+///
+/// # Consensus
+///
+/// > An action's cv and rk MUST NOT be the identity point
+///
+/// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
+///
+/// The identity point decodes successfully at parse time, so it must be rejected here. The action
+/// digest hashes affine coordinates, which the identity point lacks, so [`digest`] failing is
+/// exactly this rule.
+///
+/// [`digest`]: zcash_tachyon::action::Descriptor::digest
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+pub fn tachyon_actions_have_valid_digests(tx: &Transaction) -> Result<(), TransactionError> {
+    let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
+        return Ok(());
+    };
+
+    for action in tachyon_shielded_data.actions() {
+        action
+            .digest()
+            .map_err(|err| TransactionError::TachyonIdentityAction(err.to_string()))?;
+    }
+
+    Ok(())
+}
+
+/// Checks that the tachygrams within a tachyon proof stamp are distinct.
+///
+/// # Consensus
+///
+/// > The tachygrams within one proof stamp MUST be distinct
+///
+/// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
+///
+/// Parsing already rejects unsorted tachygram lists, but sortedness permits equal neighbours, so
+/// distinctness reduces to checking that no adjacent pair is equal. Pointer-stamped bundles carry
+/// no tachygrams, so there is nothing to check for them.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+pub fn tachyon_tachygrams_are_distinct(tx: &Transaction) -> Result<(), TransactionError> {
+    let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
+        return Ok(());
+    };
+
+    if let zcash_tachyon::TachyonBundle::Proven(bundle) = &tachyon_shielded_data.0 {
+        let tachygrams = &bundle.stamp.tachygrams;
+
+        if tachygrams.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(TransactionError::TachyonDuplicateTachygram);
+        }
+    }
+
+    Ok(())
+}

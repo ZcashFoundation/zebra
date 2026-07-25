@@ -27,6 +27,7 @@ pub struct ValueBalance<C> {
     orchard: Amount<C>,
     deferred: Amount<C>,
     ironwood: Amount<C>,
+    tachyon: Amount<C>,
 }
 
 impl<C> ValueBalance<C>
@@ -69,6 +70,14 @@ where
     pub fn from_ironwood_amount(ironwood_amount: Amount<C>) -> Self {
         ValueBalance {
             ironwood: ironwood_amount,
+            ..ValueBalance::zero()
+        }
+    }
+
+    /// Creates a [`ValueBalance`] from the given tachyon amount.
+    pub fn from_tachyon_amount(tachyon_amount: Amount<C>) -> Self {
+        ValueBalance {
+            tachyon: tachyon_amount,
             ..ValueBalance::zero()
         }
     }
@@ -147,6 +156,18 @@ where
         self
     }
 
+    /// Get the tachyon amount from the [`ValueBalance`].
+    pub fn tachyon_amount(&self) -> Amount<C> {
+        self.tachyon
+    }
+
+    /// Insert a tachyon value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_tachyon_value_balance(&mut self, tachyon_value_balance: ValueBalance<C>) -> &Self {
+        self.tachyon = tachyon_value_balance.tachyon;
+        self
+    }
+
     /// Creates a [`ValueBalance`] where all the pools are zero.
     pub fn zero() -> Self {
         let zero = Amount::zero();
@@ -157,6 +178,7 @@ where
             orchard: zero,
             deferred: zero,
             ironwood: zero,
+            tachyon: zero,
         }
     }
 
@@ -173,6 +195,7 @@ where
             orchard: self.orchard.constrain().map_err(Orchard)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
             ironwood: self.ironwood.constrain().map_err(Ironwood)?,
+            tachyon: self.tachyon.constrain().map_err(Tachyon)?,
         })
     }
 }
@@ -198,8 +221,16 @@ impl ValueBalance<NegativeAllowed> {
         // The ironwood bundle (NU6.3 onward) contributes to the transaction value pool exactly
         // like the orchard bundle; it is zero for transactions without an ironwood bundle.
         //
+        // The tachyon bundle (NU7, experimental) contributes like the other shielded pools; it is
+        // zero for transactions without a tachyon bundle.
+        //
         // This will error if the remaining value in the transaction value pool is negative.
-        (self.transparent + self.sprout + self.sapling + self.orchard + self.ironwood)?
+        (self.transparent
+            + self.sprout
+            + self.sapling
+            + self.orchard
+            + self.ironwood
+            + self.tachyon)?
             .constrain::<NonNegative>()
     }
 }
@@ -338,22 +369,25 @@ impl ValueBalance<NonNegative> {
             ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
         let fake_ironwood_value_balance =
             ValueBalance::from_ironwood_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+        let fake_tachyon_value_balance =
+            ValueBalance::from_tachyon_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
 
         fake_value_pool.set_transparent_value_balance(fake_transparent_value_balance);
         fake_value_pool.set_sprout_value_balance(fake_sprout_value_balance);
         fake_value_pool.set_sapling_value_balance(fake_sapling_value_balance);
         fake_value_pool.set_orchard_value_balance(fake_orchard_value_balance);
         fake_value_pool.set_ironwood_value_balance(fake_ironwood_value_balance);
+        fake_value_pool.set_tachyon_value_balance(fake_tachyon_value_balance);
 
         fake_value_pool
     }
 
     /// To byte array
     ///
-    /// The `ironwood` pool (NU6.3 onward) is appended after `deferred`, so that records written by
-    /// earlier Zebra versions (32 bytes without `deferred`, or 40 bytes with it) remain parsable by
-    /// [`Self::from_bytes`].
-    pub fn to_bytes(self) -> [u8; 48] {
+    /// New pools are appended in the order they were added (`ironwood` at NU6.3, then `tachyon`
+    /// at NU7), so that records written by earlier Zebra versions (32 bytes without `deferred`,
+    /// 40 bytes with it, or 48 bytes with `ironwood`) remain parsable by [`Self::from_bytes`].
+    pub fn to_bytes(self) -> [u8; 56] {
         match [
             self.transparent.to_bytes(),
             self.sprout.to_bytes(),
@@ -361,28 +395,29 @@ impl ValueBalance<NonNegative> {
             self.orchard.to_bytes(),
             self.deferred.to_bytes(),
             self.ironwood.to_bytes(),
+            self.tachyon.to_bytes(),
         ]
         .concat()
         .try_into()
         {
             Ok(bytes) => bytes,
             _ => unreachable!(
-                "six [u8; 8] should always concat with no error into a single [u8; 48]"
+                "seven [u8; 8] should always concat with no error into a single [u8; 56]"
             ),
         }
     }
 
     /// From byte array
     ///
-    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), and 48-byte records; missing
-    /// trailing pools default to zero.
+    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), 48-byte (pre-`tachyon`), and
+    /// 56-byte records; missing trailing pools default to zero.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
 
         // Return an error early if bytes don't have the right length instead of panicking later.
         match bytes_length {
-            32 | 40 | 48 => {}
+            32 | 40 | 48 | 56 => {}
             _ => return Err(Unparsable),
         };
 
@@ -416,7 +451,7 @@ impl ValueBalance<NonNegative> {
 
         let deferred = match bytes_length {
             32 => Amount::zero(),
-            40 | 48 => Amount::from_bytes(
+            40 | 48 | 56 => Amount::from_bytes(
                 bytes[32..40]
                     .try_into()
                     .expect("deferred amount should be parsable"),
@@ -427,12 +462,23 @@ impl ValueBalance<NonNegative> {
 
         let ironwood = match bytes_length {
             32 | 40 => Amount::zero(),
-            48 => Amount::from_bytes(
+            48 | 56 => Amount::from_bytes(
                 bytes[40..48]
                     .try_into()
                     .expect("ironwood amount should be parsable"),
             )
             .map_err(Ironwood)?,
+            _ => return Err(Unparsable),
+        };
+
+        let tachyon = match bytes_length {
+            32 | 40 | 48 => Amount::zero(),
+            56 => Amount::from_bytes(
+                bytes[48..56]
+                    .try_into()
+                    .expect("tachyon amount should be parsable"),
+            )
+            .map_err(Tachyon)?,
             _ => return Err(Unparsable),
         };
 
@@ -443,6 +489,7 @@ impl ValueBalance<NonNegative> {
             orchard,
             deferred,
             ironwood,
+            tachyon,
         })
     }
 }
@@ -468,6 +515,9 @@ pub enum ValueBalanceError {
     /// ironwood amount error {0}
     Ironwood(amount::Error),
 
+    /// tachyon amount error {0}
+    Tachyon(amount::Error),
+
     /// ValueBalance is unparsable
     Unparsable,
 }
@@ -481,6 +531,7 @@ impl fmt::Display for ValueBalanceError {
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
             Ironwood(e) => format!("ironwood amount err: {e}"),
+            Tachyon(e) => format!("tachyon amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
     }
@@ -499,6 +550,7 @@ where
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood + rhs.ironwood).map_err(Ironwood)?,
+            tachyon: (self.tachyon + rhs.tachyon).map_err(Tachyon)?,
         })
     }
 }
@@ -549,6 +601,7 @@ where
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood - rhs.ironwood).map_err(Ironwood)?,
+            tachyon: (self.tachyon - rhs.tachyon).map_err(Tachyon)?,
         })
     }
 }
@@ -619,6 +672,7 @@ where
             orchard: self.orchard.neg(),
             deferred: self.deferred.neg(),
             ironwood: self.ironwood.neg(),
+            tachyon: self.tachyon.neg(),
         }
     }
 }

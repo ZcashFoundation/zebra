@@ -23,7 +23,7 @@ use zebra_chain::{
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 48];
+    type Bytes = [u8; 56];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
@@ -176,13 +176,23 @@ impl IntoDisk for BlockInfo {
 
 impl FromDisk for BlockInfo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        // Records are exactly 52 bytes from NU6.3 onward (48-byte value pool incl. the ironwood
-        // pool, plus the 4-byte block size) and exactly 44 bytes for records written by earlier
-        // Zebra versions (40-byte value pool plus 4-byte size). We discriminate the two layouts by
-        // length, and stay forward-compatible by reading the known prefix
+        // Records are exactly 60 bytes from NU7 onward (56-byte value pool incl. the tachyon
+        // pool, plus the 4-byte block size), exactly 52 bytes for NU6.3-era records
+        // (48-byte value pool incl. the ironwood pool, plus size), and exactly 44 bytes for records
+        // written by earlier Zebra versions (40-byte value pool plus size). We discriminate the
+        // layouts by length, and stay forward-compatible by reading the known prefix
         // and ignoring any unexpected trailing bytes.
         match bytes.as_ref().len() {
-            // NU6.3 onward (and any forward-compatible larger record): 48-byte pool + 4-byte size.
+            // NU7 onward (and any forward-compatible larger record): 56-byte pool + 4-byte size.
+            60.. => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..56])
+                    .expect("must work for 56 bytes");
+                let size =
+                    u32::from_le_bytes(bytes.as_ref()[56..60].try_into().expect("must be 4 bytes"));
+                BlockInfo::new(value_pools, size)
+            }
+            // NU6.3-era records (exactly 52 bytes; the 60.. arm above already took every NU7
+            // record).
             52.. => {
                 let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..48])
                     .expect("must work for 48 bytes");
@@ -190,8 +200,8 @@ impl FromDisk for BlockInfo {
                     u32::from_le_bytes(bytes.as_ref()[48..52].try_into().expect("must be 4 bytes"));
                 BlockInfo::new(value_pools, size)
             }
-            // Pre-NU6.3 records (exactly 44 bytes; the open range stays forward-compatible, and the
-            // 52.. arm above already took every NU6.3 record).
+            // Pre-NU6.3 records (exactly 44 bytes; the arms above already took every larger
+            // record).
             44.. => {
                 let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..40])
                     .expect("must work for 40 bytes");
