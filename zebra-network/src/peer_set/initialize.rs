@@ -855,7 +855,8 @@ enum CrawlerAction {
     ///
     /// If there are no available candidates, crawl existing peers.
     DemandHandshakeOrCrawl,
-    /// Crawl existing peers for more peers in response to a timer `tick`.
+    /// Crawl existing peers for more peers, and queue dial attempts to fill
+    /// any spare outbound connection capacity, in response to a timer `tick`.
     TimerCrawl { tick: Instant },
     /// Clear a finished handshake.
     HandshakeFinished,
@@ -872,6 +873,11 @@ enum CrawlerAction {
 /// Crawl for new peers every `config.crawl_new_peer_interval`.
 /// Also crawl whenever there is demand, but no new peers in `candidates`.
 /// After crawling, try to connect to one new peer using `outbound_connector`.
+///
+/// On every crawl timer tick, also queue a dial attempt for each spare outbound
+/// connection slot that has a candidate ready to dial, so the peer set keeps
+/// growing until it reaches `config.peerset_outbound_connection_limit()` or
+/// runs out of ready candidates.
 ///
 /// If a handshake fails, restore the unused demand signal by sending it to
 /// `demand_tx`.
@@ -1043,7 +1049,7 @@ where
                             // There weren't any peers, so try to get more peers.
                             debug!("demand for peers but no available candidates");
 
-                            crawl(candidates, demand_tx, false).await?;
+                            crawl(candidates, demand_tx).await?;
 
                             Ok(DemandCrawlFinished)
                         }
@@ -1056,17 +1062,37 @@ where
             }
             Ok(TimerCrawl { tick }) => {
                 let candidates = candidates.clone();
-                let demand_tx = demand_tx.clone();
-                let should_always_dial = active_outbound_connections.update_count() == 0;
+                let crawl_demand_tx = demand_tx.clone();
+                let spare_capacity = config
+                    .peerset_outbound_connection_limit()
+                    .saturating_sub(active_outbound_connections.update_count());
 
                 let crawl_handle = tokio::spawn(
                     async move {
                         debug!(
                             ?tick,
+                            spare_capacity,
                             "crawling for more peers in response to the crawl timer"
                         );
 
-                        crawl(candidates, demand_tx, should_always_dial).await?;
+                        // Queue a dial attempt for each free outbound slot that has a
+                        // candidate ready to dial, so the crawler keeps trying to fill
+                        // the peer set up to the outbound connection limit.
+                        //
+                        // Capping the queued attempts at the ready candidate count avoids
+                        // spawning fallback crawls for demand that can't be met. The
+                        // demand handler re-checks the connection limit before each
+                        // handshake, so excess signals are dropped, and failed handshakes
+                        // restore their demand signal.
+                        let ready_candidates = { candidates.lock().await.ready_peer_count().await };
+                        let mut fill_demand_tx = crawl_demand_tx.clone();
+                        for _ in 0..spare_capacity.min(ready_candidates) {
+                            if fill_demand_tx.try_send(MorePeers).is_err() {
+                                break;
+                            }
+                        }
+
+                        crawl(candidates, crawl_demand_tx).await?;
 
                         Ok(TimerCrawlFinished)
                     }
@@ -1105,12 +1131,11 @@ where
 }
 
 /// Try to get more peers using `candidates`, then queue a connection attempt using `demand_tx`.
-/// If there were no new peers and `should_always_dial` is false, the connection attempt is skipped.
+/// If there were no new peers, the connection attempt is skipped.
 #[instrument(skip(candidates, demand_tx))]
 async fn crawl<S>(
     candidates: Arc<futures::lock::Mutex<CandidateSet<S>>>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
-    should_always_dial: bool,
 ) -> Result<(), BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
@@ -1125,7 +1150,7 @@ where
         result
     };
     let more_peers = match result {
-        Ok(more_peers) => more_peers.or_else(|| should_always_dial.then_some(MorePeers)),
+        Ok(more_peers) => more_peers,
         Err(e) => {
             info!(
                 ?e,

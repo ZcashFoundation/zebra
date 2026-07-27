@@ -435,6 +435,30 @@ where
         Some(next_peer)
     }
 
+    /// Returns the number of candidate peers that are currently ready for a
+    /// connection attempt, as selected by [`Self::next`].
+    ///
+    /// The returned count is a snapshot: candidates can become ready or be
+    /// attempted by other tasks immediately afterwards.
+    pub async fn ready_peer_count(&self) -> usize {
+        let address_book = self.address_book.clone();
+        let ready_peer_count = move || -> usize {
+            let guard = address_book.lock().unwrap();
+
+            // Now we have the lock, get the current time
+            let instant_now = std::time::Instant::now();
+            let chrono_now = Utc::now();
+
+            guard.reconnection_peers(instant_now, chrono_now).count()
+        };
+
+        // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || span.in_scope(ready_peer_count))
+            .wait_for_panics()
+            .await
+    }
+
     /// Returns the address book for this `CandidateSet`.
     #[cfg(any(test, feature = "proptest-impl"))]
     #[allow(dead_code)]
