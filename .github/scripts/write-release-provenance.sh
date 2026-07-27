@@ -12,7 +12,7 @@ workflow_path="${workflow_path%@*}"
 jq -n \
   --arg event_name "${GITHUB_EVENT_NAME}" \
   --arg invocation_id "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" \
-  --arg job_workflow_ref "${GITHUB_REPOSITORY}/${PROVENANCE_BUILDER_WORKFLOW}@${GITHUB_WORKFLOW_SHA}" \
+  --arg job_workflow_ref "${GITHUB_REPOSITORY}/${PROVENANCE_BUILDER_WORKFLOW}@${GITHUB_REF}" \
   --arg ref "${GITHUB_REF}" \
   --arg repository "${GITHUB_REPOSITORY}" \
   --arg repository_id "${GITHUB_REPOSITORY_ID}" \
