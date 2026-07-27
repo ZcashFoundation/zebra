@@ -61,10 +61,12 @@ jobs:
     name: Validate deployment inputs
     runs-on: ubuntu-latest
     steps:
-      - name: Validate immutable image identity
+      - name: Validate deployment contract
         env:
           IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
+          NETWORKS: ${{ inputs.networks }}
+          ZONES: ${{ inputs.zones }}
         run: |
           if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::image must be a complete Google Artifact Registry repository@sha256:digest identity"
@@ -74,6 +76,22 @@ jobs:
             dev|stage|prod) ;;
             *) echo "::error::environment must be dev, stage, or prod"; exit 1 ;;
           esac
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "Mainnet" or . == "Testnet")
+          ' <<< "${NETWORKS}" >/dev/null; then
+            echo "::error::networks must be a non-empty, unique array containing only Mainnet and Testnet"
+            exit 1
+          fi
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "us-east1-b" or . == "us-east1-c" or . == "us-east1-d")
+          ' <<< "${ZONES}" >/dev/null; then
+            echo "::error::zones must be a non-empty, unique array containing only supported us-east1 zones"
+            exit 1
+          fi
 
   # One-shot upsert of the HTTP health checks used by the zonal MIGs.
   # These are global, network-scoped resources (one per network), so running
@@ -96,12 +114,15 @@ jobs:
           NETWORKS: ${{ inputs.networks }}
         run: |
           for NET in $(jq -r '.[] | ascii_downcase' <<< "${NETWORKS}"); do
+            # A competing deployment can win the create; accept that race only
+            # when a second describe confirms the shared health check exists.
             gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null \
             || gcloud compute health-checks create http "zebra-${NET}-health" \
               --port=8080 --request-path=/healthy \
               --check-interval=60s --timeout=10s \
               --unhealthy-threshold=3 --healthy-threshold=2 \
-              --global
+              --global \
+            || gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null
           done
 
   # Cache images are network-scoped, so each selected network gets one lookup.
@@ -382,6 +403,13 @@ jobs:
             --replacement-method=recreate \
             --max-surge=0 --max-unavailable=1 \
             --zone="${ZONE}"
+
+      # Keep the per-cell concurrency lock until this exact template has reached
+      # the MIG. Application health remains the verify-nodes job's concern.
+      - name: Wait for requested template rollout
+        run: |
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --version-target-reached --zone="${ZONE}" --timeout=3300
 
   # Waits for each zonal MIG to reach HEALTHY (app-level: peer mesh + chain tip).
   verify-nodes:
