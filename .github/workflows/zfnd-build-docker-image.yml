@@ -132,34 +132,6 @@ jobs:
           echo "SOURCE_SHA_SHORT=${SOURCE_SHA:0:7}" >> "$GITHUB_ENV"
           echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      # Automatic tag management and OCI Image Format Specification for labels
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
-        with:
-          # Stable public tags are applied later by
-          # zfnd-promote-release-image.yml.
-          images: |
-            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-          labels: |
-            org.opencontainers.image.revision=${{ inputs.source_sha }}
-          # generate Docker tags based on the following events/attributes
-          tags: |
-            type=semver,pattern={{version}}
-            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
-            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
-            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
-            # - `edge`: Tags the latest build on the default branch (e.g., `main`), used in CI to represent the cutting-edge version for testing.
-            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
-            type=ref,event=pr
-            type=ref,event=branch
-            type=edge,enable={{is_default_branch}}
-            type=schedule
-            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
-            # Applied during pull requests and branch pushes to ensure CI tests use the exact image from the last commit.
-            type=sha,event=pr
-            type=sha,event=branch
-
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
@@ -200,7 +172,7 @@ jobs:
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: org.opencontainers.image.revision=${{ inputs.source_sha }}
           build-args: |
             SHORT_SHA=${{ env.SOURCE_SHA_SHORT }}
             RUST_LOG=${{ env.RUST_LOG }}
@@ -227,7 +199,7 @@ jobs:
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: org.opencontainers.image.revision=${{ inputs.source_sha }}
           build-args: |
             SHORT_SHA=${{ env.SOURCE_SHA_SHORT }}
             RUST_LOG=${{ env.RUST_LOG }}
@@ -257,7 +229,7 @@ jobs:
           overwrite: true
           retention-days: 1
 
-  # Merge multi-platform manifests and apply GAR tags.
+  # Merge multi-platform manifests under the immutable source tag.
   merge:
     name: Create multi-arch manifest
     runs-on: ubuntu-latest
@@ -276,22 +248,6 @@ jobs:
           path: /tmp/digests
           pattern: digests-${{ inputs.image_name }}-*
           merge-multiple: true
-
-      # Docker meta for tag generation
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
-        with:
-          images: |
-            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=ref,event=pr
-            type=ref,event=branch
-            type=edge,enable={{is_default_branch}}
-            type=schedule
-            type=sha,event=pr
-            type=sha,event=branch
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -319,9 +275,8 @@ jobs:
             image_sources+=("${IMAGE_REPOSITORY}@sha256:${digest}")
           done
 
-          # The -t flags expand to separate args.
-          # shellcheck disable=SC2046
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create \
+            --tag "${IMAGE_REPOSITORY}:sha-${SOURCE_SHA}" \
             --metadata-file /tmp/manifest-metadata.json \
             "${image_sources[@]}"
 
@@ -329,5 +284,5 @@ jobs:
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "image=${IMAGE_REPOSITORY}@${digest}" >> "$GITHUB_OUTPUT"
         env:
-          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
           IMAGE_REPOSITORY: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
+          SOURCE_SHA: ${{ inputs.source_sha }}

@@ -303,7 +303,7 @@ jobs:
             ${CONTAINER_MOUNT_DISKS} \
             --container-stdin \
             --container-tty \
-            --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
+            --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ github.sha }}" \
             --container-env="${CONTAINER_ENV}" \
             --container-restart-policy=never \
             --subnet=${{ vars.GCP_SUBNETWORK }} \
