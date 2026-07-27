@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.1] - 2026-07-27
+
+### Changed
+
+- Updated the following local packages: zebra-chain, zebra-node-services
+
 ## [12.0.0] - 2026-07-24
 
 ### Breaking Changes
