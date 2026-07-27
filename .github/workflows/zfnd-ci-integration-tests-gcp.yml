@@ -135,6 +135,7 @@ jobs:
       attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
+      source_sha: ${{ github.sha }}
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
