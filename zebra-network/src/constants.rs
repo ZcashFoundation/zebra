@@ -310,7 +310,13 @@ pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 ///
 /// This limit makes sure that Zebra does not reveal its entire address book
 /// in a single `Peers` response.
-pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
+///
+/// This is temporarily set to 2 (up from 4) to speed up peer discovery, so
+/// nodes can recover more quickly from network fragmentation. This reveals
+/// more of the address book to each requester, see #11103 for the tradeoff
+/// discussion and the follow-up conditions for reverting or replacing this
+/// value.
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 
 /// The maximum number of addresses Zebra will keep in its address book.
 ///
@@ -318,8 +324,11 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
 /// - revealing the whole address book in a few requests,
 /// - sending the maximum number of peer addresses, and
 /// - making sure the limit code actually gets run.
-pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
-    MAX_ADDRS_IN_MESSAGE * (ADDR_RESPONSE_LIMIT_DENOMINATOR + 1);
+///
+/// This value is deliberately pinned rather than derived from
+/// [`ADDR_RESPONSE_LIMIT_DENOMINATOR`], so the temporary denominator change
+/// above does not shrink the address book (see #11103).
+pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///

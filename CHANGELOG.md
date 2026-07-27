@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   Previously, new connections were only attempted when the peer set ran out of ready peers,
   when a crawl found new addresses, or when the node had no outbound connections at all
   ([#11102](https://github.com/ZcashFoundation/zebra/issues/11102)).
+- Zebra now sends up to half of its address book in response to a `getaddr` request, up from
+  a quarter, so peers can find more of the network from each response
+  ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
 
 ### Fixed
 
