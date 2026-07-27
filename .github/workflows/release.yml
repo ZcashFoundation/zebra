@@ -2,7 +2,7 @@
 #
 # Pipeline:
 #   non-release push to main      -> creates or updates the Release PR
-#   merged, approved Release PR   -> reconciles crates, tags, and the public
+#   merged Release PR             -> reconciles crates, tags, and the public
 #                                   zebrad GitHub Release
 #   workflow_dispatch            -> manual readiness check or post-merge recovery
 #
@@ -158,7 +158,6 @@ jobs:
                     headRefOid
                     labels(first: 100) { nodes { name } }
                     merged
-                    mergedBy { login }
                     state
                   }
                 }
@@ -176,18 +175,11 @@ jobs:
               );
             }
 
-            const isOpenCheck =
-              requestedOperation === "check" && pr.state === "OPEN";
-            if (!isOpenCheck) {
-              if (!pr.merged) {
-                throw new Error(`PR #${prNumber} is not merged`);
-              }
-
-              if (pr.mergedBy?.login !== "mergify") {
-                throw new Error(
-                  `PR #${prNumber} was not merged through the Mergify queue`,
-                );
-              }
+            if (requestedOperation === "check" && pr.state !== "OPEN") {
+              throw new Error(`PR #${prNumber} is not open`);
+            }
+            if (requestedOperation === "resume" && !pr.merged) {
+              throw new Error(`PR #${prNumber} is not merged`);
             }
 
             core.setOutput("base_sha", pr.baseRefOid);

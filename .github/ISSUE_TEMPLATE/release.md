@@ -50,5 +50,5 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
 
 - [ ] Wait for `PR Gate / Release readiness` and every other required check to pass on the latest Release PR commit.
 - [ ] Complete every checkbox in the generated Release PR and review its release plan.
-- [ ] Approve the latest commit and let Mergify merge it from the dedicated `release` queue.
+- [ ] Approve and merge the latest commit.
 - [ ] Confirm that the Release workflow completed after merge.

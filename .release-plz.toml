@@ -37,7 +37,7 @@ pr_body = """
 
 > [!IMPORTANT]
 > After every required check passes, complete every checkbox for the latest commit.
-> Then approve that commit; Mergify will merge it through the dedicated release queue.
+> Then approve and merge that commit.
 
 ## Release checklist
 
@@ -76,14 +76,13 @@ For releases that include `zebrad`:
 - [ ] `PR Gate / Release readiness` and every other required check pass for the latest commit.
 - [ ] Every checklist item above is complete and this commit is ready to publish.
 
-After checking the boxes, approve the latest commit. Mergify will merge it from the `release` queue. Do not bypass the queue with a manual merge.
+After checking the boxes, approve and merge the latest commit.
 
 ## If automation fails
 
 - If Release readiness fails, open its job summary and fix the reported issue.
 - If no automatic readiness run is available after rerunning the PR checks, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
 - If publication stops after merge, run `gh workflow run release.yml --ref main -f operation=resume -f release_pr_number=<PR>`.
-- If the PR bypassed the Mergify queue, automatic publication will remain blocked. Stop and ask a maintainer to authorize break-glass recovery.
 - If published crates, tags, or release channels conflict with the plan, stop and ask a maintainer to investigate.
 
 See the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for workflow details and recovery guidance.
