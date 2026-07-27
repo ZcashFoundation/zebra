@@ -24,6 +24,7 @@ use zebra_chain::{
     parameters::NetworkUpgrade,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    tachyon,
     transaction::Transaction,
 };
 
@@ -142,6 +143,22 @@ impl ZebraDb {
     pub fn contains_ironwood_anchor(&self, ironwood_anchor: &orchard::tree::Root) -> bool {
         let ironwood_anchors = self.db.cf_handle("ironwood_anchors").unwrap();
         self.db.zs_contains(&ironwood_anchors, &ironwood_anchor)
+    }
+
+    /// Returns `true` if the finalized state contains `tachyon_anchor` (NU7, experimental).
+    pub fn contains_tachyon_anchor(&self, tachyon_anchor: &tachyon::Anchor) -> bool {
+        let tachyon_anchors = self.db.cf_handle("tachyon_anchors").unwrap();
+        self.db.zs_contains(&tachyon_anchors, &tachyon_anchor)
+    }
+
+    /// Returns the Tachyon pool anchor after the finalized tip, or the default (pre-pool)
+    /// anchor if the Tachyon pool has not started (NU7, experimental).
+    pub fn tachyon_anchor_for_tip(&self) -> tachyon::Anchor {
+        let tachyon_anchor_by_height = self.db.cf_handle("tachyon_anchor_by_height").unwrap();
+        self.db
+            .zs_last_key_value(&tachyon_anchor_by_height)
+            .map(|(_height, anchor): (Height, tachyon::Anchor)| anchor)
+            .unwrap_or_default()
     }
 
     // # Sprout trees
@@ -591,6 +608,7 @@ impl ZebraDb {
             orchard_subtree: self.orchard_subtree_for_tip(),
             ironwood: self.ironwood_tree_for_tip(),
             ironwood_subtree: self.ironwood_subtree_for_tip(),
+            tachyon_anchor: self.tachyon_anchor_for_tip(),
         }
     }
 }
@@ -730,6 +748,18 @@ impl DiskWriteBatch {
             if let Some(subtree) = note_commitment_trees.ironwood_subtree {
                 self.insert_ironwood_subtree(zebra_db, &subtree);
             }
+        }
+
+        // Store the Tachyon pool anchor only if it has changed. The anchor changes with
+        // every block once the pool starts at NU7 (even stamp-less blocks tick it), so
+        // this skips exactly the pre-NU7 blocks, keeping the default (pre-pool) anchor
+        // out of the anchor index.
+        let prev_tachyon_anchor = prev_note_commitment_trees.as_ref().map_or_else(
+            || zebra_db.tachyon_anchor_for_tip(),
+            |prev_trees| prev_trees.tachyon_anchor,
+        );
+        if prev_tachyon_anchor != note_commitment_trees.tachyon_anchor {
+            self.create_tachyon_anchor(zebra_db, height, &note_commitment_trees.tachyon_anchor);
         }
 
         self.update_history_tree(zebra_db, history_tree);
@@ -910,6 +940,23 @@ impl DiskWriteBatch {
         subtree: &NoteCommitmentSubtree<orchard::tree::Node>,
     ) {
         self.insert_note_commitment_subtree(zebra_db, "ironwood_note_commitment_subtree", subtree);
+    }
+
+    // Tachyon anchor methods (NU7, experimental; Tachyon has no note commitment tree)
+
+    /// Inserts or overwrites the Tachyon pool anchor at the given [`Height`],
+    /// and adds it to the anchor membership index.
+    pub fn create_tachyon_anchor(
+        &mut self,
+        zebra_db: &ZebraDb,
+        height: &Height,
+        anchor: &tachyon::Anchor,
+    ) {
+        let tachyon_anchors = zebra_db.db.cf_handle("tachyon_anchors").unwrap();
+        let tachyon_anchor_by_height = zebra_db.db.cf_handle("tachyon_anchor_by_height").unwrap();
+
+        self.zs_insert(&tachyon_anchors, anchor, ());
+        self.zs_insert(&tachyon_anchor_by_height, height, anchor);
     }
 
     /// Inserts a note commitment `tree` at `height` into `tree_cf`, and its root into `anchors_cf`.

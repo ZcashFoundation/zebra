@@ -11,6 +11,7 @@ use zebra_chain::{
     block::Height,
     ironwood, orchard, sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    tachyon,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -94,6 +95,21 @@ impl FromDisk for orchard::tree::Root {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
         array.try_into().expect("finalized data must be valid")
+    }
+}
+
+impl IntoDisk for tachyon::Anchor {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl FromDisk for tachyon::Anchor {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
+        array.into()
     }
 }
 

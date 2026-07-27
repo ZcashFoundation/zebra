@@ -15,6 +15,12 @@ keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
+# `zcash_tachyon` is only used behind the `cfg(zcash_unstable = "nu7")` gate (set via
+# RUSTFLAGS, not a cargo feature), so cargo-udeps — which builds without that cfg —
+# reports it as unused. Ignore this known false positive.
+[package.metadata.cargo-udeps.ignore]
+normal = ["zcash_tachyon"]
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in dependencies
@@ -25,6 +31,12 @@ progress-bar = [
 
 # Indexes spending transaction ids by spent outpoints and revealed nullifiers
 indexer = []
+
+# Tachyon (NU7, experimental): track the Tachyon pool anchor. Only takes effect
+# together with the `zcash_unstable = "nu7"` cfg. Without this feature the
+# anchor tracking compiles but stays at its default (V7 transactions cannot be
+# parsed, so an NU7 chain cannot be synced anyway).
+tx_v7 = ["zebra-chain/tx_v7"]
 
 # Test-only features
 proptest-impl = [
@@ -71,6 +83,7 @@ tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
+zcash_tachyon = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl

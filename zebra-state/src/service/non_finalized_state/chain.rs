@@ -26,6 +26,7 @@ use zebra_chain::{
     serialization::ZcashSerialize as _,
     sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    tachyon,
     transaction::{
         self,
         Transaction::{self, *},
@@ -213,6 +214,18 @@ pub struct ChainInner {
     pub(crate) ironwood_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    /// The Tachyon pool anchors created by `blocks` (NU7, experimental).
+    ///
+    /// Tachyon has no note commitment tree: its pool state is a running anchor, so the anchor
+    /// plays both the tree and root role. Only NU7-onward anchors are tracked; the maps stay
+    /// empty before NU7 activation (and in builds without tachyon support).
+    ///
+    /// When a chain is forked from a finalized tip with an active Tachyon pool, also contains
+    /// the finalized tip anchor.
+    pub(crate) tachyon_anchors: MultiSet<tachyon::Anchor>,
+    /// The Tachyon pool anchor after each block in `blocks` (NU7 onward).
+    pub(crate) tachyon_anchors_by_height: BTreeMap<block::Height, tachyon::Anchor>,
+
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
@@ -275,6 +288,7 @@ impl Chain {
             sapling: sapling_note_commitment_tree,
             orchard: orchard_note_commitment_tree,
             ironwood: ironwood_note_commitment_tree,
+            tachyon_anchor: finalized_tip_tachyon_anchor,
             ..
         } = note_commitment_trees;
 
@@ -300,6 +314,8 @@ impl Chain {
             ironwood_anchors_by_height: Default::default(),
             ironwood_trees_by_height: Default::default(),
             ironwood_subtrees: Default::default(),
+            tachyon_anchors: MultiSet::new(),
+            tachyon_anchors_by_height: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -322,6 +338,12 @@ impl Chain {
         chain.add_orchard_tree_and_anchor(finalized_tip_height, orchard_note_commitment_tree);
         chain.add_ironwood_tree_and_anchor(finalized_tip_height, ironwood_note_commitment_tree);
         chain.add_history_tree(finalized_tip_height, history_tree);
+
+        // Only seed a real Tachyon anchor: the default anchor means the pool has not
+        // started (pre-NU7 finalized tip), and only NU7-onward anchors are tracked.
+        if finalized_tip_tachyon_anchor != tachyon::Anchor::default() {
+            chain.add_tachyon_anchor(finalized_tip_height, finalized_tip_tachyon_anchor);
+        }
 
         chain
     }
@@ -1328,6 +1350,90 @@ impl Chain {
         );
     }
 
+    /// Returns the Tachyon pool anchor after the block at `hash_or_height`, if the Tachyon
+    /// pool has started by then in this [`Chain`].
+    ///
+    /// Returns the default (pre-pool) anchor for heights before NU7 activation, matching the
+    /// seed of the anchor fold.
+    pub fn tachyon_anchor(&self, hash_or_height: HashOrHeight) -> Option<tachyon::Anchor> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        Some(
+            self.tachyon_anchors_by_height
+                .range(..=height)
+                .next_back()
+                .map(|(_height, anchor)| *anchor)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Returns the Tachyon pool anchor after the tip of this [`Chain`], or the default
+    /// (pre-pool) anchor if the pool has not started.
+    pub fn tachyon_anchor_for_tip(&self) -> tachyon::Anchor {
+        self.tachyon_anchors_by_height
+            .last_key_value()
+            .map(|(_height, anchor)| *anchor)
+            .unwrap_or_default()
+    }
+
+    /// Adds the Tachyon pool `anchor` to the anchor indexes at `height`.
+    ///
+    /// `height` can be either the height of a new block that has just been added to the chain
+    /// tip, or the finalized tip height (the parent of the first block of a new chain).
+    fn add_tachyon_anchor(&mut self, height: Height, anchor: tachyon::Anchor) {
+        trace!(?height, ?anchor, "adding tachyon anchor");
+
+        assert_eq!(
+            self.tachyon_anchors_by_height.insert(height, anchor),
+            None,
+            "incorrect overwrite of tachyon anchor: anchors must be reverted then inserted",
+        );
+        self.tachyon_anchors.insert(anchor);
+    }
+
+    /// Removes the Tachyon pool anchor indexes at `height`.
+    ///
+    /// `height` can be at two different [`RevertPosition`]s in the chain:
+    /// - a tip block above a chain fork: only that height is removed, or
+    /// - a root block: all anchors at or below that height are removed, including temporary
+    ///   finalized tip anchors.
+    ///
+    /// Does nothing for heights without a tracked anchor (blocks before NU7 activation).
+    fn remove_tachyon_anchor(&mut self, position: RevertPosition, height: Height) {
+        trace!(?height, ?position, "removing tachyon anchor");
+
+        let removed_anchors: Vec<tachyon::Anchor> = if position == RevertPosition::Root {
+            // Remove all anchors at or below the reverted root block.
+            // This makes sure the temporary anchors from finalized tip forks are removed.
+            let removed = self
+                .tachyon_anchors_by_height
+                .range(..=height)
+                .map(|(height, anchor)| (*height, *anchor))
+                .collect::<Vec<_>>();
+            for (height, _anchor) in &removed {
+                self.tachyon_anchors_by_height.remove(height);
+            }
+            removed
+                .into_iter()
+                .map(|(_height, anchor)| anchor)
+                .collect()
+        } else {
+            // Just remove the reverted tip anchor.
+            self.tachyon_anchors_by_height
+                .remove(&height)
+                .into_iter()
+                .collect()
+        };
+
+        for anchor in removed_anchors {
+            assert!(
+                self.tachyon_anchors.remove(&anchor),
+                "anchor must be present if it was added to the by-height index",
+            );
+        }
+    }
+
     /// Returns the History tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized blocks below the chain tip.
     ///
@@ -1413,6 +1519,7 @@ impl Chain {
                 orchard_subtree,
                 ironwood: ironwood_tree,
                 ironwood_subtree,
+                tachyon_anchor: self.tachyon_anchor(hash_or_height)?,
             },
             history_tree,
         ))
@@ -1701,6 +1808,7 @@ impl Chain {
             orchard_subtree: self.orchard_subtree_for_tip(),
             ironwood: self.ironwood_note_commitment_tree_for_tip(),
             ironwood_subtree: self.ironwood_subtree_for_tip(),
+            tachyon_anchor: self.tachyon_anchor_for_tip(),
         };
 
         let mut tree_result = None;
@@ -1745,6 +1853,21 @@ impl Chain {
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
+        // Advance the Tachyon pool anchor with this block, if the pool has started.
+        // `nct.tachyon_anchor` still holds the parent block's anchor here.
+        //
+        // In builds without tachyon support V7 transactions cannot be parsed, so an NU7
+        // chain cannot be synced and the anchor legitimately stays at its default.
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+        if let Some(pool_height) = zebra_chain::tachyon::pool_height(&self.network, height) {
+            let tachyon_anchor = nct
+                .tachyon_anchor
+                .advance_with_block(pool_height, &contextually_valid.block);
+            nct.tachyon_anchor = tachyon_anchor;
+            self.add_tachyon_anchor(height, tachyon_anchor);
+        }
+        let tachyon_anchor = nct.tachyon_anchor;
+
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let mut history_tree = self.history_block_commitment_tree();
         let history_tree_mut = Arc::make_mut(&mut history_tree);
@@ -1756,6 +1879,7 @@ impl Chain {
                     sapling: &sapling_root,
                     orchard: &orchard_root,
                     ironwood: &ironwood_root,
+                    tachyon: &tachyon_anchor,
                 },
             )
             .map_err(Arc::new)?;
@@ -2143,6 +2267,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         self.remove_sapling_tree_and_anchor(position, height);
         self.remove_orchard_tree_and_anchor(position, height);
         self.remove_ironwood_tree_and_anchor(position, height);
+        self.remove_tachyon_anchor(position, height);
 
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);

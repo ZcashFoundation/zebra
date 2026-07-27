@@ -5,13 +5,11 @@
 //! entry point, so a batch verifier can replace the internals without touching callers once
 //! ragu grows a batch-verification API.
 
-use zcash_tachyon::{action::Descriptor, ProofStamp};
-
-use crate::error::BlockError;
+use crate::{block::tachyon::AggregateCoverage, error::BlockError};
 
 use super::spawn_fifo;
 
-/// Verifies a tachyon proof stamp against the actions it must cover.
+/// Verifies a tachyon aggregate's proof stamp against the actions it covers.
 ///
 /// # Consensus
 ///
@@ -20,18 +18,27 @@ use super::spawn_fifo;
 ///
 /// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
 ///
-/// `covered_descriptors` must contain the descriptors of the bundle's own actions plus those of
-/// every pointer-stamped transaction naming this stamp's transaction; see
-/// `block::tachyon::coherence`. Proof verification is CPU-bound, so it runs on the rayon
-/// threadpool.
-pub async fn verify_proof_stamp(
-    stamp: ProofStamp,
-    covered_descriptors: Vec<Descriptor>,
-) -> Result<(), BlockError> {
+/// `aggregate` groups the proof-stamped bundle with every pointer-stamped bundle naming it; see
+/// `block::tachyon::coherence`, which also checks the stamp's coverage digest over the same
+/// grouping. Proof verification is CPU-bound, so it runs on the rayon threadpool.
+pub async fn verify_proof_stamp(aggregate: AggregateCoverage) -> Result<(), BlockError> {
     spawn_fifo(move || {
-        stamp
-            .verify(&mut rand::thread_rng(), &covered_descriptors)
-            .map_err(|err| BlockError::TachyonProofInvalid(err.to_string()))
+        let adjunct_refs: Vec<_> = aggregate
+            .adjuncts
+            .iter()
+            .map(|adjunct| adjunct.as_dyn())
+            .collect();
+
+        match aggregate
+            .bundle
+            .verify_proof(&mut rand::thread_rng(), &adjunct_refs)
+        {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(BlockError::TachyonProofInvalid(
+                "proof stamp was disproved".to_string(),
+            )),
+            Err(err) => Err(BlockError::TachyonProofInvalid(err.to_string())),
+        }
     })
     .await
     .map_err(|_| {

@@ -234,6 +234,19 @@ impl Block {
             .expect("number of transactions must fit u64")
     }
 
+    /// Count how many Tachyon transactions exist in a block,
+    /// i.e. transactions carrying a tachyon bundle (NU7, experimental).
+    ///
+    /// Returns zero when tachyon support is compiled out.
+    pub fn tachyon_transactions_count(&self) -> u64 {
+        self.transactions
+            .iter()
+            .filter(|tx| tx.has_tachyon_shielded_data())
+            .count()
+            .try_into()
+            .expect("number of transactions must fit u64")
+    }
+
     /// Returns the overall chain value pool change in this block---the negative sum of the
     /// transaction value balances in this block.
     ///

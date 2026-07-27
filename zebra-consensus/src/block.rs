@@ -264,12 +264,7 @@ where
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             let mut tachyon_checks = tachyon::coherence(&block)?
                 .into_iter()
-                .map(|aggregate| {
-                    crate::primitives::tachyon::verify_proof_stamp(
-                        aggregate.stamp,
-                        aggregate.covered_descriptors,
-                    )
-                })
+                .map(crate::primitives::tachyon::verify_proof_stamp)
                 .collect::<FuturesUnordered<_>>();
 
             // Since errors cause an early exit, try to do the

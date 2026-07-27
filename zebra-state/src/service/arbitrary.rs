@@ -177,6 +177,7 @@ impl Strategy for PreparedChain {
                     sapling: &Default::default(),
                     orchard: &Default::default(),
                     ironwood: &Default::default(),
+                    tachyon: &Default::default(),
                 },
             )
             .expect("history tree should be created");

@@ -434,6 +434,11 @@ impl Block {
             // Ironwood data, so this stays empty, but it must be threaded through the V3 history
             // node (NU6.3+) using its real empty-tree root so commitments match validation.
             let mut ironwood_tree = orchard::tree::NoteCommitmentTree::default();
+            // The Tachyon pool anchor advances with every block from NU7 activation (even
+            // stamp-less ones), so it must be folded here exactly like the state service does
+            // for the V4 history node (NU7+) commitments to match validation. In builds
+            // without tachyon support it stays at its default, matching the state.
+            let mut tachyon_anchor = crate::tachyon::Anchor::default();
             // The history tree usually takes care of "creating itself". But this
             // only works when blocks are pushed into it starting from genesis
             // (or at least pre-Heartwood, where the tree is not required).
@@ -484,6 +489,15 @@ impl Block {
 
                 // delete invalid transactions
                 block.transactions = new_transactions;
+
+                // Advance the Tachyon pool anchor with this block, if the pool has started,
+                // mirroring the state service's per-block fold.
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+                if let Some(pool_height) =
+                    crate::tachyon::pool_height(&current.network, block.coinbase_height().unwrap())
+                {
+                    tachyon_anchor = tachyon_anchor.advance_with_block(pool_height, block);
+                }
 
                 // fix commitment (must be done after finishing changing the block)
                 if generate_valid_commitments {
@@ -542,6 +556,7 @@ impl Block {
                                     sapling: &sapling_tree.root(),
                                     orchard: &orchard_tree.root(),
                                     ironwood: &ironwood_tree.root(),
+                                    tachyon: &tachyon_anchor,
                                 },
                             )
                             .unwrap();
@@ -554,6 +569,7 @@ impl Block {
                                     sapling: &sapling_tree.root(),
                                     orchard: &orchard_tree.root(),
                                     ironwood: &ironwood_tree.root(),
+                                    tachyon: &tachyon_anchor,
                                 },
                             )
                             .unwrap(),

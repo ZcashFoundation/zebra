@@ -9,13 +9,13 @@ mod tests;
 use std::{collections::BTreeMap, io, sync::Arc};
 
 use serde_big_array::BigArray;
-pub use zcash_history::{V1, V2, V3};
+pub use zcash_history::{V1, V2, V3, V4};
 
 use crate::{
     block::{Block, ChainHistoryMmrRootHash},
     orchard,
     parameters::{Network, NetworkUpgrade},
-    sapling,
+    sapling, tachyon,
 };
 
 /// The note commitment tree roots of a block, used to construct its chain-history leaf.
@@ -23,6 +23,9 @@ use crate::{
 /// The roots are grouped in a named struct rather than passed as adjacent positional arguments so
 /// the Orchard and Ironwood roots — which reuse the same [`orchard::tree::Root`] type — cannot be
 /// silently swapped, which would corrupt the ZIP-221 chain-history commitment.
+///
+/// Tachyon has no note commitment tree; its running pool anchor takes the tree root's place in
+/// chain-history leaves.
 #[derive(Clone, Copy)]
 pub struct BlockCommitmentTreeRoots<'a> {
     /// The root of the block's Sapling note commitment tree.
@@ -31,13 +34,16 @@ pub struct BlockCommitmentTreeRoots<'a> {
     pub orchard: &'a orchard::tree::Root,
     /// The root of the block's Ironwood note commitment tree.
     pub ironwood: &'a orchard::tree::Root,
+    /// The Tachyon pool anchor after the block.
+    pub tachyon: &'a tachyon::Anchor,
 }
 
 /// A trait to represent a version of `Tree`.
 pub trait Version: zcash_history::Version {
     /// Convert a Block into the NodeData for this version.
     ///
-    /// The Ironwood root in `roots` is ignored by all versions before V3 (NU6.3).
+    /// The Ironwood root in `roots` is ignored by all versions before V3 (NU6.3), and the Tachyon
+    /// anchor by all versions before V4 (NU7).
     fn block_to_history_node(
         block: Arc<Block>,
         network: &Network,
@@ -361,6 +367,28 @@ impl Version for V3 {
             start_ironwood_root: ironwood_root,
             end_ironwood_root: ironwood_root,
             ironwood_tx: ironwood_tx_count,
+        }
+    }
+}
+
+impl Version for V4 {
+    /// Convert a Block into a V4::NodeData used in the MMR tree (NU7 onward).
+    ///
+    /// Extends the V3 node data with the Tachyon pool anchor after the block and the count of
+    /// transactions containing a Tachyon bundle.
+    fn block_to_history_node(
+        block: Arc<Block>,
+        network: &Network,
+        roots: BlockCommitmentTreeRoots,
+    ) -> Self::NodeData {
+        let tachyon_tx_count = block.tachyon_transactions_count();
+        let node_data_v3 = V3::block_to_history_node(block, network, roots);
+        let tachyon_anchor: [u8; 32] = roots.tachyon.into();
+        Self::NodeData {
+            v3: node_data_v3,
+            start_tachyon_anchor: tachyon_anchor,
+            end_tachyon_anchor: tachyon_anchor,
+            tachyon_tx: tachyon_tx_count,
         }
     }
 }

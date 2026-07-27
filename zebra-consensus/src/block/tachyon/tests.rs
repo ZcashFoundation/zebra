@@ -14,18 +14,18 @@ use zcash_tachyon::{
     entropy::ActionEntropy,
     keys::private,
     note::{CommitmentTrapdoor, Note, NullifierTrapdoor},
-    value, Anchor, PointerStamp, ProofStamp, Tachygram, TachyonBundle,
+    value, Anchor, Bundle, PointerStamp, ProofStamp, Tachygram, TachyonBundle,
 };
 
 use crate::error::BlockError;
 
-use super::coherence;
+use super::{coherence, AggregateCoverage};
 
-/// Computes `hStampActionsTachyon` over already-sorted descriptor bytes.
+/// Computes `hStampActionsTachyon` over descriptor bytes.
 ///
 /// This duplicates tachyon's private `blake2b::action_descriptor_digest` (BLAKE2b-256,
-/// personalization `Tachyon-Actions`, over the concatenated 64-byte descriptors). Every test
-/// using it self-validates via [`ProofStamp::covers`], so drift from the tachyon crate fails
+/// personalization `Tachyon-Actions`, over the sorted concatenated 64-byte descriptors). Tests
+/// using it self-validate via [`Bundle::verify_coverage`], so drift from the tachyon crate fails
 /// loudly instead of silently testing against the wrong digest.
 fn action_descriptor_digest(descriptors: &[action::Descriptor]) -> [u8; 32] {
     // `Vec<[u8; 64]>: FromIterator<Descriptor>` is tachyon's public descriptor-bytes conversion.
@@ -70,41 +70,38 @@ fn dummy_action() -> zcash_tachyon::Action {
     }
 }
 
-/// The all-zero anchor (height 0, identity pool commit).
+/// The all-zero anchor.
 fn zero_anchor() -> Anchor {
-    Anchor::read(&[0u8; 64][..]).expect("zero anchor reads")
+    Anchor::read(&[0u8; 32][..]).expect("zero anchor reads")
 }
 
 /// A proof-stamped bundle with the given actions, tachygrams, and covered-actions digest.
 fn proven_bundle(
-    mut actions: Vec<zcash_tachyon::Action>,
-    mut tachygrams: Vec<Tachygram>,
-    covered_actions: [u8; 32],
-) -> TachyonBundle {
-    actions.sort_unstable();
-    tachygrams.sort_unstable();
-    TachyonBundle::Proven(zcash_tachyon::Bundle {
+    actions: Vec<zcash_tachyon::Action>,
+    tachygrams: Vec<Tachygram>,
+    coverage: [u8; 32],
+) -> Bundle<ProofStamp> {
+    Bundle {
         actions,
         value_balance: value::Balance::ZERO,
         binding_sig: bundle::Signature::read(&[0x02u8; 64][..]).expect("64 bytes"),
         stamp: ProofStamp {
-            actions: covered_actions,
-            tachygrams,
+            coverage,
+            tachygrams: tachygrams.into_iter().collect(),
             anchor: zero_anchor(),
             proof: Box::new(ragu::Proof::trivial()),
         },
-    })
+    }
 }
 
 /// A pointer-stamped bundle with the given actions, naming `target` as its covering aggregate.
-fn adjunct_bundle(mut actions: Vec<zcash_tachyon::Action>, target: [u8; 64]) -> TachyonBundle {
-    actions.sort_unstable();
-    TachyonBundle::Adjunct(zcash_tachyon::Bundle {
+fn adjunct_bundle(actions: Vec<zcash_tachyon::Action>, target: [u8; 64]) -> Bundle<PointerStamp> {
+    Bundle {
         actions,
         value_balance: value::Balance::ZERO,
         binding_sig: bundle::Signature::read(&[0x02u8; 64][..]).expect("64 bytes"),
         stamp: PointerStamp::try_from(target).expect("nonzero wtxid"),
-    })
+    }
 }
 
 /// A V7 transaction carrying only the given tachyon bundle.
@@ -148,16 +145,16 @@ fn duplicate_tachygram_across_block_is_rejected() {
     let digest_b = action_descriptor_digest(&[action_b.descriptor()]);
 
     let block = block_with(vec![
-        v7_transaction(proven_bundle(
+        v7_transaction(TachyonBundle::Proven(proven_bundle(
             vec![action_a],
             vec![tachygram(1), tachygram(2)],
             digest_a,
-        )),
-        v7_transaction(proven_bundle(
+        ))),
+        v7_transaction(TachyonBundle::Proven(proven_bundle(
             vec![action_b],
             vec![tachygram(2), tachygram(3)],
             digest_b,
-        )),
+        ))),
     ]);
 
     assert_eq!(
@@ -172,9 +169,8 @@ fn duplicate_tachygram_across_block_is_rejected() {
 fn pointer_to_missing_aggregate_is_rejected() {
     let _init_guard = zebra_test::init();
 
-    let block = block_with(vec![v7_transaction(adjunct_bundle(
-        vec![dummy_action()],
-        [0xEEu8; 64],
+    let block = block_with(vec![v7_transaction(TachyonBundle::Adjunct(
+        adjunct_bundle(vec![dummy_action()], [0xEEu8; 64]),
     ))]);
 
     assert_eq!(
@@ -189,12 +185,12 @@ fn pointer_to_missing_aggregate_is_rejected() {
 fn coverage_mismatch_is_rejected() {
     let _init_guard = zebra_test::init();
 
-    let block = block_with(vec![v7_transaction(proven_bundle(
+    let block = block_with(vec![v7_transaction(TachyonBundle::Proven(proven_bundle(
         vec![dummy_action()],
         vec![],
         // Deliberately not the digest of the bundle's actions.
         [0u8; 32],
-    ))]);
+    )))]);
 
     assert_eq!(
         coherence(&block).err(),
@@ -202,8 +198,36 @@ fn coverage_mismatch_is_rejected() {
     );
 }
 
+/// Rule 3: the same action descriptor covered twice (in the aggregate and in an adjunct naming
+/// it) is rejected, even with a digest computed over the duplicated descriptor list.
+#[test]
+fn duplicate_covered_action_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let action = dummy_action();
+    let covered_digest = action_descriptor_digest(&[action.descriptor(), action.descriptor()]);
+    let aggregate_tx = v7_transaction(TachyonBundle::Proven(proven_bundle(
+        vec![action],
+        vec![tachygram(1)],
+        covered_digest,
+    )));
+
+    let aggregate_wtxid = WtxId::from(aggregate_tx.as_ref()).as_bytes();
+    let adjunct_tx = v7_transaction(TachyonBundle::Adjunct(adjunct_bundle(
+        vec![action],
+        aggregate_wtxid,
+    )));
+
+    let block = block_with(vec![aggregate_tx, adjunct_tx]);
+
+    assert_eq!(
+        coherence(&block).err(),
+        Some(BlockError::TachyonDuplicateAction)
+    );
+}
+
 /// Rules 2-3 positive path: an aggregate covering its own actions plus a pointing adjunct's
-/// actions passes coherence, and the returned work item carries the combined descriptor set.
+/// actions passes coherence, and the returned work item groups the adjunct with its aggregate.
 #[test]
 fn aggregate_with_adjunct_passes_coherence() {
     let _init_guard = zebra_test::init();
@@ -213,39 +237,45 @@ fn aggregate_with_adjunct_passes_coherence() {
 
     let covered_digest =
         action_descriptor_digest(&[own_action.descriptor(), adjunct_action.descriptor()]);
-    let aggregate_tx = v7_transaction(proven_bundle(
+    let aggregate_tx = v7_transaction(TachyonBundle::Proven(proven_bundle(
         vec![own_action],
         vec![tachygram(1)],
         covered_digest,
-    ));
+    )));
 
-    // Self-validation: the hand-rolled digest must agree with tachyon's `covers`.
+    let aggregate_wtxid = WtxId::from(aggregate_tx.as_ref()).as_bytes();
+    let adjunct_tx = v7_transaction(TachyonBundle::Adjunct(adjunct_bundle(
+        vec![adjunct_action],
+        aggregate_wtxid,
+    )));
+
+    // Self-validation: the hand-rolled digest must agree with tachyon's coverage check.
     {
         let Some(data) = aggregate_tx.tachyon_shielded_data() else {
             panic!("aggregate transaction has a tachyon bundle");
         };
-        let TachyonBundle::Proven(bundle) = &data.0 else {
+        let TachyonBundle::Proven(aggregate) = &data.0 else {
             panic!("aggregate transaction bundle is proof-stamped");
         };
-        assert!(
-            bundle
-                .stamp
-                .covers(&[own_action.descriptor(), adjunct_action.descriptor()]),
-            "hand-rolled action_descriptor_digest drifted from the tachyon crate",
-        );
+        let Some(data) = adjunct_tx.tachyon_shielded_data() else {
+            panic!("adjunct transaction has a tachyon bundle");
+        };
+        let TachyonBundle::Adjunct(adjunct) = &data.0 else {
+            panic!("adjunct transaction bundle is pointer-stamped");
+        };
+        aggregate
+            .verify_coverage(&[adjunct.as_dyn()])
+            .expect("hand-rolled action_descriptor_digest must not drift from the tachyon crate");
     }
-
-    let aggregate_wtxid = WtxId::from(aggregate_tx.as_ref()).as_bytes();
-    let adjunct_tx = v7_transaction(adjunct_bundle(vec![adjunct_action], aggregate_wtxid));
 
     let block = block_with(vec![aggregate_tx, adjunct_tx]);
 
     let aggregates = coherence(&block).expect("coherent block passes");
     assert_eq!(aggregates.len(), 1, "one proof stamp to verify");
     assert_eq!(
-        aggregates[0].covered_descriptors.len(),
-        2,
-        "the work item covers the aggregate's own action and the adjunct's action",
+        aggregates[0].adjuncts.len(),
+        1,
+        "the work item groups the pointing adjunct with its aggregate",
     );
 }
 
@@ -257,15 +287,15 @@ fn autonome_passes_coherence() {
     let action = dummy_action();
     let digest = action_descriptor_digest(&[action.descriptor()]);
 
-    let block = block_with(vec![v7_transaction(proven_bundle(
+    let block = block_with(vec![v7_transaction(TachyonBundle::Proven(proven_bundle(
         vec![action],
         vec![tachygram(7)],
         digest,
-    ))]);
+    )))]);
 
     let aggregates = coherence(&block).expect("coherent block passes");
     assert_eq!(aggregates.len(), 1);
-    assert_eq!(aggregates[0].covered_descriptors.len(), 1);
+    assert!(aggregates[0].adjuncts.is_empty());
 }
 
 /// Rule 4 negative path: a proof stamp with a correct covered-actions digest but an invalid
@@ -275,15 +305,13 @@ async fn trivial_proof_fails_verification() {
     let _init_guard = zebra_test::init();
 
     let action = dummy_action();
-    let descriptors = vec![action.descriptor()];
-    let stamp = ProofStamp {
-        actions: action_descriptor_digest(&descriptors),
-        tachygrams: vec![tachygram(1)],
-        anchor: zero_anchor(),
-        proof: Box::new(ragu::Proof::trivial()),
+    let digest = action_descriptor_digest(&[action.descriptor()]);
+    let aggregate = AggregateCoverage {
+        bundle: proven_bundle(vec![action], vec![tachygram(1)], digest),
+        adjuncts: Vec::new(),
     };
 
-    let result = crate::primitives::tachyon::verify_proof_stamp(stamp, descriptors).await;
+    let result = crate::primitives::tachyon::verify_proof_stamp(aggregate).await;
     assert!(
         matches!(result, Err(BlockError::TachyonProofInvalid(_))),
         "expected TachyonProofInvalid, got: {result:?}",
@@ -307,17 +335,28 @@ async fn real_mock_proof_passes_verification() {
     let theta = ActionEntropy::random(&mut rng);
     let rcv = value::Trapdoor::random(&mut rng);
     let output_plan = action::Plan::output(note, theta, rcv);
-    let descriptors = vec![output_plan.descriptor()];
 
     let plan = bundle::Plan::new(vec![], vec![output_plan]);
     let pak = sk.derive_proof_private();
+    let ask = sk.derive_auth_private();
 
     let stamp = plan
         .stamp_plan(zero_anchor())
         .prove(&mut rng, &pak, vec![])
         .expect("output-only stamp plan proves under the mock proof system");
 
-    crate::primitives::tachyon::verify_proof_stamp(stamp, descriptors)
+    // Proof verification never checks signatures, so the sighash is arbitrary here.
+    let bundle = plan
+        .sign(&mut rng, &[0u8; 32], &ask)
+        .expect("bundle plan signs")
+        .stamp(stamp);
+
+    let aggregate = AggregateCoverage {
+        bundle,
+        adjuncts: Vec::new(),
+    };
+
+    crate::primitives::tachyon::verify_proof_stamp(aggregate)
         .await
         .expect("a genuinely proven stamp verifies");
 }

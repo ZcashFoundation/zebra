@@ -42,7 +42,7 @@ progress-bar = [
 # Note: zebrad does not forward this feature yet. A build that enables only
 # `zebra-chain/tx_v7` parses tachyon bundles but skips their verification, so
 # nodes that enable tachyon support must enable this feature too.
-tx_v7 = ["zebra-chain/tx_v7"]
+tx_v7 = ["zebra-chain/tx_v7", "zebra-state/tx_v7"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]

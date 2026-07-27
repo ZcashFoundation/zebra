@@ -323,9 +323,9 @@ impl Transaction {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
             Transaction::V5 { .. } => Some(AuthDigest::from(self)),
-            // TODO: fold `TachyonBundle::auth_digest()` into the V7 auth digest once the tachyon
-            // digests are specified. Until then the tachyon bundle does not contribute to the
-            // auth digest (or the wtxid derived from it), consistent with the txid and sighash.
+            // The V7 auth digest (computed through librustzcash) includes the tachyon bundle's
+            // `auth_digest()` contribution: its action signatures, binding signature, and stamp
+            // digest. So V7 wtxids commit to the full tachyon bundle.
             Transaction::V6 { .. } | Transaction::V7 { .. } => Some(AuthDigest::from(self)),
         }
     }
@@ -1303,6 +1303,21 @@ impl Transaction {
             | Transaction::V4 { .. }
             | Transaction::V5 { .. }
             | Transaction::V6 { .. } => None,
+        }
+    }
+
+    /// Does this transaction carry a tachyon bundle?
+    ///
+    /// Returns `false` when tachyon support is compiled out, so callers don't need to repeat the
+    /// tachyon `cfg` gate.
+    pub fn has_tachyon_shielded_data(&self) -> bool {
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+        {
+            self.tachyon_shielded_data().is_some()
+        }
+        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
+        {
+            false
         }
     }
 

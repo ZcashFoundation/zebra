@@ -295,9 +295,6 @@ pub enum TransactionError {
     )]
     TachyonIdentityAction(String),
 
-    #[error("tachygrams within a tachyon proof stamp MUST be distinct")]
-    TachyonDuplicateTachygram,
-
     // TODO: the underlying error is zcash_tachyon's SignatureError, but it does not implement
     // Arbitrary as required here.
     #[error("tachyon action and binding signatures MUST verify over the transaction sighash: {0}")]
@@ -436,7 +433,6 @@ impl TransactionError {
             | OrchardProofSize
             | IronwoodProofSize
             | TachyonIdentityAction(_)
-            | TachyonDuplicateTachygram
             | TachyonSignatureInvalid(_)
             | BothVPubsNonZero
             | DisabledAddToSproutPool
@@ -543,6 +539,12 @@ pub enum BlockError {
          every pointer-stamped transaction naming it"
     )]
     TachyonCoverageMismatch,
+
+    #[error(
+        "action descriptors covered by a tachyon proof stamp MUST be distinct across its own \
+         bundle and every pointer-stamped bundle naming it"
+    )]
+    TachyonDuplicateAction,
 
     // TODO: the underlying error is zcash_tachyon's stamp::VerificationError, but it does not
     // implement Clone/PartialEq as required here.

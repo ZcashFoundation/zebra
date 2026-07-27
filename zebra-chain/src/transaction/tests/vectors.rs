@@ -1295,8 +1295,8 @@ mod v7_tests {
                 stamp: zcash_tachyon::ProofStamp {
                     // Covered-actions digest is not asserted by fixture consumers;
                     // it only needs to round-trip through the wire format.
-                    actions: [0u8; 32],
-                    tachygrams: vec![tachygram],
+                    coverage: [0u8; 32],
+                    tachygrams: [tachygram].into_iter().collect(),
                     anchor: default_anchor(),
                     proof: Box::new(ragu::Proof::trivial()),
                 },
@@ -1331,21 +1331,17 @@ mod v7_tests {
             let tg1 = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
             let tg2 = zcash_tachyon::Tachygram::from(fp_from_seed([0xCCu8; 64]));
             let tg3 = zcash_tachyon::Tachygram::from(fp_from_seed([0xDDu8; 64]));
-            // Tachyon wire format requires actions and tachygrams to
-            // be in canonical (sorted) order, so sort before constructing.
-            let mut actions = vec![action1, action2];
-            actions.sort();
-            let mut tachygrams = vec![tg1, tg2, tg3];
-            tachygrams.sort();
+            // The tachyon wire format no longer requires sorted actions ("relaxed
+            // action ordering"); tachygrams are a set, so they are inherently sorted.
             let bundle = zcash_tachyon::TachyonBundle::Proven(zcash_tachyon::Bundle {
-                actions,
+                actions: vec![action1, action2],
                 value_balance: zcash_tachyon::value::Balance::try_from(300i64).unwrap(),
                 binding_sig: zcash_tachyon::bundle::Signature::read(&[0x02u8; 64][..]).unwrap(),
                 stamp: zcash_tachyon::ProofStamp {
                     // Covered-actions digest is not asserted by fixture consumers;
                     // it only needs to round-trip through the wire format.
-                    actions: [0u8; 32],
-                    tachygrams,
+                    coverage: [0u8; 32],
+                    tachygrams: [tg1, tg2, tg3].into_iter().collect(),
                     anchor: default_anchor(),
                     proof: Box::new(ragu::Proof::trivial()),
                 },
@@ -1387,6 +1383,7 @@ mod v7_tests {
 
     /// Generate and print V7 tachyon test vectors as hex.
     #[test]
+    #[allow(clippy::print_stdout)]
     fn generate_v7_tachyon_test_vectors() {
         let _init_guard = zebra_test::init();
 

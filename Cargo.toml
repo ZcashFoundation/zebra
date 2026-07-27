@@ -44,15 +44,18 @@ sapling-crypto = "0.7"
 # librustzcash crates track the tachyon-zcash fork's `main` branch. See its diff
 # against upstream zcash/librustzcash `main` here:
 #   https://github.com/zcash/librustzcash/compare/main...tachyon-zcash:librustzcash:main
-zcash_address = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_encoding = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_history = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_keys = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_primitives = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_proofs = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_transparent = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-zcash_protocol = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
-equihash = {git = "https://github.com/tachyon-zcash/librustzcash", branch = "main"}
+# TEMPORARY: pointed at the local librustzcash checkout while the tachyon
+# anchor / zcash_history V4 changes are developed; re-point to the git branch
+# once they are pushed.
+zcash_address = {path = "../librustzcash/components/zcash_address"}
+zcash_encoding = {path = "../librustzcash/components/zcash_encoding"}
+zcash_history = {path = "../librustzcash/zcash_history"}
+zcash_keys = {path = "../librustzcash/zcash_keys"}
+zcash_primitives = {path = "../librustzcash/zcash_primitives"}
+zcash_proofs = {path = "../librustzcash/zcash_proofs"}
+zcash_transparent = {path = "../librustzcash/zcash_transparent"}
+zcash_protocol = {path = "../librustzcash/components/zcash_protocol"}
+equihash = {path = "../librustzcash/components/equihash"}
 zip32 = "0.2"
 abscissa_core = "0.7"
 base64 = "0.22.1"

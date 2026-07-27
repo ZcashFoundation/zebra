@@ -18,7 +18,7 @@ use crate::{
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::{
         BlockCommitmentTreeRoots, Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward,
-        V3 as IronwoodOnward,
+        V3 as IronwoodOnward, V4 as TachyonOnward,
     },
 };
 
@@ -52,8 +52,10 @@ enum InnerHistoryTree {
     PreOrchard(Tree<PreOrchard>),
     /// An Orchard-onward tree (NU5 to pre-NU6.3).
     OrchardOnward(Tree<OrchardOnward>),
-    /// An Ironwood-onward tree (NU6.3 onward), which also commits to the Ironwood pool.
+    /// An Ironwood-onward tree (NU6.3 to pre-NU7), which also commits to the Ironwood pool.
     IronwoodOnward(Tree<IronwoodOnward>),
+    /// A Tachyon-onward tree (NU7 onward), which also commits to the Tachyon pool anchor.
+    TachyonOnward(Tree<TachyonOnward>),
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
@@ -118,7 +120,7 @@ impl NonEmptyHistoryTree {
                 )?;
                 InnerHistoryTree::OrchardOnward(tree)
             }
-            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => {
+            NetworkUpgrade::Nu6_3 => {
                 let tree = Tree::<IronwoodOnward>::new_from_cache(
                     network,
                     network_upgrade,
@@ -128,17 +130,27 @@ impl NonEmptyHistoryTree {
                 )?;
                 InnerHistoryTree::IronwoodOnward(tree)
             }
-
-            #[cfg(zcash_unstable = "zfuture")]
-            NetworkUpgrade::ZFuture => {
-                let tree = Tree::<IronwoodOnward>::new_from_cache(
+            NetworkUpgrade::Nu7 => {
+                let tree = Tree::<TachyonOnward>::new_from_cache(
                     network,
                     network_upgrade,
                     size,
                     &peaks,
                     &Default::default(),
                 )?;
-                InnerHistoryTree::IronwoodOnward(tree)
+                InnerHistoryTree::TachyonOnward(tree)
+            }
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => {
+                let tree = Tree::<TachyonOnward>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::TachyonOnward(tree)
             }
         };
         Ok(Self {
@@ -184,15 +196,19 @@ impl NonEmptyHistoryTree {
                 let (tree, entry) = Tree::<OrchardOnward>::new_from_block(network, block, roots)?;
                 (InnerHistoryTree::OrchardOnward(tree), entry)
             }
-            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => {
+            NetworkUpgrade::Nu6_3 => {
                 let (tree, entry) = Tree::<IronwoodOnward>::new_from_block(network, block, roots)?;
                 (InnerHistoryTree::IronwoodOnward(tree), entry)
+            }
+            NetworkUpgrade::Nu7 => {
+                let (tree, entry) = Tree::<TachyonOnward>::new_from_block(network, block, roots)?;
+                (InnerHistoryTree::TachyonOnward(tree), entry)
             }
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => {
-                let (tree, entry) = Tree::<IronwoodOnward>::new_from_block(network, block, roots)?;
-                (InnerHistoryTree::IronwoodOnward(tree), entry)
+                let (tree, entry) = Tree::<TachyonOnward>::new_from_block(network, block, roots)?;
+                (InnerHistoryTree::TachyonOnward(tree), entry)
             }
         };
         let mut peaks = BTreeMap::new();
@@ -254,6 +270,9 @@ impl NonEmptyHistoryTree {
                 .append_leaf(block, roots)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
             InnerHistoryTree::IronwoodOnward(tree) => tree
+                .append_leaf(block, roots)
+                .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
+            InnerHistoryTree::TachyonOnward(tree) => tree
                 .append_leaf(block, roots)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
         };
@@ -389,6 +408,15 @@ impl NonEmptyHistoryTree {
                     &Default::default(),
                 )?)
             }
+            InnerHistoryTree::TachyonOnward(_) => {
+                InnerHistoryTree::TachyonOnward(Tree::<TachyonOnward>::new_from_cache(
+                    &self.network,
+                    self.network_upgrade,
+                    self.size,
+                    &self.peaks,
+                    &Default::default(),
+                )?)
+            }
         })
     }
 
@@ -398,6 +426,7 @@ impl NonEmptyHistoryTree {
             InnerHistoryTree::PreOrchard(tree) => tree.hash(),
             InnerHistoryTree::OrchardOnward(tree) => tree.hash(),
             InnerHistoryTree::IronwoodOnward(tree) => tree.hash(),
+            InnerHistoryTree::TachyonOnward(tree) => tree.hash(),
         }
     }
 

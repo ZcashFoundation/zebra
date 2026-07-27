@@ -167,6 +167,52 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
         );
     }
 
+    // Tachyon proof stamps (NU7, experimental)
+    //
+    // A proof stamp's anchor MUST be the Tachyon pool anchor after some earlier block.
+    //
+    // Tachyon has no note commitment tree: the pool state is a running anchor, so this
+    // is the tachyon analogue of the "earlier treestate" anchor rules above. Pointer
+    // (adjunct) stamps carry no anchor; their actions are covered by the proof stamp of
+    // the aggregate transaction they point to, which is checked when that transaction
+    // is validated.
+    //
+    // This check binds the stamp to the chain; the cryptographic check that the proof
+    // is actually valid for that anchor is done by proof verification in zebra-consensus.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+    if let Some(tachyon_shielded_data) = transaction.tachyon_shielded_data() {
+        if let zcash_tachyon::TachyonBundle::Proven(bundle) = &tachyon_shielded_data.0 {
+            let anchor = zebra_chain::tachyon::Anchor::from(bundle.stamp.anchor);
+
+            tracing::debug!(
+                ?anchor,
+                ?tx_index_in_block,
+                ?height,
+                "observed tachyon anchor",
+            );
+
+            if !parent_chain
+                .map(|chain| chain.tachyon_anchors.contains(&anchor))
+                .unwrap_or(false)
+                && !finalized_state.contains_tachyon_anchor(&anchor)
+            {
+                return Err(ValidateContextError::UnknownTachyonAnchor {
+                    anchor,
+                    height,
+                    tx_index_in_block,
+                    transaction_hash,
+                });
+            }
+
+            tracing::debug!(
+                ?anchor,
+                ?tx_index_in_block,
+                ?height,
+                "validated tachyon anchor",
+            );
+        }
+    }
+
     Ok(())
 }
 

@@ -66,6 +66,7 @@ fn push_and_prune_for_network_upgrade(
             sapling: &first_sapling_root,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )?;
 
@@ -101,6 +102,7 @@ fn push_and_prune_for_network_upgrade(
             sapling: &second_sapling_root,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )
     .unwrap();
@@ -152,6 +154,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
             sapling: &sapling_root_prev,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )?;
 
@@ -181,6 +184,7 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
             sapling: &activation_sapling_root,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )
     .unwrap();

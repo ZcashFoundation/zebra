@@ -870,6 +870,7 @@ fn history_tree_is_updated_for_network_upgrade(
             sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
             orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
             ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+            tachyon: &chain.tachyon_anchor_for_tip(),
         },
     )
     .unwrap();
@@ -957,6 +958,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
             sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
             orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
             ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+            tachyon: &chain.tachyon_anchor_for_tip(),
         },
     )
     .unwrap();

@@ -65,11 +65,11 @@ fn v7_transaction(
 }
 
 /// A proof stamp with an unasserted covered-actions digest and no proof: tx-level verification
-/// never checks the stamp's proof or coverage (those are block-level rules), only its tachygrams.
+/// never checks the stamp's proof or coverage (those are block-level rules).
 fn mock_proof_stamp(tachygrams: Vec<Tachygram>) -> ProofStamp {
     ProofStamp {
-        actions: [0u8; 32],
-        tachygrams,
+        coverage: [0u8; 32],
+        tachygrams: tachygrams.into_iter().collect(),
         anchor: zcash_tachyon::Anchor::read(&[0u8; 64][..]).expect("zero anchor reads"),
         proof: Box::new(ragu::Proof::trivial()),
     }
@@ -90,14 +90,11 @@ fn random_note(
     (sk, note)
 }
 
-/// A properly-signed spend-only bundle over `sighash`, in the unproven state.
+/// A spend-only bundle plan worth `value`, with its spend authorizing key.
 ///
 /// A spend contributes its value positively to the transaction value pool, so the resulting
 /// transaction has a valid (non-negative) miner fee.
-fn signed_spend_bundle(
-    sighash: &[u8; 32],
-    value: u64,
-) -> zcash_tachyon::Bundle<zcash_tachyon::Unproven> {
+fn spend_bundle_plan(value: u64) -> (bundle::Plan, private::SpendAuthorizingKey) {
     let mut rng = rand::thread_rng();
 
     let (sk, note) = random_note(&mut rng, value);
@@ -109,16 +106,39 @@ fn signed_spend_bundle(
         ask.derive_action_private(&alpha).derive_action_public()
     });
 
-    let plan = bundle::Plan::new(vec![spend_plan], vec![]);
+    (bundle::Plan::new(vec![spend_plan], vec![]), ask)
+}
 
-    plan.sign(&mut rng, sighash, &ask)
+/// A properly-signed spend-only bundle over its own transaction's sighash, in the unproven state.
+///
+/// The V7 sighash commits to the bundle's effecting data (action descriptors and value balance)
+/// but not its signatures or stamp, so the sighash is computed from a draft bundle carrying
+/// placeholder signatures, and the returned bundle then signs over it. Attaching the returned
+/// bundle (under any stamp) to [`v7_transaction`] yields the same sighash the signatures commit
+/// to.
+fn signed_spend_bundle(value: u64) -> zcash_tachyon::Bundle<zcash_tachyon::Unproven> {
+    let mut rng = rand::thread_rng();
+
+    let (plan, ask) = spend_bundle_plan(value);
+
+    let draft = plan
+        .sign(&mut rng, &[0u8; 32], &ask)
+        .expect("bundle plan has matching signatures and an in-range value balance");
+    let draft_tx = v7_transaction(
+        NetworkUpgrade::Nu7,
+        Some(TachyonBundle::Proven(draft.stamp(mock_proof_stamp(vec![])))),
+    );
+    let sighash = v7_sighash(&draft_tx);
+
+    plan.sign(&mut rng, &sighash, &ask)
         .expect("bundle plan has matching signatures and an in-range value balance")
 }
 
 /// The sighash the tachyon bundle's signatures must commit to.
 ///
-/// The current V7 sighash has no tachyon contribution, so it can be computed before the bundle is
-/// attached; see the TODO in `verify_v7_transaction`.
+/// The V7 sighash commits to the tachyon bundle's effecting data (action descriptors and value
+/// balance), but not its signatures or stamp — so a bundle with placeholder signatures produces
+/// the same sighash as its properly-signed counterpart under any stamp.
 fn v7_sighash(tx: &Transaction) -> [u8; 32] {
     tx.sighash(
         NetworkUpgrade::Nu7,
@@ -153,6 +173,47 @@ async fn verify_block_transaction(
         .await
 }
 
+/// The V7 sighash commits to the tachyon bundle's effecting data, but not its stamp.
+#[tokio::test(flavor = "multi_thread")]
+async fn v7_sighash_commits_to_tachyon_bundle() {
+    let _init_guard = zebra_test::init();
+
+    let mut rng = rand::thread_rng();
+    let (plan, ask) = spend_bundle_plan(100);
+    let bundle = plan
+        .sign(&mut rng, &[0u8; 32], &ask)
+        .expect("bundle plan has matching signatures and an in-range value balance");
+
+    let no_bundle_sighash = v7_sighash(&v7_transaction(NetworkUpgrade::Nu7, None));
+    let proven_sighash = v7_sighash(&v7_transaction(
+        NetworkUpgrade::Nu7,
+        Some(TachyonBundle::Proven(
+            bundle.clone().stamp(mock_proof_stamp(vec![])),
+        )),
+    ));
+    let adjunct_sighash = v7_sighash(&v7_transaction(
+        NetworkUpgrade::Nu7,
+        Some(TachyonBundle::Adjunct(
+            bundle
+                .stamp(mock_proof_stamp(vec![]))
+                .strip(PointerStamp::try_from([0xEEu8; 64]).expect("nonzero wtxid")),
+        )),
+    ));
+    let other_bundle_sighash = v7_sighash(&v7_transaction(
+        NetworkUpgrade::Nu7,
+        Some(TachyonBundle::Proven(
+            signed_spend_bundle(100).stamp(mock_proof_stamp(vec![])),
+        )),
+    ));
+
+    // The sighash changes when a bundle is present, and differs between distinct action sets.
+    assert_ne!(no_bundle_sighash, proven_sighash);
+    assert_ne!(proven_sighash, other_bundle_sighash);
+
+    // The stamp is excluded, so the sighash is invariant across stamping and stripping.
+    assert_eq!(proven_sighash, adjunct_sighash);
+}
+
 /// A V7 transaction with a properly-signed tachyon bundle passes verification, whether
 /// proof-stamped or pointer-stamped: proof coverage is a block-level rule.
 #[tokio::test(flavor = "multi_thread")]
@@ -160,17 +221,16 @@ async fn v7_with_signed_tachyon_bundle_is_accepted() {
     let _init_guard = zebra_test::init();
     let (network, height) = nu7_network();
 
-    let sighash = v7_sighash(&v7_transaction(NetworkUpgrade::Nu7, None));
-
     // Proof-stamped: the tx-level rules don't verify the proof itself.
-    let proven = signed_spend_bundle(&sighash, 100).stamp(mock_proof_stamp(vec![]));
+    let proven = signed_spend_bundle(100).stamp(mock_proof_stamp(vec![]));
     let tx = v7_transaction(NetworkUpgrade::Nu7, Some(TachyonBundle::Proven(proven)));
     verify_block_transaction(&network, height, tx)
         .await
         .expect("a signed proof-stamped tachyon transaction should verify");
 
     // Pointer-stamped: signature checks still run, proof coverage is deferred to the block.
-    let adjunct = signed_spend_bundle(&sighash, 100)
+    // The sighash excludes the stamp, so stripping a signed bundle keeps its signatures valid.
+    let adjunct = signed_spend_bundle(100)
         .stamp(mock_proof_stamp(vec![]))
         .strip(PointerStamp::try_from([0xEEu8; 64]).expect("nonzero wtxid"));
     let tx = v7_transaction(NetworkUpgrade::Nu7, Some(TachyonBundle::Adjunct(adjunct)));
@@ -186,7 +246,12 @@ async fn v7_with_wrong_sighash_signatures_is_rejected() {
     let (network, height) = nu7_network();
 
     // Sign over a different message than the transaction's sighash.
-    let bundle = signed_spend_bundle(&[0x42u8; 32], 100).stamp(mock_proof_stamp(vec![]));
+    let mut rng = rand::thread_rng();
+    let (plan, ask) = spend_bundle_plan(100);
+    let bundle = plan
+        .sign(&mut rng, &[0x42u8; 32], &ask)
+        .expect("bundle plan has matching signatures and an in-range value balance")
+        .stamp(mock_proof_stamp(vec![]));
     let tx = v7_transaction(NetworkUpgrade::Nu7, Some(TachyonBundle::Proven(bundle)));
 
     let result = verify_block_transaction(&network, height, tx).await;
@@ -234,26 +299,10 @@ async fn v7_with_identity_cv_is_rejected() {
     );
 }
 
-/// A proof stamp with duplicate tachygrams is rejected.
-#[tokio::test(flavor = "multi_thread")]
-async fn v7_with_duplicate_tachygrams_is_rejected() {
-    let _init_guard = zebra_test::init();
-    let (network, height) = nu7_network();
-
-    let sighash = v7_sighash(&v7_transaction(NetworkUpgrade::Nu7, None));
-
-    // A duplicated tachygram list is sorted (parsing allows it), but not distinct.
-    let tachygram = Tachygram::from(halo2::pasta::pallas::Base::from(42u64));
-    let bundle =
-        signed_spend_bundle(&sighash, 100).stamp(mock_proof_stamp(vec![tachygram, tachygram]));
-    let tx = v7_transaction(NetworkUpgrade::Nu7, Some(TachyonBundle::Proven(bundle)));
-
-    let result = verify_block_transaction(&network, height, tx).await;
-    assert!(
-        matches!(result, Err(TransactionError::TachyonDuplicateTachygram)),
-        "expected TachyonDuplicateTachygram, got: {result:?}",
-    );
-}
+// Distinctness of the tachygrams within one proof stamp is enforced at parse time in
+// `zcash_tachyon`: they deserialize into a set, and the wire parser rejects duplicate or
+// unsorted entries. A duplicate-tachygram transaction is unrepresentable in Zebra, so there
+// is no transaction-level semantic check (or test) for it.
 
 /// V7 transactions are rejected before NU7 activation.
 #[tokio::test(flavor = "multi_thread")]
@@ -268,7 +317,12 @@ async fn v7_is_rejected_before_nu7() {
     // The bundle's actions let the transaction pass the has-inputs-and-outputs check, so the
     // network-upgrade gate is what rejects it. The gate errors before any signature check runs,
     // so the signatures can be arbitrary.
-    let bundle = signed_spend_bundle(&[0u8; 32], 100).stamp(mock_proof_stamp(vec![]));
+    let mut rng = rand::thread_rng();
+    let (plan, ask) = spend_bundle_plan(100);
+    let bundle = plan
+        .sign(&mut rng, &[0u8; 32], &ask)
+        .expect("bundle plan has matching signatures and an in-range value balance")
+        .stamp(mock_proof_stamp(vec![]));
     let tx = v7_transaction(NetworkUpgrade::Nu6_3, Some(TachyonBundle::Proven(bundle)));
 
     let result = verify_block_transaction(&network, nu6_3_height, tx).await;
