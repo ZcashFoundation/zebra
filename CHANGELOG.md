@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
+  responses, rather than discarding it to work around obsolete `zcashd` behavior
+  ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
+
 ## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
 
 ### Changed
