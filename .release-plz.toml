@@ -41,7 +41,7 @@ pr_body = """
 
 ## Release checklist
 
-Checking a box records a maintainer's validation. For a conditional item, check it after validating the condition or confirming that it does not apply. A release-plz update replaces this body, resets the checklist, and requires the new commit to be reviewed.
+Checking a box records a maintainer's validation. For a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits rerun the standard PR Gate. A release-plz update replaces this body, resets the checklist, and requires the new release plan to be reviewed.
 
 ### Release prerequisites
 
