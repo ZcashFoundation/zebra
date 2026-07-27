@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated the following local packages: zebra-chain, zebra-node-services
+- `zebra-chain` dependency bumped to `11.2.1`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
 
 ## [12.0.0] - 2026-07-24
 

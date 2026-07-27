@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AT_OR_NEAR_TIP_THRESHOLD` is now 1,000 blocks, keeping peer stall detection disabled during
   long gaps between blocks ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10.
 
 ### Fixed
 

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-serving peers. At or near the network tip, such peers (like pruned nodes, which can serve
   recent blocks) are accepted again. Inbound and isolated connections are unaffected
   ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+- The peer crawler now queues a connection attempt on each crawl interval for every spare
+  outbound connection slot that has a ready address book candidate, so dropped outbound
+  connections are proactively replaced until the outbound connection limit is reached
+  ([#11102](https://github.com/ZcashFoundation/zebra/issues/11102)).
 - Zebra now sends up to half of its address book in response to a `getaddr` request, up from
   a quarter, so peers can find more of the network from each response. The maximum address
   book size is now pinned at 5000 instead of being derived from the response fraction

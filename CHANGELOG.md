@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   a fresh sync at genesis when most reachable listeners are non-serving. While syncing, Zebra
   now requires the `NODE_NETWORK` service from outbound peers; at or near the network tip it
   accepts non-serving peers (like pruned nodes) again
-  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
 - The embedded zcashd-compat release manifest and the installer script now pin sidecar
   `zebra-compat-v1.1.0`, which follows Mainnet past the NU6.3 (Ironwood) activation at block
   3,428,143. The previous `zebra-compat-v1.0.0` sidecar predates the activation height and stops
