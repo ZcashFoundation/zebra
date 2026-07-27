@@ -171,7 +171,7 @@ jobs:
       cancel-in-progress: false
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       CACHED_DISK_NAME: >-
         ${{ matrix.network == 'Mainnet'
@@ -395,8 +395,7 @@ jobs:
             --instance="${INSTANCE}" --zone="${ZONE}" \
             --stateful-external-ip="address=${IP_ADDRESS},interface-name=nic0,auto-delete=never"
 
-      # Rolling update waits only for the new template to start rolling out;
-      # full health convergence is the verify-nodes job's concern.
+      # Start the rolling update for an existing MIG.
       - name: Rolling update on existing MIG
         if: steps.does-group-exist.outcome == 'success'
         run: |
@@ -406,68 +405,24 @@ jobs:
             --max-surge=0 --max-unavailable=1 \
             --zone="${ZONE}"
 
-      # Keep the per-cell concurrency lock until this exact template has reached
-      # the MIG. Application health remains the verify-nodes job's concern.
+      # Keep the per-cell concurrency lock through rollout and health
+      # verification so a later deployment cannot replace the template while
+      # this deployment is being verified.
       - name: Wait for requested template rollout
         run: |
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
             --version-target-reached --zone="${ZONE}" --timeout=600
 
-  # Waits for each zonal MIG to reach HEALTHY (app-level: peer mesh + chain tip).
-  verify-nodes:
-    name: Verify ${{ matrix.network }} ${{ matrix.zone }}
-    strategy:
-      fail-fast: false
-      matrix:
-        network: ${{ fromJSON(inputs.networks) }}
-        zone: ${{ fromJSON(inputs.zones) }}
-    needs: [deploy-nodes]
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    environment: ${{ inputs.environment }}
-    permissions:
-      contents: read
-      id-token: write
-    if: ${{ inputs.verify && needs.deploy-nodes.result == 'success' }}
-    steps:
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
-        with:
-          short-length: 7
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
-        with:
-          workload_identity_provider: "${{ vars.GCP_WIF }}"
-          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
-
-      - name: Wait for MIG stable
-        env:
-          ENVIRONMENT: ${{ inputs.environment }}
-          MATRIX_NETWORK: ${{ matrix.network }}
-          MATRIX_ZONE: ${{ matrix.zone }}
+      - name: Wait for deployed node health
+        id: verify
+        if: ${{ inputs.verify }}
         run: |
-          NETWORK="${MATRIX_NETWORK,,}"
-          ZONE_LETTER="${MATRIX_ZONE##*-}"
-          case "${ENVIRONMENT}" in
-            prod)  PREFIX="" ;;
-            stage) PREFIX="main-" ;;
-            dev)   PREFIX="${GITHUB_REF_SLUG_URL}-" ;;
-          esac
-          MIG_NAME="zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
-          {
-            echo "MIG_NAME=${MIG_NAME}"
-            echo "ZONE=${MATRIX_ZONE}"
-          } >> "$GITHUB_ENV"
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
-            --stable --zone="${MATRIX_ZONE}" --timeout=5400
+            --stable --zone="${ZONE}" --timeout=5400
 
       # Surface the failing instance's health state and container logs.
       - name: Diagnose verify failure
-        if: failure()
+        if: ${{ failure() && steps.verify.outcome == 'failure' }}
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
         run: |
@@ -510,21 +465,5 @@ jobs:
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           label-name: S-ci-fail-release-auto-issue
-          always-create-new-issue: false
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  verify-failure-issue:
-    name: Open or update issues for verify failures
-    needs: [verify-nodes]
-    if: failure() || cancelled()
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
-        with:
-          title-template: "{{refname}} verify failed: {{eventName}} in {{workflow}}"
-          label-name: S-ci-fail-verify-auto-issue
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}

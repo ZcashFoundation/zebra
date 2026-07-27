@@ -26,7 +26,7 @@ The event-driven workflow builds an image with its trigger-specific inputs, then
 
 Cache images come from `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first.
 
-Deploy success has two channels: `deploy-nodes` reports infrastructure, `verify-nodes` reports application health. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-channels) for details.
+Each `deploy-nodes` cell holds its per-MIG concurrency lock through template rollout and optional application-health verification. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-stages) for details.
 
 ## Triggers
 
