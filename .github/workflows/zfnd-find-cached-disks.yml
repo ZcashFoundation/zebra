@@ -10,6 +10,10 @@ name: Check if cached state disks exist
 on:
   workflow_call:
     inputs:
+      source_sha:
+        description: The immutable source revision used to determine the database format
+        required: true
+        type: string
       network:
         description: The Zcash network used to look up the disks
         required: true
@@ -68,6 +72,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ inputs.source_sha }}
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:

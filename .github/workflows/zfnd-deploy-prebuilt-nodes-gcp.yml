@@ -135,6 +135,7 @@ jobs:
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ inputs.use_cached_disk && contains(fromJSON(inputs.networks), 'Mainnet') }}
     with:
+      source_sha: ${{ inputs.source_sha }}
       network: Mainnet
       environment: ${{ inputs.environment }}
       disk_prefix: zebrad-cache
@@ -149,6 +150,7 @@ jobs:
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ inputs.use_cached_disk && contains(fromJSON(inputs.networks), 'Testnet') }}
     with:
+      source_sha: ${{ inputs.source_sha }}
       network: Testnet
       environment: ${{ inputs.environment }}
       disk_prefix: zebrad-cache
