@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a quarter, so peers can find more of the network from each response. The maximum address
   book size is now pinned at 5000 instead of being derived from the response fraction
   ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
+- The peer stall detector no longer disconnects peers for empty `FindBlocks` or `FindHeaders`
+  responses while the node is within 1,000 estimated blocks of the network tip
+  ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
 
 ## [10.2.1] - 2026-07-24
 
