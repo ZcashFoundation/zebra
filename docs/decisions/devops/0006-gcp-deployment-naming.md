@@ -88,13 +88,13 @@ One MIG per matrix cell. Names encode every identity axis:
 
 ### Static IPs
 
-Deterministic zone-to-IP mapping for push and release:
+Deterministic zone-to-IP mapping for `stage` and `prod`:
 
 - `us-east1-b` → `zebra-${network}` (primary)
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-Workflow_dispatch deploys use ephemeral IPs (PR smoke tests don't need stable external addresses).
+Dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that explicitly selects `prod` updates the stable production MIG and reserved IP for its selected network and zone.
 
 ### Labels
 
