@@ -121,6 +121,8 @@ jobs:
       }}
     needs:
       - build
+      - binary-version
+      - prepare-binaries
       - attach-binaries
     timeout-minutes: 1
     steps:

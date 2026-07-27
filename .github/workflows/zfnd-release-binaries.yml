@@ -128,7 +128,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           workflow_path="${WORKFLOW_REF#"${REPOSITORY}/"}"
-          workflow_path="${workflow_path%@"${REF}"}"
+          workflow_path="${workflow_path%@*}"
           jq -n \
             --arg event_name "${EVENT_NAME}" \
             --arg invocation_id "${SERVER_URL}/${REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" \
