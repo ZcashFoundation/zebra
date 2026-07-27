@@ -409,7 +409,7 @@ jobs:
       - name: Wait for requested template rollout
         run: |
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
-            --version-target-reached --zone="${ZONE}" --timeout=3300
+            --version-target-reached --zone="${ZONE}" --timeout=600
 
   # Waits for each zonal MIG to reach HEALTHY (app-level: peer mesh + chain tip).
   verify-nodes:
