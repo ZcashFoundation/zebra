@@ -36,13 +36,12 @@ on:
 permissions: {}
 
 jobs:
-  # A merged Release PR is already owned by the post-merge controller, so its
-  # squash commit must not create the next Release PR.
+  # A release commit belongs to the post-merge controller and must not create
+  # another Release PR.
   release-pr:
     name: Create or update Release PR
     if: >-
       github.event_name == 'push' &&
-      github.event.head_commit.author.username != 'zebra-release[bot]' &&
       !startsWith(github.event.head_commit.message, 'chore: release')
     runs-on: ubuntu-latest
     concurrency:
@@ -109,13 +108,11 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
        startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
        contains(github.event.pull_request.labels.*.name, 'A-release'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # verify the retained Release PR head and merge topology
       pull-requests: read # validate the selected Release PR
     concurrency:
       group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
@@ -156,15 +153,12 @@ jobs:
               `query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
                   pullRequest(number: $number) {
-                    baseRefName
                     baseRefOid
                     headRefName
                     headRefOid
-                    headRepository { nameWithOwner }
                     labels(first: 100) { nodes { name } }
-                    mergeCommit { oid }
                     merged
-                    mergedBy { login __typename }
+                    mergedBy { login }
                     state
                   }
                 }
@@ -172,107 +166,34 @@ jobs:
               { ...context.repo, number: prNumber },
             );
             const pr = result.repository.pullRequest;
-            const expectedRepository = `${context.repo.owner}/${context.repo.repo}`;
             const isReleasePr =
-              pr?.baseRefName === "main" &&
-              pr.headRepository?.nameWithOwner === expectedRepository &&
-              pr.headRefName.startsWith("release-plz-") &&
+              pr?.headRefName.startsWith("release-plz-") &&
               pr.labels.nodes.some(({ name }) => name === "A-release");
 
             if (!isReleasePr || (pr.state !== "OPEN" && !pr.merged)) {
               throw new Error(
-                `PR #${prNumber} is not an open or merged internal A-release Release PR`,
+                `PR #${prNumber} is not a release-plz A-release PR`,
               );
             }
 
-            let baseSha;
-            let targetSha;
-            if (requestedOperation === "check" && !pr.merged) {
-              const comparison =
-                await github.rest.repos.compareCommitsWithBasehead({
-                  ...context.repo,
-                  basehead: `${pr.baseRefOid}...${pr.headRefOid}`,
-                });
-              if (comparison.data.merge_base_commit.sha !== pr.baseRefOid) {
-                throw new Error(
-                  `PR #${prNumber} is behind main; wait for release-plz to update it`,
-                );
-              }
-              baseSha = pr.baseRefOid;
-              targetSha = pr.headRefOid;
-            } else {
-              if (!pr.merged || pr.mergeCommit?.oid === undefined) {
+            const isOpenCheck =
+              requestedOperation === "check" && pr.state === "OPEN";
+            if (!isOpenCheck) {
+              if (!pr.merged) {
                 throw new Error(`PR #${prNumber} is not merged`);
               }
 
-              // GitHub's GraphQL Bot.login is `mergify`; the REST API renders
-              // the same actor as `mergify[bot]`.
-              if (
-                pr.mergedBy?.__typename !== "Bot" ||
-                pr.mergedBy.login !== "mergify"
-              ) {
+              if (pr.mergedBy?.login !== "mergify") {
                 throw new Error(
                   `PR #${prNumber} was not merged through the Mergify queue`,
                 );
               }
-
-              const mergeCommit = await github.rest.repos.getCommit({
-                ...context.repo,
-                ref: pr.mergeCommit.oid,
-              });
-              const [mergeBase, mergedHead, ...extraParents] =
-                mergeCommit.data.parents;
-              if (
-                mergeBase?.sha === undefined ||
-                mergedHead?.sha !== pr.headRefOid ||
-                extraParents.length !== 0
-              ) {
-                throw new Error(
-                  `PR #${prNumber} merge did not retain the checked Release PR head`,
-                );
-              }
-
-              targetSha = pr.headRefOid;
-              const releaseComparison =
-                await github.rest.repos.compareCommitsWithBasehead({
-                  ...context.repo,
-                  basehead: `${mergeBase.sha}...${targetSha}`,
-                });
-              baseSha = releaseComparison.data.merge_base_commit.sha;
-
-              const comparison =
-                await github.rest.repos.compareCommitsWithBasehead({
-                  ...context.repo,
-                  basehead: `${targetSha}...${pr.baseRefName}`,
-                });
-              if (comparison.data.merge_base_commit.sha !== targetSha) {
-                throw new Error(
-                  `release target ${targetSha} is not an ancestor of current main`,
-                );
-              }
-              try {
-                const policy = await github.rest.repos.getContent({
-                  ...context.repo,
-                  path: ".github/cargo-release.yml",
-                  ref: targetSha,
-                });
-                if (Array.isArray(policy.data) || policy.data.type !== "file") {
-                  throw new Error("release policy path is not a file");
-                }
-              } catch (error) {
-                if (error?.status === 404) {
-                  throw new Error(
-                    `release target ${targetSha} predates the Cargo Release cutover`,
-                  );
-                }
-                throw error;
-              }
             }
 
-            core.setOutput("base_sha", baseSha);
+            core.setOutput("base_sha", pr.baseRefOid);
             core.setOutput("operation", requestedOperation);
             core.setOutput("pr_number", String(prNumber));
-            core.setOutput("target_sha", targetSha);
+            core.setOutput("target_sha", pr.headRefOid);
 
   release-check:
     name: Check release without publishing

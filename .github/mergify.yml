@@ -41,10 +41,8 @@ defaults:
 
 # Allows to define the rules that reign over our merge queues
 queue_rules:
-  # Release PRs must retain the exact head commit that passed Release readiness.
-  # release-plz documents merge commits as the safe merge-queue strategy because
-  # the checked PR head remains an ancestor of main and can be published without
-  # including unrelated PRs that were validated in the same speculative train.
+  # release-plz identifies Release PRs by branch and label. Keep those PRs in
+  # their own single-item queue so they never share a speculative batch.
   - name: release
     batch_size: 1
     merge_method: merge
@@ -55,6 +53,7 @@ queue_rules:
       - base=main
       - -draft
       - label!=do-not-merge
+      - 'head~=^release-plz-'
       - label=A-release
       - "#approved-reviews-by >= 1"
       - "#changes-requested-reviews-by = 0"
