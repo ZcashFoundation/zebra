@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
+## [13.0.0] - 2026-07-22
+
+### Added
+
+- `error::TransactionError`:
+  - `Halo2VerificationFailed`
+  - `SaplingVerificationFailed`
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
+
+### Security
+
+- Check the ZIP-317 mempool rules before verifying a transaction's shielded proofs, so an
+  underpaying transaction is rejected before the expensive cryptographic checks run
+  ([#11053](https://github.com/ZcashFoundation/zebra/pull/11053)).
+- Score failed shielded proof and signature verifications, and non-canonical Orchard and
+  Ironwood proof sizes, as mempool misbehaviour, so a peer sending invalid shielded transactions
+  is disconnected instead of repeatedly forcing their verification
+  ([#11054](https://github.com/ZcashFoundation/zebra/pull/11054)).
+
+## [12.0.1] - 2026-07-17
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.0`.
+
 ## [12.0.0] - 2026-07-17
 
 ### Changed
@@ -12,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires `zebra-state` 11.0.0. `zebra-state` types (`error::ValidateContextError`,
   `request::Request`, `response::{Response, KnownBlock}`) appear in this crate's public API,
   so `zebra-state`'s major bump is breaking here too.
+- `tower-batch-control` dependency bumped to `1.1.1`.
+- `tower-fallback` dependency bumped to `0.2.43`.
+- `zebra-chain` dependency bumped to `11.2.0`.
+- `zebra-node-services` dependency bumped to `9.1.1`.
+- `zebra-script` dependency bumped to `10.1.1`.
 
 ## [11.0.0] - 2026-07-10
 
