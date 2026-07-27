@@ -113,6 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read # resolve the merged release commit and its parent
       pull-requests: read # validate the selected Release PR
     concurrency:
       group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
@@ -157,6 +158,10 @@ jobs:
                     headRefName
                     headRefOid
                     labels(first: 100) { nodes { name } }
+                    mergeCommit {
+                      oid
+                      parents(first: 1) { nodes { oid } }
+                    }
                     merged
                     state
                   }
@@ -182,10 +187,20 @@ jobs:
               throw new Error(`PR #${prNumber} is not merged`);
             }
 
-            core.setOutput("base_sha", pr.baseRefOid);
+            let baseSha = pr.baseRefOid;
+            let targetSha = pr.headRefOid;
+            if (requestedOperation === "resume") {
+              baseSha = pr.mergeCommit?.parents.nodes[0]?.oid;
+              targetSha = pr.mergeCommit?.oid;
+              if (baseSha === undefined || targetSha === undefined) {
+                throw new Error(`PR #${prNumber} has no merged release source`);
+              }
+            }
+
+            core.setOutput("base_sha", baseSha);
             core.setOutput("operation", requestedOperation);
             core.setOutput("pr_number", String(prNumber));
-            core.setOutput("target_sha", pr.headRefOid);
+            core.setOutput("target_sha", targetSha);
 
   release-check:
     name: Check release without publishing
