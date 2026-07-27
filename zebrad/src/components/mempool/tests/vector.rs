@@ -58,6 +58,40 @@ fn stale_branch_id_at_nu6_3_has_no_mempool_score() {
     );
 }
 
+/// A stale NU6.2 branch ID at a maximum-height NU6.3 activation does not panic.
+#[test]
+fn stale_branch_id_at_max_nu6_3_height_has_no_mempool_score() {
+    let network = ParametersBuilder::default()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            nu6: Some(8),
+            nu6_1: Some(9),
+            nu6_2: Some(Height::MAX.0 - 1),
+            nu6_3: Some(Height::MAX.0),
+            nu7: None,
+        })
+        .expect("activation heights at Height::MAX are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured network is valid");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_2),
+            Height::MAX,
+            &network,
+        ),
+        0,
+    );
+}
+
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized
