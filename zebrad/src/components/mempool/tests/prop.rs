@@ -92,6 +92,37 @@ proptest! {
         );
     }
 
+    /// Checks that NU6.3 branch IDs have no peer score just before activation.
+    #[test]
+    fn nu6_3_branch_id_has_no_score_before_activation(
+        activation_height in 100u32..1_000_000,
+        height_offset in -40i64..0,
+    ) {
+        let network = Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                nu6_2: Some(activation_height - 41),
+                nu6_3: Some(activation_height),
+                ..Default::default()
+            })
+            .expect("generated activation heights are valid")
+            .clear_funding_streams()
+            .to_network()
+            .expect("configured testnet is valid");
+        let activation_height = block::Height(activation_height);
+        let height = (activation_height + height_offset)
+            .expect("generated activation heights are above Height::MIN");
+
+        prop_assert_eq!(
+            adjusted_mempool_misbehavior_score(
+                &TransactionError::WrongConsensusBranchId,
+                Some(NetworkUpgrade::Nu6_3),
+                height,
+                &network,
+            ),
+            0,
+        );
+    }
+
     /// Checks that NU6.2 branch IDs regain their peer score at the grace cutoff.
     #[test]
     fn nu6_2_branch_id_keeps_score_after_nu6_3_grace(
