@@ -1313,6 +1313,182 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
     std::mem::drop(banned_connection);
 }
 
+/// Test that inbound connections accepted on a dual-stack listener are canonicalized,
+/// so that IPv4 peers arriving as IPv4-mapped IPv6 addresses are keyed the same way as
+/// the ban set, the recent-IP limiter, and the peer set.
+#[tokio::test]
+async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // And a dual-stack IPv6 listener.
+    if zebra_test::net::zebra_skip_ipv6_tests() {
+        return;
+    }
+
+    let peer_ip = Ipv4Addr::LOCALHOST;
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
+
+    let success_stay_open_inbound_handshaker =
+        service_fn(move |req: HandshakeRequest<TcpStream>| {
+            let peer_tracker_tx = peer_tracker_tx.clone();
+            async move {
+                let HandshakeRequest {
+                    data_stream: tcp_stream,
+                    connected_addr,
+                    connection_tracker,
+                } = req;
+
+                let ConnectedAddr::InboundDirect { addr } = connected_addr else {
+                    unreachable!("inbound listener handshakes use inbound direct addresses");
+                };
+
+                let (fake_client, _harness) = ClientTestHarness::build()
+                    .with_connected_addr(connected_addr)
+                    .finish();
+
+                peer_tracker_tx
+                    .unbounded_send((addr.ip(), tcp_stream, connection_tracker))
+                    .expect("unexpected error sending to unbounded channel");
+
+                Ok(fake_client)
+            }
+        });
+
+    let mut config = Config {
+        listen_addr: "[::]:0".parse().unwrap(),
+        peerset_initial_target_size: 1,
+        max_connections_per_ip: usize::MAX,
+        ..Config::default()
+    };
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+    config.listen_addr = listen_addr;
+
+    let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(2);
+    let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
+
+    let listen_fut = accept_inbound_connections(
+        config,
+        tcp_listener,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        success_stay_open_inbound_handshaker,
+        peerset_tx,
+        bans_rx,
+        Vec::new(),
+    );
+    let listen_task_handle = tokio::spawn(listen_fut);
+
+    // Connect over IPv4 to the dual-stack listener, so the accepted address is
+    // the IPv4-mapped IPv6 form `::ffff:127.0.0.1`.
+    let ipv4_listen_addr = SocketAddr::new(peer_ip.into(), listen_addr.port());
+    let connection = connect_from(peer_ip, ipv4_listen_addr).await;
+
+    tokio::time::sleep(ZCASHD_COMPAT_LISTENER_TEST_DURATION).await;
+
+    listen_task_handle.abort();
+    tokio::task::yield_now().await;
+    assert_listener_task_cancelled(listen_task_handle);
+
+    let mut accepted_ips = Vec::new();
+    while let Ok((ip, peer_connection, peer_tracker)) = peer_tracker_rx.try_recv() {
+        accepted_ips.push(ip);
+        std::mem::drop(peer_connection);
+        std::mem::drop(peer_tracker);
+    }
+
+    let mut peer_set_ips = Vec::new();
+    while let Ok(Some((addr, _client))) = peerset_rx.try_next() {
+        peer_set_ips.push(addr.ip());
+    }
+
+    assert_eq!(
+        accepted_ips,
+        vec![IpAddr::V4(peer_ip)],
+        "inbound addresses must be canonicalized before they are used as keys"
+    );
+    assert_eq!(
+        peer_set_ips,
+        vec![IpAddr::V4(peer_ip)],
+        "peer set keys must be canonical, so that ban and per-IP checks match"
+    );
+
+    std::mem::drop(connection);
+}
+
+/// Test that a ban on an IPv4 address is enforced against an inbound connection that
+/// presents the IPv4-mapped IPv6 form of that address on a dual-stack listener.
+#[tokio::test]
+async fn listener_bans_ipv4_mapped_inbound_connection() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // And a dual-stack IPv6 listener.
+    if zebra_test::net::zebra_skip_ipv6_tests() {
+        return;
+    }
+
+    let banned_ip = Ipv4Addr::LOCALHOST;
+    let unreachable_inbound_handshaker = service_fn(|_| async {
+        unreachable!("banned inbound peers should never reach the handshaker")
+    });
+
+    let mut config = Config {
+        listen_addr: "[::]:0".parse().unwrap(),
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+    config.listen_addr = listen_addr;
+
+    let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
+    // The ban is stored in the canonical IPv4 form, like `MetaAddr::new_misbehavior`
+    // stores it.
+    let (bans_tx, bans_rx) = tokio::sync::watch::channel(
+        [(banned_ip.into(), std::time::Instant::now())]
+            .into_iter()
+            .collect::<IndexMap<IpAddr, Instant>>()
+            .into(),
+    );
+
+    let listen_fut = accept_inbound_connections(
+        config,
+        tcp_listener,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        unreachable_inbound_handshaker,
+        peerset_tx,
+        bans_rx,
+        Vec::new(),
+    );
+    let listen_task_handle = tokio::spawn(listen_fut);
+
+    // The banned peer connects over IPv4, so the listener accepts it as `::ffff:127.0.0.1`.
+    let ipv4_listen_addr = SocketAddr::new(banned_ip.into(), listen_addr.port());
+    let banned_connection = connect_from(banned_ip, ipv4_listen_addr).await;
+
+    tokio::time::sleep(ZCASHD_COMPAT_LISTENER_TEST_DURATION).await;
+
+    listen_task_handle.abort();
+    tokio::task::yield_now().await;
+    assert_listener_task_cancelled(listen_task_handle);
+
+    assert_eq!(
+        drain_discovered_peers(&mut peerset_rx),
+        0,
+        "banned IPv4 peers must not be admitted as IPv4-mapped IPv6 peers"
+    );
+
+    std::mem::drop(bans_tx);
+    std::mem::drop(banned_connection);
+}
+
 /// Test the listener with the default inbound peer limit, and a handshaker that always errors.
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_error() {

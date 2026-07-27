@@ -44,7 +44,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
-    protocol::external::canonical_socket_addr,
+    protocol::external::{canonical_peer_addr, canonical_socket_addr},
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
@@ -693,7 +693,14 @@ where
         };
 
         if let Ok((tcp_stream, addr)) = inbound_result {
-            let addr: PeerSocketAddr = addr.into();
+            // # Security
+            //
+            // Canonicalize the accepted address before it is used as a key. On a
+            // dual-stack listener an IPv4 peer connects as IPv4-mapped IPv6, but
+            // bans and misbehaviour updates are keyed on the canonical IPv4 address.
+            // This address also becomes the peer set key and the per-IP limiter key
+            // below, so canonicalizing once here keeps all of them in the same form.
+            let addr: PeerSocketAddr = canonical_peer_addr(addr);
 
             // # Security
             //
