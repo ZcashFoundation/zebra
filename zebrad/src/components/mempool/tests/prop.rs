@@ -92,6 +92,37 @@ proptest! {
         );
     }
 
+    /// Checks that NU6.2 branch IDs regain their peer score at the grace cutoff.
+    #[test]
+    fn nu6_2_branch_id_keeps_score_after_nu6_3_grace(
+        activation_height in 100u32..1_000_000,
+        height_offset in 40i64..1_000,
+    ) {
+        let network = Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                nu6_2: Some(activation_height - 1),
+                nu6_3: Some(activation_height),
+                ..Default::default()
+            })
+            .expect("generated activation heights are valid")
+            .clear_funding_streams()
+            .to_network()
+            .expect("configured testnet is valid");
+        let activation_height = block::Height(activation_height);
+        let height = (activation_height + height_offset)
+            .expect("generated activation heights are far below Height::MAX");
+
+        prop_assert_eq!(
+            adjusted_mempool_misbehavior_score(
+                &TransactionError::WrongConsensusBranchId,
+                Some(NetworkUpgrade::Nu6_2),
+                height,
+                &network,
+            ),
+            100,
+        );
+    }
+
     /// Test if the mempool storage is cleared on a chain reset.
     #[test]
     fn storage_is_cleared_on_single_chain_reset(
