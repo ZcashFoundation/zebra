@@ -251,8 +251,8 @@ CMD ["zebrad"]
 # Override the ARGs to bake in a different sidecar release.
 FROM runtime AS runtime-zcashd-compat
 
-ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz"
-ARG ZCASHD_COMPAT_ARCHIVE_SHA256="b861ea94215647a69a944ded7c9d6c7c3dfd836e54e3e194103242935e6879f2"
+ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz"
+ARG ZCASHD_COMPAT_ARCHIVE_SHA256="92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
