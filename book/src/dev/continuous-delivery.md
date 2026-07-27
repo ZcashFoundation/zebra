@@ -16,7 +16,7 @@ ADR [0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md) records
 
 ## Update mechanics
 
-Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones). A workflow_dispatch is a single job (user picks the zone). Every job runs the same flow for its zonal MIG:
+The event-driven workflow builds an image with its trigger-specific inputs, then passes the complete immutable GAR `repository@sha256:...` identity to the reusable deployment workflow. Release automation can call that same deployment boundary with an image prepared earlier. Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones), while a workflow_dispatch runs one job for the selected zone. Every job runs the same flow for its zonal MIG:
 
 1. Build a new instance template with the commit's container image.
 2. Ensure the zonal stateful disk exists. On first deploy, create it from the latest matching cache image. On subsequent deploys, attach the existing disk.
