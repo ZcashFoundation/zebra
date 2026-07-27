@@ -41,27 +41,6 @@ defaults:
 
 # Allows to define the rules that reign over our merge queues
 queue_rules:
-  # release-plz identifies Release PRs by branch and label. Keep those PRs in
-  # their own single-item queue so they never share a speculative batch.
-  - name: release
-    batch_size: 1
-    merge_method: merge
-    commit_message_format:
-      title: pr-title
-      body: empty
-    queue_conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
-      - 'head~=^release-plz-'
-      - label=A-release
-      - "#approved-reviews-by >= 1"
-      - "#changes-requested-reviews-by = 0"
-      - check-success=lint
-      - check-success=unit-tests
-      - check-success=test-crates
-      - check-success=pr-gate-result
-
   - name: urgent
     batch_size: 5
     # Wait a short time to embark hotfixes together in a merge train

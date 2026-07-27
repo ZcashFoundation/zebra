@@ -131,9 +131,9 @@ To help ensure that you have sufficient time and a clear path to update, this is
 The normal release path requires 2 maintainer actions:
 
 1. Review the latest Release PR after every required check passes.
-2. Approve the latest commit and let Mergify merge it from the queue.
+2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `A-release` label, `PR Gate / Release readiness` validates it, Mergify enforces the approval and check boundary, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge. The release queue handles one Release PR at a time.
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `A-release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 
@@ -141,7 +141,7 @@ Wait until release-plz finishes updating the PR and every required check passes,
 
 A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
 
-Approve only after every required check passes and every checkbox is complete. A later release-plz update invalidates the earlier review and checklist. Do not bypass the queue with a manual merge; the dedicated Mergify `release` queue accepts only `release-plz-` branches with the `A-release` label, validates one Release PR at a time, and uses a merge commit. The release controller requires the Mergify merge before publication.
+Approve and merge only after every required check passes and every checkbox is complete. A later release-plz update invalidates the earlier review and checklist.
 
 ### What Release Readiness Reports
 
@@ -151,7 +151,7 @@ Before publication, a green report with `reason: "incomplete"` is expected: the 
 
 ### What Happens After Merge
 
-Mergify merging the approved Release PR starts the post-merge release workflow. The controller passes the Release PR's base and head directly to Cargo Release, which publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
+Merging the approved Release PR starts the post-merge release workflow. The controller passes the Release PR's base and head directly to Cargo Release, which publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
 
 No maintainer command is required when this workflow succeeds.
 
@@ -167,7 +167,6 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing `[Unreleased]` entry on `main`, then let release-plz refresh the PR. A dependency-only failure indicates a release-plz configuration regression; do not edit the generated branch. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
-| The Release PR bypassed the Mergify queue | Automatic publication remains blocked. Stop and ask a maintainer to authorize break-glass recovery. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 
 Each new Release PR commit reruns the complete readiness check.
