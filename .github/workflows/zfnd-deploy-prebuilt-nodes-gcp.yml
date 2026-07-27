@@ -139,6 +139,9 @@ jobs:
         network: ${{ fromJSON(inputs.networks) }}
         zone: ${{ fromJSON(inputs.zones) }}
     name: Deploy ${{ matrix.network }} ${{ matrix.zone }}
+    concurrency:
+      group: zebra-gcp-${{ inputs.environment }}-${{ matrix.network }}-${{ matrix.zone }}
+      cancel-in-progress: false
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -192,6 +195,7 @@ jobs:
 
       - name: Compute MIG and disk naming
         env:
+          DEPLOY_IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
           REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -202,10 +206,11 @@ jobs:
             dev)   PREFIX="${REF_SLUG}-" ;;
           esac
           SOURCE_SHA_SHORT="${SOURCE_SHA:0:7}"
+          IMAGE_DIGEST="${DEPLOY_IMAGE##*@sha256:}"
           {
             echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
             echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
-            echo "TEMPLATE_NAME=zebrad-${PREFIX}${SOURCE_SHA_SHORT}-${NETWORK}-${ZONE_LETTER}"
+            echo "TEMPLATE_NAME=zebrad-${ENVIRONMENT}-${IMAGE_DIGEST:0:12}-${GITHUB_RUN_ID}-${NETWORK}-${ZONE_LETTER}"
             echo "SOURCE_SHA_SHORT=${SOURCE_SHA_SHORT}"
           } >> "$GITHUB_ENV"
 
@@ -265,8 +270,13 @@ jobs:
         env:
           DEPLOY_IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
+          GCP_DEPLOYMENTS_SA: ${{ vars.GCP_DEPLOYMENTS_SA }}
+          GCP_MACHINE: ${{ vars.GCP_SMALL_MACHINE }}
+          GCP_SUBNETWORK: ${{ vars.GCP_SUBNETWORK }}
           LOG_FILE: ${{ inputs.log_file }}
           MATRIX_NETWORK: ${{ matrix.network }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           if [ "${MATRIX_NETWORK}" = "Mainnet" ]; then
@@ -275,6 +285,12 @@ jobs:
             P2P=18233; RPC=18232
           fi
           if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
+            TEMPLATE_IMAGE=$(gcloud compute instance-templates describe "${TEMPLATE_NAME}" \
+              --format="value(properties.metadata.items.filter(key:zebra-container-image).extract(value))")
+            if [ "${TEMPLATE_IMAGE}" != "${DEPLOY_IMAGE}" ]; then
+              echo "::error::${TEMPLATE_NAME} does not contain the requested immutable image"
+              exit 1
+            fi
             exit 0
           fi
 
@@ -284,18 +300,18 @@ jobs:
           fi
 
           gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
-            --machine-type=${{ vars.GCP_SMALL_MACHINE }} \
+            --machine-type="${GCP_MACHINE}" \
             --provisioning-model=SPOT \
             --boot-disk-size=10GB --boot-disk-type=pd-standard \
             --image-project=cos-cloud --image-family=cos-stable \
-            --subnet=${{ vars.GCP_SUBNETWORK }} --no-address \
+            --subnet="${GCP_SUBNETWORK}" --no-address \
             --disk="name=${DISK_NAME},device-name=${DISK_NAME},mode=rw,auto-delete=no,boot=no" \
             --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
             --container-stdin --container-tty \
             --container-image="${DEPLOY_IMAGE}" \
-            --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
-            --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} --scopes=cloud-platform \
-            --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+            --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
+            --service-account="${GCP_DEPLOYMENTS_SA}" --scopes=cloud-platform \
+            --metadata="google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true,zebra-container-image=${DEPLOY_IMAGE}" \
             --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${GITHUB_EVENT_NAME},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
             --tags=zebrad
 
@@ -378,6 +394,11 @@ jobs:
       id-token: write
     if: ${{ inputs.verify && needs.deploy-nodes.result == 'success' }}
     steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
+        with:
+          short-length: 7
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
@@ -398,7 +419,7 @@ jobs:
           case "${ENVIRONMENT}" in
             prod)  PREFIX="" ;;
             stage) PREFIX="main-" ;;
-            dev) echo "::error::verification is unsupported for dev deployments"; exit 1 ;;
+            dev)   PREFIX="${GITHUB_REF_SLUG_URL}-" ;;
           esac
           MIG_NAME="zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
           {
