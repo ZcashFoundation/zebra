@@ -4,6 +4,8 @@
 
 use super::*;
 
+mod vectors;
+
 impl<S, C> Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
