@@ -7,23 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.0] - 2026-07-24
+
 ### Breaking Changes
 
+- `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured
+  from the same chain snapshot used to compute `confirmations`. `MinedTx::new`
+  now takes this hash as its fifth argument. Consumers should pin follow-up
+  state queries to this hash (or to the resolved block hash) instead of issuing
+  a separate `Tip` / `BestChainBlockHash` request. See
+  [#10550](https://github.com/ZcashFoundation/zebra/issues/10550).
 - `Config::elasticsearch_password` is now a `RedactedString` instead of a `String`. Config
   files are unaffected; code that reads the field needs `.as_str()`, and code that sets it
   needs `.into()`. Only applies to builds with the `elasticsearch` feature
-  ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
-
-### Security
-
-- The startup config dump no longer prints the Elasticsearch password. It previously appeared
-  in cleartext in logs and journald on `elasticsearch`-feature builds with a password set
   ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
 
 ### Added
 
 - `RedactedString`, a `String` wrapper whose `Debug` output is `[REDACTED]`, for config fields
   that hold secrets
+  ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
+
+### Security
+
+- The startup config dump no longer prints the Elasticsearch password. It previously appeared
+  in cleartext in logs and journald on `elasticsearch`-feature builds with a password set
   ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051))
 
 ## [11.1.1] - 2026-07-22
