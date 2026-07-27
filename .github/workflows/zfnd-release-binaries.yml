@@ -54,6 +54,17 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
+      # GitHub's provenance predicate records the caller's GITHUB_SHA.
+      # Keep that claim identical to the source this job actually builds.
+      - name: Bind source to provenance
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if [[ "${SOURCE_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "::error::source_sha must match the caller commit recorded in build provenance"
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: |
           sudo sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list
