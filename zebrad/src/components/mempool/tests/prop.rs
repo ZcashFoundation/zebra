@@ -271,6 +271,7 @@ fn setup(
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(
+        network,
         &Config {
             tx_cost_limit: 160_000_000,
             ..Default::default()
