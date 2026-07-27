@@ -47,6 +47,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::Height,
+    parameters::NetworkUpgrade,
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -139,6 +140,10 @@ pub enum TransactionDownloadVerifyError {
     Invalid {
         error: zebra_consensus::error::TransactionError,
         advertiser_addr: Option<PeerSocketAddr>,
+        /// The transaction's consensus branch upgrade, if its version contains one.
+        transaction_upgrade: Option<NetworkUpgrade>,
+        /// The candidate block height used for mempool consensus verification.
+        verification_height: Height,
     },
 }
 
@@ -438,6 +443,7 @@ where
 
             trace!(?txid, "got tx");
 
+            let transaction_upgrade = tx.transaction.network_upgrade();
             let result = verifier
                 .oneshot(tx::Request::Mempool {
                     transaction: tx.clone(),
@@ -455,7 +461,12 @@ where
             // Hide the transaction data to avoid filling the logs
             trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
-            result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )
+            result.map_err(|error| TransactionDownloadVerifyError::Invalid {
+                error: error.into(),
+                advertiser_addr,
+                transaction_upgrade,
+                verification_height: next_height,
+            })
         }
         .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(
