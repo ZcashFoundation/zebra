@@ -15,7 +15,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{
         testnet::{ConfiguredActivationHeights, ParametersBuilder},
-        Network,
+        Network, NetworkUpgrade,
     },
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, VerifiedUnminedTx},
@@ -38,6 +38,25 @@ type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, 
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, TransactionError>;
+
+/// A stale NU6.2 branch ID has no peer score at NU6.3 activation.
+#[test]
+fn stale_branch_id_at_nu6_3_has_no_mempool_score() {
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_2),
+            height,
+            &network,
+        ),
+        0,
+    );
+}
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
