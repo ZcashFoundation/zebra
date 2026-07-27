@@ -299,7 +299,6 @@ jobs:
   zebrad-release:
     name: Resolve zebrad release
     needs: release-target
-    if: needs.release-target.outputs.operation == 'resume'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -391,6 +390,51 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: prod
+
+  # Temporary branch-only rehearsal jobs. Remove after the hosted check and
+  # staging rollout have been recorded.
+  rehearse-public-image:
+    name: Rehearse public image promotion
+    needs: [release-target, zebrad-release, prepare-public-image]
+    if: >-
+      needs.release-target.outputs.operation == 'check' &&
+      needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      artifact-metadata: write
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/zfnd-promote-release-image.yml
+    with:
+      image: ${{ needs.prepare-public-image.outputs.image }}
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      version: ${{ format('{0}-rehearsal.{1}', needs.zebrad-release.outputs.version, github.run_id) }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  rehearse-stage-deploy:
+    name: Rehearse staging deployment
+    needs: [release-target, zebrad-release, prepare-gcp-image]
+    if: >-
+      needs.release-target.outputs.operation == 'check' &&
+      needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
+    with:
+      image: ${{ needs.prepare-gcp-image.outputs.image }}
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      environment: stage
+      created_by: workflow_dispatch
+      networks: '["Mainnet","Testnet"]'
+      zones: '["us-east1-b","us-east1-c","us-east1-d"]'
+      use_cached_disk: true
+      cached_disk_type: tip
+      log_file: ${{ vars.CD_LOG_FILE }}
+      verify: true
 
   release:
     name: Publish crates and GitHub Release
