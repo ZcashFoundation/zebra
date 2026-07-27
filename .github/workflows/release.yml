@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # verify that the selected merge commit is on main
+      contents: read # verify the retained Release PR head and merge topology
       pull-requests: read # validate the selected Release PR
     concurrency:
       group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
@@ -214,17 +214,30 @@ jobs:
                 );
               }
 
-              targetSha = pr.mergeCommit.oid;
-              const commit = await github.rest.repos.getCommit({
+              const mergeCommit = await github.rest.repos.getCommit({
                 ...context.repo,
-                ref: targetSha,
+                ref: pr.mergeCommit.oid,
               });
-              baseSha = commit.data.parents[0]?.sha;
-              if (baseSha === undefined) {
+              const [mergeBase, mergedHead, ...extraParents] =
+                mergeCommit.data.parents;
+              if (
+                mergeBase?.sha === undefined ||
+                mergedHead?.sha !== pr.headRefOid ||
+                extraParents.length !== 0
+              ) {
                 throw new Error(
-                  `release target ${targetSha} has no first parent`,
+                  `PR #${prNumber} merge did not retain the checked Release PR head`,
                 );
               }
+
+              targetSha = pr.headRefOid;
+              const releaseComparison =
+                await github.rest.repos.compareCommitsWithBasehead({
+                  ...context.repo,
+                  basehead: `${mergeBase.sha}...${targetSha}`,
+                });
+              baseSha = releaseComparison.data.merge_base_commit.sha;
+
               const comparison =
                 await github.rest.repos.compareCommitsWithBasehead({
                   ...context.repo,

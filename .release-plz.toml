@@ -36,43 +36,47 @@ pr_body = """
 {%- endfor %}
 
 > [!IMPORTANT]
-> Wait for every required check, review this checklist, then approve the latest commit.
-> Mergify will merge it from the queue after all queue conditions remain satisfied.
+> After every required check passes, complete every checkbox for the latest commit.
+> Then approve that commit; Mergify will merge it through the dedicated release queue.
 
 ## Release checklist
 
+Checking a box records a maintainer's validation. For a conditional item, check it after validating the condition or confirming that it does not apply. A release-plz update replaces this body, resets the checklist, and requires the new commit to be reviewed.
+
 ### Release prerequisites
 
-- No unintended prerelease dependency versions remain.
+- [ ] No unintended prerelease dependency versions remain.
 
 For releases that include `zebrad`:
 
-- A full sync completed after the latest state change, or no new full sync is required.
-- Mainnet and Testnet checkpoints are current for this release.
+- [ ] A full sync completed after the latest state change, or no new full sync is required.
+- [ ] Mainnet and Testnet checkpoints are current for this release.
 
 ### Release contents
 
-- If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
-- Each crate changelog covers every consumer-visible change since that crate's previous release.
-- Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
+- [ ] If `zebrad` is included, the root changelog covers every operator-visible change since the previous `zebrad` release.
+- [ ] Each crate changelog covers every consumer-visible change since that crate's previous release.
+- [ ] Changelog entries describe the final behavior, use the correct category, and link the relevant pull requests.
 
 ### Versions
 
-- If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
-- Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
+- [ ] If `zebrad` is included, its proposed version follows the release policy, and its stable or prerelease status is correct.
+- [ ] Each crate version follows Cargo SemVer for its API and behavior changes, and dependency-only releases use the smallest required bump.
 
 ### Release data and documentation
 
 For releases that include `zebrad`:
 
-- The end-of-support height matches the intended release date.
-- Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
-- README, installation, compatibility, and operational documentation match the release.
+- [ ] The end-of-support height matches the intended release date.
+- [ ] Network-upgrade activation heights and the minimum network protocol version are correct, when applicable.
+- [ ] README, installation, compatibility, and operational documentation match the release.
 
 ### Publish
 
-1. Approve the latest commit after `PR Gate / Release readiness` and every other required check pass.
-2. Let Mergify merge the approved commit from the queue. Do not bypass the queue with a manual merge.
+- [ ] `PR Gate / Release readiness` and every other required check pass for the latest commit.
+- [ ] Every checklist item above is complete and this commit is ready to publish.
+
+After checking the boxes, approve the latest commit. Mergify will merge it from the `release` queue. Do not bypass the queue with a manual merge.
 
 ## If automation fails
 

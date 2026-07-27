@@ -3,7 +3,8 @@
 name: PR Gate
 
 on:
-  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate release readiness.
+  # Title edits re-run source policy; body-only checklist edits skip expensive
+  # policy and readiness jobs. Labels re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main]
@@ -37,6 +38,7 @@ jobs:
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
+      policy_change: ${{ github.event.action != 'edited' || github.event.changes.title.from != '' }}
     steps:
       - name: Identify Mergify queue candidates
         id: classify
@@ -99,6 +101,7 @@ jobs:
     # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
     if: >-
       github.event_name == 'pull_request' &&
+      needs.changes.outputs.policy_change == 'true' &&
       needs.changes.outputs.queue_candidate != 'true' &&
       needs.changes.outputs.semver == 'true' &&
       needs.changes.outputs.breaking == 'false'
@@ -132,6 +135,7 @@ jobs:
     needs: changes
     if: >-
       github.event_name == 'pull_request' &&
+      needs.changes.outputs.policy_change == 'true' &&
       needs.changes.outputs.queue_candidate != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -156,8 +160,10 @@ jobs:
   # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
   release-readiness:
     name: Release readiness
+    needs: changes
     if: >-
       github.event_name == 'pull_request' &&
+      needs.changes.outputs.policy_change == 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'A-release')
