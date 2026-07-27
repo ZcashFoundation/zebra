@@ -54,6 +54,15 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
+      - name: Check out release workflow support
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          path: release-workflow-support
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/scripts/write-release-provenance.sh
+          sparse-checkout-cone-mode: false
+
       - name: Install build dependencies
         run: |
           sudo sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list
@@ -119,7 +128,7 @@ jobs:
           PROVENANCE_BUILDER_WORKFLOW: .github/workflows/zfnd-release-binaries.yml
           PROVENANCE_OUTPUT: ${{ runner.temp }}/release-binary-provenance.json
           PROVENANCE_SOURCE_SHA: ${{ inputs.source_sha }}
-        run: bash .github/scripts/write-release-provenance.sh
+        run: bash release-workflow-support/.github/scripts/write-release-provenance.sh
 
       # Generated in the build job so the attestation reflects the matrix
       # runner (ubuntu-22.04 / ubuntu-22.04-arm), not the publish job's runner.
