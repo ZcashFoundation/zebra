@@ -25,6 +25,10 @@ filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
+[[profile.ci.overrides]]
+filter = 'test(/^integration::sync::/)'
+test-group = 'serial-live-mainnet'
+
 # These tests sync mainnet to genesis from live peers; they normally finish in
 # ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
 # retry instead of hanging near the old 30m hard limit, where they flaked.
@@ -52,10 +56,20 @@ slow-timeout = { period = "30m", terminate-after = 2 }
 
 [test-groups]
 serial-state = { max-threads = 1 }
+# Live Mainnet tests compete for the same limited set of usable peers when they
+# connect concurrently from one public IP.
+serial-live-mainnet = { max-threads = 1 }
 # zcashd-compat integration tests each spawn a zebrad + zcashd on
 # bind-probed-then-released ports, so they must never run concurrently, even
 # under a parallel profile invoked with --run-ignored=all.
 serial-zcashd-compat = { max-threads = 1 }
+
+# Force tests that start fresh live Mainnet nodes to run serially in local
+# parallel test runs. The CI overrides above assign the same test group while
+# preserving their profile-specific retries and timeouts.
+[[profile.default.overrides]]
+filter = 'test(/^integration::sync::/)'
+test-group = 'serial-live-mainnet'
 
 # Force zcashd-compat integration tests serial in every profile, so a parallel
 # --run-ignored=all run cannot collide on their released RPC/P2P ports.
