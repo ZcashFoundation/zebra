@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
+  responses, rather than discarding it to work around obsolete `zcashd` behavior
+  ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
+
 ### Fixed
 
 - Outbound peer slots no longer fill up with peers that advertise no services, which could stall
@@ -14,6 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   now requires the `NODE_NETWORK` service from outbound peers; at or near the network tip it
   accepts non-serving peers (like pruned nodes) again
   ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
+
+## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
+
+### Changed
+
+- The first peer disk-cache write is retried every 20 seconds until it succeeds, instead of waiting the full 5-minute update interval, so a cold-started node caches its peers soon after finding them ([#11073](https://github.com/ZcashFoundation/zebra/pull/11073)).
+
+### Fixed
+
+- `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to
+  the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg
+  or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
+
+### Security
+
+- The startup config dump no longer prints the Elasticsearch password in logs or journald when the `elasticsearch` feature is enabled ([#11051](https://github.com/ZcashFoundation/zebra/pull/11051)).
+- `zebrad-log-filter` no longer executes log text as a shell command, so a log line containing a single quote cannot run commands as the user running the filter ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050)).
 
 ## [Zebra 6.2.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.1) - 2026-07-22
 
@@ -37,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - Allow chain synchronization to immediately retry an honest block body after rejecting a body
-  with the same header hash, without waiting for a child block to trigger cleanup.
+  with the same header hash, without waiting for a child block to trigger cleanup
+  ([GHSA-x93j-mj2f-q338](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-x93j-mj2f-q338)).
 - Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
   underpaying and structurally invalid shielded mempool transactions before their expensive proof
   verification, and disconnect peers that send transactions with invalid shielded proofs.
@@ -71,12 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - The installer's `docker-supervised` mode now configures the embedded sidecar
   source, so its generated command works with the published Zebra image
   ([#11008](https://github.com/ZcashFoundation/zebra/pull/11008)).
-
-### Security
-
-- Allow chain synchronization to immediately retry an honest block body after
-  rejecting a body with the same header hash, without waiting for a child block
-  to trigger cleanup.
 
 ## [Zebra 6.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.1.0) - 2026-07-17
 

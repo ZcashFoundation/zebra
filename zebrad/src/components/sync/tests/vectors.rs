@@ -70,9 +70,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
 
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
-
     // Start the syncer
     let chain_sync_task_handle = tokio::spawn(chain_sync_future);
 
@@ -127,7 +124,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .respond(zn::Response::BlockHashes(vec![
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -213,7 +209,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             block2_hash, // tip (discarded - already fetched)
             block3_hash, // expected_next
             block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests
@@ -312,9 +307,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
 
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
-
     // Start the syncer
     let chain_sync_task_handle = tokio::spawn(chain_sync_future);
 
@@ -371,7 +363,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block1_hash,
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -459,7 +450,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block4_hash,
             block3_hash,
             block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests
@@ -607,9 +597,6 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
     let block2_hash = block2.hash();
 
-    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
-    let block3_hash = block3.hash();
-
     // Also get a block that is a long way away from genesis
     let block982k: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -670,7 +657,6 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             block982k_hash,
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 982k)
@@ -780,9 +766,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
 
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
-
     // Also get a block that is a long way away from genesis
     let block982k: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -842,7 +825,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .respond(zn::Response::BlockHashes(vec![
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -929,7 +911,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             block3_hash, // expected_next
             block4_hash,
             block982k_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests

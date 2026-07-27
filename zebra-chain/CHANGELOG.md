@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ironwood::ShieldedData::data_mut`
+- With the `proptest-impl` feature:
+  - `transaction::Transaction::v6_strategy`
+  - `impl Arbitrary for orchard::ShieldedDataV6` and `ironwood::ShieldedData`
+  - `parameters::NetworkUpgrade::nu6_3_branch_id_strategy`
+  - `transaction::Transaction::ironwood_value_balance_mut`
+
+### Fixed
+
+- With the `proptest-impl` feature, the arbitrary `Transaction` strategy now generates v6
+  transactions (with v6 Orchard and Ironwood bundles) for NU6.3 and later network upgrades,
+  and accepts a transaction version override of 6. Previously it only generated v4/v5
+  transactions for those upgrades, so property tests built on it could never observe
+  v6/Ironwood data.
+
 ## [11.2.0] - 2026-07-17
 
 ### Added
