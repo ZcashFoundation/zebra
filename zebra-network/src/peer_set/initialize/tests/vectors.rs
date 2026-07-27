@@ -36,7 +36,7 @@ use zebra_test::net::random_known_port;
 use crate::{
     address_book_updater::AddressBookUpdater,
     config::CacheDir,
-    constants, init,
+    connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
     peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
@@ -73,6 +73,14 @@ const ZCASHD_COMPAT_LISTENER_TEST_DURATION: Duration = Duration::from_millis(500
 
 /// The amount of time to make the inbound connection acceptor wait between peer connections.
 const MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS: Duration = Duration::from_millis(25);
+
+/// The amount of time to wait for the peer set to become ready, or stay unready.
+const PEER_SET_BAN_TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The amount of time to wait for a misbehaviour update to be flushed and turned into a ban.
+///
+/// Misbehaviour updates are batched behind a 30 second timer in `initialize()`.
+const MISBEHAVIOR_FLUSH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
@@ -1401,7 +1409,7 @@ async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
     }
 
     let mut peer_set_ips = Vec::new();
-    while let Ok(Some((addr, _client))) = peerset_rx.try_next() {
+    while let Ok((addr, _client)) = peerset_rx.try_recv() {
         peer_set_ips.push(addr.ip());
     }
 
@@ -1487,6 +1495,128 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
 
     std::mem::drop(bans_tx);
     std::mem::drop(banned_connection);
+}
+
+/// End-to-end test: a peer that is banned while it is connected must be dropped from the
+/// peer set, including when it connected to a dual-stack listener as IPv4-mapped IPv6.
+///
+/// Uses the real listener, a real TCP connection, a real handshake, and the real
+/// misbehaviour channel returned by [`init()`].
+#[tokio::test]
+async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // And a dual-stack IPv6 listener.
+    if zebra_test::net::zebra_skip_ipv6_tests() {
+        return;
+    }
+
+    let peers_inbound_service =
+        service_fn(|_req| async move { Ok::<Response, BoxError>(Response::Peers(Vec::new())) });
+
+    let config = Config {
+        listen_addr: "[::]:0".parse().unwrap(),
+        peerset_initial_target_size: 1,
+
+        // Stop Zebra making outbound connections
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+
+        ..Config::default()
+    };
+
+    let (mut peer_set, address_book, misbehavior_tx) = init(
+        config,
+        peers_inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    )
+    .await;
+
+    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+    let peer_ip = Ipv4Addr::LOCALHOST;
+
+    // Connect over IPv4, so the listener accepts `::ffff:127.0.0.1`.
+    let ipv4_listen_addr = SocketAddr::new(peer_ip.into(), listen_addr.port());
+    let _connected_peer = connect_isolated_tcp_direct_with_inbound(
+        &Mainnet,
+        ipv4_listen_addr,
+        "Test peer user agent".to_string(),
+        peers_inbound_service,
+    )
+    .await
+    .expect("local listener connection succeeds");
+
+    // The peer set routes requests to the connected peer before it is banned.
+    //
+    // `peer_set` is a `Buffer`, so its `poll_ready` only checks the buffer's capacity: the
+    // only way to tell whether the peer set has a usable peer is to send it a request.
+    let response = tokio::time::timeout(
+        PEER_SET_BAN_TEST_TIMEOUT,
+        peer_set
+            .ready()
+            .await
+            .expect("peer set buffer is ready")
+            .call(Request::Peers),
+    )
+    .await;
+
+    assert!(
+        response.is_ok(),
+        "the connected peer should answer requests before it is banned"
+    );
+
+    // Ban the peer, using the same channel that block and transaction verification uses.
+    misbehavior_tx
+        .send((
+            PeerSocketAddr::from(SocketAddr::new(peer_ip.into(), ipv4_listen_addr.port())),
+            constants::MAX_PEER_MISBEHAVIOR_SCORE,
+        ))
+        .await
+        .expect("misbehavior channel is open");
+
+    // # Correctness
+    //
+    // Misbehaviour updates are batched behind a 30 second flush timer, so the ban does not
+    // exist yet. Wait for it to actually appear in the address book before checking the peer
+    // set, otherwise this test passes whenever the timer hasn't fired, whatever the peer set
+    // does.
+    let ban_deadline = Instant::now() + MISBEHAVIOR_FLUSH_TIMEOUT;
+    let banned_ip: IpAddr = peer_ip.into();
+    loop {
+        if address_book.lock().unwrap().bans().contains_key(&banned_ip) {
+            break;
+        }
+
+        assert!(
+            Instant::now() < ban_deadline,
+            "the misbehaviour update should be flushed and banned within {MISBEHAVIOR_FLUSH_TIMEOUT:?}"
+        );
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // The banned peer must be dropped, so there is no peer left to route a request to.
+    let response = tokio::time::timeout(
+        PEER_SET_BAN_TEST_TIMEOUT,
+        peer_set
+            .ready()
+            .await
+            .expect("peer set buffer is ready")
+            .call(Request::Peers),
+    )
+    .await;
+
+    assert!(
+        response.is_err(),
+        "a banned peer must be dropped from the peer set, so its requests can't be routed"
+    );
 }
 
 /// Test the listener with the default inbound peer limit, and a handshaker that always errors.
