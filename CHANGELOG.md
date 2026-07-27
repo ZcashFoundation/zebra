@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+- Mempool transaction relay no longer penalizes peers for adjacent NU6.2 and
+  NU6.3 branch ID mismatches during the 40 heights on either side of NU6.3
+  activation, avoiding bans caused by temporary chain-tip divergence
+  ([#11113](https://github.com/ZcashFoundation/zebra/pull/11113)).
 - Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
   responses, rather than discarding it to work around obsolete `zcashd` behavior
   ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
