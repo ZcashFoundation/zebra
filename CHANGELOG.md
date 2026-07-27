@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Fixed
+
+- The embedded zcashd-compat release manifest and the installer script now pin sidecar
+  `zebra-compat-v1.1.0`, which follows Mainnet past the NU6.3 (Ironwood) activation at block
+  3,428,143. The previous `zebra-compat-v1.0.0` sidecar predates the activation height and stops
+  following the chain at that block. Supervised deployments using `zcashd_source = "embedded"`
+  must upgrade (or set `zcashd_path` to a current sidecar binary) before activation.
+
 ## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
 
 ### Changed
