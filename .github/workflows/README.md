@@ -57,6 +57,7 @@ graph TB
     FindDisks[zfnd-find-cached-disks.yml]
     Deploy[zfnd-deploy-integration-tests-gcp.yml]
     DeployNodes[zfnd-deploy-nodes-gcp.yml]
+    DeployPrebuilt[zfnd-deploy-prebuilt-nodes-gcp.yml]
     Cleanup[zfnd-delete-gcp-resources.yml]
   end
 
@@ -71,6 +72,7 @@ graph TB
   %% Build dependency
   BuildDocker --> IT
   IT --> FindDisks --> Deploy
+  DeployNodes --> BuildDocker --> DeployPrebuilt
 
   %% Styling
   classDef primary fill:#2374ab,stroke:#2374ab,color:white
@@ -79,7 +81,7 @@ graph TB
   class BuildDocker primary
   class ReleaseWorkflow,ReleaseBinaries primary
   class Unit,Lint,Coverage,DockerCfg,CrateBuild,PRGate,Docs,Security secondary
-  class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
+  class IT,FindDisks,Deploy,DeployNodes,DeployPrebuilt,Cleanup secondary
   class PR,Push,ReleaseEvent,Schedule,Manual trigger
 ```
 
@@ -168,7 +170,8 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
 - **Deploy integration tests** (`zfnd-deploy-integration-tests-gcp.yml`): Orchestrates GCP VMs and test runs
-- **Deploy nodes** (`zfnd-deploy-nodes-gcp.yml`): Provision long-lived nodes
+- **Deploy nodes** (`zfnd-deploy-nodes-gcp.yml`): Build the event-specific image and orchestrate long-lived node deployment
+- **Deploy prebuilt nodes** (`zfnd-deploy-prebuilt-nodes-gcp.yml`): Deploy an explicit immutable GAR image identity
 - **Delete GCP resources** (`zfnd-delete-gcp-resources.yml`): Cleanup utilities
 - Helper scripts in `.github/workflows/scripts/` used by the above
 
