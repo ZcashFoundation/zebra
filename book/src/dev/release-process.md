@@ -133,15 +133,15 @@ The normal release path requires 2 maintainer actions:
 1. Review the latest Release PR after every required check passes.
 2. Approve the latest commit and let Mergify merge it from the queue.
 
-Everything else is automatic. release-plz creates and updates the Release PR from non-release commits on `main`, `PR Gate / Release readiness` validates every new commit, Mergify enforces the approval and check boundary, and `ZcashFoundation/cargo-release` reconciles the approved release after merge. The Release PR merge commit is the immutable source for both package contents and the [tag and GitHub Release policy](../../../.github/cargo-release.yml).
+Everything else is automatic. release-plz creates and updates the Release PR from non-release commits on `main`, `PR Gate / Release readiness` validates every new commit, Mergify enforces the approval and check boundary, and `ZcashFoundation/cargo-release` reconciles the approved release after merge. Mergify uses a merge commit so the checked Release PR head remains an ancestor of `main`; that retained head is the immutable source for package contents, tags, and the [GitHub Release policy](../../../.github/cargo-release.yml).
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR, then review the latest commit and its generated checklist. The checklist is a review aid rather than an editable task list, because body edits restart CI; submit a GitHub approval to record the decision. Source PRs author curated changelog entries under `[Unreleased]`, then release-plz moves those entries under versioned headings and adds mechanical dependency-only entries when it refreshes the Release PR. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checking boxes edits only the PR body, so PR Gate skips its expensive source-policy and release-readiness jobs. Source PRs author curated changelog entries under `[Unreleased]`, then release-plz moves those entries under versioned headings and adds mechanical dependency-only entries when it refreshes the Release PR. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
 
-PR Gate cancels an in-progress readiness run when the Release PR body or labels change and starts a complete replacement run. This is expected; avoid metadata changes while readiness is running, and treat only the latest run as authoritative.
+A new Release PR commit replaces the generated body, resets every checkbox, and runs the complete readiness check again. Label changes also re-evaluate readiness. Treat only the checks and completed checklist for the latest commit as authoritative.
 
-Approve only when every required check passes for the latest commit. A later update invalidates the earlier review and automatically runs readiness again. Do not bypass the queue with a manual merge; Mergify merges the approved commit only while its queue conditions remain satisfied. The release controller independently confirms that Mergify performed the merge, so a late approval or rerun cannot repair a direct merge.
+Approve only after every required check passes and every checkbox is complete for the latest commit. A later update invalidates the earlier review and checklist. Do not bypass the queue with a manual merge; the dedicated Mergify `release` queue validates one Release PR at a time and retains its checked head with a merge commit. The release controller independently confirms both the Mergify actor and that retained head, so a late approval, direct merge, squash merge, or batched source cannot become an automatic release.
 
 ### What Release Readiness Reports
 
@@ -151,7 +151,7 @@ Before publication, a green report with `reason: "incomplete"` is expected: the 
 
 ### What Happens After Merge
 
-Mergify merging the approved Release PR starts the post-merge release workflow. It publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
+Mergify merging the approved Release PR starts the post-merge release workflow. The controller publishes the retained, readiness-checked Release PR head rather than the merge commit, so unrelated changes that reached `main` while the PR was queued cannot enter the release. It publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release merge commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
 
 No maintainer command is required when this workflow succeeds.
 
@@ -167,7 +167,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing `[Unreleased]` entry on `main`, then let release-plz refresh the PR. A dependency-only failure indicates a release-plz configuration regression; do not edit the generated branch. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
-| The Release PR bypassed the Mergify queue | Automatic publication remains blocked. Stop and ask a maintainer to authorize break-glass recovery. |
+| The Release PR bypassed the Mergify queue or its merge did not retain the checked head | Automatic publication remains blocked. Stop and ask a maintainer to authorize break-glass recovery. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 
 Each new Release PR commit reruns the complete readiness check.
@@ -190,7 +190,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` applies only when the merged Release PR contains `.github/cargo-release.yml`, which marks the Cargo Release cutover. The action reuses the immutable merge commit, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection.
+`resume` applies only when the merged Release PR contains `.github/cargo-release.yml`, which marks the Cargo Release cutover. The action reuses the immutable Release PR head retained by the merge commit, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection.
 
 Do not retry immutable contradictions: a crate archive from another source commit, a tag that points to another commit, or a GitHub Release with a conflicting channel must stop for maintainer review. Do not manually repeat publication or overwrite external state.
 
