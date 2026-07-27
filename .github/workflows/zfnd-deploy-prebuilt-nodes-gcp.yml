@@ -68,7 +68,7 @@ jobs:
           NETWORKS: ${{ inputs.networks }}
           ZONES: ${{ inputs.zones }}
         run: |
-          if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
+          if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^/@[:space:]:]+/[^/@[:space:]:]+/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::image must be a complete Google Artifact Registry repository@sha256:digest identity"
             exit 1
           fi
