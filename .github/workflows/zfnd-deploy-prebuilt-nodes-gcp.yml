@@ -24,6 +24,10 @@ on:
         description: The target environment, dev, stage, or prod
         required: true
         type: string
+      created_by:
+        description: The deployment origin stored in GCP resource labels
+        required: true
+        type: string
       networks:
         description: A JSON array of Zcash networks
         required: true
@@ -57,10 +61,12 @@ jobs:
     name: Validate deployment inputs
     runs-on: ubuntu-latest
     steps:
-      - name: Validate immutable image identity
+      - name: Validate deployment contract
         env:
           IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
+          NETWORKS: ${{ inputs.networks }}
+          ZONES: ${{ inputs.zones }}
         run: |
           if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::image must be a complete Google Artifact Registry repository@sha256:digest identity"
@@ -70,6 +76,22 @@ jobs:
             dev|stage|prod) ;;
             *) echo "::error::environment must be dev, stage, or prod"; exit 1 ;;
           esac
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "Mainnet" or . == "Testnet")
+          ' <<< "${NETWORKS}" >/dev/null; then
+            echo "::error::networks must be a non-empty, unique array containing only Mainnet and Testnet"
+            exit 1
+          fi
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "us-east1-b" or . == "us-east1-c" or . == "us-east1-d")
+          ' <<< "${ZONES}" >/dev/null; then
+            echo "::error::zones must be a non-empty, unique array containing only supported us-east1 zones"
+            exit 1
+          fi
 
   # One-shot upsert of the HTTP health checks used by the zonal MIGs.
   # These are global, network-scoped resources (one per network), so running
@@ -92,12 +114,15 @@ jobs:
           NETWORKS: ${{ inputs.networks }}
         run: |
           for NET in $(jq -r '.[] | ascii_downcase' <<< "${NETWORKS}"); do
+            # A competing deployment can win the create; accept that race only
+            # when a second describe confirms the shared health check exists.
             gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null \
             || gcloud compute health-checks create http "zebra-${NET}-health" \
               --port=8080 --request-path=/healthy \
               --check-interval=60s --timeout=10s \
               --unhealthy-threshold=3 --healthy-threshold=2 \
-              --global
+              --global \
+            || gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null
           done
 
   # Cache images are network-scoped, so each selected network gets one lookup.
@@ -233,6 +258,7 @@ jobs:
       # subsequent deploys or after a manual bootstrap.
       - name: Ensure zonal disk exists
         env:
+          CREATED_BY: ${{ inputs.created_by }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
           if gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" &>/dev/null; then
@@ -245,13 +271,13 @@ jobs:
           gcloud compute disks create "${DISK_NAME}" --zone="${ZONE}" \
             --image="${CACHED_DISK_NAME}" \
             --size=400 --type=pd-balanced \
-            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${GITHUB_EVENT_NAME},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
 
       # Single source of truth for the zone-suffix to reserved-IP mapping.
       # Gated to stable deploys so feature-branch dispatches to dev can't
       # advertise a prod IP that isn't actually attached to the MIG.
       - name: Resolve reserved external IP
-        if: ${{ inputs.environment == 'prod' || inputs.environment == 'stage' || github.ref_name == 'main' }}
+        if: ${{ inputs.environment == 'prod' || inputs.environment == 'stage' }}
         env:
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
@@ -268,6 +294,7 @@ jobs:
 
       - name: Create instance template
         env:
+          CREATED_BY: ${{ inputs.created_by }}
           DEPLOY_IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
           GCP_DEPLOYMENTS_SA: ${{ vars.GCP_DEPLOYMENTS_SA }}
@@ -312,7 +339,7 @@ jobs:
             --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
             --service-account="${GCP_DEPLOYMENTS_SA}" --scopes=cloud-platform \
             --metadata="google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true,zebra-container-image=${DEPLOY_IMAGE}" \
-            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${GITHUB_EVENT_NAME},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
             --tags=zebrad
 
       - name: Check if zonal MIG exists
@@ -348,7 +375,7 @@ jobs:
         if: >-
           ${{
             steps.does-group-exist.outcome == 'failure' &&
-            (inputs.environment == 'prod' || inputs.environment == 'stage' || github.ref_name == 'main')
+            (inputs.environment == 'prod' || inputs.environment == 'stage')
           }}
         run: |
           if [ -z "${IP_ADDRESS:-}" ]; then
@@ -376,6 +403,13 @@ jobs:
             --replacement-method=recreate \
             --max-surge=0 --max-unavailable=1 \
             --zone="${ZONE}"
+
+      # Keep the per-cell concurrency lock until this exact template has reached
+      # the MIG. Application health remains the verify-nodes job's concern.
+      - name: Wait for requested template rollout
+        run: |
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --version-target-reached --zone="${ZONE}" --timeout=3300
 
   # Waits for each zonal MIG to reach HEALTHY (app-level: peer mesh + chain tip).
   verify-nodes:

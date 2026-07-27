@@ -1,6 +1,6 @@
 # Zebra Continuous Delivery
 
-The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment and every published release to `prod`, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
+The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment and every finalized Zebra release to `prod`, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
 
 ## Topology: one zonal MIG per (environment, branch, network, zone)
 
@@ -8,7 +8,7 @@ The pipeline targets two GCP environments. Each network in each environment depl
 
 | Trigger              | Environment label | GCP project       | MIGs per network | MIG name                                      | Stateful disk                                 |
 | -------------------- | ----------------- | ----------------- | ---------------- | --------------------------------------------- | --------------------------------------------- |
-| `release`            | `prod`            | `zfnd-prod-zebra` | 3 (one per zone) | `zebrad-${network}-${zone-letter}`            | `zebrad-cache-${network}-${zone-letter}`      |
+| Release controller   | `prod`            | `zfnd-prod-zebra` | 3 (one per zone) | `zebrad-${network}-${zone-letter}`            | `zebrad-cache-${network}-${zone-letter}`      |
 | `push` to `main`     | `stage`           | `zfnd-dev-zebra`  | 3 (one per zone) | `zebrad-main-${network}-${zone-letter}`       | `zebrad-cache-main-${network}-${zone-letter}` |
 | `workflow_dispatch`  | `dev` or `prod`   | selected by env   | 1 (user-chosen zone) | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
 
@@ -16,7 +16,7 @@ ADR [0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md) records
 
 ## Update mechanics
 
-The event-driven workflow builds an image with its trigger-specific inputs, then passes the complete immutable GAR `repository@sha256:...` identity to the reusable deployment workflow. Release automation can call that same deployment boundary with an image prepared earlier. Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones), while a workflow_dispatch runs one job for the selected zone. Every job runs the same flow for its zonal MIG:
+The event-driven workflow builds an image for `main` and manual triggers, then passes the complete immutable GAR `repository@sha256:...` identity to the reusable deployment workflow. The release controller prepares its fleet image in parallel with crates and passes that exact identity to the same deployment boundary after the GitHub Release is finalized. Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones), while a workflow_dispatch runs one job for the selected zone. Every job runs the same flow for its zonal MIG:
 
 1. Build a new instance template with the commit's container image.
 2. Ensure the zonal stateful disk exists. On first deploy, create it from the latest matching cache image. On subsequent deploys, attach the existing disk.
@@ -30,12 +30,11 @@ Deploy success has two channels: `deploy-nodes` reports infrastructure, `verify-
 
 ## Triggers
 
-The workflow runs on:
+The event-driven wrapper runs on:
 
 - a `push` to `main` that touches Rust code, dependencies, Docker files, or the workflow itself
-- a published `release`
 - a `workflow_dispatch` from any branch (dispatcher picks `network`, `zone`, and `environment`)
 
-Pull requests run only the Docker-configuration tests; they do not deploy.
+Pull requests run only the Docker-configuration tests; they do not deploy. A merged Release PR is deployed by `release.yml` after Cargo finalization, using the immutable fleet image prepared by that same workflow run.
 
-For implementation details, see the [deploy workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml).
+For implementation details, see the [event-driven wrapper](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml) and [prebuilt-image deployment workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml).

@@ -26,7 +26,7 @@ Operating a multi-instance regional MIG also coupled deploy-landed to node-healt
 - Updates must be true rolling: one zone at a time, others keep serving.
 - Cleanup must be auditable and reversible: label-based protection, manual reap commands, no accidental destruction of live stateful disks.
 - Cache images produced by integration tests must remain the cold-start mechanism for fresh deploys; cache images are network-scoped (same image seeds all zones).
-- The architecture must compose with the existing `release:published` trigger contract.
+- The architecture must accept an immutable fleet image prepared by the release controller.
 - The naming model must reuse existing label vocabulary.
 
 ## Considered Options
@@ -73,7 +73,7 @@ One MIG per matrix cell. Names encode every identity axis:
 
 | Trigger              | Environment          | MIG                                      | Disk                                          |
 | -------------------- | -------------------- | ---------------------------------------- | --------------------------------------------- |
-| `release`            | `zfnd-prod-zebra`    | `zebrad-${network}-${zone-letter}`       | `zebrad-cache-${network}-${zone-letter}`      |
+| Release controller   | `zfnd-prod-zebra`    | `zebrad-${network}-${zone-letter}`       | `zebrad-cache-${network}-${zone-letter}`      |
 | `push` to `main`     | `zfnd-dev-zebra`     | `zebrad-main-${network}-${zone-letter}`  | `zebrad-cache-main-${network}-${zone-letter}` |
 | `workflow_dispatch`  | `zfnd-dev-zebra`     | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
 

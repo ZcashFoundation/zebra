@@ -130,9 +130,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      pull-requests: write
-      statuses: write
-      attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       source_sha: ${{ github.sha }}
@@ -140,14 +137,8 @@ jobs:
       dockerfile_target: tests
       image_name: ${{ vars.CI_IMAGE_NAME }}
       no_cache: ${{ inputs.no_cache || false }}
-      rust_backtrace: full
-      rust_lib_backtrace: full
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
-    # This step needs access to Docker Hub secrets to run successfully
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # Check if the cached state disks used by the tests are available for the default network.
   #
   # The default network is mainnet unless a manually triggered workflow or repository variable

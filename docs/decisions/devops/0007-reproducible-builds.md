@@ -39,7 +39,7 @@ Reproducibility applies to every image build, releases included, because the cha
 
 The build stays hermetic by keeping `.git` out of the context and passing the commit as the `SHORT_SHA` build arg. Reading `.git` would let the clone shape, a detached-HEAD tag checkout or a shallow clone, change the output bytes.
 
-Signing and attestation apply on the release path only; the reproducibility measures above apply to every build. Development and dispatch builds are reproducible but unsigned. The `merge` job signs the final multi-arch digest with Cosign and attaches a signed SLSA provenance attestation and a signed SBOM. A verify step then fails the release if any of them do not verify, pinning the signer with `gh attestation verify --signer-workflow`. Release builds also run with `no_cache: true`.
+Signing and release attestation apply only on the promotion path; the reproducibility measures above apply to every build. Development and dispatch builds are reproducible but are not promoted as public releases. The release controller builds the public image without cache while crates publish, then `zfnd-promote-release-image.yml` copies that exact multi-arch digest to its version tag in GAR and Docker Hub, updates `latest` for stable versions, signs it with Cosign, and attaches signed SLSA provenance and SBOM attestations. A verify step fails the release if any of them do not verify, pinning the promotion workflow with `gh attestation verify --signer-workflow`.
 
 `codegen-units` stays at the cargo default: the binary already reproduces bit-for-bit with thin LTO, so forcing it to `1` would only cost build time.
 
@@ -58,9 +58,9 @@ Verify a release image (`<version>` is the release tag):
 ```sh
 gh attestation verify oci://docker.io/zfnd/zebra:<version> \
   --owner ZcashFoundation \
-  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml
+  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-promote-release-image.yml
 cosign verify docker.io/zfnd/zebra:<version> \
-  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-build-docker-image\.yml@' \
+  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-promote-release-image\.yml@' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 

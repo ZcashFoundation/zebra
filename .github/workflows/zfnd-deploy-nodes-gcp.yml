@@ -1,8 +1,8 @@
 # Build and deploy Zebra nodes to Google Cloud Platform.
 #
-# The event-driven wrapper preserves the existing PR, main, release, and manual
-# build inputs. Deployment is delegated to zfnd-deploy-prebuilt-nodes-gcp.yml
-# with the complete immutable image identity returned by the build.
+# The event-driven wrapper preserves PR, main, and manual build inputs.
+# Release deployment is owned by release.yml and calls
+# zfnd-deploy-prebuilt-nodes-gcp.yml with its prepared image.
 name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -114,10 +114,6 @@ on:
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
       - .github/workflows/zfnd-build-docker-image.yml
 
-  release:
-    types:
-      - published
-
 permissions:
   contents: read
 
@@ -161,11 +157,6 @@ jobs:
           LOG_FILE="${DEFAULT_LOG_FILE}"
 
           case "${EVENT_NAME}" in
-            release)
-              ENVIRONMENT="prod"
-              USE_CACHED_DISK="false"
-              VERIFY="true"
-              ;;
             workflow_dispatch)
               ENVIRONMENT="${DISPATCH_ENVIRONMENT}"
               NETWORKS=$(jq -cn --arg network "${DISPATCH_NETWORK}" '[$network]')
@@ -207,20 +198,16 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      pull-requests: write
-      attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     # Build for:
     # - Pull requests
     # - Manual workflow_dispatch
     # - Push to main branch
-    # - Releases
     if: >-
       ${{
         (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && github.ref_name == 'main') ||
-        (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+        (github.event_name == 'push' && github.ref_name == 'main')
       }}
     with:
       source_sha: ${{ github.sha }}
@@ -231,10 +218,6 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: ${{ needs.set-matrix.outputs.environment }}
-    # This step needs access to Docker Hub secrets to run successfully
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   deploy:
     name: Deploy immutable image
@@ -244,7 +227,6 @@ jobs:
         github.repository_owner == 'ZcashFoundation' &&
         (
           (github.event_name == 'push' && github.ref_name == 'main') ||
-          (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
           github.event_name == 'workflow_dispatch'
         )
       }}
@@ -257,6 +239,7 @@ jobs:
       image: ${{ needs.build.outputs.image }}
       source_sha: ${{ github.sha }}
       environment: ${{ needs.set-matrix.outputs.environment }}
+      created_by: ${{ github.event_name }}
       networks: ${{ needs.set-matrix.outputs.networks }}
       zones: ${{ needs.set-matrix.outputs.zones }}
       use_cached_disk: ${{ fromJSON(needs.set-matrix.outputs.use_cached_disk) }}

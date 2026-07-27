@@ -151,7 +151,9 @@ Before publication, a green report with `reason: "incomplete"` is expected: the 
 
 ### What Happens After Merge
 
-Merging the approved Release PR starts the post-merge release workflow. The controller passes the Release PR's base and head directly to Cargo Release, which publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
+Merging the approved Release PR starts the post-merge release workflow. The controller selects the merge commit on `main` as the single release source and starts Cargo publication, Linux binary preparation, the public image build, and the GCP fleet-image build in parallel. Cargo publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release.
+
+Cargo finalization is the publication boundary. After it succeeds, the same workflow attaches the prepared signed and checksummed Linux `x86_64` and `aarch64` binaries, promotes the prepared public image to its version tag with signatures and attestations, updates `latest` for a stable version, and deploys the prepared fleet image to the production GCP nodes. The release commit does not create another Release PR, and GitHub Release events do not own a second delivery path.
 
 No maintainer command is required when this workflow succeeds.
 
@@ -189,7 +191,7 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` reuses the same Release PR source, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection.
+`resume` reuses the same merged release source, rebuilds the preparatory artifacts in parallel, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection. Prepared outputs are promoted or attached only after Cargo finalization succeeds.
 
 Do not retry immutable contradictions: a crate archive from another source commit, a tag that points to another commit, or a GitHub Release with a conflicting channel must stop for maintainer review. Do not manually repeat publication or overwrite external state.
 

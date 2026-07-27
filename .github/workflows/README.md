@@ -25,7 +25,7 @@ Below is a simplified Mermaid diagram showing the current workflows, their key t
 graph TB
   %% Triggers
   subgraph Triggers
-    PR[Pull Request] & Push[Push to main] & ReleaseEvent[GitHub Release] & Schedule[Weekly] & Manual[Manual]
+    PR[Pull Request] & Push[Push to main] & Schedule[Weekly] & Manual[Manual]
   end
 
   %% Reusable build
@@ -33,12 +33,15 @@ graph TB
     BuildDocker[zfnd-build-docker-image.yml]
     PrepareBinaries[zfnd-release-binaries.yml]
     AttachBinaries[zfnd-attach-release-binaries.yml]
+    PromoteImage[zfnd-promote-release-image.yml]
   end
 
   %% Release automation
   subgraph Release
     ReleaseWorkflow[release.yml]
-    ReleaseBinaries[release-binaries.yml]
+    CargoRelease[Publish crates and finalize GitHub Release]
+    PublicImage[Prepare public image]
+    FleetImage[Prepare GCP image]
   end
 
   %% CI workflows
@@ -66,14 +69,17 @@ graph TB
   %% Trigger wiring
   PR --> Unit & Lint & DockerCfg & CrateBuild & PRGate & IT & Security
   Push --> Unit & Lint & Coverage & PRGate & Docs & Security & ReleaseWorkflow
-  ReleaseWorkflow --> ReleaseEvent
-  ReleaseEvent --> ReleaseBinaries & DeployNodes
   Schedule --> IT
   Manual --> IT & DeployNodes & Cleanup
 
-  %% Build dependency
-  ReleaseBinaries --> BuildDocker & PrepareBinaries
-  PrepareBinaries --> AttachBinaries
+  %% Release dependency
+  ReleaseWorkflow --> CargoRelease & PrepareBinaries & PublicImage & FleetImage
+  PublicImage & FleetImage --> BuildDocker
+  CargoRelease & PrepareBinaries --> AttachBinaries
+  CargoRelease & PublicImage --> PromoteImage
+  CargoRelease & FleetImage --> DeployPrebuilt
+
+  %% CI and deployment dependency
   BuildDocker --> IT
   IT --> FindDisks --> Deploy
   DeployNodes --> BuildDocker --> DeployPrebuilt
@@ -82,11 +88,11 @@ graph TB
   classDef primary fill:#2374ab,stroke:#2374ab,color:white
   classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
   classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
-  class BuildDocker,PrepareBinaries,AttachBinaries primary
-  class ReleaseWorkflow,ReleaseBinaries primary
+  class BuildDocker,PrepareBinaries,AttachBinaries,PromoteImage primary
+  class ReleaseWorkflow,CargoRelease,PublicImage,FleetImage primary
   class Unit,Lint,Coverage,DockerCfg,CrateBuild,PRGate,Docs,Security secondary
   class IT,FindDisks,Deploy,DeployNodes,DeployPrebuilt,Cleanup secondary
-  class PR,Push,ReleaseEvent,Schedule,Manual trigger
+  class PR,Push,Schedule,Manual trigger
 ```
 
 _The diagram above illustrates the parallel execution patterns in our CI/CD system. All triggers can initiate the pipeline concurrently, unit tests run in parallel after the Docker image build, and integration tests follow a mix of parallel and sequential steps. The infrastructure components support their respective workflow parts concurrently._
@@ -165,13 +171,13 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
-- **Release Binaries** (`release-binaries.yml`): Orchestrates release images and prepares and attaches downloadable binaries
+- **Release** (`release.yml`): Creates or updates Release PRs with release-plz. After merge, it publishes crates while preparing binaries and immutable images in parallel, finalizes the GitHub Release, then attaches, promotes, and deploys the prepared outputs. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
-- **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+- **Build docker image** (`zfnd-build-docker-image.yml`): Builds a source-explicit immutable GAR image and returns its complete identity
+- **Promote release image** (`zfnd-promote-release-image.yml`): Applies the version tag in GAR and Docker Hub, also updates `latest` for stable versions, then signs and attests the prepared public image
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests

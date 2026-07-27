@@ -2,13 +2,9 @@
 #
 # Pipeline:
 #   non-release push to main      -> creates or updates the Release PR
-#   merged Release PR             -> reconciles crates, tags, and the public
-#                                   zebrad GitHub Release
+#   merged Release PR             -> prepares binaries and images in parallel
+#                                   with crates, then publishes each output
 #   workflow_dispatch            -> manual readiness check or post-merge recovery
-#
-# Downstream triggers (independent workflows, not managed here):
-#   release:released  -> release-binaries.yml (Docker Hub)
-#   release:published -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
 name: Release
 
 on:
@@ -154,6 +150,7 @@ jobs:
               `query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
                   pullRequest(number: $number) {
+                    baseRefName
                     baseRefOid
                     headRefName
                     headRefOid
@@ -178,6 +175,9 @@ jobs:
               throw new Error(
                 `PR #${prNumber} is not a release-plz A-release PR`,
               );
+            }
+            if (pr.baseRefName !== "main") {
+              throw new Error(`PR #${prNumber} does not target main`);
             }
 
             if (requestedOperation === "check" && pr.state !== "OPEN") {
@@ -237,12 +237,12 @@ jobs:
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
         run: |
-          sudo timeout --foreground 180s apt-get \
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             update
-          sudo timeout --foreground 180s apt-get \
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
@@ -296,6 +296,102 @@ jobs:
             exit 1
           fi
 
+  zebrad-release:
+    name: Resolve zebrad release
+    needs: release-target
+    if: needs.release-target.outputs.operation == 'resume'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      required: ${{ steps.zebrad.outputs.required }}
+      tag: ${{ steps.zebrad.outputs.tag }}
+      version: ${{ steps.zebrad.outputs.version }}
+    steps:
+      - name: Check out previous source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          path: previous-source
+          persist-credentials: false
+          ref: ${{ needs.release-target.outputs.base_sha }}
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          path: release-source
+          persist-credentials: false
+          ref: ${{ needs.release-target.outputs.target_sha }}
+      - name: Resolve zebrad version change
+        id: zebrad
+        run: |
+          set -euo pipefail
+
+          previous_version=$(cargo +stable metadata --no-deps --format-version 1 \
+            --manifest-path previous-source/Cargo.toml \
+            | jq -er '.packages[] | select(.name == "zebrad") | .version')
+          version=$(cargo +stable metadata --no-deps --format-version 1 \
+            --manifest-path release-source/Cargo.toml \
+            | jq -er '.packages[] | select(.name == "zebrad") | .version')
+
+          if [[ "${version}" == "${previous_version}" ]]; then
+            echo "required=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          {
+            echo "required=true"
+            echo "tag=v${version}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+  prepare-binaries:
+    name: Prepare release binaries
+    needs: [release-target, zebrad-release]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: read
+      id-token: write # authenticate binary provenance and signatures
+      attestations: write # store binary provenance
+    uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      version: ${{ needs.zebrad-release.outputs.version }}
+      features: default-release-binaries
+
+  prepare-public-image:
+    name: Prepare public release image
+    needs: [release-target, zebrad-release]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-build-docker-image.yml
+    with:
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: runtime
+      image_name: zebra
+      features: ${{ vars.RUST_PROD_FEATURES }}
+      rust_log: ${{ vars.RUST_LOG }}
+      no_cache: true
+      environment: prod
+
+  prepare-gcp-image:
+    name: Prepare GCP release image
+    needs: [release-target, zebrad-release]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-build-docker-image.yml
+    with:
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: runtime
+      image_name: zebrad
+      rust_log: info
+      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
+      environment: prod
+
   release:
     name: Publish crates and GitHub Release
     needs: release-target
@@ -303,7 +399,7 @@ jobs:
     runs-on: ubuntu-latest-xl
     timeout-minutes: 120
     permissions:
-      contents: read # inspect release state; the app token performs finalization
+      contents: write # inspect release state and finalize tags and GitHub Releases
       id-token: write # authenticate to crates.io through OIDC
     environment: release
     concurrency:
@@ -331,29 +427,16 @@ jobs:
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
         run: |
-          sudo timeout --foreground 180s apt-get \
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             update
-          sudo timeout --foreground 180s apt-get \
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             install -y libclang-dev
-      - name: Generate release app token
-        id: app-token
-        if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
-        with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-      - name: Validate release app token
-        if: steps.app-token.outputs.token == ''
-        run: |
-          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY. The app token is required before crate publication so finalization can trigger downstream release workflows."
-          exit 1
       - name: Authenticate to crates.io
         id: crates-io-auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 #v1.0.5
@@ -412,7 +495,7 @@ jobs:
           base-sha: ${{ needs.release-target.outputs.base_sha }}
           target-sha: ${{ needs.release-target.outputs.target_sha }}
           config-path: release-source/.github/cargo-release.yml
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ github.token }}
       - name: Summarize release
         if: always()
         env:
@@ -437,3 +520,52 @@ jobs:
               fi
             done
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  attach-binaries:
+    name: Attach release binaries
+    needs: [release, zebrad-release, prepare-binaries]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: write # attach assets to the finalized GitHub Release
+    uses: ./.github/workflows/zfnd-attach-release-binaries.yml
+    with:
+      release_tag: ${{ needs.zebrad-release.outputs.tag }}
+
+  promote-public-image:
+    name: Promote public release image
+    needs: [release-target, release, zebrad-release, prepare-public-image]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      artifact-metadata: write # record registry storage for attestations
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/zfnd-promote-release-image.yml
+    with:
+      image: ${{ needs.prepare-public-image.outputs.image }}
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      version: ${{ needs.zebrad-release.outputs.version }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  deploy-gcp-image:
+    name: Deploy GCP release image
+    needs: [release-target, release, zebrad-release, prepare-gcp-image]
+    if: needs.zebrad-release.outputs.required == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
+    with:
+      image: ${{ needs.prepare-gcp-image.outputs.image }}
+      source_sha: ${{ needs.release-target.outputs.target_sha }}
+      environment: prod
+      created_by: release
+      networks: '["Mainnet","Testnet"]'
+      zones: '["us-east1-b","us-east1-c","us-east1-d"]'
+      use_cached_disk: false
+      cached_disk_type: tip
+      log_file: ${{ vars.CD_LOG_FILE }}
+      verify: true

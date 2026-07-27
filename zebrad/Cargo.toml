@@ -33,7 +33,7 @@ pre-release-replacements = [
   {file="../README.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
 ]
 
-# `cargo binstall zebrad` fetches the release archives built by release-binaries.yml.
+# `cargo binstall zebrad` fetches the release archives prepared by release.yml.
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }{ archive-suffix }"
 pkg-fmt = "tgz"
