@@ -154,6 +154,7 @@ jobs:
               `query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
                   pullRequest(number: $number) {
+                    baseRefName
                     baseRefOid
                     headRefName
                     headRefOid
@@ -178,6 +179,9 @@ jobs:
               throw new Error(
                 `PR #${prNumber} is not a release-plz A-release PR`,
               );
+            }
+            if (pr.baseRefName !== "main") {
+              throw new Error(`PR #${prNumber} does not target main`);
             }
 
             if (requestedOperation === "check" && pr.state !== "OPEN") {
