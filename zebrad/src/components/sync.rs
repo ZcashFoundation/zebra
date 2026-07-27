@@ -932,9 +932,9 @@ where
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
-                        // zcashd sometimes appends an unrelated hash at the
-                        // start or end of its response. Check the first hash
-                        // against the previous response, and discard mismatches.
+                        // Legacy zcashd nodes could prepend an unrelated hash
+                        // to their response. Check the first hash against the
+                        // previous response, and discard mismatches.
                         let unknown_hashes = match hashes.as_slice() {
                             [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
