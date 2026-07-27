@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `parameters::NetworkUpgrade::nu6_3_branch_id_strategy`
   - `transaction::Transaction::ironwood_value_balance_mut`
 
+### Changed
+
+- `AT_OR_NEAR_TIP_THRESHOLD` is now 1,000 blocks, keeping peer stall detection disabled during
+  long gaps between blocks ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+
 ### Fixed
 
 - With the `proptest-impl` feature, the arbitrary `Transaction` strategy now generates v6

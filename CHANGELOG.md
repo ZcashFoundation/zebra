@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Zebra now sends up to half of its address book in response to a `getaddr` request, up from
   a quarter, so peers can find more of the network from each response
   ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
+- The peer stall detector no longer disconnects peers for empty `FindBlocks` or `FindHeaders`
+  responses while the node is within 1,000 estimated blocks of the network tip, avoiding false
+  stall detection during long gaps between blocks
+  ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
 
 ### Fixed
 
