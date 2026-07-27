@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
   responses, rather than discarding it to work around obsolete `zcashd` behavior
   ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
+- Zebra now sends up to half of its address book in response to a `getaddr` request, up from
+  a quarter, so peers can find more of the network from each response
+  ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
 
 ### Fixed
 
