@@ -31,6 +31,8 @@ graph TB
   %% Reusable build
   subgraph Build
     BuildDocker[zfnd-build-docker-image.yml]
+    PrepareBinaries[zfnd-release-binaries.yml]
+    AttachBinaries[zfnd-attach-release-binaries.yml]
   end
 
   %% Release automation
@@ -69,6 +71,8 @@ graph TB
   Manual --> IT & DeployNodes & Cleanup
 
   %% Build dependency
+  ReleaseBinaries --> BuildDocker & PrepareBinaries
+  PrepareBinaries --> AttachBinaries
   BuildDocker --> IT
   IT --> FindDisks --> Deploy
 
@@ -76,7 +80,7 @@ graph TB
   classDef primary fill:#2374ab,stroke:#2374ab,color:white
   classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
   classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
-  class BuildDocker primary
+  class BuildDocker,PrepareBinaries,AttachBinaries primary
   class ReleaseWorkflow,ReleaseBinaries primary
   class Unit,Lint,Coverage,DockerCfg,CrateBuild,PRGate,Docs,Security secondary
   class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
@@ -160,12 +164,14 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
-- **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
+- **Release Binaries** (`release-binaries.yml`): Orchestrates release images and prepares and attaches downloadable binaries
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+- **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
+- **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
 - **Deploy integration tests** (`zfnd-deploy-integration-tests-gcp.yml`): Orchestrates GCP VMs and test runs
 - **Deploy nodes** (`zfnd-deploy-nodes-gcp.yml`): Provision long-lived nodes
