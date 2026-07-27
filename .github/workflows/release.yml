@@ -205,6 +205,8 @@ jobs:
                 throw new Error(`PR #${prNumber} is not merged`);
               }
 
+              // GitHub's GraphQL Bot.login is `mergify`; the REST API renders
+              // the same actor as `mergify[bot]`.
               if (
                 pr.mergedBy?.__typename !== "Bot" ||
                 pr.mergedBy.login !== "mergify"
