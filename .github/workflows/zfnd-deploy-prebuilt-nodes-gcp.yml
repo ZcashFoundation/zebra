@@ -24,6 +24,10 @@ on:
         description: The target environment, dev, stage, or prod
         required: true
         type: string
+      created_by:
+        description: The deployment origin stored in GCP resource labels
+        required: true
+        type: string
       networks:
         description: A JSON array of Zcash networks
         required: true
@@ -233,6 +237,7 @@ jobs:
       # subsequent deploys or after a manual bootstrap.
       - name: Ensure zonal disk exists
         env:
+          CREATED_BY: ${{ inputs.created_by }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
           if gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" &>/dev/null; then
@@ -245,7 +250,7 @@ jobs:
           gcloud compute disks create "${DISK_NAME}" --zone="${ZONE}" \
             --image="${CACHED_DISK_NAME}" \
             --size=400 --type=pd-balanced \
-            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${GITHUB_EVENT_NAME},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
 
       # Single source of truth for the zone-suffix to reserved-IP mapping.
       # Gated to stable deploys so feature-branch dispatches to dev can't
@@ -268,6 +273,7 @@ jobs:
 
       - name: Create instance template
         env:
+          CREATED_BY: ${{ inputs.created_by }}
           DEPLOY_IMAGE: ${{ inputs.image }}
           ENVIRONMENT: ${{ inputs.environment }}
           GCP_DEPLOYMENTS_SA: ${{ vars.GCP_DEPLOYMENTS_SA }}
@@ -312,7 +318,7 @@ jobs:
             --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
             --service-account="${GCP_DEPLOYMENTS_SA}" --scopes=cloud-platform \
             --metadata="google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true,zebra-container-image=${DEPLOY_IMAGE}" \
-            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${GITHUB_EVENT_NAME},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
             --tags=zebrad
 
       - name: Check if zonal MIG exists

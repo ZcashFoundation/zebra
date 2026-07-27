@@ -257,6 +257,7 @@ jobs:
       image: ${{ needs.build.outputs.image }}
       source_sha: ${{ github.sha }}
       environment: ${{ needs.set-matrix.outputs.environment }}
+      created_by: ${{ github.event_name }}
       networks: ${{ needs.set-matrix.outputs.networks }}
       zones: ${{ needs.set-matrix.outputs.zones }}
       use_cached_disk: ${{ fromJSON(needs.set-matrix.outputs.use_cached_disk) }}
