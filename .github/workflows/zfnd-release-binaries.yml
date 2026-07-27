@@ -132,7 +132,7 @@ jobs:
           jq -n \
             --arg event_name "${EVENT_NAME}" \
             --arg invocation_id "${SERVER_URL}/${REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" \
-            --arg job_workflow_ref "${WORKFLOW_REF}" \
+            --arg job_workflow_ref "${REPOSITORY}/.github/workflows/zfnd-release-binaries.yml@${REF}" \
             --arg ref "${REF}" \
             --arg repository "${REPOSITORY}" \
             --arg repository_id "${REPOSITORY_ID}" \
