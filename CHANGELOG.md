@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
   responses, rather than discarding it to work around obsolete `zcashd` behavior
   ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
+- The peer crawler now queues a connection attempt on each crawl interval for every spare
+  outbound connection slot that has a ready address book candidate, so dropped outbound
+  connections are proactively replaced until the outbound connection limit is reached.
+  Previously, new connections were only attempted when the peer set ran out of ready peers,
+  when a crawl found new addresses, or when the node had no outbound connections at all
+  ([#11102](https://github.com/ZcashFoundation/zebra/issues/11102)).
 
 ## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
 
