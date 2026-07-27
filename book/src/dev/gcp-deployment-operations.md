@@ -244,7 +244,7 @@ Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-The workflow assigns them via per-instance configs for push and release deploys; workflow_dispatch deploys use ephemeral IPs. Reserve new ones manually with `gcloud compute addresses create` before adding capacity.
+The workflow assigns them via per-instance configs in `stage` and `prod`; dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that selects `prod` updates the stable production MIG and reserved IP for its selected network and zone. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
 
 **Cache images** are produced by `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
 
