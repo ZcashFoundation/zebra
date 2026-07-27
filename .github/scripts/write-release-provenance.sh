@@ -7,7 +7,7 @@ set -euo pipefail
 : "${PROVENANCE_SOURCE_SHA:?set PROVENANCE_SOURCE_SHA}"
 
 workflow_path="${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY}/"}"
-workflow_path="${workflow_path%@"${GITHUB_REF}"}"
+workflow_path="${workflow_path%@*}"
 
 jq -n \
   --arg event_name "${GITHUB_EVENT_NAME}" \
