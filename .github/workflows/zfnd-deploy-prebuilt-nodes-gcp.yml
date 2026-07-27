@@ -277,7 +277,7 @@ jobs:
       # Gated to stable deploys so feature-branch dispatches to dev can't
       # advertise a prod IP that isn't actually attached to the MIG.
       - name: Resolve reserved external IP
-        if: ${{ inputs.environment == 'prod' || inputs.environment == 'stage' || github.ref_name == 'main' }}
+        if: ${{ inputs.environment == 'prod' || inputs.environment == 'stage' }}
         env:
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
@@ -375,7 +375,7 @@ jobs:
         if: >-
           ${{
             steps.does-group-exist.outcome == 'failure' &&
-            (inputs.environment == 'prod' || inputs.environment == 'stage' || github.ref_name == 'main')
+            (inputs.environment == 'prod' || inputs.environment == 'stage')
           }}
         run: |
           if [ -z "${IP_ADDRESS:-}" ]; then
