@@ -218,6 +218,9 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: ${{ needs.set-matrix.outputs.environment }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   deploy:
     name: Deploy immutable image

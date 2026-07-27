@@ -373,6 +373,9 @@ jobs:
       rust_log: ${{ vars.RUST_LOG }}
       no_cache: true
       environment: prod
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   prepare-gcp-image:
     name: Prepare GCP release image
@@ -390,6 +393,9 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
       environment: prod
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Temporary branch-only rehearsal jobs. Remove after the hosted check and
   # staging rollout have been recorded.

@@ -139,6 +139,9 @@ jobs:
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # Check if the cached state disks used by the tests are available for the default network.
   #
   # The default network is mainnet unless a manually triggered workflow or repository variable

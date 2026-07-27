@@ -39,6 +39,11 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
 
     outputs:
       image:
@@ -150,6 +155,13 @@ jobs:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Authenticate to Docker Build Cloud
+        if: vars.DOCKER_BUILDER == 'cloud'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
