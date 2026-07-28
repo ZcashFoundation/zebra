@@ -49,6 +49,14 @@ pub struct NoteCommitmentTrees {
     /// this struct so the previous block's anchor threads through the same treestate plumbing as
     /// the note commitment trees.
     pub tachyon_anchor: tachyon::Anchor,
+
+    /// The Tachyon epoch-boundary anchor (NU7, experimental).
+    ///
+    /// Set by the state service only for the treestate of an epoch-first block: the anchor after
+    /// the block's epoch lift, before any of its stamps. `None` for mid-epoch blocks. Like
+    /// [`Self::tachyon_anchor`], it is not touched by [`Self::update_trees_parallel`]; it rides
+    /// here so the finalized state can persist epoch anchors by epoch index.
+    pub tachyon_epoch_anchor: Option<tachyon::Anchor>,
 }
 
 /// Note commitment tree errors.

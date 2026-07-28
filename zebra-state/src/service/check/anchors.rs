@@ -169,7 +169,9 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
 
     // Tachyon proof stamps (NU7, experimental)
     //
-    // A proof stamp's anchor MUST be the Tachyon pool anchor after some earlier block.
+    // A proof stamp's anchor MUST be the Tachyon pool anchor after some earlier block, or an
+    // epoch-boundary anchor (the lift no block's post anchor equals, which spend lineages root
+    // at); both are tracked in the anchor membership indexes.
     //
     // Tachyon has no note commitment tree: the pool state is a running anchor, so this
     // is the tachyon analogue of the "earlier treestate" anchor rules above. Pointer

@@ -109,8 +109,12 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // across build flags; these stay empty until the Tachyon pool starts at NU7.
     // Tachyon has no note commitment tree: its pool state is a running anchor, stored
     // by height (for the tip anchor and reorgs) and by anchor (for membership checks).
+    // Tachygrams are epoch-scoped: `tachyon_tachygrams` holds the current epoch's
+    // working set, and is pruned when an epoch-first block is finalized.
     "tachyon_anchors",
     "tachyon_anchor_by_height",
+    "tachyon_epoch_anchor_by_epoch",
+    "tachyon_tachygrams",
     // Chain
     "history_tree",
     "tip_chain_value_pool",
@@ -400,9 +404,11 @@ impl FinalizedState {
                 if let Some(pool_height) =
                     zebra_chain::tachyon::pool_height(&self.network(), checkpoint_verified.height)
                 {
-                    note_commitment_trees.tachyon_anchor = note_commitment_trees
+                    let advance = note_commitment_trees
                         .tachyon_anchor
                         .advance_with_block(pool_height, &block);
+                    note_commitment_trees.tachyon_anchor = advance.post_block;
+                    note_commitment_trees.tachyon_epoch_anchor = advance.epoch_boundary;
                 }
 
                 let history_tree_mut = Arc::make_mut(&mut history_tree);

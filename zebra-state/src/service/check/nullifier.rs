@@ -62,6 +62,45 @@ pub(crate) fn no_duplicates_in_finalized_chain(
         }
     }
 
+    no_duplicate_tachygrams_in_finalized_chain(semantically_verified, finalized_state)?;
+
+    Ok(())
+}
+
+/// Reject same-epoch duplicate tachygrams against the finalized state (NU7, experimental).
+///
+/// Tachygrams are epoch-scoped: the same tachygram MUST NOT be revealed twice within one epoch,
+/// but may appear again in a later epoch. The finalized working set is pruned when an epoch-first
+/// block is finalized, but can still hold the previous epoch's tachygrams while that block is
+/// only in the non-finalized state, so the epochs are compared instead of trusting pruning.
+///
+/// (Duplicates against other non-finalized blocks are rejected during the chain update, and
+/// duplicates within one block during semantic verification.)
+///
+/// No-op when tachyon support is compiled out: blocks then have no tachygrams.
+#[tracing::instrument(skip(semantically_verified, finalized_state))]
+fn no_duplicate_tachygrams_in_finalized_chain(
+    semantically_verified: &SemanticallyVerifiedBlock,
+    finalized_state: &ZebraDb,
+) -> Result<(), ValidateContextError> {
+    let network = finalized_state.network();
+    let block_epoch = zebra_chain::tachyon::epoch(&network, semantically_verified.height);
+
+    for transaction in &semantically_verified.block.transactions {
+        for tachygram in transaction.tachyon_tachygrams() {
+            if let Some(revealed_height) =
+                finalized_state.tachyon_tachygram_revealed_height(&tachygram)
+            {
+                if zebra_chain::tachyon::epoch(&network, revealed_height) == block_epoch {
+                    Err(ValidateContextError::DuplicateTachyonTachygram {
+                        tachygram,
+                        in_finalized_state: true,
+                    })?;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

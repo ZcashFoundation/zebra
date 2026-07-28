@@ -1321,6 +1321,35 @@ impl Transaction {
         }
     }
 
+    /// The tachygrams revealed by this transaction's tachyon proof stamp, in the stamp's
+    /// canonical (sorted) order.
+    ///
+    /// Pointer-stamped bundles carry no tachygrams (theirs are revealed by the aggregate's proof
+    /// stamp). Returns an empty list for non-V7 transactions, and when tachyon support is
+    /// compiled out, so callers don't need to repeat the tachyon `cfg` gate.
+    pub fn tachyon_tachygrams(&self) -> Vec<crate::tachyon::Tachygram> {
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+        {
+            match self.tachyon_shielded_data() {
+                Some(shielded_data) => match &shielded_data.0 {
+                    zcash_tachyon::TachyonBundle::Proven(bundle) => bundle
+                        .stamp
+                        .tachygrams
+                        .iter()
+                        .map(|&tachygram| crate::tachyon::Tachygram::from(tachygram))
+                        .collect(),
+                    zcash_tachyon::TachyonBundle::NoBundle
+                    | zcash_tachyon::TachyonBundle::Adjunct(_) => Vec::new(),
+                },
+                None => Vec::new(),
+            }
+        }
+        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
+        {
+            Vec::new()
+        }
+    }
+
     /// Does this transaction have any tachyon actions?
     ///
     /// Returns `false` when tachyon support is compiled out, so callers don't need to repeat the

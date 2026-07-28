@@ -10,12 +10,52 @@ use std::{fmt, io};
 
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::{
+    parameters::{Network, NetworkUpgrade},
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 use crate::block::Block;
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-use crate::parameters::{Network, NetworkUpgrade};
+
+/// The number of blocks in a Tachyon epoch, from [`zcash_tachyon::constants::EPOCH_SIZE`].
+///
+/// Tachygrams are kept in the epoch's working set from the epoch's first block, and pruned when
+/// the epoch ends; the anchor fold lifts into each new epoch at its first block. Epochs are
+/// indexed by pool height: epoch `E` spans pool heights `[E * EPOCH_LENGTH, (E+1) * EPOCH_LENGTH)`.
+///
+/// This re-export keeps Zebra's epoch math (which must stay available when tachyon support is
+/// compiled out) in one place, agreeing with the tachyon crate's own epoch helpers. Note that
+/// `zcash_tachyon` shrinks the constant under its *own* `cfg(test)` builds; that never applies
+/// here, because dependencies are always compiled without `cfg(test)`.
+pub const EPOCH_LENGTH: u32 = zcash_tachyon::constants::EPOCH_SIZE;
+
+/// The 0-based Tachyon pool height of `height`: its offset above the NU7
+/// activation height.
+///
+/// Returns `None` if NU7 is not active at `height`, or has no activation
+/// height on `network`. The pool fold (and its epoch schedule) is indexed by
+/// pool height, not chain height.
+pub fn pool_height(network: &Network, height: crate::block::Height) -> Option<u32> {
+    let activation_height = NetworkUpgrade::Nu7.activation_height(network)?;
+    height.0.checked_sub(activation_height.0)
+}
+
+/// The Tachyon epoch index containing `pool_height`.
+pub fn epoch_of_pool_height(pool_height: u32) -> u32 {
+    pool_height / EPOCH_LENGTH
+}
+
+/// Whether `pool_height` is the first block of its epoch.
+pub fn is_epoch_first(pool_height: u32) -> bool {
+    pool_height.is_multiple_of(EPOCH_LENGTH)
+}
+
+/// The Tachyon epoch index containing the block at `height`, if the pool has
+/// started by then on `network`.
+pub fn epoch(network: &Network, height: crate::block::Height) -> Option<u32> {
+    pool_height(network, height).map(epoch_of_pool_height)
+}
 
 /// The running anchor of the Tachyon pool after some block.
 ///
@@ -84,6 +124,50 @@ impl From<zcash_tachyon::Anchor> for Anchor {
     }
 }
 
+/// A tachygram: a nullifier or note commitment revealed by a Tachyon proof stamp.
+///
+/// Stored as the canonical 32-byte encoding of the underlying Pallas base field element, so this
+/// type stays available when tachyon support is compiled out. Tachygrams are tracked in the
+/// current epoch's working set; revealing the same tachygram twice within one epoch is invalid.
+#[derive(Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Tachygram(pub [u8; 32]);
+
+impl fmt::Debug for Tachygram {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("tachyon::Tachygram")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
+
+impl From<[u8; 32]> for Tachygram {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Tachygram> for [u8; 32] {
+    fn from(tachygram: Tachygram) -> Self {
+        tachygram.0
+    }
+}
+
+impl From<&Tachygram> for [u8; 32] {
+    fn from(tachygram: &Tachygram) -> Self {
+        tachygram.0
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
+impl From<zcash_tachyon::Tachygram> for Tachygram {
+    fn from(tachygram: zcash_tachyon::Tachygram) -> Self {
+        // `Tachygram` newtypes a Pallas base field element; its canonical encoding is the
+        // element's 32-byte representation.
+        let fp: halo2::pasta::pallas::Base = tachygram.into();
+        Self(fp.into())
+    }
+}
+
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 impl Anchor {
     /// Convert to the tachyon crate's anchor type.
@@ -104,7 +188,7 @@ impl Anchor {
     /// `self` is the anchor after the parent block, or [`Anchor::default`]
     /// when `block` is the first pool block (NU7 activation). `pool_height` is
     /// the block's 0-based height above the NU7 activation height, which
-    /// drives tachyon's epoch schedule.
+    /// drives the epoch schedule (see [`EPOCH_LENGTH`]).
     ///
     /// This mirrors tachyon's reference pool fold: an epoch-first pool height
     /// lifts the anchor into its epoch, then each proof stamp's tachygram-set
@@ -112,15 +196,21 @@ impl Anchor {
     /// stamps ticks the anchor once instead (preserving per-height anchor
     /// uniqueness). Adjunct (pointer-stamped) bundles do not contribute: their
     /// tachygrams are carried by the aggregate's proof stamp.
-    pub fn advance_with_block(&self, pool_height: u32, block: &Block) -> Anchor {
-        use zcash_tachyon::{BlockHeight, TachygramSetPoly, TachyonBundle};
-
-        let pool_height = BlockHeight(pool_height);
+    ///
+    /// The returned [`AnchorAdvance`] also carries the epoch-boundary anchor
+    /// when `block` starts a new epoch: the epoch's initial state, which spend
+    /// lineages root at, tracked in state per epoch.
+    pub fn advance_with_block(&self, pool_height: u32, block: &Block) -> AnchorAdvance {
+        use zcash_tachyon::{TachygramSetPoly, TachyonBundle};
 
         let mut anchor = self.to_tachyon();
-        if pool_height.is_epoch_first() {
-            anchor = anchor.next_epoch(pool_height.epoch());
-        }
+        let epoch_boundary = if is_epoch_first(pool_height) {
+            anchor =
+                anchor.next_epoch(zcash_tachyon::EpochIndex(epoch_of_pool_height(pool_height)));
+            Some(Anchor::from(anchor))
+        } else {
+            None
+        };
 
         let mut absorbed_stamp = false;
         for transaction in &block.transactions {
@@ -142,20 +232,24 @@ impl Anchor {
             anchor = anchor.next_empty();
         }
 
-        Anchor::from(anchor)
+        AnchorAdvance {
+            post_block: Anchor::from(anchor),
+            epoch_boundary,
+        }
     }
 }
 
-/// The 0-based Tachyon pool height of `height`: its offset above the NU7
-/// activation height.
-///
-/// Returns `None` if NU7 is not active at `height`, or has no activation
-/// height on `network`. The pool fold (and its epoch schedule) is indexed by
-/// pool height, not chain height.
+/// The result of advancing the Tachyon pool anchor with one block.
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-pub fn pool_height(network: &Network, height: crate::block::Height) -> Option<u32> {
-    let activation_height = NetworkUpgrade::Nu7.activation_height(network)?;
-    height.0.checked_sub(activation_height.0)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnchorAdvance {
+    /// The pool anchor after the block.
+    pub post_block: Anchor,
+
+    /// The epoch-boundary anchor, if the block is the first of a new epoch:
+    /// the anchor after the epoch lift, before any of the block's stamps are
+    /// absorbed. `None` for mid-epoch blocks.
+    pub epoch_boundary: Option<Anchor>,
 }
 
 #[cfg(test)]
@@ -169,6 +263,20 @@ mod tests {
         anchor.zcash_serialize(&mut bytes).unwrap();
         assert_eq!(bytes.len(), 32);
         assert_eq!(Anchor::zcash_deserialize(&bytes[..]).unwrap(), anchor);
+    }
+
+    #[test]
+    fn epoch_helpers_follow_epoch_length() {
+        assert_eq!(epoch_of_pool_height(0), 0);
+        assert_eq!(epoch_of_pool_height(EPOCH_LENGTH - 1), 0);
+        assert_eq!(epoch_of_pool_height(EPOCH_LENGTH), 1);
+        assert_eq!(epoch_of_pool_height(3 * EPOCH_LENGTH + 7), 3);
+
+        assert!(is_epoch_first(0));
+        assert!(!is_epoch_first(1));
+        assert!(!is_epoch_first(EPOCH_LENGTH - 1));
+        assert!(is_epoch_first(EPOCH_LENGTH));
+        assert!(is_epoch_first(2 * EPOCH_LENGTH));
     }
 
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
@@ -202,32 +310,72 @@ mod tests {
             assert_eq!(Anchor::from(anchor).to_tachyon(), anchor);
         }
 
+        /// Zebra's epoch helpers agree with the tachyon crate's own epoch math.
+        #[test]
+        fn epoch_helpers_agree_with_tachyon_crate() {
+            for pool_height in [
+                0,
+                1,
+                EPOCH_LENGTH - 1,
+                EPOCH_LENGTH,
+                EPOCH_LENGTH + 1,
+                3 * EPOCH_LENGTH + 7,
+            ] {
+                let crate_height = zcash_tachyon::BlockHeight(pool_height);
+                assert_eq!(
+                    epoch_of_pool_height(pool_height),
+                    crate_height.epoch().0,
+                    "epoch mismatch at pool height {pool_height}",
+                );
+                assert_eq!(
+                    is_epoch_first(pool_height),
+                    crate_height.is_epoch_first(),
+                    "epoch-first mismatch at pool height {pool_height}",
+                );
+            }
+        }
+
         /// The per-block fold matches tachyon's reference semantics for
         /// stamp-less blocks: epoch lift on epoch-first pool heights, then a
-        /// single empty tick.
+        /// single empty tick. Boundary lifts also surface the epoch anchor.
         #[test]
         fn stampless_fold_matches_reference() {
             let block = Arc::new(stampless_block());
 
-            // Pool block 0: the genesis epoch lift, then one empty tick.
-            let after_genesis = Anchor::default().advance_with_block(0, &block);
+            // Pool block 0: the genesis epoch lift, then one empty tick. The
+            // genesis boundary anchor is tachyon's default anchor.
+            let genesis_advance = Anchor::default().advance_with_block(0, &block);
             let expected = zcash_tachyon::Anchor::default().next_empty();
-            assert_eq!(after_genesis, Anchor::from(expected));
+            assert_eq!(genesis_advance.post_block, Anchor::from(expected));
+            assert_eq!(
+                genesis_advance.epoch_boundary,
+                Some(Anchor::from(zcash_tachyon::Anchor::default())),
+            );
 
-            // A mid-epoch block only ticks.
-            let after_next = after_genesis.advance_with_block(1, &block);
-            assert_eq!(after_next, Anchor::from(expected.next_empty()));
+            // A mid-epoch block only ticks, and crosses no boundary.
+            let next_advance = genesis_advance.post_block.advance_with_block(1, &block);
+            assert_eq!(next_advance.post_block, Anchor::from(expected.next_empty()));
+            assert_eq!(next_advance.epoch_boundary, None);
 
             // Consecutive anchors are distinct even without stamps.
-            assert_ne!(after_genesis, after_next);
+            assert_ne!(genesis_advance.post_block, next_advance.post_block);
 
-            // An epoch-first pool height lifts into its epoch before ticking.
-            let after_boundary = after_next.advance_with_block(4096, &block);
-            let expected_boundary = expected
+            // An epoch-first pool height lifts into its epoch before ticking,
+            // and surfaces the boundary anchor.
+            let boundary_advance = next_advance
+                .post_block
+                .advance_with_block(EPOCH_LENGTH, &block);
+            let expected_lift = expected
                 .next_empty()
-                .next_epoch(zcash_tachyon::EpochIndex(1))
-                .next_empty();
-            assert_eq!(after_boundary, Anchor::from(expected_boundary));
+                .next_epoch(zcash_tachyon::EpochIndex(1));
+            assert_eq!(
+                boundary_advance.epoch_boundary,
+                Some(Anchor::from(expected_lift)),
+            );
+            assert_eq!(
+                boundary_advance.post_block,
+                Anchor::from(expected_lift.next_empty()),
+            );
         }
     }
 }

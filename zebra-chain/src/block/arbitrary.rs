@@ -438,6 +438,7 @@ impl Block {
             // stamp-less ones), so it must be folded here exactly like the state service does
             // for the V4 history node (NU7+) commitments to match validation. In builds
             // without tachyon support it stays at its default, matching the state.
+            #[cfg_attr(not(all(zcash_unstable = "nu7", feature = "tx_v7")), allow(unused_mut))]
             let mut tachyon_anchor = crate::tachyon::Anchor::default();
             // The history tree usually takes care of "creating itself". But this
             // only works when blocks are pushed into it starting from genesis
@@ -496,7 +497,9 @@ impl Block {
                 if let Some(pool_height) =
                     crate::tachyon::pool_height(&current.network, block.coinbase_height().unwrap())
                 {
-                    tachyon_anchor = tachyon_anchor.advance_with_block(pool_height, block);
+                    tachyon_anchor = tachyon_anchor
+                        .advance_with_block(pool_height, block)
+                        .post_block;
                 }
 
                 // fix commitment (must be done after finishing changing the block)

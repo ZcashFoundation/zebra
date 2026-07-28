@@ -14,6 +14,8 @@ expression: empty_column_families
   "sprout_nullifiers: no entries",
   "tachyon_anchor_by_height: no entries",
   "tachyon_anchors: no entries",
+  "tachyon_epoch_anchor_by_epoch: no entries",
+  "tachyon_tachygrams: no entries",
   "tx_loc_by_spent_out_loc: no entries",
   "tx_loc_by_transparent_addr_loc: no entries",
   "utxo_by_out_loc: no entries",

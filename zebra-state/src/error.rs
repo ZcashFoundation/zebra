@@ -493,6 +493,16 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error(
+        "duplicate Tachyon tachygram: {tachygram:?}, already revealed in this epoch, \
+         in finalized state: {in_finalized_state}"
+    )]
+    #[non_exhaustive]
+    DuplicateTachyonTachygram {
+        tachygram: zebra_chain::tachyon::Tachygram,
+        in_finalized_state: bool,
+    },
 }
 
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {

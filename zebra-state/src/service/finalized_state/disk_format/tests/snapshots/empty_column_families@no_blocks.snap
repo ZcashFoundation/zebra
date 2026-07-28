@@ -27,6 +27,8 @@ expression: empty_column_families
   "sprout_nullifiers: no entries",
   "tachyon_anchor_by_height: no entries",
   "tachyon_anchors: no entries",
+  "tachyon_epoch_anchor_by_epoch: no entries",
+  "tachyon_tachygrams: no entries",
   "tip_chain_value_pool: no entries",
   "tx_by_loc: no entries",
   "tx_loc_by_hash: no entries",
