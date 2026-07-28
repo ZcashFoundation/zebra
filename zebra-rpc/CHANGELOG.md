@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Clarified the error message returned by `getrawtransaction` for transactions
+  that are not in the mempool or best chain
+  ([#11014](https://github.com/ZcashFoundation/zebra/pull/11014)).
+
 ## [15.0.0] - 2026-07-27
 
 ### Breaking Changes
