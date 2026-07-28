@@ -12,6 +12,7 @@ merge_queue:
 defaults:
   # Define our default queue rules
   queue_rule:
+    merge_method: merge
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
     batch_max_wait_time: "2 minutes"

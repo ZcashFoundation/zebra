@@ -3543,9 +3543,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.15.0"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cca2ede6a4a77bd729eed3be9303d98a08b217edc85190dcf4dbe004086d5a65"
+checksum = "e8b67beade27dbebdbfee0819e23170b0b263dc7b4f558ee936151716baf6e1f"
 dependencies = [
  "aes",
  "bitvec",
@@ -7137,9 +7137,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36391ebfce7df2510c6564f79e608ed93f1c0692c6464e2397b248e06dae3912"
+checksum = "cc842e024fe37e52cfd3920826c4a28cc2a023fc9d77351d9c0f310becae3eb7"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -7178,9 +7178,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdbeccc05bfe63b6dee9e989c6ff5027421741562a4853c36504dd621f6a81b1"
+checksum = "34ca4de11896f704ffe6319c2cd7bc8fc6ab31a55cec80d26def15c009d83678"
 dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
@@ -7209,9 +7209,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91fb0b420fb66a765f1fa92ab7a6b631aa54c08415415ef6185256826e74fbd"
+checksum = "ea125021aaa749e966989c7f7aaa18afe2f89474573f5f0dfac8b98083a6d095"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7271,9 +7271,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72e0f8c142bed366ed5886dcfa8772ec90b5420cc127e6cdb76b6744c53a287b"
+checksum = "547c012778bae17f58007731af074d638aa146ab0ecfc120adebf23d049aff6c"
 dependencies = [
  "bip32",
  "bs58",
@@ -7296,7 +7296,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "11.2.0"
+version = "11.3.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -7366,7 +7366,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "12.0.1"
+version = "14.0.1"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7418,7 +7418,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "10.2.0"
+version = "11.0.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -7460,7 +7460,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "9.1.1"
+version = "9.1.2"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -7474,7 +7474,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "12.1.0"
+version = "15.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7540,7 +7540,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "10.1.1"
+version = "10.1.2"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7558,7 +7558,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "11.1.0"
+version = "12.0.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -7635,7 +7635,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "9.1.2"
+version = "10.0.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -7657,7 +7657,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "6.2.0"
+version = "6.2.3"
 dependencies = [
  "abscissa_core",
  "anyhow",

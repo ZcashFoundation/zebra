@@ -46,19 +46,9 @@ Here's how we make sure we got everything:
 
 # Prepare and Publish the Release
 
-The automated release workflow creates the Release PR and embeds its checklist from `.release-plz.toml`. If the automated workflow is not usable, follow the [legacy manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md):
+Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for detailed instructions and recovery guidance.
 
-Release PR:
-
-- [ ] Update Changelog
-- [ ] Update README
-- [ ] Update Zebra Versions
-- [ ] Update Crate Versions and Crate Change Logs
-- [ ] Update End of Support Height
-
-Publish Release:
-
-- [ ] Create & Test GitHub Pre-Release
-- [ ] Publish GitHub Release
-- [ ] Publish Rust Crates
-- [ ] Publish Docker Images
+- [ ] Wait for `PR Gate / Release readiness` and every other required check to pass on the latest Release PR commit.
+- [ ] Complete every checkbox in the generated Release PR and review its release plan.
+- [ ] Approve and merge the latest commit.
+- [ ] Confirm that the Release workflow completed after merge.

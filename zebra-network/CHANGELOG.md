@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [11.0.0] - 2026-07-27
+
+### Breaking Changes
+
+- `HandshakeError` gains the `MissingRequiredServices` variant. `HandshakeError` is not
+  `#[non_exhaustive]`, so exhaustive `match` expressions over it stop compiling
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
+### Added
+
+- `HandshakeError::MissingRequiredServices`, returned when an outbound handshake is rejected
+  because the remote peer's `version` message doesn't advertise `NODE_NETWORK`
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
+### Changed
+
+- While the node is syncing, outbound connections to peers that don't advertise `NODE_NETWORK`
+  are rejected during the handshake, so a fresh sync's outbound slots aren't occupied by
+  non-serving peers. At or near the network tip, such peers (like pruned nodes, which can serve
+  recent blocks) are accepted again. Inbound and isolated connections are unaffected
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+- The peer crawler now queues a connection attempt on each crawl interval for every spare
+  outbound connection slot that has a ready address book candidate, so dropped outbound
+  connections are proactively replaced until the outbound connection limit is reached
+  ([#11102](https://github.com/ZcashFoundation/zebra/issues/11102)).
+- Zebra now sends up to half of its address book in response to a `getaddr` request, up from
+  a quarter, so peers can find more of the network from each response. The maximum address
+  book size is now pinned at 5000 instead of being derived from the response fraction
+  ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
+- The peer stall detector no longer disconnects peers for empty `FindBlocks` or `FindHeaders`
+  responses while the node is within 1,000 estimated blocks of the network tip
+  ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+
+## [10.2.1] - 2026-07-24
+
+### Changed
+
+- The first peer disk-cache write is retried every 20 seconds until it succeeds, instead of
+  waiting the full 5-minute update interval, so a cold-started node caches its peers soon after
+  finding them ([#11073](https://github.com/ZcashFoundation/zebra/pull/11073)).
+
+## [10.2.0] - 2026-07-17
+
+### Added
+
+- `init_with_block_gossip_peer_ips`, an `init` variant that treats inbound peers
+  from the listed IP addresses as trusted zcashd-compat sidecars: they always receive
+  `AdvertiseBlock` inventory broadcasts (queued while the peer is busy), share a
+  reserved inbound connection pool of one slot per listed IP (falling back to public
+  slots and the normal rate limits when the pool is full), bypass the recent-IP
+  reconnection rate limit while a reserved slot is free, and are exempt from the
+  `FindBlocks`/`FindHeaders` stall detector. Callers must only list IPs where every
+  process is trusted
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+
 ## [10.1.1] - 2026-07-17
 
 ### Changed
@@ -33,15 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   controlling whether coinbase outputs may be spent into transparent outputs. Setting it
   on a configured Testnet is rejected with an error
   ([#10698](https://github.com/ZcashFoundation/zebra/pull/10698)).
-- Added `init_with_block_gossip_peer_ips`, an `init` variant that treats inbound peers
-  from the listed IP addresses as trusted zcashd-compat sidecars: they always receive
-  `AdvertiseBlock` inventory broadcasts (queued while the peer is busy), share a
-  reserved inbound connection pool of one slot per listed IP (falling back to public
-  slots and the normal rate limits when the pool is full), bypass the recent-IP
-  reconnection rate limit while a reserved slot is free, and are exempt from the
-  `FindBlocks`/`FindHeaders` stall detector. Callers must only list IPs where every
-  process is trusted
-  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
 
 ## [9.0.0] - 2026-06-10
 

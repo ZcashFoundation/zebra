@@ -8,7 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{future::BoxFuture, FutureExt, TryFutureExt};
+use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
 use tokio::sync::watch;
@@ -20,6 +20,8 @@ use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::SigHash;
+
+use crate::{error::TransactionError, BoxError};
 
 /// Sapling prover containing spend and output params for the Sapling circuit.
 ///
@@ -108,28 +110,28 @@ impl Service<BatchControl<Item>> for Verifier {
                     .batch
                     .check_bundle(item.bundle, item.sighash.into())
                     .then_some(())
-                    .ok_or("invalid Sapling bundle");
+                    .ok_or(TransactionError::SaplingVerificationFailed);
 
                 async move {
-                    bundle_check?;
+                    bundle_check.map_err(BoxError::from)?;
 
                     rx.changed()
                         .await
-                        .map_err(|_| "verifier was dropped without flushing")
-                        .and_then(|_| {
-                            // We use a new channel for each batch, so we always get the correct
-                            // batch result here.
-                            rx.borrow()
-                                .ok_or("threadpool unexpectedly dropped channel sender")?
-                                .then(|| {
-                                    metrics::counter!("proofs.sapling.verified").increment(1);
-                                })
-                                .ok_or_else(|| {
-                                    metrics::counter!("proofs.sapling.invalid").increment(1);
-                                    "batch verification of Sapling shielded data failed"
-                                })
-                        })
-                        .map_err(Self::Error::from)
+                        .map_err(|_| BoxError::from("verifier was dropped without flushing"))?;
+
+                    // We use a new channel for each batch, so we always get the correct
+                    // batch result here.
+                    let is_valid = rx.borrow().ok_or_else(|| {
+                        BoxError::from("threadpool unexpectedly dropped channel sender")
+                    })?;
+
+                    if is_valid {
+                        metrics::counter!("proofs.sapling.verified").increment(1);
+                        Ok(())
+                    } else {
+                        metrics::counter!("proofs.sapling.invalid").increment(1);
+                        Err(BoxError::from(TransactionError::SaplingVerificationFailed))
+                    }
                 }
                 .boxed()
             }
@@ -180,20 +182,23 @@ pub fn verify_single(
             .batch
             .check_bundle(item.bundle, item.sighash.into())
             .then_some(())
-            .ok_or("invalid Sapling bundle");
-        check?;
+            .ok_or(TransactionError::SaplingVerificationFailed);
+        check.map_err(BoxError::from)?;
 
-        tokio::task::spawn_blocking(move || {
+        let is_valid = tokio::task::spawn_blocking(move || {
             let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
             mem::take(&mut verifier.batch).validate(&spend_vk, &output_vk, thread_rng())
         })
         .await
-        .map_err(|_| "Sapling bundle validation thread panicked")?
-        .then_some(())
-        .ok_or("invalid proof or sig in Sapling bundle")
+        .map_err(|_| BoxError::from("Sapling bundle validation thread panicked"))?;
+
+        if is_valid {
+            Ok(())
+        } else {
+            Err(BoxError::from(TransactionError::SaplingVerificationFailed))
+        }
     }
-    .map_err(Box::from)
     .boxed()
 }
 

@@ -1,15 +1,14 @@
-# Release workflow: crate publishing and GitHub Release creation.
-#
-# Changelogs are authored in source PRs and finalized before release.
+# Release workflow: Release PR planning and resumable publication.
 #
 # Pipeline:
-#   push to main                  → creates/updates the single Release PR
-#   merged, approved Release PR   → publishes crates + tags and creates the
-#                                   app-authored zebrad GitHub Release
+#   non-release push to main      -> creates or updates the Release PR
+#   merged Release PR             -> reconciles crates, tags, and the public
+#                                   zebrad GitHub Release
+#   workflow_dispatch            -> manual readiness check or post-merge recovery
 #
 # Downstream triggers (independent workflows, not managed here):
-#   release:released  → release-binaries.yml (Docker Hub)
-#   release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
+#   release:released  -> release-binaries.yml (Docker Hub)
+#   release:published -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
 name: Release
 
 on:
@@ -18,28 +17,39 @@ on:
   pull_request:
     branches: [main]
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Check an open Release PR or resume a merged one"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - resume
+      release_pr_number:
+        description: "Release PR number"
+        required: true
+        type: string
 
-# Deny all at workflow level — each job declares minimum permissions
+# Deny all at workflow level; each job declares minimum permissions.
 permissions: {}
 
 jobs:
-  # ── Stage 1: Create or update the Release PR ────────────────────────────
-  #
-  # Runs on every push to main. Detects changed crates by comparing local
-  # source against crates.io, bumps versions based on conventional commits,
-  # and opens or updates a single Release PR.
+  # A release commit belongs to the post-merge controller and must not create
+  # another Release PR.
   release-pr:
     name: Create or update Release PR
-    if: github.event_name == 'push'
+    if: >-
+      github.event_name == 'push' &&
+      !startsWith(github.event.head_commit.message, 'chore: release')
     runs-on: ubuntu-latest
-    # Avoid racing updates to the single release-plz Release PR branch when
-    # multiple commits land on main while a previous release-pr job is running.
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # create and update the release branch
+      pull-requests: write # create and update the Release PR
     steps:
       - name: Generate release app token
         id: app-token
@@ -50,16 +60,17 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Create or update Release PR
         id: release-plz-pr
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release-pr
+          version: "0.3.160"
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Add zebrad version to Release PR title
@@ -73,7 +84,6 @@ jobs:
             map(select(any(.releases[]?; .package_name == "zebrad")))
             | first // empty
           ' <<< "${RELEASE_PRS:-[]}")"
-
           if [ -z "${ZEBRAD_RELEASE_PR}" ]; then
             echo "No zebrad release in release-plz output; keeping the generated title."
             exit 0
@@ -83,7 +93,6 @@ jobs:
           VERSION="$(jq -r '
             .releases[] | select(.package_name == "zebrad") | .version
           ' <<< "${ZEBRAD_RELEASE_PR}")"
-
           if [ -z "${PR_NUMBER}" ] || [ "${PR_NUMBER}" = "null" ] || [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
             echo "::error::release-plz did not return both the PR number and zebrad version: ${ZEBRAD_RELEASE_PR}"
             exit 1
@@ -93,62 +102,249 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "chore: release v${VERSION}"
 
-  # ── Stage 2: Publish crates and create the public zebrad release ────────
-  #
-  # Runs only when an approved Release PR from the release-plz branch is
-  # merged into main. The merged commit is the immutable release target.
-  # The job:
-  #   1. Publishes changed crates to crates.io in dependency order
-  #   2. Uses trusted publishing (OIDC) — no static API tokens
-  #   3. Creates per-crate git tags
-  #   4. Creates one public GitHub Release for zebrad
-  #
-  # The Release PR merge is the human gate. The GitHub Release must be created
-  # with a GitHub App installation token because release events created by the
-  # repository GITHUB_TOKEN do not trigger downstream workflows.
-  #
+  release-target:
+    name: Verify Release PR
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+       contains(github.event.pull_request.labels.*.name, 'A-release'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # resolve the merged release commit and its parent
+      pull-requests: read # validate the selected Release PR
+    concurrency:
+      group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
+      cancel-in-progress: false
+    outputs:
+      base_sha: ${{ steps.release-target.outputs.base_sha }}
+      operation: ${{ steps.release-target.outputs.operation }}
+      pr_number: ${{ steps.release-target.outputs.pr_number }}
+      target_sha: ${{ steps.release-target.outputs.target_sha }}
+    steps:
+      - name: Resolve immutable release target
+        id: release-target
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 #v9.0.0
+        env:
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_PR_NUMBER: ${{ inputs.release_pr_number }}
+        with:
+          script: |
+            const requestedOperation =
+              context.eventName === "workflow_dispatch"
+                ? process.env.INPUT_OPERATION
+                : "resume";
+            const rawPrNumber =
+              context.eventName === "workflow_dispatch"
+                ? process.env.INPUT_PR_NUMBER
+                : String(context.payload.pull_request?.number ?? "");
+            const prNumber = Number(rawPrNumber);
+
+            if (
+              !Number.isSafeInteger(prNumber) ||
+              prNumber <= 0 ||
+              !["check", "resume"].includes(requestedOperation)
+            ) {
+              throw new Error("operation and Release PR number are invalid");
+            }
+
+            const result = await github.graphql(
+              `query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    baseRefName
+                    baseRefOid
+                    headRefName
+                    headRefOid
+                    labels(first: 100) { nodes { name } }
+                    mergeCommit {
+                      oid
+                      parents(first: 1) { nodes { oid } }
+                    }
+                    merged
+                    state
+                  }
+                }
+              }`,
+              { ...context.repo, number: prNumber },
+            );
+            const pr = result.repository.pullRequest;
+            const isReleasePr =
+              pr?.headRefName.startsWith("release-plz-") &&
+              pr.labels.nodes.some(({ name }) => name === "A-release");
+
+            if (!isReleasePr || (pr.state !== "OPEN" && !pr.merged)) {
+              throw new Error(
+                `PR #${prNumber} is not a release-plz A-release PR`,
+              );
+            }
+            if (pr.baseRefName !== "main") {
+              throw new Error(`PR #${prNumber} does not target main`);
+            }
+
+            if (requestedOperation === "check" && pr.state !== "OPEN") {
+              throw new Error(`PR #${prNumber} is not open`);
+            }
+            if (requestedOperation === "resume" && !pr.merged) {
+              throw new Error(`PR #${prNumber} is not merged`);
+            }
+
+            let baseSha = pr.baseRefOid;
+            let targetSha = pr.headRefOid;
+            if (requestedOperation === "resume") {
+              baseSha = pr.mergeCommit?.parents.nodes[0]?.oid;
+              targetSha = pr.mergeCommit?.oid;
+              if (baseSha === undefined || targetSha === undefined) {
+                throw new Error(`PR #${prNumber} has no merged release source`);
+              }
+            }
+
+            core.setOutput("base_sha", baseSha);
+            core.setOutput("operation", requestedOperation);
+            core.setOutput("pr_number", String(prNumber));
+            core.setOutput("target_sha", targetSha);
+
+  release-check:
+    name: Check release without publishing
+    needs: release-target
+    if: needs.release-target.outputs.operation == 'check'
+    runs-on: ubuntu-latest-xl
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    concurrency:
+      group: release-check-${{ needs.release-target.outputs.pr_number }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-source
+          persist-credentials: false
+          ref: ${{ needs.release-target.outputs.target_sha }}
+      - name: Validate release changelogs
+        id: changelogs
+        continue-on-error: true
+        working-directory: release-source
+        env:
+          BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
+          TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
+        run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-workspaces: release-source -> target
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
+        run: |
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
+      - name: Check desired release state
+        id: cargo-release
+        continue-on-error: true
+        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
+        with:
+          phase: check
+          source-directory: release-source
+          base-sha: ${{ needs.release-target.outputs.base_sha }}
+          target-sha: ${{ needs.release-target.outputs.target_sha }}
+          config-path: release-source/.github/cargo-release.yml
+          github-token: ${{ github.token }}
+      - name: Summarize release check
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+          PLAN: ${{ steps.cargo-release.outputs.plan }}
+          REPORT: ${{ steps.cargo-release.outputs.report }}
+        run: |
+          {
+            echo "## Cargo Release check"
+            echo "| Validation | Result |"
+            echo "| --- | --- |"
+            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
+            if [[ -n "${PLAN}" ]]; then
+              echo '### Plan'
+              echo '```json'
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
+              echo '```'
+            fi
+            if [[ -n "${REPORT}" ]]; then
+              echo '### Report'
+              echo '```json'
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+        run: |
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release check failed::Review each failed validation step and the job summary."
+            exit 1
+          fi
+
   release:
     name: Publish crates and GitHub Release
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
-      contains(github.event.pull_request.labels.*.name, 'A-release')
-    runs-on: ubuntu-latest
+    needs: release-target
+    if: needs.release-target.outputs.operation == 'resume'
+    runs-on: ubuntu-latest-xl
+    timeout-minutes: 120
     permissions:
-      contents: write
-      id-token: write
-      pull-requests: read
+      contents: read # inspect release state; the app token performs finalization
+      id-token: write # authenticate to crates.io through OIDC
     environment: release
     concurrency:
       group: release-publish
       cancel-in-progress: false
     steps:
-      - name: Verify approved Release PR
+      - name: Check out immutable release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-source
+          persist-credentials: false
+          ref: ${{ needs.release-target.outputs.target_sha }}
+      - name: Validate release changelogs
+        working-directory: release-source
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
-          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
+          TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
+        run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-workspaces: release-source -> target
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
         run: |
-          set -euo pipefail
-
-          RELEASE_PR="$(gh pr view "${PR_NUMBER}" \
-            --repo "${REPOSITORY}" \
-            --json baseRefName,headRefName,labels,mergeCommit,reviewDecision,state)"
-
-          if ! jq -e --arg target_sha "${TARGET_SHA}" '
-            .state == "MERGED" and
-            .reviewDecision == "APPROVED" and
-            .baseRefName == "main" and
-            (.headRefName | startswith("release-plz-")) and
-            .mergeCommit.oid == $target_sha and
-            any(.labels[]; .name == "A-release")
-          ' <<< "${RELEASE_PR}" >/dev/null; then
-            echo "::error::PR #${PR_NUMBER} is not an approved A-release Release PR merged into main at ${TARGET_SHA}."
-            exit 1
-          fi
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
       - name: Generate release app token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
@@ -157,215 +353,91 @@ jobs:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
-          permission-pull-requests: read
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-      - name: Restore main branch context
-        env:
-          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-        run: |
-          git switch --force-create main "${TARGET_SHA}"
-          git branch --set-upstream-to=origin/main main
       - name: Validate release app token
         if: steps.app-token.outputs.token == ''
         run: |
-          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before merging a Release PR. The app token is required before crates publish so the zebrad GitHub Release can trigger Docker and GCP workflows."
+          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY. The app token is required before crate publication so finalization can trigger downstream release workflows."
           exit 1
-      - name: Install libclang for librocksdb-sys bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
-      - name: Publish crates and create tags
-        id: release-plz
-        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 #v0.5.130
+      - name: Authenticate to crates.io
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 #v1.0.5
+      - name: Publish and verify missing crates
+        id: cargo-release-publish
+        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
         with:
-          command: release
+          phase: publish
+          source-directory: release-source
+          base-sha: ${{ needs.release-target.outputs.base_sha }}
+          target-sha: ${{ needs.release-target.outputs.target_sha }}
+          config-path: release-source/.github/cargo-release.yml
+          github-token: ${{ github.token }}
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-      - name: Extract zebrad release metadata
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+      - name: Read zebrad release version
         id: zebrad-release
-        if: steps.release-plz.outputs.releases_created == 'true'
         env:
-          RELEASES: ${{ steps.release-plz.outputs.releases }}
+          PLAN: ${{ steps.cargo-release-publish.outputs.plan }}
         run: |
-          set -euo pipefail
-
-          ZEBRAD_RELEASE="$(jq -c 'map(select((.package_name // .package // .name) == "zebrad")) | first // empty' <<< "${RELEASES:-[]}")"
-
-          if [ -z "${ZEBRAD_RELEASE}" ]; then
-            echo "released=false" >> "${GITHUB_OUTPUT}"
-            echo "No zebrad release in release-plz output; skipping GitHub Release."
-            exit 0
+          version="$(jq -r '
+            [.packages[] | select(.name == "zebrad") | .version]
+            | first // empty
+          ' <<< "${PLAN}")"
+          if [[ -z "${version}" ]]; then
+            echo "required=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "required=true" >> "${GITHUB_OUTPUT}"
+            echo "version=${version}" >> "${GITHUB_OUTPUT}"
           fi
-
-          VERSION="$(jq -r '.version' <<< "${ZEBRAD_RELEASE}")"
-          TAG="$(jq -r '.tag' <<< "${ZEBRAD_RELEASE}")"
-
-          if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ] || [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
-            echo "::error::release-plz did not return both version and tag for zebrad: ${ZEBRAD_RELEASE}"
-            exit 1
-          fi
-
-          {
-            echo "released=true"
-            echo "version=${VERSION}"
-            echo "tag=${TAG}"
-            if [[ "${VERSION}" == *-* ]]; then
-              echo "prerelease=true"
-            else
-              echo "prerelease=false"
-            fi
-          } >> "${GITHUB_OUTPUT}"
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        if: steps.zebrad-release.outputs.released == 'true'
-        with:
-          toolchain: stable
-          cache-on-failure: true
       - name: Verify zebrad installs from crates.io
-        if: steps.zebrad-release.outputs.released == 'true'
+        if: steps.zebrad-release.outputs.required == 'true'
         timeout-minutes: 30
         env:
           VERSION: ${{ steps.zebrad-release.outputs.version }}
         run: |
           set -euo pipefail
 
-          cargo install --locked --force --version "${VERSION}" zebrad
-          ~/.cargo/bin/zebrad --version
-      - name: Build release notes
-        id: notes
-        if: steps.zebrad-release.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          VERSION: ${{ steps.zebrad-release.outputs.version }}
-          TAG: ${{ steps.zebrad-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY before publishing a zebrad GitHub Release. Releases created with GITHUB_TOKEN do not trigger release-binaries.yml or zfnd-deploy-nodes-gcp.yml."
-            exit 1
-          fi
-
-          awk -v version="${VERSION}" '
-            BEGIN {
-              heading = "## [Zebra " version "]"
-            }
-            /^##[[:space:]]+\[/ {
-              if (found) {
-                exit
-              }
-              if (index($0, heading) == 1) {
-                found = 1
-              }
-            }
-            found {
-              print
-            }
-          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
-
-          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
-            {
-              echo "Zebra ${TAG}"
-              echo
-              echo "See CHANGELOG.md for release details."
-            } > "${RUNNER_TEMP}/release-notes.md"
-          fi
-
-          # Pass the extracted section to the optional Claude step. The content is
-          # this repo's own curated CHANGELOG, so the random delimiter is precautionary.
-          delim="SECTION_$(openssl rand -hex 8)"
-          {
-            echo "section<<${delim}"
-            cat "${RUNNER_TEMP}/release-notes.md"
-            echo "${delim}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Enhance release notes with Claude
-        id: enhance
-        if: steps.zebrad-release.outputs.released == 'true' && vars.CLAUDE_ENABLED != ''
-        continue-on-error: true
-        uses: anthropics/claude-code-action@11ba60486e4aec9ddfeafcf4bb3f00b028ac2c16 # v1.0.142
+          for attempt in 1 2 3; do
+            if cargo +1.91.0 install --locked --force --version "=${VERSION}" zebrad; then
+              ~/.cargo/bin/zebrad --version
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              sleep "$((attempt * 30))"
+            fi
+          done
+          echo "::error::zebrad ${VERSION} did not install from crates.io after 3 attempts."
+          exit 1
+      - name: Create missing tags and GitHub Release
+        id: cargo-release-finalize
+        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Provide a token so the action skips its OIDC exchange, which needs id-token: write.
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Distills the summary and a brief update-priority line from the GitHub Release Format in
-          # book/src/dev/changelog-guidelines.md; How to Upgrade and Compatibility are added at release time.
-          prompt: |
-            Rewrite the changelog section below into operator-facing GitHub Release
-            notes for Zebra ${{ steps.zebrad-release.outputs.tag }}.
-
-            Rules:
-            - Keep the "## [Zebra <version>]" heading line exactly as given.
-            - After the heading, add an "Update priority" line and a one-paragraph
-              summary for node operators, keeping any existing summary text.
-            - Keep every changelog entry; do not invent, drop, or reorder entries.
-            - Do not add detail that is not present in the section.
-            Return the full release notes, heading included, in the structured output.
-
-            Changelog section:
-            ${{ steps.notes.outputs.section }}
-          claude_args: |
-            --json-schema '{"type":"object","properties":{"notes":{"type":"string"}},"required":["notes"],"additionalProperties":false}'
-            --max-turns 5
-
-      - name: Select release notes
-        if: steps.zebrad-release.outputs.released == 'true'
+          phase: finalize
+          source-directory: release-source
+          base-sha: ${{ needs.release-target.outputs.base_sha }}
+          target-sha: ${{ needs.release-target.outputs.target_sha }}
+          config-path: release-source/.github/cargo-release.yml
+          github-token: ${{ steps.app-token.outputs.token }}
+      - name: Summarize release
+        if: always()
         env:
-          STRUCTURED: ${{ steps.enhance.outputs.structured_output }}
+          FINALIZE_REPORT: ${{ steps.cargo-release-finalize.outputs.report }}
+          PLAN: ${{ steps.cargo-release-publish.outputs.plan }}
+          PUBLISH_REPORT: ${{ steps.cargo-release-publish.outputs.report }}
         run: |
-          set -euo pipefail
-
-          enhanced="${RUNNER_TEMP}/release-notes.enhanced.md"
-          final="${RUNNER_TEMP}/release-notes.final.md"
-
-          if [ -n "${STRUCTURED}" ]; then
-            jq -r '.notes // empty' <<< "${STRUCTURED}" > "${enhanced}"
-          fi
-
-          # Use Claude's notes only when non-empty and still carrying the version
-          # heading; otherwise keep the deterministic extracted notes.
-          if [ -s "${enhanced}" ] && grep -q '^## \[Zebra ' "${enhanced}"; then
-            cp "${enhanced}" "${final}"
-            echo "Using Claude-enhanced release notes."
-          else
-            cp "${RUNNER_TEMP}/release-notes.md" "${final}"
-            echo "Using extracted changelog notes."
-          fi
-
-      - name: Create zebrad GitHub Release
-        if: steps.zebrad-release.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPOSITORY: ${{ github.repository }}
-          TARGET_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          TAG: ${{ steps.zebrad-release.outputs.tag }}
-          PRERELEASE: ${{ steps.zebrad-release.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-
-          notes_file="${RUNNER_TEMP}/release-notes.final.md"
-          release_flags=(--latest --prerelease=false)
-
-          if [ "${PRERELEASE}" = "true" ]; then
-            release_flags=(--latest=false --prerelease)
-          fi
-
-          if gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
-            gh release edit "${TAG}" \
-              --repo "${REPOSITORY}" \
-              --title "Zebra ${TAG}" \
-              --notes-file "${notes_file}" \
-              --target "${TARGET_SHA}" \
-              "${release_flags[@]}"
-          else
-            gh release create "${TAG}" \
-              --repo "${REPOSITORY}" \
-              --title "Zebra ${TAG}" \
-              --notes-file "${notes_file}" \
-              --target "${TARGET_SHA}" \
-              --verify-tag \
-              "${release_flags[@]}"
-          fi
+          {
+            echo "## Cargo Release"
+            for entry in \
+              "Plan:${PLAN}" \
+              "Publication report:${PUBLISH_REPORT}" \
+              "Finalization report:${FINALIZE_REPORT}"
+            do
+              label="${entry%%:*}"
+              value="${entry#*:}"
+              if [[ -n "${value}" ]]; then
+                echo "### ${label}"
+                echo '```json'
+                jq . <<< "${value}" || printf '%s\n' "${value}"
+                echo '```'
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"

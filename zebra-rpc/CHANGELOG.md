@@ -7,12 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [15.0.0] - 2026-07-27
+
+### Breaking Changes
+
+- Requires `zebra-network` 11.0.0, whose `address_book_peers::AddressBookPeers` trait bounds
+  this crate's public API (`methods::RpcImpl`). Consumers that implement it must upgrade with
+  this crate ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
+### Changed
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-consensus` dependency bumped to `14.0.1`.
+- `zebra-network` dependency bumped to `11.0.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-script` dependency bumped to `10.1.2`.
+- `zebra-state` dependency bumped to `12.0.1`.
+
+## [14.0.0] - 2026-07-24
+
+### Breaking Changes
+
+- `getblock` verbosity 2 now returns transaction objects for side-chain blocks with `height` set to `-1` and `confirmations` set to `0`, instead of panicking while serializing them ([#10606](https://github.com/ZcashFoundation/zebra/pull/10606)).
+
+### Changed
+
+- Requires `zebra-consensus` 14.0.0 and `zebra-state` 12.0.0, whose types appear in this
+  crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+- `zebra-network` dependency bumped to `10.2.1`.
+
+### Fixed
+
+- `getblock`, `getblockheader`, and `gettxout` now bind follow-up state queries to the block hash or chain tip resolved by the first read, so responses do not combine state from different best chains during a reorg or tip advance ([#10606](https://github.com/ZcashFoundation/zebra/pull/10606)).
+
+## [13.0.0] - 2026-07-22
+
+### Changed
+
+- Requires `zebra-consensus` 13.0.0. `zebra-consensus`'s `error::TransactionError` appears in this
+  crate's public API (`TransactionTemplate::new_coinbase`), so its new variants are a breaking
+  change here too.
+- `zebra-state` dependency bumped to `11.1.1`.
+
+## [12.1.0] - 2026-07-17
+
 ### Added
 
 - `methods::RpcServer::generate_to_address`, the regtest-only
   `generatetoaddress` RPC handler that mines a requested number of blocks paying
   coinbase to a caller-supplied address
-  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952))
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
+- `GetBlockTemplateHandler::set_miner_params`, which overrides the miner
+  parameters used to build coinbase transactions on a cloned handler, so
+  `generatetoaddress` can mine to a caller-specified address without changing the
+  configured default
+  ([#10952](https://github.com/ZcashFoundation/zebra/pull/10952)).
 
 ## [12.0.0] - 2026-07-17
 

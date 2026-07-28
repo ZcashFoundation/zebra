@@ -734,6 +734,156 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     );
 }
 
+/// Test that the crawler timer fills the peer set up to the outbound connection limit
+/// using existing address book candidates, without any demand signals, and even when
+/// crawls return no new addresses. Then test that it replaces dropped connections,
+/// and doesn't dial over the limit once it is reached.
+#[tokio::test]
+async fn crawler_refills_spare_outbound_capacity_on_timer() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the outbound connector
+    // and peer set are fake.
+
+    let config = Config {
+        peerset_initial_target_size: 1,
+        // Tick often enough that the crawler gets multiple chances to fill spare capacity.
+        crawl_new_peer_interval: Duration::from_millis(200),
+        ..Config::default()
+    };
+
+    let outbound_limit = config.peerset_outbound_connection_limit();
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+
+    // Add enough candidates for the initial fill and the replacement dials.
+    let candidate_count = outbound_limit * 2 + 1;
+    for address_number in 0..candidate_count {
+        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let addr = MetaAddr::new_gossiped_meta_addr(
+            addr.into(),
+            PeerServices::NODE_NETWORK,
+            DateTime32::now(),
+        )
+        .new_gossiped_change()
+        .expect("created MetaAddr contains enough information to represent a gossiped address");
+
+        address_book
+            .lock()
+            .expect("panic in previous thread while accessing the address book")
+            .update(addr);
+    }
+
+    // A peer set whose crawl responses never contain any addresses,
+    // so the crawler can only dial existing address book candidates.
+    let empty_peer_set = service_fn(|req| async move {
+        let rsp = match req {
+            Request::Peers => Response::Peers(Vec::new()),
+            _ => unreachable!("unexpected request: {:?}", req),
+        };
+
+        Ok(rsp)
+    });
+
+    let (peer_tracker_tx, mut peer_tracker_rx) = mpsc::unbounded();
+
+    let success_stay_open_outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let peer_tracker_tx = peer_tracker_tx.clone();
+        async move {
+            let OutboundConnectorRequest {
+                addr,
+                connection_tracker,
+            } = req;
+
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+            // Make the connection stay open.
+            peer_tracker_tx
+                .unbounded_send(connection_tracker)
+                .expect("unexpected error sending to unbounded channel");
+
+            Ok((addr, fake_client))
+        }
+    });
+
+    let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(candidate_count);
+    // The demand channel starts empty: all dials must come from the crawler timer.
+    let (demand_tx, demand_rx) = mpsc::channel::<MorePeers>(candidate_count);
+
+    let candidates = CandidateSet::new(address_book.clone(), empty_peer_set);
+    let active_outbound_connections = ActiveConnectionCounter::new_counter();
+
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config.clone(),
+        demand_tx,
+        demand_rx,
+        candidates,
+        success_stay_open_outbound_connector,
+        peerset_tx,
+        active_outbound_connections,
+        address_book_updater,
+    ));
+
+    // Let the crawler fill the peer set from the timer.
+    tokio::time::sleep(CRAWLER_TEST_DURATION / 2).await;
+
+    let mut initial_peer_count: usize = 0;
+    while peerset_rx.try_recv().is_ok() {
+        initial_peer_count += 1;
+    }
+
+    assert_eq!(
+        initial_peer_count, outbound_limit,
+        "expected the timer to fill the peer set to the outbound limit without demand",
+    );
+
+    // Hold the initial connections open, then drop some to make spare capacity.
+    let mut peer_trackers: Vec<ConnectionTracker> = Vec::new();
+    while let Ok(peer_tracker) = peer_tracker_rx.try_recv() {
+        peer_trackers.push(peer_tracker);
+    }
+    assert_eq!(
+        peer_trackers.len(),
+        outbound_limit,
+        "expected one held connection tracker per successful handshake",
+    );
+
+    let dropped_count = outbound_limit.div_ceil(2);
+    for peer_tracker in peer_trackers.drain(..dropped_count) {
+        std::mem::drop(peer_tracker);
+    }
+
+    // Let the crawler replace the dropped connections.
+    tokio::time::sleep(CRAWLER_TEST_DURATION / 2).await;
+
+    let mut replacement_peer_count: usize = 0;
+    while peerset_rx.try_recv().is_ok() {
+        replacement_peer_count += 1;
+    }
+
+    assert_eq!(
+        replacement_peer_count, dropped_count,
+        "expected the crawler to replace exactly the dropped connections, \
+         without dialing over the limit",
+    );
+
+    // Stop the crawler and check for panics or errors.
+    crawl_task_handle.abort();
+    tokio::task::yield_now().await;
+
+    let crawl_result = crawl_task_handle.now_or_never();
+    assert!(
+        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+        "unexpected error or panic in peer crawler task: {crawl_result:?}",
+    );
+}
+
 /// Test the listener with an inbound peer limit of zero peers, and a handshaker that panics.
 #[tokio::test]
 async fn listener_peer_limit_zero_handshake_panic() {

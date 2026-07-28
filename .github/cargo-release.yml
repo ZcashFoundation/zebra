@@ -1,0 +1,12 @@
+tagTemplate: "{name}-v{version}"
+
+packageOverrides:
+  zebrad:
+    tagTemplate: "v{version}"
+
+githubRelease:
+  package: zebrad
+  nameTemplate: "Zebra {version}"
+  notesFile: CHANGELOG.md
+  notesHeadingTemplate: "## [Zebra {version}]"
+  makeLatest: auto

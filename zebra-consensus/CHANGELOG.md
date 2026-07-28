@@ -7,11 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
+## [14.0.1] - 2026-07-27
 
-- `transaction::Verifier::check_maturity_height` is now private and takes
-  `tx`, `height`, `network`, and `spent_utxos` directly instead of `&Request`.
-  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843))
+### Changed
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-script` dependency bumped to `10.1.2`.
+- `zebra-state` dependency bumped to `12.0.1`.
+
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
+## [13.0.0] - 2026-07-22
+
+### Added
+
+- `error::TransactionError`:
+  - `Halo2VerificationFailed`
+  - `SaplingVerificationFailed`
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
+
+### Security
+
+- Check the ZIP-317 mempool rules before verifying a transaction's shielded proofs, so an
+  underpaying transaction is rejected before the expensive cryptographic checks run
+  ([#11053](https://github.com/ZcashFoundation/zebra/pull/11053)).
+- Score failed shielded proof and signature verifications, and non-canonical Orchard and
+  Ironwood proof sizes, as mempool misbehaviour, so a peer sending invalid shielded transactions
+  is disconnected instead of repeatedly forcing their verification
+  ([#11054](https://github.com/ZcashFoundation/zebra/pull/11054)).
+
+## [12.0.1] - 2026-07-17
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.0`.
 
 ## [12.0.0] - 2026-07-17
 

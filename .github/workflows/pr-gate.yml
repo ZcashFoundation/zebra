@@ -3,7 +3,7 @@
 name: PR Gate
 
 on:
-  # `edited`, `labeled`, and `unlabeled` re-run the gate when the declaration or changelog waiver changes.
+  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main]
@@ -22,8 +22,7 @@ concurrency:
 
 permissions:
   contents: read
-  # dorny/paths-filter reads the changed-file list from the pull request API.
-  pull-requests: read
+  pull-requests: read # dorny/paths-filter reads the changed-file list
 
 env:
   CLICOLOR: 1
@@ -117,8 +116,8 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags origin "$BASE_REF"
-          echo "rev=$(git merge-base FETCH_HEAD HEAD)" >> "$GITHUB_OUTPUT"
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
@@ -142,75 +141,125 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Check declaration and changelog narrative
+      - name: Check declaration and package changelogs
         env:
           BASE_REF: ${{ github.base_ref }}
           BREAKING: ${{ needs.changes.outputs.breaking }}
           CONVENTIONAL: ${{ needs.changes.outputs.conventional }}
           DECLARED_TYPE: ${{ needs.changes.outputs.type }}
-          CHANGELOG_WAIVED: ${{ contains(github.event.pull_request.labels.*.name, 'C-trivial') || contains(github.event.pull_request.labels.*.name, 'C-exclude-from-changelog') }}
         run: |
-          set -euo pipefail
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
+          bash .github/scripts/validate-pr-changelogs.sh \
+            "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
-          git fetch --no-tags origin "$BASE_REF"
-          merge_base="$(git merge-base FETCH_HEAD HEAD)"
-
-          allowed_type=false
-          case "$DECLARED_TYPE" in
-            feat|fix|perf|refactor|build|chore|docs|test|ci|style|revert|release)
-              allowed_type=true
-              ;;
-          esac
-
-          has_changelog=false
-          has_breaking_heading=false
-          code_changed=false
-          while IFS= read -r -d '' path; do
-            if [[ "${path##*/}" == "CHANGELOG.md" ]]; then
-              has_changelog=true
-              # Only the unreleased section counts, and its heading may predate this PR's diff.
-              if [[ -f "$path" ]] && awk '
-                /^## / { unreleased = ($0 ~ /^## \[Unreleased\]/) }
-                unreleased && /^### Breaking Changes/ { found = 1 }
-                END { exit !found }
-              ' "$path"; then
-                has_breaking_heading=true
-              fi
+  # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
+  release-readiness:
+    name: Release readiness
+    if: >-
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'A-release')
+    runs-on: ubuntu-latest-xl
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Resolve release comparison
+        id: release-target
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base_tip="$(git rev-parse "origin/${BASE_REF}")"
+          base_sha="$(git merge-base "${base_tip}" "${TARGET_SHA}")"
+          if [[ "${base_sha}" != "${base_tip}" ]]; then
+            echo "::error title=Release PR is behind main::Wait for release-plz to update this PR before review."
+            exit 1
+          fi
+          echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Validate release changelogs
+        id: changelogs
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
+        run: |
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
+      - name: Check desired release state
+        id: cargo-release
+        continue-on-error: true
+        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
+        with:
+          phase: check
+          base-sha: ${{ steps.release-target.outputs.base_sha }}
+          target-sha: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
+      - name: Summarize release readiness
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+          PLAN: ${{ steps.cargo-release.outputs.plan }}
+          REPORT: ${{ steps.cargo-release.outputs.report }}
+        run: |
+          {
+            echo "## Release readiness"
+            echo "| Validation | Result |"
+            echo "| --- | --- |"
+            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
+            if [[ -n "${PLAN}" ]]; then
+              echo '### Plan'
+              echo '```json'
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
+              echo '```'
             fi
-            if [[ "$path" == *.rs || "${path##*/}" == "Cargo.toml" || "${path##*/}" == "Cargo.lock" ]]; then
-              code_changed=true
+            if [[ -n "${REPORT}" ]]; then
+              echo '### External state'
+              echo '```json'
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
+              echo '```'
             fi
-          done < <(git diff --name-only -z "$merge_base"..HEAD)
-
-          failed=false
-
-          if [[ "$CONVENTIONAL" != "true" || "$allowed_type" != "true" ]]; then
-            echo "::error title=Invalid PR title::Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
-            failed=true
-          fi
-
-          if [[ "$DECLARED_TYPE" =~ ^(feat|fix|perf)$ && "$code_changed" == "true" && "$has_changelog" != "true" && "$CHANGELOG_WAIVED" != "true" ]]; then
-            echo "::error title=Missing changelog entry::Add a CHANGELOG.md entry, or label the PR C-trivial or C-exclude-from-changelog."
-            failed=true
-          fi
-
-          if [[ "$BREAKING" == "true" && "$has_breaking_heading" != "true" ]]; then
-            echo "::error title=Missing breaking changes heading::Add a ### Breaking Changes section under ## [Unreleased] in a CHANGELOG.md changed by this PR."
-            failed=true
-          fi
-
-          if [[ "$failed" == "true" ]]; then
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+        run: |
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release readiness failed::Review each failed validation step and the job summary."
             exit 1
           fi
 
   pr-gate-result:
     runs-on: ubuntu-latest
     if: always()
-    needs: [changes, semver-checks, changelog-gate]
+    needs: [changes, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: semver-checks, changelog-gate
+          allowed-skips: semver-checks, changelog-gate, release-readiness

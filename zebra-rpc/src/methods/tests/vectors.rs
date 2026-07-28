@@ -857,6 +857,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_hash = block.hash();
     let block_header = block.header.clone();
     let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
 
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -897,7 +898,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
             next_block_hash: None,
         });
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::SaplingTree(_)))
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
         .await
         .respond(ReadResponse::SaplingTree(Some(Default::default())));
     read_state
@@ -907,30 +908,49 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
 
     // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
+        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
         .await
         .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
         .await
         .respond(ReadResponse::OrchardTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::IronwoodTree(_)))
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
         .await
         .respond(ReadResponse::IronwoodTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(None));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
 
-    block_future
+    let block_response = block_future
         .await
         .expect("task should not panic")
         .expect("getblock should succeed for side-chain blocks");
+
+    let GetBlockResponse::Object(obj) = block_response else {
+        panic!("expected verbosity-2 getblock to return an object");
+    };
+
+    assert_eq!(
+        obj.confirmations, -1,
+        "side-chain confirmations should be -1"
+    );
+
+    // Each transaction object must be labeled as side-chain (height=-1,
+    // confirmations=0) rather than panicking on the u32 cast.
+    for actual_tx in &obj.tx {
+        let GetBlockTransaction::Object(tx_obj) = actual_tx else {
+            panic!("verbosity-2 returns transaction objects");
+        };
+        assert_eq!(tx_obj.height, Some(-1));
+        assert_eq!(tx_obj.confirmations, Some(0));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
