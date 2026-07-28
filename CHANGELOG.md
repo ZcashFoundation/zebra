@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
+
+This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
+
+This release helps keep Zebra's peer set healthy. While syncing, outbound connection slots are
+no longer occupied by peers that can't serve blocks, dropped outbound connections are proactively
+replaced, and `getaddr` responses share more of the address book so peers can find more of the
+network. Zebra also no longer disconnects peers during expected long gaps between blocks, or
+penalizes them for briefly disagreeing about the NU6.3 activation.
+
+### Changed
+
+- Mempool transaction relay no longer penalizes peers for adjacent NU6.2 and
+  NU6.3 branch ID mismatches during the 40 heights on either side of NU6.3
+  activation, avoiding bans caused by temporary chain-tip divergence
+  ([#11113](https://github.com/ZcashFoundation/zebra/pull/11113)).
+- Chain synchronization now retains the final block hash returned by peers in `FindBlocks`
+  responses, rather than discarding it to work around obsolete `zcashd` behavior
+  ([#11093](https://github.com/ZcashFoundation/zebra/pull/11093)).
+- The peer crawler now queues a connection attempt on each crawl interval for every spare
+  outbound connection slot that has a ready address book candidate, so dropped outbound
+  connections are proactively replaced until the outbound connection limit is reached.
+  Previously, new connections were only attempted when the peer set ran out of ready peers,
+  when a crawl found new addresses, or when the node had no outbound connections at all
+  ([#11102](https://github.com/ZcashFoundation/zebra/issues/11102)).
+- Zebra now sends up to half of its address book in response to a `getaddr` request, up from
+  a quarter, so peers can find more of the network from each response
+  ([#11103](https://github.com/ZcashFoundation/zebra/issues/11103)).
+- The peer stall detector no longer disconnects peers for empty `FindBlocks` or `FindHeaders`
+  responses while the node is within 1,000 estimated blocks of the network tip, avoiding false
+  stall detection during long gaps between blocks
+  ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+- Upgraded the librustzcash crate cohort (`orchard` 0.15.3, `zcash_keys` 0.16.0,
+  `zcash_primitives` 0.30.0, `zcash_proofs` 0.30.0, `zcash_transparent` 0.10.0) to the
+  released NU6.3 versions. No behavior change
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+
+### Fixed
+
+- Outbound peer slots no longer fill up with peers that advertise no services, which could stall
+  a fresh sync at genesis when most reachable listeners are non-serving. While syncing, Zebra
+  now requires the `NODE_NETWORK` service from outbound peers; at or near the network tip it
+  accepts non-serving peers (like pruned nodes) again
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+- The embedded zcashd-compat release manifest and the installer script now pin sidecar
+  `zebra-compat-v1.1.0`, which follows Mainnet past the NU6.3 (Ironwood) activation at block
+  3,428,143. The previous `zebra-compat-v1.0.0` sidecar predates the activation height and stops
+  following the chain at that block. Supervised deployments using `zcashd_source = "embedded"`
+  must upgrade (or set `zcashd_path` to a current sidecar binary) before activation
+  ([#11112](https://github.com/ZcashFoundation/zebra/pull/11112)).
+
 ## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
 
 ### Changed

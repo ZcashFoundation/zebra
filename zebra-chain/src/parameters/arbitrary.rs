@@ -28,6 +28,19 @@ impl NetworkUpgrade {
         .boxed()
     }
 
+    /// Generates network upgrades that are valid for V6 transactions (NU6.3 onward).
+    ///
+    /// Does not generate `Nu7`: its consensus branch ID is still a placeholder that
+    /// librustzcash does not recognise, so transactions carrying it cannot round-trip
+    /// through `to_librustzcash` (which computes txids and auth digests).
+    pub fn nu6_3_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
+        prop_oneof![
+            Just(NetworkUpgrade::Nu6_3),
+            // TODO: add Nu7 once its consensus branch ID is set in librustzcash
+        ]
+        .boxed()
+    }
+
     /// Generates network upgrades from a reduced set
     pub fn reduced_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
         // Used to give a transaction a consensus branch id that is inconsistent with its block
