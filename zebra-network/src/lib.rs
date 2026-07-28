@@ -155,6 +155,7 @@ pub mod constants;
 
 mod address_book;
 mod address_book_updater;
+mod connection_metrics;
 mod isolated;
 mod meta_addr;
 mod peer;

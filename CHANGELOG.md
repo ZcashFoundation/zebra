@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
+  direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
+  report the bounded self-reported implementation class without using peer IPs or raw user agents
+  as labels.
+
+### Changed
+
+- Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
+  and Testnet values no longer overwrite each other in processes that run both networks.
+
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
 This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.

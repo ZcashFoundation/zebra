@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Connection-attempt, terminal-outcome, and remote-version metrics with bounded network,
+  direction, address-family, lifecycle-stage, outcome, and implementation labels.
+
+### Changed
+
+- Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so multiple
+  network instances in one process do not overwrite each other's values.
+
 ## [11.0.0] - 2026-07-27
 
 ### Breaking Changes
