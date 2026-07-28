@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
+This release helps keep Zebra's peer set healthy. While syncing, outbound connection slots are
+no longer occupied by peers that can't serve blocks, dropped outbound connections are proactively
+replaced, and `getaddr` responses share more of the address book so peers can find more of the
+network. Zebra also no longer disconnects peers during expected long gaps between blocks, or
+penalizes them for briefly disagreeing about the NU6.3 activation.
+
 ### Changed
 
 - Mempool transaction relay no longer penalizes peers for adjacent NU6.2 and
