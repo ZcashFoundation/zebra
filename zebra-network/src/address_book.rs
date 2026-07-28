@@ -18,9 +18,9 @@ use tracing::Span;
 use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
+    connection_metrics::network_kind_label,
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
-    peer::connection_metrics::network_kind_label,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     types::MetaAddr,
     AddressBookPeers, PeerAddrState, PeerSocketAddr,

@@ -36,16 +36,15 @@ use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics, paramete
 
 use crate::{
     address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
+    connection_metrics::{
+        network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
+        record_inbound_connection_rejected, ConnectionDirection,
+    },
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
-        self, address_is_valid_for_inbound_listeners,
-        connection_metrics::{
-            network_kind_label, record_connection_attempt_finished,
-            record_connection_attempt_started, record_inbound_connection_rejected,
-            ConnectionDirection,
-        },
-        HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest, PeerPreference,
+        self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
+        OutboundConnectorRequest, PeerPreference,
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},

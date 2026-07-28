@@ -129,8 +129,9 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
+    connection_metrics::network_kind_label,
     constants::MIN_PEER_SET_LOG_INTERVAL,
-    peer::{connection_metrics::network_kind_label, LoadTrackedClient, MinimumPeerVersion},
+    peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},

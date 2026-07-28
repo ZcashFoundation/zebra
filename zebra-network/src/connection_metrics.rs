@@ -1,3 +1,8 @@
+//! Bounded metrics for Zebra's peer connection lifecycle.
+//!
+//! Keeping these metrics at the crate root prevents address-book and peer-set code
+//! from reaching through peer implementation details.
+
 use std::io::ErrorKind;
 
 use zebra_chain::{
@@ -5,9 +10,10 @@ use zebra_chain::{
     serialization::SerializationError,
 };
 
-use crate::{BoxError, PeerSocketAddr};
-
-use super::{ConnectedAddr, HandshakeError};
+use crate::{
+    peer::{ConnectedAddr, HandshakeError},
+    BoxError, PeerSocketAddr,
+};
 
 const CONNECTION_ATTEMPTS_TOTAL: &str = "zcash.net.connection.attempts.total";
 const CONNECTION_OUTCOMES_TOTAL: &str = "zcash.net.connection.outcomes.total";
@@ -33,6 +39,90 @@ impl ConnectionDirection {
 struct ConnectionErrorLabels {
     stage: &'static str,
     outcome: &'static str,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct RemoteVersionMetricLabels {
+    network: &'static str,
+    direction: &'static str,
+    address_family: &'static str,
+    implementation: &'static str,
+}
+
+/// Records exactly one terminal outcome after Zebra decodes a remote `Version` message.
+///
+/// Dropping this guard before an explicit outcome records a cancellation. This makes
+/// the metric complete when the outer connection timeout cancels an in-progress handshake.
+#[must_use = "dropping the guard records a canceled remote Version outcome"]
+pub(crate) struct RemoteVersionOutcomeGuard {
+    labels: Option<RemoteVersionMetricLabels>,
+    outcome_recorded: bool,
+}
+
+impl RemoteVersionOutcomeGuard {
+    /// Records a decoded remote `Version` message and starts tracking its terminal outcome.
+    pub(crate) fn new(network: &Network, connected_addr: &ConnectedAddr, user_agent: &str) -> Self {
+        let labels =
+            connection_labels(connected_addr).map(|(direction, addr)| RemoteVersionMetricLabels {
+                network: network_kind_label(network),
+                direction: direction.label(),
+                address_family: address_family_label(addr),
+                implementation: implementation_label(user_agent),
+            });
+
+        if let Some(labels) = labels {
+            metrics::counter!(
+                REMOTE_VERSION_MESSAGES_TOTAL,
+                "network" => labels.network,
+                "direction" => labels.direction,
+                "address_family" => labels.address_family,
+                "implementation" => labels.implementation,
+            )
+            .increment(1);
+        }
+
+        Self {
+            labels,
+            outcome_recorded: false,
+        }
+    }
+
+    /// Records a handshake error and returns it for propagation to the caller.
+    pub(crate) fn record_error(&mut self, error: HandshakeError) -> HandshakeError {
+        self.record_outcome(handshake_error_outcome(&error));
+        error
+    }
+
+    /// Records a successful handshake without emitting a cancellation when this guard is dropped.
+    pub(crate) fn record_success(mut self) {
+        self.record_outcome("success");
+    }
+
+    fn record_outcome(&mut self, outcome: &'static str) {
+        if std::mem::replace(&mut self.outcome_recorded, true) {
+            return;
+        }
+
+        let Some(labels) = self.labels else {
+            return;
+        };
+
+        metrics::counter!(
+            REMOTE_VERSION_OUTCOMES_TOTAL,
+            "network" => labels.network,
+            "direction" => labels.direction,
+            "address_family" => labels.address_family,
+            "implementation" => labels.implementation,
+            "outcome" => outcome,
+        )
+        .increment(1);
+    }
+}
+
+impl Drop for RemoteVersionOutcomeGuard {
+    fn drop(&mut self) {
+        self.record_outcome("canceled");
+    }
 }
 
 /// Returns a bounded metrics label for `network`.
@@ -71,7 +161,7 @@ pub(crate) fn record_connection_attempt_finished(
             stage: "handshake",
             outcome: "success",
         },
-        classify_connection_error,
+        |error| classify_connection_error(direction, error),
     );
 
     metrics::counter!(
@@ -102,56 +192,23 @@ pub(crate) fn record_inbound_connection_rejected(
     .increment(1);
 }
 
-/// Records a remote BIP-14 user agent after Zebra receives and decodes `Version`.
-///
-/// The exact self-reported user agent remains available in debug logs. The
-/// implementation label is intentionally bounded for Prometheus.
-pub(crate) fn record_remote_version_received(
-    network: &Network,
-    connected_addr: &ConnectedAddr,
-    user_agent: &str,
-) {
-    let Some((direction, addr)) = connection_labels(connected_addr) else {
-        return;
-    };
-
-    metrics::counter!(
-        REMOTE_VERSION_MESSAGES_TOTAL,
-        "network" => network_kind_label(network),
-        "direction" => direction.label(),
-        "address_family" => address_family_label(addr),
-        "implementation" => implementation_label(user_agent),
-    )
-    .increment(1);
-}
-
-/// Records the terminal result after Zebra has decoded a remote `Version` message.
-pub(crate) fn record_remote_version_outcome(
-    network: &Network,
-    connected_addr: &ConnectedAddr,
-    user_agent: &str,
-    error: Option<&HandshakeError>,
-) {
-    let Some((direction, addr)) = connection_labels(connected_addr) else {
-        return;
-    };
-    let outcome = error.map_or("success", handshake_error_outcome);
-
-    metrics::counter!(
-        REMOTE_VERSION_OUTCOMES_TOTAL,
-        "network" => network_kind_label(network),
-        "direction" => direction.label(),
-        "address_family" => address_family_label(addr),
-        "implementation" => implementation_label(user_agent),
-        "outcome" => outcome,
-    )
-    .increment(1);
-}
-
-fn classify_connection_error(error: &BoxError) -> ConnectionErrorLabels {
+fn classify_connection_error(
+    direction: ConnectionDirection,
+    error: &BoxError,
+) -> ConnectionErrorLabels {
     if error.is::<tower::timeout::error::Elapsed>() {
         return ConnectionErrorLabels {
-            stage: "tcp_or_handshake",
+            stage: match direction {
+                ConnectionDirection::Inbound => "handshake",
+                ConnectionDirection::Outbound => "tcp_or_handshake",
+            },
+            outcome: "timeout",
+        };
+    }
+
+    if error.is::<tokio::time::error::Elapsed>() {
+        return ConnectionErrorLabels {
+            stage: "handshake",
             outcome: "timeout",
         };
     }
@@ -263,10 +320,76 @@ fn implementation_label(user_agent: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::{future, io, sync::Arc, time::Duration};
+    use std::{
+        future, io,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
     use super::*;
+    use metrics::{
+        Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+    };
     use tower::{service_fn, ServiceExt};
+
+    #[derive(Default)]
+    struct CounterRegistrationRecorder {
+        keys: Mutex<Vec<(String, Vec<(String, String)>)>>,
+    }
+
+    impl CounterRegistrationRecorder {
+        fn label_values(&self, metric_name: &str, label_name: &str) -> Vec<String> {
+            self.keys
+                .lock()
+                .expect("the test recorder mutex must not be poisoned")
+                .iter()
+                .filter(|(name, _)| name == metric_name)
+                .filter_map(|(_, labels)| {
+                    labels
+                        .iter()
+                        .find(|(key, _)| key == label_name)
+                        .map(|(_, value)| value.clone())
+                })
+                .collect()
+        }
+    }
+
+    impl Recorder for CounterRegistrationRecorder {
+        fn describe_counter(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {
+        }
+
+        fn describe_gauge(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+        fn describe_histogram(
+            &self,
+            _key: KeyName,
+            _unit: Option<Unit>,
+            _description: SharedString,
+        ) {
+        }
+
+        fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
+            let labels = key
+                .labels()
+                .map(|label| (label.key().to_owned(), label.value().to_owned()))
+                .collect();
+
+            self.keys
+                .lock()
+                .expect("the test recorder mutex must not be poisoned")
+                .push((key.name().to_owned(), labels));
+
+            Counter::noop()
+        }
+
+        fn register_gauge(&self, _key: &Key, _metadata: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, _key: &Key, _metadata: &Metadata<'_>) -> Histogram {
+            Histogram::noop()
+        }
+    }
 
     #[test]
     fn user_agent_implementation_labels_are_bounded() {
@@ -285,7 +408,7 @@ mod tests {
         .into();
 
         assert_eq!(
-            classify_connection_error(&error),
+            classify_connection_error(ConnectionDirection::Inbound, &error),
             ConnectionErrorLabels {
                 stage: "handshake",
                 outcome: "connection_reset",
@@ -299,7 +422,7 @@ mod tests {
             io::Error::new(ErrorKind::ConnectionRefused, "test listener is closed").into();
 
         assert_eq!(
-            classify_connection_error(&error),
+            classify_connection_error(ConnectionDirection::Outbound, &error),
             ConnectionErrorLabels {
                 stage: "tcp_connect",
                 outcome: "connection_refused",
@@ -308,7 +431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn outer_timeout_keeps_its_combined_stage() {
+    async fn outbound_outer_timeout_keeps_its_combined_stage() {
         let service = tower::timeout::Timeout::new(
             service_fn(|()| future::pending::<Result<(), BoxError>>()),
             Duration::ZERO,
@@ -319,11 +442,77 @@ mod tests {
             .expect_err("the pending test service must time out");
 
         assert_eq!(
-            classify_connection_error(&error),
+            classify_connection_error(ConnectionDirection::Outbound, &error),
             ConnectionErrorLabels {
                 stage: "tcp_or_handshake",
                 outcome: "timeout",
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn inbound_outer_timeout_is_a_handshake_timeout() {
+        let service = tower::timeout::Timeout::new(
+            service_fn(|()| future::pending::<Result<(), BoxError>>()),
+            Duration::ZERO,
+        );
+        let error = service
+            .oneshot(())
+            .await
+            .expect_err("the pending test service must time out");
+
+        assert_eq!(
+            classify_connection_error(ConnectionDirection::Inbound, &error),
+            ConnectionErrorLabels {
+                stage: "handshake",
+                outcome: "timeout",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn tokio_timeout_is_a_handshake_timeout() {
+        let error: BoxError = tokio::time::timeout(Duration::ZERO, future::pending::<()>())
+            .await
+            .expect_err("the pending test future must time out")
+            .into();
+
+        assert_eq!(
+            classify_connection_error(ConnectionDirection::Inbound, &error),
+            ConnectionErrorLabels {
+                stage: "handshake",
+                outcome: "timeout",
+            }
+        );
+    }
+
+    #[test]
+    fn remote_version_outcomes_are_cancellation_safe() {
+        let recorder = CounterRegistrationRecorder::default();
+        let connected_addr = ConnectedAddr::InboundDirect {
+            addr: "127.0.0.1:8233"
+                .parse()
+                .expect("the test peer address must be valid"),
+        };
+
+        metrics::with_local_recorder(&recorder, || {
+            drop(RemoteVersionOutcomeGuard::new(
+                &Network::Mainnet,
+                &connected_addr,
+                "/Zakura:1.2.3/",
+            ));
+
+            RemoteVersionOutcomeGuard::new(&Network::Mainnet, &connected_addr, "/Zebra:3.0.0/")
+                .record_success();
+        });
+
+        assert_eq!(
+            recorder.label_values(REMOTE_VERSION_MESSAGES_TOTAL, "implementation"),
+            ["zakura", "zebra"]
+        );
+        assert_eq!(
+            recorder.label_values(REMOTE_VERSION_OUTCOMES_TOTAL, "outcome"),
+            ["canceled", "success"]
         );
     }
 }
