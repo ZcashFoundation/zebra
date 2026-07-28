@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
+This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
+
 This release helps keep Zebra's peer set healthy. While syncing, outbound connection slots are
 no longer occupied by peers that can't serve blocks, dropped outbound connections are proactively
 replaced, and `getaddr` responses share more of the address book so peers can find more of the
