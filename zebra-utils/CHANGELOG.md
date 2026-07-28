@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [9.1.5] - 2026-07-27
+## [10.0.0] - 2026-07-27
+
+### Breaking Changes
+
+- Requires `zebra-rpc` 15.0.0, which in turn requires `zebra-network` 11.0.0
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
 
 ### Changed
 
-- `zebra-chain` dependency bumped to `11.2.1`.
+- Updated `zcash_primitives` to 0.30
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
 - `zebra-node-services` dependency bumped to `9.1.2`.
-- `zebra-rpc` dependency bumped to `14.0.1`.
+- `zebra-rpc` dependency bumped to `15.0.0`.
 
 ## [9.1.4] - 2026-07-24
 

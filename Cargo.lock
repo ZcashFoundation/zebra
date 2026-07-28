@@ -7296,7 +7296,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "11.2.1"
+version = "11.3.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -7418,7 +7418,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "10.3.0"
+version = "11.0.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -7474,7 +7474,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "14.0.1"
+version = "15.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7635,7 +7635,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "9.1.5"
+version = "10.0.0"
 dependencies = [
  "clap",
  "color-eyre",

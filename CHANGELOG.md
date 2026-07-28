@@ -39,6 +39,10 @@ penalizes them for briefly disagreeing about the NU6.3 activation.
   responses while the node is within 1,000 estimated blocks of the network tip, avoiding false
   stall detection during long gaps between blocks
   ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+- Upgraded the librustzcash crate cohort (`orchard` 0.15.3, `zcash_keys` 0.16.0,
+  `zcash_primitives` 0.30.0, `zcash_proofs` 0.30.0, `zcash_transparent` 0.10.0) to the
+  released NU6.3 versions. No behavior change
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
 
 ### Fixed
 

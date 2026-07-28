@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [11.2.1] - 2026-07-27
+## [11.3.0] - 2026-07-27
 
 ### Added
 
@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AT_OR_NEAR_TIP_THRESHOLD` is now 1,000 blocks, keeping peer stall detection disabled during
   long gaps between blocks ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
 - Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
-  `zcash_transparent` to 0.10.
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
 
 ### Fixed
 
@@ -31,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transactions (with v6 Orchard and Ironwood bundles) for NU6.3 and later network upgrades,
   and accepts a transaction version override of 6. Previously it only generated v4/v5
   transactions for those upgrades, so property tests built on it could never observe
-  v6/Ironwood data.
+  v6/Ironwood data ([#11075](https://github.com/ZcashFoundation/zebra/pull/11075)).
 
 ## [11.2.0] - 2026-07-17
 

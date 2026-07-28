@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [10.3.0] - 2026-07-27
+## [11.0.0] - 2026-07-27
+
+### Breaking Changes
+
+- `HandshakeError` gains the `MissingRequiredServices` variant. `HandshakeError` is not
+  `#[non_exhaustive]`, so exhaustive `match` expressions over it stop compiling
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
 
 ### Added
 
