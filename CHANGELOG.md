@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
+
+This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
+
+This release helps keep Zebra's peer set healthy. While syncing, outbound connection slots are
+no longer occupied by peers that can't serve blocks, dropped outbound connections are proactively
+replaced, and `getaddr` responses share more of the address book so peers can find more of the
+network. Zebra also no longer disconnects peers during expected long gaps between blocks, or
+penalizes them for briefly disagreeing about the NU6.3 activation.
+
 ### Changed
 
 - Mempool transaction relay no longer penalizes peers for adjacent NU6.2 and
@@ -29,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   responses while the node is within 1,000 estimated blocks of the network tip, avoiding false
   stall detection during long gaps between blocks
   ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+- Upgraded the librustzcash crate cohort (`orchard` 0.15.3, `zcash_keys` 0.16.0,
+  `zcash_primitives` 0.30.0, `zcash_proofs` 0.30.0, `zcash_transparent` 0.10.0) to the
+  released NU6.3 versions. No behavior change
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
 
 ### Fixed
 
@@ -36,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   a fresh sync at genesis when most reachable listeners are non-serving. While syncing, Zebra
   now requires the `NODE_NETWORK` service from outbound peers; at or near the network tip it
   accepts non-serving peers (like pruned nodes) again
-  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071))
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
 - The embedded zcashd-compat release manifest and the installer script now pin sidecar
   `zebra-compat-v1.1.0`, which follows Mainnet past the NU6.3 (Ironwood) activation at block
   3,428,143. The previous `zebra-compat-v1.0.0` sidecar predates the activation height and stops
