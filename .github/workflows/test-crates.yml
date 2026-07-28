@@ -63,7 +63,9 @@ jobs:
         with:
           toolchain: 1.97.0
           components: clippy
-          cache-on-failure: true
+          # This job only runs `cargo tree` to build the matrix, so a cache here
+          # only consumes quota.
+          cache: false
       - uses: ./.github/actions/setup-zebra-build
 
       # This step dynamically creates a JSON containing the values of each crate
@@ -117,8 +119,16 @@ jobs:
         with:
           toolchain: 1.97.0
           components: clippy
-          cache-key: crate-build-${{ matrix.crate }}
+          # One cache for the whole matrix instead of one per crate. These jobs
+          # compile overlapping subsets of the same dependency graph, so 12
+          # per-crate caches stored ~12 GB of near-duplicate artifacts and blew
+          # through the repo-wide 10 GB quota on their own.
+          cache-shared-key: crate-build
           cache-on-failure: true
+          # Only main writes the shared cache, and only from the crate with the
+          # widest dependency closure, so the other legs restore a superset
+          # rather than whichever leg happened to finish first.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
@@ -179,8 +189,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-          cache-key: crate-build-msrv-${{ matrix.crate }}
+          # One cache for the whole matrix, see the `build` job above.
+          cache-shared-key: crate-build-msrv
           cache-on-failure: true
+          # `zebra-rpc` is also the seed here: this matrix skips `zebrad`, and
+          # `zebra-rpc` pulls in the rest of the workspace.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
