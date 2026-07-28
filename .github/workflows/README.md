@@ -138,7 +138,45 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 
 **Note**: Self-hosted Runners are just used to keep the logs running in the GitHub Actions UI for over 6 hours, the Integration Tests are not run in the Self-hosted Runner itself, but in the deployed VMs in GCP through GitHub Actions.
 
-### 5. Queue Management
+### 5. Rust build caching
+
+Rust jobs cache `~/.cargo` and dependency artifacts in `target/` through
+[`actions-rust-lang/setup-rust-toolchain`](https://github.com/actions-rust-lang/setup-rust-toolchain),
+which wraps [`Swatinem/rust-cache`](https://github.com/Swatinem/rust-cache). Caching is on by
+default, so a job opts *out* with `cache: false` rather than opting in.
+
+GitHub gives each repository a 10 GB cache quota and evicts least-recently-used entries when it is
+exceeded. Caches are also branch-scoped: a branch can read its own caches and the default branch's,
+but never another branch's. Those two rules together mean an unmanaged setup is self-defeating -
+caches written by PRs can never be read by anyone else, but they still evict main's caches, which
+are the only ones every PR does restore from.
+
+Three rules keep the quota usable:
+
+1. **Only main writes.** Every job that builds the workspace sets
+   `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing.
+2. **Wide matrices share one key.** The `test-crates.yml` matrices use `cache-shared-key` and seed
+   the shared cache from a single leg (`zebra-rpc`, which has the widest dependency closure), rather
+   than one ~1 GB near-duplicate cache per crate.
+3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
+   crate-matrix generator in `test-crates.yml` set `cache: false`.
+
+Some jobs are deliberate exceptions to rule 1, because they never run on main and so would get no
+cache at all under it: `check-no-git-dependencies` in `tests-unit.yml` and `release-readiness` in
+`pr-gate.yml` (both A-release PRs only), and `benchmarks.yml` (label-gated). They do build, and
+they reuse their own cache across pushes to the same PR, so they keep saving. All three are
+infrequent enough not to dominate the quota.
+
+To inspect the current state:
+
+```bash
+gh api repos/ZcashFoundation/zebra/actions/cache/usage
+gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
+  --jq '[.actions_caches[] | {ref, mb: (.size_in_bytes/1048576|round)}]
+        | group_by(.ref)[] | "\(.[0].ref) n=\(length) \(map(.mb)|add)MB"'
+```
+
+### 6. Queue Management
 
 [Mergify](https://mergify.com)
 
