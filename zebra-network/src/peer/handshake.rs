@@ -38,6 +38,7 @@ use crate::{
     constants,
     meta_addr::MetaAddrChange,
     peer::{
+        connection_metrics::{record_remote_version_outcome, record_remote_version_received},
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
         MinimumPeerVersion, PeerError,
     },
@@ -656,6 +657,7 @@ where
         .chain_tip()
         .is_at_or_near_network_tip(&config.network);
 
+    let network = config.network.clone();
     let (their_addr, our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
@@ -726,6 +728,16 @@ where
     };
 
     let remote_address_services = remote.address_from.untrusted_services();
+    record_remote_version_received(&network, connected_addr, &remote.user_agent);
+    debug!(
+        remote_user_agent = %remote.user_agent,
+        "received remote peer version"
+    );
+    let remote_user_agent = remote.user_agent.clone();
+    let record_version_error = |error: HandshakeError| {
+        record_remote_version_outcome(&network, connected_addr, &remote_user_agent, Some(&error));
+        error
+    };
     if remote_address_services != remote.services {
         info!(
             ?remote.services,
@@ -750,7 +762,7 @@ where
     let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
         info!(?connected_addr, "rejecting self-connection attempt");
-        Err(HandshakeError::RemoteNonceReuse)?;
+        return Err(record_version_error(HandshakeError::RemoteNonceReuse));
     }
 
     // # Security
@@ -786,7 +798,9 @@ where
         .set(remote.version.0 as f64);
 
         // Disconnect if peer is using an obsolete version.
-        return Err(HandshakeError::ObsoleteVersion(remote.version));
+        return Err(record_version_error(HandshakeError::ObsoleteVersion(
+            remote.version,
+        )));
     }
 
     // # Security
@@ -821,9 +835,11 @@ where
         .increment(1);
 
         // Disconnect if the outbound peer doesn't advertise the required services.
-        return Err(HandshakeError::MissingRequiredServices {
-            services: remote.services,
-        });
+        return Err(record_version_error(
+            HandshakeError::MissingRequiredServices {
+                services: remote.services,
+            },
+        ));
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
@@ -862,12 +878,19 @@ where
     )
     .set(connection_info.remote.version.0 as f64);
 
-    peer_conn.send(Message::Verack).await?;
+    if let Err(error) = peer_conn.send(Message::Verack).await {
+        return Err(record_version_error(HandshakeError::from(error)));
+    }
 
-    let mut remote_msg = peer_conn
-        .next()
-        .await
-        .ok_or(HandshakeError::ConnectionClosed)??;
+    let mut remote_msg = match peer_conn.next().await {
+        Some(Ok(message)) => message,
+        Some(Err(error)) => {
+            return Err(record_version_error(HandshakeError::from(error)));
+        }
+        None => {
+            return Err(record_version_error(HandshakeError::ConnectionClosed));
+        }
+    };
 
     // Wait for next message if the one we got is not Verack
     loop {
@@ -877,15 +900,21 @@ where
                 break;
             }
             _ => {
-                remote_msg = peer_conn
-                    .next()
-                    .await
-                    .ok_or(HandshakeError::ConnectionClosed)??;
+                remote_msg = match peer_conn.next().await {
+                    Some(Ok(message)) => message,
+                    Some(Err(error)) => {
+                        return Err(record_version_error(HandshakeError::from(error)));
+                    }
+                    None => {
+                        return Err(record_version_error(HandshakeError::ConnectionClosed));
+                    }
+                };
                 debug!(?remote_msg, "ignoring non-verack message from remote peer");
             }
         }
     }
 
+    record_remote_version_outcome(&network, connected_addr, &remote_user_agent, None);
     Ok(connection_info)
 }
 

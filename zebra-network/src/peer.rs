@@ -2,6 +2,7 @@
 
 mod client;
 mod connection;
+pub(crate) mod connection_metrics;
 mod connector;
 mod error;
 mod handshake;
