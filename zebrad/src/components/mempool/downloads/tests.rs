@@ -85,6 +85,7 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         .next()
         .expect("at least one test transaction")
         .transaction;
+    let transaction_upgrade = transaction.transaction.network_upgrade();
 
     type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -122,9 +123,12 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
             error,
             TransactionDownloadVerifyError::Invalid {
                 advertiser_addr: Some(addr),
+                transaction_upgrade: actual_upgrade,
+                verification_height: Height(0),
                 ..
             } if addr == PeerSocketAddr::from(peer_addr)
+                && actual_upgrade == transaction_upgrade
         ),
-        "expected the pushed transaction failure to carry the peer address, got {error:?}"
+        "expected the pushed transaction failure to carry its peer, branch, and height, got {error:?}"
     );
 }

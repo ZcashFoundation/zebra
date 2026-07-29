@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `transaction::BlockVerifier` and `transaction::MempoolVerifier` services and
   dedicated request/response types. No verification behavior change is intended
   ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+  
+## [14.0.1] - 2026-07-27
+
+### Changed
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-script` dependency bumped to `10.1.2`.
+- `zebra-state` dependency bumped to `12.0.1`.
 
 ## [14.0.0] - 2026-07-24
 
