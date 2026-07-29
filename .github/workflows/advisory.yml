@@ -133,7 +133,9 @@ jobs:
       - name: Check feature combinations
         run: cargo hack check --all
         env:
-          RUSTFLAGS: -D warnings
+          # Setting RUSTFLAGS replaces the workspace `.cargo/config.toml` build
+          # rustflags, so the NU7 cfg must be repeated here.
+          RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
 
   unused-deps:
     name: Nightly unused dependencies

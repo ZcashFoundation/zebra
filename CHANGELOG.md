@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- V7 (tachyon) transaction support is no longer experimental on this fork: the `tx_v7`
+  cargo feature and the `zcash_unstable = "nu7"` gates on Zebra code were removed, and
+  the workspace `.cargo/config.toml` now always passes `--cfg zcash_unstable="nu7"` so
+  the librustzcash NU7 items compile without setting `RUSTFLAGS`. Environments or CI
+  jobs that set `RUSTFLAGS` themselves must include `--cfg zcash_unstable="nu7"`,
+  because the environment variable replaces the config file's rustflags.
+
 ## [Zebra 6.2.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.2) - 2026-07-24
 
 ### Changed

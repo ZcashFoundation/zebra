@@ -11,12 +11,10 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod tachyon_shielded;
 mod txid;
 mod unmined;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub use tachyon_shielded::TachyonShieldedData;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -183,11 +181,7 @@ pub enum Transaction {
     },
     /// A `version = 7` (tachyon) transaction.
     ///
-    /// V7 reuses the v6 (Ironwood) field layout and additionally carries a tachyon bundle. It is
-    /// only constructed and accepted in tachyon builds
-    /// (`cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))`); in other builds the variant still
-    /// exists but its tachyon field is compiled out, so it behaves like a v6 transaction with a
-    /// distinct version group ID.
+    /// V7 reuses the v6 (Ironwood) field layout and additionally carries a tachyon bundle.
     V7 {
         /// The Network Upgrade for this transaction.
         ///
@@ -209,7 +203,6 @@ pub enum Transaction {
         /// The Ironwood data for this transaction, if any (NU6.3 onward).
         ironwood_shielded_data: Option<ironwood::ShieldedData>,
         /// The tachyon data for this transaction, if any.
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
         tachyon_shielded_data: Option<TachyonShieldedData>,
     },
 }
@@ -1287,9 +1280,8 @@ impl Transaction {
 
     // tachyon
 
-    /// Access the tachyon shielded data in this transaction (NU7, experimental), if there is any,
+    /// Access the tachyon shielded data in this transaction (NU7), if there is any,
     /// regardless of version. It only appears in v7 transactions.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     pub fn tachyon_shielded_data(&self) -> Option<&TachyonShieldedData> {
         match self {
             Transaction::V7 {
@@ -1307,19 +1299,9 @@ impl Transaction {
     }
 
     /// Does this transaction have any tachyon actions?
-    ///
-    /// Returns `false` when tachyon support is compiled out, so callers don't need to repeat the
-    /// tachyon `cfg` gate.
     pub fn has_tachyon_actions(&self) -> bool {
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        {
-            self.tachyon_shielded_data()
-                .is_some_and(|data| !data.actions().is_empty())
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
-        {
-            false
-        }
+        self.tachyon_shielded_data()
+            .is_some_and(|data| !data.actions().is_empty())
     }
 
     // value balances
@@ -1678,7 +1660,7 @@ impl Transaction {
         ValueBalance::from_ironwood_amount(ironwood_value_balance)
     }
 
-    /// Return the tachyon value balance (NU7, experimental), the change in the transaction value
+    /// Return the tachyon value balance (NU7), the change in the transaction value
     /// pool due to tachyon actions.
     ///
     /// Positive values are added to this transaction's value pool, and removed from the tachyon
@@ -1686,7 +1668,6 @@ impl Transaction {
     /// tachyon pool. This is zero for transactions without a tachyon bundle.
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     pub fn tachyon_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let tachyon_value_balance = self
             .tachyon_shielded_data()
@@ -1705,16 +1686,12 @@ impl Transaction {
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        let value_balance = self.transparent_value_balance_from_outputs(outputs)?
+        self.transparent_value_balance_from_outputs(outputs)?
             + self.sprout_value_balance()?
             + self.sapling_value_balance()
             + self.orchard_value_balance()
-            + self.ironwood_value_balance();
-
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        let value_balance = value_balance + self.tachyon_value_balance();
-
-        value_balance
+            + self.ironwood_value_balance()
+            + self.tachyon_value_balance()
     }
 
     /// Returns the value balances for this transaction.

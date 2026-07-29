@@ -858,7 +858,6 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data,
                 orchard_shielded_data,
                 ironwood_shielded_data,
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 tachyon_shielded_data,
             } => {
                 // Transaction V7 (tachyon): the v6 (Ironwood) body followed by a tachyon bundle.
@@ -896,7 +895,6 @@ impl ZcashSerialize for Transaction {
 
                 // Tachyon bundle: `TachyonBundle::write` writes the 0x01/0x02 state byte itself,
                 // so the absent case writes 0x00 explicitly.
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 match tachyon_shielded_data {
                     None => writer.write_u8(0)?,
                     Some(wrapped) => wrapped.0.write(&mut writer)?,
@@ -1271,11 +1269,8 @@ impl ZcashDeserialize for Transaction {
 
                 Ok(tx)
             }
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             (7, true) => {
                 // Transaction V7 (tachyon): the v6 (Ironwood) body followed by a tachyon bundle.
-                // This branch only exists in tachyon builds; in other builds version 7 falls
-                // through to the "bad tx header" arm below.
 
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
