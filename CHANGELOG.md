@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
 
+### Fixed
+
+- Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
+  enforcing the cap on the total monetary base
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
 This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.

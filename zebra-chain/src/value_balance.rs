@@ -160,6 +160,23 @@ where
         }
     }
 
+    /// Returns the sum of all value pool balances.
+    pub fn total(self) -> Result<Amount<C>, amount::Error> {
+        let total: i128 = [
+            self.transparent,
+            self.sprout,
+            self.sapling,
+            self.orchard,
+            self.deferred,
+            self.ironwood,
+        ]
+        .into_iter()
+        .map(|amount| i128::from(amount.zatoshis()))
+        .sum();
+
+        Amount::try_from(total)
+    }
+
     /// Convert this value balance to a different ValueBalance type,
     /// if it satisfies the new constraint
     pub fn constrain<C2>(self) -> Result<ValueBalance<C2>, ValueBalanceError>
@@ -318,26 +335,35 @@ impl ValueBalance<NonNegative> {
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
-        chain_value_pool.constrain()
+        let chain_value_pool = chain_value_pool.constrain::<NonNegative>()?;
+
+        // The sum of all chain value pools is the total monetary base, which consensus caps at
+        // `MAX_MONEY`. Reject any change that would push the chain value pool total over that cap.
+        chain_value_pool.total().map_err(ValueBalanceError::Total)?;
+
+        Ok(chain_value_pool)
     }
 
     /// Create a fake value pool for testing purposes.
     ///
-    /// The resulting [`ValueBalance`] will have half of the MAX_MONEY amount on each pool.
+    /// The resulting [`ValueBalance`] has `MAX_MONEY / 8` on the transparent, Sprout, Sapling,
+    /// Orchard, and Ironwood pools; the deferred pool is zero. This keeps the total within the
+    /// valid `Amount` range (see [`ValueBalance::total`]), while leaving headroom for value pool
+    /// changes that tests commit on top of it.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn fake_populated_pool() -> ValueBalance<NonNegative> {
         let mut fake_value_pool = ValueBalance::zero();
 
         let fake_transparent_value_balance =
-            ValueBalance::from_transparent_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_transparent_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_sprout_value_balance =
-            ValueBalance::from_sprout_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_sprout_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_sapling_value_balance =
-            ValueBalance::from_sapling_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_sapling_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_orchard_value_balance =
-            ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_ironwood_value_balance =
-            ValueBalance::from_ironwood_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_ironwood_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
 
         fake_value_pool.set_transparent_value_balance(fake_transparent_value_balance);
         fake_value_pool.set_sprout_value_balance(fake_sprout_value_balance);
@@ -468,6 +494,9 @@ pub enum ValueBalanceError {
     /// ironwood amount error {0}
     Ironwood(amount::Error),
 
+    /// total amount error {0}
+    Total(amount::Error),
+
     /// ValueBalance is unparsable
     Unparsable,
 }
@@ -481,6 +510,7 @@ impl fmt::Display for ValueBalanceError {
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
             Ironwood(e) => format!("ironwood amount err: {e}"),
+            Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
     }
