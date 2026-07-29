@@ -1,5 +1,10 @@
 //! Fixed test cases for batch worker tasks.
 
+// `tokio-test`'s macro expansion trips this lint, and each toolchain knows only one of its two names: https://github.com/rust-lang/rust/issues/79813
+#![allow(unknown_lints)]
+#![allow(semicolon_in_expressions_from_macros)]
+#![allow(semicolon_in_expressions_from_non_local_macros)]
+
 use std::time::Duration;
 
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
