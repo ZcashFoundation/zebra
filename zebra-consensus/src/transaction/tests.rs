@@ -45,9 +45,7 @@ use zebra_test::mock_service::MockService;
 
 use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
 
-use super::{
-    check, BlockRequest, BlockVerifier, MempoolRequest, MempoolVerifier, Request, Verifier,
-};
+use super::{check, BlockRequest, BlockVerifier, MempoolRequest, MempoolVerifier};
 
 #[cfg(test)]
 mod prop;
@@ -4252,26 +4250,19 @@ async fn mempool_zip317_ok() {
 /// Ensure a block with a transaction with garbage Orchard proofs is rejected, even if the mempool has a valid version of the same transaction.
 #[tokio::test(flavor = "multi_thread")]
 async fn block_with_garbage_orchard_proofs_is_rejected() {
-    use zebra_chain::{primitives::Halo2Proof, transaction::VerifiedUnminedTx};
+    use zebra_chain::primitives::Halo2Proof;
 
     let _init_guard = zebra_test::init();
 
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    let verifier = BlockVerifier::new(&Network::Mainnet, state.clone());
     let verifier = Buffer::new(verifier, 1);
-
-    mempool_setup_tx
-        .send(mempool.clone())
-        .ok()
-        .expect("send should succeed");
 
     let height = NetworkUpgrade::Nu6
         .activation_height(&Network::Mainnet)
         .expect("Nu6 activation height is specified");
     let fund_height = (height - 1).expect("too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(
+    let (input, output, _known_utxos) = mock_transparent_transfer(
         fund_height,
         true,
         0,
@@ -4305,38 +4296,10 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
     }
     assert_eq!(tx.hash(), garbage_tx.hash());
 
-    // simulate valid version in mempool
-    let spent_output = known_utxos
-        .get(&input_outpoint)
-        .unwrap()
-        .utxo
-        .output
-        .clone();
-    let verified_tx = VerifiedUnminedTx::new(
-        tx.clone().into(),
-        Amount::try_from(10000).unwrap(),
-        0,
-        0,
-        Arc::new(vec![spent_output]),
-    )
-    .unwrap();
-
-    let mut mc = mempool.clone();
-    tokio::spawn(async move {
-        mc.expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
-            .await
-            .unwrap()
-            .respond(mempool::Response::TransactionWithDeps {
-                transaction: verified_tx,
-                dependencies: [input_outpoint.hash].into(),
-            });
-    });
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     // submit garbage version as block tx, must be rejected
     let resp = verifier
         .clone()
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: tx_hash,
             transaction: Arc::new(garbage_tx),
             known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),
@@ -4415,16 +4378,9 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
-    let mempool: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
-    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&network, state.clone(), mempool_setup_rx);
+    let verifier = BlockVerifier::new(&network, state.clone());
     let verifier = Buffer::new(verifier, 1);
-
-    mempool_setup_tx
-        .send(mempool.clone())
-        .ok()
-        .expect("send should succeed");
 
     // Submit the same transaction as a Block request at expired_block_height
     // (H+2).  The known_outpoint_hashes set satisfies the dependency check
@@ -4434,7 +4390,7 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     // because H+2 > nExpiryHeight.
     let result = timeout(
         test_timeout(),
-        verifier.clone().oneshot(Request::Block {
+        verifier.clone().oneshot(BlockRequest {
             transaction_hash: tx_hash,
             transaction: Arc::new(tx.clone()),
             known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),

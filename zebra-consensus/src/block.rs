@@ -163,7 +163,10 @@ impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
-    V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    V: Service<tx::BlockRequest, Response = tx::BlockResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     V::Future: Send + 'static,
 {
     /// Creates a new SemanticBlockVerifier
@@ -180,7 +183,10 @@ impl<S, V> Service<Request> for SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
-    V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    V: Service<tx::BlockRequest, Response = tx::BlockResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     V::Future: Send + 'static,
 {
     type Response = block::Hash;
@@ -295,7 +301,7 @@ where
                     .ready()
                     .await
                     .expect("transaction verifier is always ready")
-                    .call(tx::Request::Block {
+                    .call(tx::BlockRequest {
                         transaction_hash,
                         transaction: transaction.clone(),
                         known_outpoint_hashes: known_outpoint_hashes.clone(),
@@ -320,16 +326,11 @@ where
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
 
-                assert!(
-                    matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {response:?}"
-                );
-
-                sigops += response.sigops();
+                sigops += response.sigops;
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee() {
+                if let Some(miner_fee) = response.miner_fee {
                     block_miner_fees += miner_fee;
                 }
             }

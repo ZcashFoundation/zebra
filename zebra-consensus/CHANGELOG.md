@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced the unified transaction verifier API with separate
+  `transaction::BlockVerifier` and `transaction::MempoolVerifier` services and
+  dedicated request/response types. No verification behavior change is intended
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
 ## [14.0.0] - 2026-07-24
 
 ### Changed
