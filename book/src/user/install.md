@@ -103,15 +103,9 @@ If you are having trouble with:
 - **dependencies**: Use `cargo install` without `--locked` to build with the
   latest versions of each dependency.
 
-#### Optional Tor feature
+#### Tor feature
 
-The `zebra-network/tor` feature has an optional dependency named `libsqlite3`.
-If you don't have it installed, you might see errors like `note: /usr/bin/ld:
-cannot find -lsqlite3`. Follow [the arti
-instructions](https://gitlab.torproject.org/tpo/core/arti/-/blob/main/CONTRIBUTING.md#setting-up-your-development-environment)
-to install `libsqlite3`, or use one of these commands instead:
-
-```sh
-cargo build
-cargo build -p zebrad --all-features
-```
+Experimental Tor support is currently
+[disabled](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648)
+until Zebra upgrades to the latest `arti-client`, and the `zebra-network/tor`
+feature cannot be built.
