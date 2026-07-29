@@ -25,17 +25,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
       - name: Restore Lychee cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 #v6.1.0
         with:
           path: .lycheecache
           key: cache-lychee-${{ github.sha }}
           restore-keys: cache-lychee-
       - name: Check links
-        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 #v2.8.0
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 #v2.9.0
         with:
           args: >-
             --verbose
@@ -63,10 +63,10 @@ jobs:
             args: --workspace --all-targets
             features: default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           components: clippy
           toolchain: beta
@@ -80,15 +80,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: beta
           cache-key: advisory-unit-tests-beta
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e #v2.85.4
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
@@ -100,10 +100,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: nightly
           cache-on-failure: true
@@ -119,14 +119,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e #v2.85.4
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -140,14 +140,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e #v2.85.4
         with:
           tool: cargo-udeps
       - uses: ./.github/actions/setup-zebra-build

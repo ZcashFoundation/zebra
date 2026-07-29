@@ -37,17 +37,17 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: stable
           cache-key: zcashd-compat-regtest
           cache-on-failure: true
 
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e #v2.85.4
         with:
           tool: cargo-nextest
 
