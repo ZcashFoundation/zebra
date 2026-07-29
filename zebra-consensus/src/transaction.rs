@@ -152,7 +152,8 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Create a new mempool transaction verifier with a closed channel receiver for mempool setup for tests.
+    /// Creates a new mempool transaction verifier for tests using a closed
+    /// mempool setup channel receiver.
     #[cfg(test)]
     pub fn new_for_tests(network: &Network, state: ZS) -> Self {
         Self {
@@ -186,7 +187,7 @@ pub struct BlockRequest {
 ///
 /// Mempool transactions do not have any additional UTXOs.
 ///
-/// Note: coinbase transactions are invalid in the mempool
+/// Note: coinbase transactions are invalid in the mempool.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MempoolRequest {
     /// The transaction itself.
@@ -268,7 +269,9 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Note: The block verifier expects the transaction verifier to always be ready.
+        // Block verification has no deferred startup dependencies: all required state is
+        // provided at construction, and any missing UTXOs are handled during request
+        // processing via state lookups.
         Poll::Ready(Ok(()))
     }
 
@@ -406,7 +409,7 @@ where
                 tracing::trace!("awaiting outpoint lookup");
 
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UXTO in known_utxos, discarding query");
+                    tracing::trace!("UTXO in known_utxos, discarding query");
                     output.utxo.clone()
                 } else {
                     let response = state
@@ -452,6 +455,10 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Opportunistically install the mempool service once startup wiring provides it.
+        // The verifier remains ready even before that happens: requests that require
+        // mempool-only outputs will fail during verification if the mempool handle is
+        // still unavailable.
         if self.mempool.is_none() {
             if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
                 self.mempool = Some(Timeout::new(mempool, MEMPOOL_OUTPUT_LOOKUP_TIMEOUT));
@@ -745,7 +752,7 @@ where
                     //
                     // # Correctness
                     //
-                    // If the tip height changes while an umined transaction is being verified,
+                    // If the tip height changes while an unmined transaction is being verified,
                     // the transaction must be re-verified before being added to the mempool.
                     transparent::Utxo::new(output, height, false),
                 );
@@ -893,8 +900,8 @@ fn check_maturity_height(
 
 /// Dispatches version-specific async verification checks for `tx`.
 ///
-/// `nu` is the network upgrade active at the transaction's block height,
-/// pre-computed by the caller from `req.upgrade(&network)`.
+/// `nu` is the network upgrade active at the transaction's verification height,
+/// pre-computed by the caller using [`NetworkUpgrade::current`].
 ///
 /// Returns [`TransactionError::WrongVersion`] for V1-V3 transactions, which
 /// are not supported by any network upgrade Zebra verifies.
@@ -937,7 +944,7 @@ fn dispatch_version_verification(
 /// The parameters of this method are:
 ///
 /// - the `tx` transaction to verify
-/// - the `nu` network upgrade active at the transaction's block height
+/// - the `nu` network upgrade active at the transaction's verification height
 /// - the `script_verifier` to use for verifying the transparent transfers
 /// - the prepared `cached_ffi_transaction` used by the script verifier
 /// - the Sprout `joinsplit_data` shielded data in the transaction
@@ -1014,7 +1021,8 @@ fn verify_v4_transaction_network_upgrade(
 /// Returns a set of asynchronous checks that must all succeed for the transaction to be
 /// considered valid. These checks include:
 ///
-/// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+/// - transaction support by the selected network upgrade, as checked by
+///   [`verify_v5_transaction_network_upgrade`]
 /// - transparent transfers
 /// - sapling shielded data (TODO)
 /// - orchard shielded data (TODO)
@@ -1022,7 +1030,7 @@ fn verify_v4_transaction_network_upgrade(
 /// The parameters of this method are:
 ///
 /// - the `tx` transaction to verify
-/// - the `nu` network upgrade active at the transaction's block height
+/// - the `nu` network upgrade active at the transaction's verification height
 /// - the `script_verifier` to use for verifying the transparent transfers
 /// - the prepared `cached_ffi_transaction` used by the script verifier
 #[allow(clippy::unwrap_in_result)]
@@ -1155,7 +1163,7 @@ fn verify_v6_transaction_network_upgrade(
 /// Verifies if a transaction's transparent inputs are valid using the provided
 /// `script_verifier` and `cached_ffi_transaction`.
 ///
-/// Returns script verification responses via the `utxo_sender`.
+/// Returns the asynchronous script verification checks for transparent inputs in `tx`.
 fn verify_transparent_inputs_and_outputs(
     tx: &Transaction,
     script_verifier: script::Verifier,
@@ -1382,7 +1390,7 @@ fn queue_orchard_bundle(
     async_checks
 }
 
-/// Calculate the miner fee from the transaction's value balance.
+/// Calculates the miner fee from the transaction's value balance.
 fn miner_fee(
     tx: &Transaction,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
