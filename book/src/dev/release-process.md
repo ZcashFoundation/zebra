@@ -131,17 +131,17 @@ To help ensure that you have sufficient time and a clear path to update, this is
 The normal release path requires 2 maintainer actions:
 
 1. Review the latest Release PR after every required check passes.
-2. Approve and merge that exact commit.
+2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates the Release PR from `main`, `PR Gate / Release readiness` validates every new commit, and `ZcashFoundation/cargo-release` reconciles the approved release after merge. The Release PR merge commit is the immutable source for both package contents and the [tag and GitHub Release policy](../../../.github/cargo-release.yml).
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `A-release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR, then review the latest commit and its generated checklist. The checklist is a review aid rather than an editable task list, because body edits restart CI; submit a GitHub approval to record the decision. Source PRs author curated changelog entries under `[Unreleased]`, then release-plz moves those entries under versioned headings and adds mechanical dependency-only entries when it refreshes the Release PR. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs author curated changelog entries under `[Unreleased]`, then release-plz moves those entries under versioned headings and adds mechanical dependency-only entries when it refreshes the Release PR. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
 
-PR Gate cancels an in-progress readiness run when the Release PR body or labels change and starts a complete replacement run. This is expected; avoid metadata changes while readiness is running, and treat only the latest run as authoritative.
+A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
 
-Approve and merge only when every required check passes for that exact commit. A later update invalidates the earlier review and automatically runs readiness again.
+Approve and merge only after every required check passes and every checkbox is complete. A later release-plz update invalidates the earlier review and checklist.
 
 ### What Release Readiness Reports
 
@@ -151,7 +151,7 @@ Before publication, a green report with `reason: "incomplete"` is expected: the 
 
 ### What Happens After Merge
 
-Merging the approved Release PR starts the post-merge release workflow. It publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
+Merging the approved Release PR starts the post-merge release workflow. The controller uses the merge commit as the immutable release source and its first parent as the publication range base. Cargo Release publishes missing crates in dependency order, verifies that the published `zebrad` installs when it is part of the plan, then creates missing tags and the public `zebrad` GitHub Release. The release commit does not create another Release PR. That GitHub Release triggers the downstream workflows that publish signed Docker images, attach signed and checksummed Linux `x86_64` and `aarch64` binaries, and deploy long-lived GCP nodes.
 
 No maintainer command is required when this workflow succeeds.
 
@@ -171,7 +171,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 
 Each new Release PR commit reruns the complete readiness check.
 
-If no readiness run is available, first rerun the PR checks in GitHub. Use this fallback only when the automatic PR check did not start:
+If no readiness run is available, first rerun the PR checks in GitHub. The manual dispatch below is the readiness exit hatch when the automatic PR check still does not start:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -189,8 +189,8 @@ gh workflow run release.yml --ref main \
   -f release_pr_number=<PR>
 ```
 
-`resume` applies only when the merged Release PR contains `.github/cargo-release.yml`, which marks the Cargo Release cutover. The action reuses the immutable merge commit, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection.
+`resume` reuses the same Release PR source, skips matching crates and tags, and continues from missing external state. It can repair configured mutable GitHub Release metadata, such as the release name, notes, draft state, or latest selection.
 
 Do not retry immutable contradictions: a crate archive from another source commit, a tag that points to another commit, or a GitHub Release with a conflicting channel must stop for maintainer review. Do not manually repeat publication or overwrite external state.
 
-If the automated workflow remains unavailable and a maintainer authorizes a fully manual release, follow the [legacy manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+If the automated workflow remains unavailable and a maintainer authorizes a break-glass manual release, follow the [manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
