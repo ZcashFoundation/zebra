@@ -620,7 +620,12 @@ async fn setup(
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
     MockService<zebra_consensus::Request, block::Hash, PanicAssertion, RouterError>,
-    MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
+    MockService<
+        transaction::MempoolRequest,
+        transaction::MempoolResponse,
+        PanicAssertion,
+        TransactionError,
+    >,
     // real tasks
     JoinHandle<Result<(), BlockGossipError>>,
     JoinHandle<Result<(), BoxError>>,

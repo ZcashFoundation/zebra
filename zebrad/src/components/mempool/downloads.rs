@@ -149,7 +149,10 @@ pub struct Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -210,7 +213,10 @@ impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -286,7 +292,10 @@ impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -439,14 +448,12 @@ where
             trace!(?txid, "got tx");
 
             let result = verifier
-                .oneshot(tx::Request::Mempool {
+                .oneshot(tx::MempoolRequest {
                     transaction: tx.clone(),
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
-                        panic!("unexpected non-mempool response to mempool request")
-                    };
+                    let tx::MempoolResponse { transaction, spent_mempool_outpoints } = rsp;
 
                     (transaction, spent_mempool_outpoints, tip_height)
                 })
@@ -635,7 +642,10 @@ impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
