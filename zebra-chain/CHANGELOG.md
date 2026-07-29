@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Added the `ValueBalanceError::Total` variant returned when the sum of value
+  pools is out of range
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+
+### Added
+
+- `ValueBalance::total`, which returns the sum of all value pool balances
+
 ## [11.3.0] - 2026-07-27
 
 ### Added
