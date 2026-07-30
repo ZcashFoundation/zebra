@@ -400,7 +400,6 @@ impl FinalizedState {
                 // started. The anchor in `note_commitment_trees` still holds the
                 // parent block's anchor here (`update_trees_parallel` doesn't touch
                 // it, because the fold is indexed by pool height).
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 if let Some(pool_height) =
                     zebra_chain::tachyon::pool_height(&self.network(), checkpoint_verified.height)
                 {

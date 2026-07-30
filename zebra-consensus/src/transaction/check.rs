@@ -905,7 +905,6 @@ pub fn consensus_branch_id(
 /// exactly this rule.
 ///
 /// [`digest`]: zcash_tachyon::action::Descriptor::digest
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub fn tachyon_actions_have_valid_digests(tx: &Transaction) -> Result<(), TransactionError> {
     let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
         return Ok(());

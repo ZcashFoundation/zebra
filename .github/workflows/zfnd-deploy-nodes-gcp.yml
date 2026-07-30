@@ -274,6 +274,7 @@ jobs:
         (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
       }}
     with:
+      source_sha: ${{ github.sha }}
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad

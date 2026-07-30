@@ -11,12 +11,10 @@ use std::{fmt, io};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    block::Block,
     parameters::{Network, NetworkUpgrade},
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
-
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-use crate::block::Block;
 
 /// The number of blocks in a Tachyon epoch, from [`zcash_tachyon::constants::EPOCH_SIZE`].
 ///
@@ -24,10 +22,10 @@ use crate::block::Block;
 /// the epoch ends; the anchor fold lifts into each new epoch at its first block. Epochs are
 /// indexed by pool height: epoch `E` spans pool heights `[E * EPOCH_LENGTH, (E+1) * EPOCH_LENGTH)`.
 ///
-/// This re-export keeps Zebra's epoch math (which must stay available when tachyon support is
-/// compiled out) in one place, agreeing with the tachyon crate's own epoch helpers. Note that
-/// `zcash_tachyon` shrinks the constant under its *own* `cfg(test)` builds; that never applies
-/// here, because dependencies are always compiled without `cfg(test)`.
+/// This re-export keeps Zebra's epoch math in one place, agreeing with the tachyon crate's own
+/// epoch helpers. Note that `zcash_tachyon` shrinks the constant under its *own* `cfg(test)`
+/// builds; that never applies here, because dependencies are always compiled without
+/// `cfg(test)`.
 pub const EPOCH_LENGTH: u32 = zcash_tachyon::constants::EPOCH_SIZE;
 
 /// The 0-based Tachyon pool height of `height`: its offset above the NU7
@@ -60,8 +58,7 @@ pub fn epoch(network: &Network, height: crate::block::Height) -> Option<u32> {
 /// The running anchor of the Tachyon pool after some block.
 ///
 /// Stored as the canonical 32-byte encoding of the underlying Pallas base field
-/// element ([`zcash_tachyon::Anchor`]'s wire encoding), so this type stays
-/// available when tachyon support is compiled out.
+/// element ([`zcash_tachyon::Anchor`]'s wire encoding).
 ///
 /// The [`Default`] value (all-zero bytes) encodes the field zero element: the
 /// fold seed of a pool that has not started yet. It is *not* the anchor of any
@@ -109,7 +106,6 @@ impl ZcashDeserialize for Anchor {
     }
 }
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 impl From<zcash_tachyon::Anchor> for Anchor {
     fn from(anchor: zcash_tachyon::Anchor) -> Self {
         let mut bytes = Vec::with_capacity(32);
@@ -126,9 +122,9 @@ impl From<zcash_tachyon::Anchor> for Anchor {
 
 /// A tachygram: a nullifier or note commitment revealed by a Tachyon proof stamp.
 ///
-/// Stored as the canonical 32-byte encoding of the underlying Pallas base field element, so this
-/// type stays available when tachyon support is compiled out. Tachygrams are tracked in the
-/// current epoch's working set; revealing the same tachygram twice within one epoch is invalid.
+/// Stored as the canonical 32-byte encoding of the underlying Pallas base field element.
+/// Tachygrams are tracked in the current epoch's working set; revealing the same tachygram
+/// twice within one epoch is invalid.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tachygram(pub [u8; 32]);
 
@@ -158,7 +154,6 @@ impl From<&Tachygram> for [u8; 32] {
     }
 }
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 impl From<zcash_tachyon::Tachygram> for Tachygram {
     fn from(tachygram: zcash_tachyon::Tachygram) -> Self {
         // `Tachygram` newtypes a Pallas base field element; its canonical encoding is the
@@ -168,7 +163,6 @@ impl From<zcash_tachyon::Tachygram> for Tachygram {
     }
 }
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 impl Anchor {
     /// Convert to the tachyon crate's anchor type.
     ///
@@ -240,7 +234,6 @@ impl Anchor {
 }
 
 /// The result of advancing the Tachyon pool anchor with one block.
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AnchorAdvance {
     /// The pool anchor after the block.
@@ -279,7 +272,6 @@ mod tests {
         assert!(is_epoch_first(2 * EPOCH_LENGTH));
     }
 
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     mod fold {
         use std::sync::Arc;
 

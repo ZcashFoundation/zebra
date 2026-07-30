@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "11.2.0"
+version = "11.3.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -14,13 +14,6 @@ homepage.workspace = true
 keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
-
-# `zcash_tachyon` and `ragu` are only used behind the `cfg(zcash_unstable = "nu7")`
-# gate (set via RUSTFLAGS, not a cargo feature), so cargo-udeps — which builds
-# without that cfg — reports them as unused. Ignore these known false positives.
-[package.metadata.cargo-udeps.ignore]
-normal = ["zcash_tachyon"]
-development = ["ragu"]
 
 [features]
 default = []
@@ -42,10 +35,6 @@ internal-miner = ["equihash/solver"]
 
 # Experimental elasticsearch support
 elasticsearch = []
-
-# Experimental tachyon (v7) transaction support; only meaningful with
-# `--cfg zcash_unstable="nu7"`.
-tx_v7 = []
 
 # Test-only features
 

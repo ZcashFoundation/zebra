@@ -29,9 +29,9 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
             Transaction::V6 { .. } => self.txid_v6(),
-            // V7 (tachyon) reuses the v6 txid path.
-            // TODO: fold the tachyon bundle into the txid digest once the tachyon txid digest is
-            // specified. Until then the tachyon bundle does not contribute to the txid.
+            // V7 (tachyon) uses the v6 path through librustzcash, whose v7 txid digest appends
+            // the tachyon bundle's effecting commitment (`hActionsTachyon` and
+            // `valueBalanceTachyon`; the stamp is excluded as malleable authorizing data).
             Transaction::V7 { .. } => self.txid_v6(),
         }
     }

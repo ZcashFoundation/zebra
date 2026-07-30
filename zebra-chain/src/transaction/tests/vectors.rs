@@ -1196,7 +1196,6 @@ fn test_coinbase_script() -> Result<()> {
 
 // Transaction V7 test vectors
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod v7_tests {
     use super::*;
     use group::ff::FromUniformBytes;
@@ -1383,6 +1382,8 @@ mod v7_tests {
 
     /// Generate and print V7 tachyon test vectors as hex.
     #[test]
+    // Printing the vectors is this test's purpose: the output is pasted into
+    // `v7_tachyon_test_vectors_exact_encoding` after intentional format changes.
     #[allow(clippy::print_stdout)]
     fn generate_v7_tachyon_test_vectors() {
         let _init_guard = zebra_test::init();

@@ -1939,7 +1939,7 @@ where
             }),
 
             zebra_state::ReadResponse::AnyChainTransaction(None) => {
-                Err("No such mempool or main chain transaction")
+                Err("Transaction not found in mempool or best chain")
                     .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             }
 
@@ -2498,15 +2498,8 @@ where
                 // when the tip changes.
                 let precompute_coinbase = |network, height, params| {
                     tokio::task::spawn_blocking(move || {
-                        TransactionTemplate::new_coinbase(
-                            &network,
-                            height,
-                            &params,
-                            Amount::zero(),
-                            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-                            None,
-                        )
-                        .expect("valid coinbase tx")
+                        TransactionTemplate::new_coinbase(&network, height, &params, Amount::zero())
+                            .expect("valid coinbase tx")
                     })
                 };
 
@@ -2599,8 +2592,6 @@ where
                         server_long_poll_id,
                         vec![],
                         submit_old,
-                        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-                        None,
                     )
                     .into())
                 }

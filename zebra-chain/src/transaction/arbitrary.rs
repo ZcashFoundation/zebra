@@ -9,7 +9,7 @@ use reddsa::{orchard::Binding, Signature};
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
-    orchard,
+    ironwood, orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
@@ -180,6 +180,63 @@ impl Transaction {
             .boxed()
     }
 
+    /// Generate a proptest strategy for V6 Transactions
+    pub fn v6_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
+        (
+            NetworkUpgrade::nu6_3_branch_id_strategy(),
+            any::<LockTime>(),
+            any::<block::Height>(),
+            transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
+            vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
+            option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
+            option::of(any::<orchard::ShieldedDataV6>()),
+            option::of(any::<ironwood::ShieldedData>()),
+        )
+            .prop_map(
+                move |(
+                    network_upgrade,
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ironwood_shielded_data,
+                )| {
+                    Transaction::V6 {
+                        network_upgrade: if ledger_state.transaction_has_valid_network_upgrade() {
+                            ledger_state.network_upgrade()
+                        } else {
+                            network_upgrade
+                        },
+                        lock_time,
+                        expiry_height,
+                        inputs,
+                        outputs,
+                        sapling_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            sapling_shielded_data
+                        },
+                        orchard_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            orchard_shielded_data
+                        },
+                        ironwood_shielded_data: if ledger_state.height.is_min() {
+                            // The genesis block should not contain any shielded data.
+                            None
+                        } else {
+                            ironwood_shielded_data
+                        },
+                    }
+                },
+            )
+            .boxed()
+    }
+
     /// Proptest Strategy for creating a Vector of transactions where the first
     /// transaction is always the only coinbase transaction
     pub fn vec_strategy(
@@ -220,7 +277,7 @@ impl Transaction {
         }
     }
 
-    /// Apply `f` to the sapling value balance and orchard value balance
+    /// Apply `f` to the sapling, orchard, and ironwood value balances
     /// in this transaction, regardless of version.
     pub fn for_each_value_balance_mut<F>(&mut self, mut f: F)
     where
@@ -232,6 +289,10 @@ impl Transaction {
 
         if let Some(orchard_value_balance) = self.orchard_value_balance_mut() {
             f(orchard_value_balance);
+        }
+
+        if let Some(ironwood_value_balance) = self.ironwood_value_balance_mut() {
+            f(ironwood_value_balance);
         }
     }
 
@@ -246,7 +307,8 @@ impl Transaction {
         where
             Amount<C>: Copy,
         {
-            const POOL_COUNT: u64 = 4;
+            // transparent, sprout, sapling, orchard, and ironwood
+            const POOL_COUNT: u64 = 5;
 
             let max_arbitrary_items: u64 = MAX_ARBITRARY_ITEMS.try_into().unwrap();
             let max_partial_chain_blocks: u64 = MAX_PARTIAL_CHAIN_BLOCKS.try_into().unwrap();
@@ -346,6 +408,14 @@ impl Transaction {
             }
         }
 
+        let ironwood_input = self.ironwood_value_balance().constrain::<NonNegative>();
+        if let Ok(ironwood_input) = ironwood_input {
+            match input_chain_value_pools.add_chain_value_pool_change(-ironwood_input) {
+                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
+                Err(_) => *self.ironwood_value_balance_mut().unwrap() = Amount::zero(),
+            }
+        }
+
         let remaining_transaction_value = self.fix_remaining_value(outputs)?;
 
         // check our calculations are correct
@@ -373,7 +443,7 @@ impl Transaction {
     /// Returns the total input value of this transaction's value pool.
     ///
     /// This is the sum of transparent inputs, sprout input values,
-    /// and if positive, the sapling and orchard value balances.
+    /// and if positive, the sapling, orchard, and ironwood value balances.
     ///
     /// `outputs` must contain all the [`transparent::Output`]s spent in this transaction.
     fn input_value_pool(
@@ -409,8 +479,14 @@ impl Transaction {
             .constrain::<NonNegative>()
             .unwrap_or_else(|_| Amount::zero());
 
+        let ironwood_input = self
+            .ironwood_value_balance()
+            .ironwood_amount()
+            .constrain::<NonNegative>()
+            .unwrap_or_else(|_| Amount::zero());
+
         let transaction_input_value_pool =
-            (transparent_inputs + sprout_inputs + sapling_input + orchard_input)
+            (transparent_inputs + sprout_inputs + sapling_input + orchard_input + ironwood_input)
                 .expect("chain is limited to MAX_MONEY");
 
         Ok(transaction_input_value_pool)
@@ -486,6 +562,17 @@ impl Transaction {
         }
 
         if let Some(value_balance) = self.orchard_value_balance_mut() {
+            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
+                if remaining_input_value >= output_value {
+                    remaining_input_value = (remaining_input_value - output_value)
+                        .expect("input >= output so result is always non-negative");
+                } else {
+                    *value_balance = Amount::zero();
+                }
+            }
+        }
+
+        if let Some(value_balance) = self.ironwood_value_balance_mut() {
             if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
                 if remaining_input_value >= output_value {
                     remaining_input_value = (remaining_input_value - output_value)
@@ -747,6 +834,21 @@ impl Arbitrary for orchard::ShieldedData {
     type Strategy = BoxedStrategy<Self>;
 }
 
+impl Arbitrary for orchard::ShieldedDataV6 {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // The v6 Orchard-pool bundle reserves `enableCrossAddress` exactly like v5, so the base
+        // `ShieldedData` strategy (which only generates the pre-NU6.3 flag bits) is reused as-is.
+        // Only the Ironwood bundle permits that flag; see the `ironwood::ShieldedData` strategy.
+        any::<orchard::ShieldedData>()
+            .prop_map(orchard::ShieldedDataV6::new)
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct BindingSignature(pub(crate) Signature<Binding>);
 
@@ -782,6 +884,7 @@ impl Arbitrary for Transaction {
             Some(3) => return Self::v3_strategy(ledger_state),
             Some(4) => return Self::v4_strategy(ledger_state),
             Some(5) => return Self::v5_strategy(ledger_state),
+            Some(6) => return Self::v6_strategy(ledger_state),
             Some(_) => unreachable!("invalid transaction version in override"),
             None => {}
         }
@@ -798,11 +901,17 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2
-            | NetworkUpgrade::Nu6_3
-            | NetworkUpgrade::Nu7 => prop_oneof![
+            | NetworkUpgrade::Nu6_2 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
+            ]
+            .boxed(),
+
+            // V6 transactions are only valid from NU6.3; v4 and v5 remain valid alongside them.
+            NetworkUpgrade::Nu6_3 | NetworkUpgrade::Nu7 => prop_oneof![
+                Self::v4_strategy(ledger_state.clone()),
+                Self::v5_strategy(ledger_state.clone()),
+                Self::v6_strategy(ledger_state)
             ]
             .boxed(),
 

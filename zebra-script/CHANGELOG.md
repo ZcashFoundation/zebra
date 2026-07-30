@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.1.2] - 2026-07-27
+
+### Changed
+
+- Updated `zcash_primitives` to 0.30. No other changes to this crate
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+
 ## [10.1.1] - 2026-07-17
 
 ### Changed

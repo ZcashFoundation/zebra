@@ -77,7 +77,6 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// (Duplicates against other non-finalized blocks are rejected during the chain update, and
 /// duplicates within one block during semantic verification.)
 ///
-/// No-op when tachyon support is compiled out: blocks then have no tachygrams.
 #[tracing::instrument(skip(semantically_verified, finalized_state))]
 fn no_duplicate_tachygrams_in_finalized_chain(
     semantically_verified: &SemanticallyVerifiedBlock,

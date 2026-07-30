@@ -28,9 +28,6 @@ use zebra_node_services::mempool::TransactionDependencies;
 use super::CoinbaseCache;
 use crate::methods::types::transaction::TransactionTemplate;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-use zebra_chain::amount::NonNegative;
-
 #[cfg(test)]
 mod tests;
 

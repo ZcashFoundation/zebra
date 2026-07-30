@@ -80,8 +80,10 @@ jobs:
 
           SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           export SOURCE_DATE_EPOCH
-          # Keep build-host paths out of the binary.
-          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/zebra --remap-path-prefix=${HOME}/.cargo=/cargo"
+          # Keep build-host paths out of the binary. Setting RUSTFLAGS replaces the
+          # workspace `.cargo/config.toml` build rustflags, so the NU7 cfg must be
+          # repeated here.
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/zebra --remap-path-prefix=${HOME}/.cargo=/cargo --cfg zcash_unstable=\"nu7\""
           export CARGO_PROFILE_RELEASE_STRIP=symbols
           # ROCKSDB_LIB_DIR is left unset so librocksdb-sys builds and links RocksDB
           # statically; the binary then depends only on glibc and libstdc++.

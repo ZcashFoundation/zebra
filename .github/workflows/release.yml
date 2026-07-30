@@ -1,10 +1,10 @@
 # Release workflow: Release PR planning and resumable publication.
 #
 # Pipeline:
-#   push to main                  -> creates or updates the Release PR
-#   merged, approved Release PR   -> reconciles crates, tags, and the public
+#   non-release push to main      -> creates or updates the Release PR
+#   merged Release PR             -> reconciles crates, tags, and the public
 #                                   zebrad GitHub Release
-#   workflow_dispatch            -> fallback check or post-merge recovery
+#   workflow_dispatch            -> manual readiness check or post-merge recovery
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:released  -> release-binaries.yml (Docker Hub)
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Fallback check for an open Release PR or resume a merged one"
+        description: "Check an open Release PR or resume a merged one"
         required: true
         default: check
         type: choice
@@ -35,12 +35,20 @@ on:
 # Deny all at workflow level; each job declares minimum permissions.
 permissions: {}
 
+env:
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
+
 jobs:
-  # Runs on every push to main and leaves post-merge execution to Zebra's
-  # release controller.
+  # A release commit belongs to the post-merge controller and must not create
+  # another Release PR.
   release-pr:
     name: Create or update Release PR
-    if: github.event_name == 'push'
+    if: >-
+      github.event_name == 'push' &&
+      !startsWith(github.event.head_commit.message, 'chore: release')
     runs-on: ubuntu-latest
     concurrency:
       group: release-plz-${{ github.ref }}
@@ -106,13 +114,12 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
        startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
        contains(github.event.pull_request.labels.*.name, 'A-release'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read # verify that the selected merge commit is on main
+      contents: read # resolve the merged release commit and its parent
       pull-requests: read # validate the selected Release PR
     concurrency:
       group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
@@ -157,11 +164,12 @@ jobs:
                     baseRefOid
                     headRefName
                     headRefOid
-                    headRepository { nameWithOwner }
                     labels(first: 100) { nodes { name } }
-                    mergeCommit { oid }
+                    mergeCommit {
+                      oid
+                      parents(first: 1) { nodes { oid } }
+                    }
                     merged
-                    reviewDecision
                     state
                   }
                 }
@@ -169,81 +177,33 @@ jobs:
               { ...context.repo, number: prNumber },
             );
             const pr = result.repository.pullRequest;
-            const expectedRepository = `${context.repo.owner}/${context.repo.repo}`;
             const isReleasePr =
-              pr?.baseRefName === "main" &&
-              pr.headRepository?.nameWithOwner === expectedRepository &&
-              pr.headRefName.startsWith("release-plz-") &&
+              pr?.headRefName.startsWith("release-plz-") &&
               pr.labels.nodes.some(({ name }) => name === "A-release");
 
             if (!isReleasePr || (pr.state !== "OPEN" && !pr.merged)) {
               throw new Error(
-                `PR #${prNumber} is not an open or merged internal A-release Release PR`,
+                `PR #${prNumber} is not a release-plz A-release PR`,
               );
             }
+            if (pr.baseRefName !== "main") {
+              throw new Error(`PR #${prNumber} does not target main`);
+            }
 
-            let baseSha;
-            let targetSha;
-            if (requestedOperation === "check" && !pr.merged) {
-              const comparison =
-                await github.rest.repos.compareCommitsWithBasehead({
-                  ...context.repo,
-                  basehead: `${pr.baseRefOid}...${pr.headRefOid}`,
-                });
-              if (comparison.data.merge_base_commit.sha !== pr.baseRefOid) {
-                throw new Error(
-                  `PR #${prNumber} is behind main; wait for release-plz to update it`,
-                );
-              }
-              baseSha = pr.baseRefOid;
-              targetSha = pr.headRefOid;
-            } else {
-              if (
-                !pr.merged ||
-                pr.reviewDecision !== "APPROVED" ||
-                pr.mergeCommit?.oid === undefined
-              ) {
-                throw new Error(
-                  `PR #${prNumber} is not an approved merged Release PR`,
-                );
-              }
-              targetSha = pr.mergeCommit.oid;
-              const commit = await github.rest.repos.getCommit({
-                ...context.repo,
-                ref: targetSha,
-              });
-              baseSha = commit.data.parents[0]?.sha;
-              if (baseSha === undefined) {
-                throw new Error(
-                  `release target ${targetSha} has no first parent`,
-                );
-              }
-              const comparison =
-                await github.rest.repos.compareCommitsWithBasehead({
-                  ...context.repo,
-                  basehead: `${targetSha}...${pr.baseRefName}`,
-                });
-              if (comparison.data.merge_base_commit.sha !== targetSha) {
-                throw new Error(
-                  `release target ${targetSha} is not an ancestor of current main`,
-                );
-              }
-              try {
-                const policy = await github.rest.repos.getContent({
-                  ...context.repo,
-                  path: ".github/cargo-release.yml",
-                  ref: targetSha,
-                });
-                if (Array.isArray(policy.data) || policy.data.type !== "file") {
-                  throw new Error("release policy path is not a file");
-                }
-              } catch (error) {
-                if (error?.status === 404) {
-                  throw new Error(
-                    `release target ${targetSha} predates the Cargo Release cutover`,
-                  );
-                }
-                throw error;
+            if (requestedOperation === "check" && pr.state !== "OPEN") {
+              throw new Error(`PR #${prNumber} is not open`);
+            }
+            if (requestedOperation === "resume" && !pr.merged) {
+              throw new Error(`PR #${prNumber} is not merged`);
+            }
+
+            let baseSha = pr.baseRefOid;
+            let targetSha = pr.headRefOid;
+            if (requestedOperation === "resume") {
+              baseSha = pr.mergeCommit?.parents.nodes[0]?.oid;
+              targetSha = pr.mergeCommit?.oid;
+              if (baseSha === undefined || targetSha === undefined) {
+                throw new Error(`PR #${prNumber} has no merged release source`);
               }
             }
 
@@ -256,7 +216,7 @@ jobs:
     name: Check release without publishing
     needs: release-target
     if: needs.release-target.outputs.operation == 'check'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     timeout-minutes: 90
     permissions:
       contents: read
@@ -283,9 +243,20 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: 1.91.0
+          cache-workspaces: release-source -> target
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+        run: |
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
@@ -339,7 +310,7 @@ jobs:
     name: Publish crates and GitHub Release
     needs: release-target
     if: needs.release-target.outputs.operation == 'resume'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     timeout-minutes: 120
     permissions:
       contents: read # inspect release state; the app token performs finalization
@@ -366,9 +337,20 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
           toolchain: 1.91.0
+          cache-workspaces: release-source -> target
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+        run: |
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
       - name: Generate release app token
         id: app-token
         if: vars.RELEASE_APP_ID != ''

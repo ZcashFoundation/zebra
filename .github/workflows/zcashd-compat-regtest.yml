@@ -27,6 +27,10 @@ env:
   RUST_LIB_BACKTRACE: 1
   RUST_LOG: info
   COLORBT_SHOW_HIDDEN: 1
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
 
 jobs:
   zcashd-compat-regtest:

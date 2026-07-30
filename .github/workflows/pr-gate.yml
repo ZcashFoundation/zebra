@@ -26,6 +26,10 @@ permissions:
 
 env:
   CLICOLOR: 1
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
 
 jobs:
   changes:
@@ -158,10 +162,9 @@ jobs:
     name: Release readiness
     if: >-
       github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'A-release')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -195,7 +198,17 @@ jobs:
           toolchain: 1.91.0
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+        run: |
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --kill-after=10s --foreground 180s apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y libclang-dev
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true

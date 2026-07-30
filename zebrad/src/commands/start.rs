@@ -420,6 +420,7 @@ impl StartCmd {
 
         info!("initializing mempool");
         let (mempool, mempool_transaction_subscriber) = Mempool::new(
+            &config.network.network,
             &config.mempool,
             peer_set.clone(),
             state.clone(),

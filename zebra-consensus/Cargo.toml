@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "14.0.0"
+version = "14.0.1"
 authors.workspace = true
 description = "Implementation of Zcash consensus checks"
 license.workspace = true
@@ -19,13 +19,6 @@ keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies"]
 
-# `zcash_tachyon` is only used behind the `cfg(zcash_unstable = "nu7")` gate (set via
-# RUSTFLAGS, not a cargo feature), so cargo-udeps — which builds without that cfg —
-# reports it as unused. Ignore this known false positive.
-[package.metadata.cargo-udeps.ignore]
-normal = ["zcash_tachyon"]
-development = ["ragu"]
-
 [features]
 default = []
 
@@ -36,13 +29,6 @@ progress-bar = [
     "zebra-state/progress-bar",
 ]
 
-# Experimental tachyon (v7) transaction verification; only meaningful with
-# `--cfg zcash_unstable="nu7"`.
-#
-# Note: zebrad does not forward this feature yet. A build that enables only
-# `zebra-chain/tx_v7` parses tachyon bundles but skips their verification, so
-# nodes that enable tachyon support must enable this feature too.
-tx_v7 = ["zebra-chain/tx_v7", "zebra-state/tx_v7"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
@@ -83,10 +69,10 @@ zcash_primitives = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.43" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.1.1" }
 
-zebra-script = { path = "../zebra-script", version = "10.1.1" }
-zebra-state = { path = "../zebra-state", version = "12.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "9.1.1" }
-zebra-chain = { path = "../zebra-chain", version = "11.2.0" }
+zebra-script = { path = "../zebra-script", version = "10.1.2" }
+zebra-state = { path = "../zebra-state", version = "12.0.1" }
+zebra-node-services = { path = "../zebra-node-services", version = "9.1.2" }
+zebra-chain = { path = "../zebra-chain", version = "11.3.0" }
 
 zcash_protocol.workspace = true
 zcash_tachyon = { workspace = true }

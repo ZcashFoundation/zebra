@@ -1,6 +1,17 @@
 # Zebra cargo configuration
 
 [build]
+rustflags = [
+    # NU7 (tachyon) is not experimental on this fork: always compile the
+    # `zcash_unstable = "nu7"` items in librustzcash (and any remaining gated
+    # Zebra code).
+    #
+    # NOTE: a `RUSTFLAGS` environment variable REPLACES this list instead of
+    # extending it, so any environment or CI job that sets `RUSTFLAGS` must
+    # include `--cfg zcash_unstable="nu7"` itself.
+    '--cfg',
+    'zcash_unstable="nu7"',
+]
 rustdocflags = [
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
     # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-deploy-firebase.yml#L68

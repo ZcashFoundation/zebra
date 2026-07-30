@@ -11,12 +11,10 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 mod tachyon_shielded;
 mod txid;
 mod unmined;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub use tachyon_shielded::TachyonShieldedData;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -183,11 +181,7 @@ pub enum Transaction {
     },
     /// A `version = 7` (tachyon) transaction.
     ///
-    /// V7 reuses the v6 (Ironwood) field layout and additionally carries a tachyon bundle. It is
-    /// only constructed and accepted in tachyon builds
-    /// (`cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))`); in other builds the variant still
-    /// exists but its tachyon field is compiled out, so it behaves like a v6 transaction with a
-    /// distinct version group ID.
+    /// V7 reuses the v6 (Ironwood) field layout and additionally carries a tachyon bundle.
     V7 {
         /// The Network Upgrade for this transaction.
         ///
@@ -209,7 +203,6 @@ pub enum Transaction {
         /// The Ironwood data for this transaction, if any (NU6.3 onward).
         ironwood_shielded_data: Option<ironwood::ShieldedData>,
         /// The tachyon data for this transaction, if any.
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
         tachyon_shielded_data: Option<TachyonShieldedData>,
     },
 }
@@ -1287,9 +1280,8 @@ impl Transaction {
 
     // tachyon
 
-    /// Access the tachyon shielded data in this transaction (NU7, experimental), if there is any,
+    /// Access the tachyon shielded data in this transaction (NU7), if there is any,
     /// regardless of version. It only appears in v7 transactions.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     pub fn tachyon_shielded_data(&self) -> Option<&TachyonShieldedData> {
         match self {
             Transaction::V7 {
@@ -1307,63 +1299,35 @@ impl Transaction {
     }
 
     /// Does this transaction carry a tachyon bundle?
-    ///
-    /// Returns `false` when tachyon support is compiled out, so callers don't need to repeat the
-    /// tachyon `cfg` gate.
     pub fn has_tachyon_shielded_data(&self) -> bool {
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        {
-            self.tachyon_shielded_data().is_some()
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
-        {
-            false
-        }
+        self.tachyon_shielded_data().is_some()
     }
 
     /// The tachygrams revealed by this transaction's tachyon proof stamp, in the stamp's
     /// canonical (sorted) order.
     ///
     /// Pointer-stamped bundles carry no tachygrams (theirs are revealed by the aggregate's proof
-    /// stamp). Returns an empty list for non-V7 transactions, and when tachyon support is
-    /// compiled out, so callers don't need to repeat the tachyon `cfg` gate.
+    /// stamp). Returns an empty list for non-V7 transactions.
     pub fn tachyon_tachygrams(&self) -> Vec<crate::tachyon::Tachygram> {
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        {
-            match self.tachyon_shielded_data() {
-                Some(shielded_data) => match &shielded_data.0 {
-                    zcash_tachyon::TachyonBundle::Proven(bundle) => bundle
-                        .stamp
-                        .tachygrams
-                        .iter()
-                        .map(|&tachygram| crate::tachyon::Tachygram::from(tachygram))
-                        .collect(),
-                    zcash_tachyon::TachyonBundle::NoBundle
-                    | zcash_tachyon::TachyonBundle::Adjunct(_) => Vec::new(),
-                },
-                None => Vec::new(),
-            }
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
-        {
-            Vec::new()
+        match self.tachyon_shielded_data() {
+            Some(shielded_data) => match &shielded_data.0 {
+                zcash_tachyon::TachyonBundle::Proven(bundle) => bundle
+                    .stamp
+                    .tachygrams
+                    .iter()
+                    .map(|&tachygram| crate::tachyon::Tachygram::from(tachygram))
+                    .collect(),
+                zcash_tachyon::TachyonBundle::NoBundle
+                | zcash_tachyon::TachyonBundle::Adjunct(_) => Vec::new(),
+            },
+            None => Vec::new(),
         }
     }
 
     /// Does this transaction have any tachyon actions?
-    ///
-    /// Returns `false` when tachyon support is compiled out, so callers don't need to repeat the
-    /// tachyon `cfg` gate.
     pub fn has_tachyon_actions(&self) -> bool {
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        {
-            self.tachyon_shielded_data()
-                .is_some_and(|data| !data.actions().is_empty())
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
-        {
-            false
-        }
+        self.tachyon_shielded_data()
+            .is_some_and(|data| !data.actions().is_empty())
     }
 
     // value balances
@@ -1722,7 +1686,7 @@ impl Transaction {
         ValueBalance::from_ironwood_amount(ironwood_value_balance)
     }
 
-    /// Return the tachyon value balance (NU7, experimental), the change in the transaction value
+    /// Return the tachyon value balance (NU7), the change in the transaction value
     /// pool due to tachyon actions.
     ///
     /// Positive values are added to this transaction's value pool, and removed from the tachyon
@@ -1730,7 +1694,6 @@ impl Transaction {
     /// tachyon pool. This is zero for transactions without a tachyon bundle.
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     pub fn tachyon_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let tachyon_value_balance = self
             .tachyon_shielded_data()
@@ -1749,16 +1712,12 @@ impl Transaction {
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        let value_balance = self.transparent_value_balance_from_outputs(outputs)?
+        self.transparent_value_balance_from_outputs(outputs)?
             + self.sprout_value_balance()?
             + self.sapling_value_balance()
             + self.orchard_value_balance()
-            + self.ironwood_value_balance();
-
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
-        let value_balance = value_balance + self.tachyon_value_balance();
-
-        value_balance
+            + self.ironwood_value_balance()
+            + self.tachyon_value_balance()
     }
 
     /// Returns the value balances for this transaction.
@@ -1937,6 +1896,37 @@ impl Transaction {
     pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
         self.orchard_shielded_data_mut()
             .map(|shielded_data| &mut shielded_data.value_balance)
+    }
+
+    /// Modify the `value_balance` field from the `ironwood::ShieldedData` in this transaction,
+    /// regardless of version.
+    ///
+    /// See `ironwood_value_balance` for details.
+    pub fn ironwood_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
+        match self {
+            Transaction::V6 {
+                ironwood_shielded_data: Some(ironwood_shielded_data),
+                ..
+            }
+            | Transaction::V7 {
+                ironwood_shielded_data: Some(ironwood_shielded_data),
+                ..
+            } => Some(&mut ironwood_shielded_data.data_mut().value_balance),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. }
+            | Transaction::V6 {
+                ironwood_shielded_data: None,
+                ..
+            }
+            | Transaction::V7 {
+                ironwood_shielded_data: None,
+                ..
+            } => None,
+        }
     }
 
     /// Modify the `value_balance` field from the `sapling::ShieldedData` in this transaction,

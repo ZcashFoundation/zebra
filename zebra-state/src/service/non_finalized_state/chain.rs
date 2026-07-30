@@ -1468,7 +1468,6 @@ impl Chain {
     /// Adds the Tachyon epoch-boundary `anchor` for `epoch` to the epoch anchor index.
     ///
     /// Only called from tachyon-enabled builds (the epoch boundary comes from the anchor fold).
-    #[cfg_attr(not(all(zcash_unstable = "nu7", feature = "tx_v7")), allow(dead_code))]
     fn add_tachyon_epoch_anchor(&mut self, epoch: u32, anchor: tachyon::Anchor) {
         trace!(?epoch, ?anchor, "adding tachyon epoch anchor");
 
@@ -2034,7 +2033,6 @@ impl Chain {
         //
         // In builds without tachyon support V7 transactions cannot be parsed, so an NU7
         // chain cannot be synced and the anchor legitimately stays at its default.
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
         if let Some(pool_height) = zebra_chain::tachyon::pool_height(&self.network, height) {
             let advance = nct
                 .tachyon_anchor
@@ -2052,7 +2050,7 @@ impl Chain {
         let tachyon_anchor = nct.tachyon_anchor;
 
         // Add this block's tachygrams to the epoch working set, rejecting same-epoch
-        // duplicates within this chain. No-op when tachyon support is compiled out.
+        // duplicates within this chain.
         let block_tachygrams: Vec<_> = contextually_valid
             .block
             .transactions

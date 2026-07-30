@@ -181,7 +181,6 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     //
     // This check binds the stamp to the chain; the cryptographic check that the proof
     // is actually valid for that anchor is done by proof verification in zebra-consensus.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     if let Some(tachyon_shielded_data) = transaction.tachyon_shielded_data() {
         if let zcash_tachyon::TachyonBundle::Proven(bundle) = &tachyon_shielded_data.0 {
             let anchor = zebra_chain::tachyon::Anchor::from(bundle.stamp.anchor);

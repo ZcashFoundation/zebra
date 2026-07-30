@@ -430,15 +430,15 @@ impl Block {
             let mut chain_value_pools = ValueBalance::zero();
             let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
             let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
-            // Ironwood reuses the Orchard note commitment tree type. Generated blocks have no
-            // Ironwood data, so this stays empty, but it must be threaded through the V3 history
-            // node (NU6.3+) using its real empty-tree root so commitments match validation.
+            // Ironwood reuses the Orchard note commitment tree type. Generated v6 transactions
+            // (NU6.3+) can carry Ironwood bundles, whose note commitments are appended below and
+            // threaded through the V3 history node so commitments match validation. For pre-NU6.3
+            // chains this stays empty, and its real empty-tree root is used the same way.
             let mut ironwood_tree = orchard::tree::NoteCommitmentTree::default();
             // The Tachyon pool anchor advances with every block from NU7 activation (even
             // stamp-less ones), so it must be folded here exactly like the state service does
             // for the V4 history node (NU7+) commitments to match validation. In builds
             // without tachyon support it stays at its default, matching the state.
-            #[cfg_attr(not(all(zcash_unstable = "nu7", feature = "tx_v7")), allow(unused_mut))]
             let mut tachyon_anchor = crate::tachyon::Anchor::default();
             // The history tree usually takes care of "creating itself". But this
             // only works when blocks are pushed into it starting from genesis
@@ -493,7 +493,6 @@ impl Block {
 
                 // Advance the Tachyon pool anchor with this block, if the pool has started,
                 // mirroring the state service's per-block fold.
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
                 if let Some(pool_height) =
                     crate::tachyon::pool_height(&current.network, block.coinbase_height().unwrap())
                 {
