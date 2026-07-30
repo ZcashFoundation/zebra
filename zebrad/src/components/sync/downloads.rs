@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{
@@ -34,6 +35,9 @@ use crate::components::sync::{
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
+#[cfg(test)]
+mod tests;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// A multiplier used to calculate the extra number of blocks we allow in the
@@ -57,6 +61,13 @@ pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 /// The maximum height difference between Zebra's state tip and a downloaded block.
 /// Blocks higher than this will get dropped and return an error.
 pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
+
+/// How long to wait for the parent-height lookup that decides whether a behind-tip block was
+/// forged.
+///
+/// Bounds a drop path that also fires for honest old blocks. Timing out is treated as "no proof",
+/// so a slow state read costs the peer nothing.
+const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -111,10 +122,19 @@ pub enum BlockDownloadVerifyError {
         advertiser_addr: Option<PeerSocketAddr>,
     },
 
+    /// A downloaded block claimed a height a long way behind the state chain tip.
+    ///
+    /// A peer can answer with a canonical header and a rewritten coinbase height because the
+    /// initial hash check does not recompute the header's commitment to the body's authorizing data
+    /// (GHSA-g95h-hw6g-pvgv). Peers also legitimately serve blocks that are genuinely this old, so
+    /// the block is always dropped, but `advertiser_addr` is only set when the parent Zebra already
+    /// holds proves the claimed height wrong — a block's height is one more than its parent's. An
+    /// authentic old block, or one whose parent Zebra does not hold, is dropped anonymously.
     #[error("downloaded block was too far behind the chain tip: {height:?} {hash:?}")]
     BehindTipHeightLimit {
         height: block::Height,
         hash: block::Hash,
+        advertiser_addr: Option<PeerSocketAddr>,
     },
 
     #[error("downloaded block had an invalid height: {hash:?}")]
@@ -175,7 +195,7 @@ impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV, ZSTip>
+pub struct Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -185,6 +205,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZS: zs::ReadState + Sync,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
@@ -195,6 +216,12 @@ where
 
     /// A service that verifies downloaded blocks.
     verifier: ZV,
+
+    /// A read-only handle to the state, used to query the blocks Zebra already holds.
+    ///
+    /// Checks a downloaded block's claimed height against its parent's, so a rewritten coinbase
+    /// height can be told apart from a genuinely old block (GHSA-g95h-hw6g-pvgv).
+    read_state: ZS,
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: ZSTip,
@@ -229,7 +256,7 @@ where
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 }
 
-impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
+impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -239,6 +266,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZS: zs::ReadState + Sync,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
@@ -276,7 +304,7 @@ where
     }
 }
 
-impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
+impl<ZN, ZV, ZS, ZSTip> Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
@@ -286,6 +314,7 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
+    ZS: zs::ReadState + Sync,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
@@ -301,6 +330,7 @@ where
     pub fn new(
         network: ZN,
         verifier: ZV,
+        read_state: ZS,
         latest_chain_tip: ZSTip,
         past_lookahead_limit_sender: watch::Sender<bool>,
         lookahead_limit: usize,
@@ -312,6 +342,7 @@ where
         Self {
             network,
             verifier,
+            read_state,
             latest_chain_tip,
             lookahead_limit,
             max_checkpoint_height,
@@ -357,6 +388,7 @@ where
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
         let mut verifier = self.verifier.clone();
+        let read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         let lookahead_limit = self.lookahead_limit;
@@ -513,7 +545,46 @@ where
                     );
                     metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
 
-                    Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
+                    // Security: only attribute the drop to the supplying peer when the block's own
+                    // parent proves the claimed height wrong.
+                    //
+                    // A peer can answer with a canonical header and a rewritten coinbase height
+                    // because the initial hash check does not recompute the header's commitment to
+                    // the body's authorizing data (GHSA-g95h-hw6g-pvgv). A block's height is one
+                    // more than its parent's, so a mismatch proves the body was rewritten.
+                    //
+                    // Peers legitimately serve genuinely old blocks: the syncer tolerates an
+                    // out-of-order first hash in `FindBlocks` responses, so a requested hash can
+                    // resolve to an old side-chain block that an honest peer still has. Those
+                    // responses are consistent with their parent, or have a parent we don't hold, so
+                    // they are dropped without scoring.
+                    let advertiser_addr = match advertiser_addr {
+                        Some(advertiser_addr) => match timeout(
+                            PARENT_LOOKUP_TIMEOUT,
+                            read_state.oneshot(zs::ReadRequest::BlockHeader(
+                                block.header.previous_block_hash.into(),
+                            )),
+                        )
+                        .await
+                        {
+                            Ok(Ok(zs::ReadResponse::BlockHeader {
+                                height: parent_height,
+                                ..
+                            })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
+                            // Parent unknown, height consistent with it, or the lookup failed or
+                            // timed out: there is no proof of misbehaviour, so the peer is not
+                            // scored.
+                            _ => None,
+                        },
+                        // There is no peer to score, so skip the state lookup.
+                        None => None,
+                    };
+
+                    return Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+                        height: block_height,
+                        hash,
+                        advertiser_addr,
+                    });
                 }
 
                 // Wait for the verifier service to be ready.

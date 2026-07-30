@@ -329,7 +329,7 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-pub struct ChainSync<ZN, ZS, ZV, ZSTip>
+pub struct ChainSync<ZN, ZS, ZSR, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -343,6 +343,12 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
+    ZSR: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZSR::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
@@ -383,6 +389,7 @@ where
             Downloads<
                 Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
                 Timeout<ZV>,
+                ZSR,
                 ZSTip,
             >,
         >,
@@ -424,7 +431,7 @@ where
 /// This component is used for initial block sync, but the `Inbound` service is
 /// responsible for participating in the gossip protocols used for block
 /// diffusion.
-impl<ZN, ZS, ZV, ZSTip> ChainSync<ZN, ZS, ZV, ZSTip>
+impl<ZN, ZS, ZSR, ZV, ZSTip> ChainSync<ZN, ZS, ZSR, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -438,6 +445,12 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
+    ZSR: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZSR::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
@@ -451,15 +464,18 @@ where
     ///  - peers: the zebra-network peers to contact for downloads
     ///  - verifier: the zebra-consensus verifier that checks the chain
     ///  - state: the zebra-state that stores the chain
+    ///  - read_state: a read-only handle to the zebra-state, used to check downloaded block heights
     ///  - latest_chain_tip: the latest chain tip from `state`
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &ZebradConfig,
         max_checkpoint_height: Height,
         peers: ZN,
         verifier: ZV,
         state: ZS,
+        read_state: ZSR,
         latest_chain_tip: ZSTip,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
     ) -> (Self, SyncStatus) {
@@ -529,6 +545,7 @@ where
         let downloads = Box::pin(Downloads::new(
             block_network,
             verifier,
+            read_state,
             latest_chain_tip.clone(),
             past_lookahead_limit_sender,
             max(
@@ -1211,33 +1228,59 @@ where
                 let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
             }
 
+            // The downloader only sets `advertiser_addr` here when the parent Zebra already holds
+            // proves the body's claimed height wrong. A peer can answer with a canonical header and
+            // a rewritten coinbase height because the initial hash check does not recompute the
+            // header's commitment to the body's authorizing data (GHSA-g95h-hw6g-pvgv). Peers that
+            // serve genuinely old blocks arrive unattributed and fall through unscored. Score a
+            // proven rewrite like the mirror-image above-lookahead drop.
+            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) => {
+                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            }
+
             Err(_) => {}
         };
 
-        // A block whose download failed because no peer delivered it (`NotFound`)
-        // is otherwise dropped here and never re-requested, which wedges the
-        // checkpoint frontier until the verify timeout (#5709). Re-queue it for
-        // the next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Consensus
-        // failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
+        // A hash the syncer still needs, whose download did not produce a usable block, is
+        // otherwise dropped here and only rediscovered by a later sync round. Re-queue it for the
+        // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
+        // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
+        //   frontier until the verify timeout (#5709).
+        // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
+        //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
+        //   be attributed, and covers the window before a score reaches the address book, which
+        //   only applies misbehavior reports in batches.
+        // Consensus failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
         // re-downloading a block the network already rejected is pointless.
-        if let Err(BlockDownloadVerifyError::DownloadFailed { error, hash }) = &response {
-            if format!("{error:?}").contains("NotFound") {
-                let attempts = self.block_reobtain_retries.entry(*hash).or_insert(0);
-                if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
-                    *attempts += 1;
-                    self.reobtain_hashes.insert(*hash);
-                    debug!(
-                        ?hash,
-                        attempts = *attempts,
-                        "re-queueing missing block for re-download"
-                    );
-                } else {
-                    debug!(
-                        ?hash,
-                        "missing block exceeded re-download retries, dropping"
-                    );
-                    self.block_reobtain_retries.remove(hash);
-                }
+        let reobtain_hash = match &response {
+            Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
+                if format!("{error:?}").contains("NotFound") =>
+            {
+                Some(*hash)
+            }
+            Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
+            _ => None,
+        };
+
+        if let Some(hash) = reobtain_hash {
+            let attempts = self.block_reobtain_retries.entry(hash).or_insert(0);
+            if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
+                *attempts += 1;
+                self.reobtain_hashes.insert(hash);
+                debug!(
+                    ?hash,
+                    attempts = *attempts,
+                    "re-queueing missing block for re-download"
+                );
+            } else {
+                debug!(
+                    ?hash,
+                    "missing block exceeded re-download retries, dropping"
+                );
+                self.block_reobtain_retries.remove(&hash);
             }
         }
 
@@ -1321,8 +1364,8 @@ where
             BlockDownloadVerifyError::BehindTipHeightLimit { .. } => {
                 debug!(
                     error = ?e,
-                    "block height is behind the current state tip, \
-                     assuming the syncer will eventually catch up to the state, continuing"
+                    "block height is behind the current state tip: re-requesting the hash, \
+                     and scoring the peer if the body contradicts the parent we hold, continuing"
                 );
                 false
             }
