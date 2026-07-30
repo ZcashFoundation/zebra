@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
 
+### Security
+
+- Score misbehavior for peers that advertise a block containing duplicate transactions, matching
+  the treatment of the other definitive block-validity violations
+  ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))
+
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
 This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
