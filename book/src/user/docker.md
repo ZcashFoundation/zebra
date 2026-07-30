@@ -37,13 +37,13 @@ The default compose file already exposes the Mainnet P2P port.
 ## Custom Images
 
 If you want to use your own images with, for example, some opt-in compilation
-features enabled, add the desired features to the `FEATURES` variable in the
-`docker/.env` file and build the image:
+features enabled, pass the desired features to the `FEATURES` build argument
+and build the image:
 
 ```shell
 docker build \
   --file docker/Dockerfile \
-  --env-file docker/.env \
+  --build-arg FEATURES="default-release-binaries elasticsearch" \
   --target runtime \
   --tag zebra:local \
   .

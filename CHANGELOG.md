@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
 
+### Fixed
+
+- Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
+  enforcing the cap on the total monetary base
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+
 ### Security
 
 - Inbound connections are canonicalized when they are accepted, so an IPv4 peer that connects to a
