@@ -693,6 +693,10 @@ where
     /// address on a cloned handler, without changing the configured default.
     pub fn set_miner_params(&mut self, miner_params: MinerParams) {
         self.miner_params = Some(miner_params);
+        // Cached coinbases pay the previous miner address, and this handler shares
+        // its cache with the handler it was cloned from. Detach to a fresh cache so
+        // neither handler can serve a coinbase built for the other's address.
+        self.coinbase_cache = CoinbaseCache::default();
     }
 
     /// Returns a handle to the coinbase transaction cache.
