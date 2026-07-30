@@ -905,7 +905,6 @@ pub fn consensus_branch_id(
 /// exactly this rule.
 ///
 /// [`digest`]: zcash_tachyon::action::Descriptor::digest
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub fn tachyon_actions_have_valid_digests(tx: &Transaction) -> Result<(), TransactionError> {
     let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
         return Ok(());
@@ -931,7 +930,6 @@ pub fn tachyon_actions_have_valid_digests(tx: &Transaction) -> Result<(), Transa
 /// Parsing already rejects unsorted tachygram lists, but sortedness permits equal neighbours, so
 /// distinctness reduces to checking that no adjacent pair is equal. Pointer-stamped bundles carry
 /// no tachygrams, so there is nothing to check for them.
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub fn tachyon_tachygrams_are_distinct(tx: &Transaction) -> Result<(), TransactionError> {
     let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
         return Ok(());

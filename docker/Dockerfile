@@ -150,7 +150,9 @@ ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
 # Strip absolute build paths from the binary so it doesn't depend on the build layout.
-ENV RUSTFLAGS="--remap-path-prefix=${HOME}=/zebra --remap-path-prefix=${CARGO_HOME}=/cargo"
+# Setting RUSTFLAGS replaces the workspace `.cargo/config.toml` build rustflags, so the
+# NU7 cfg must be repeated here.
+ENV RUSTFLAGS="--remap-path-prefix=${HOME}=/zebra --remap-path-prefix=${CARGO_HOME}=/cargo --cfg zcash_unstable=\"nu7\""
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \

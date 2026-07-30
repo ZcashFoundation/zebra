@@ -1022,15 +1022,8 @@ where
                 Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
             // V7 (tachyon) verifies the v6-shaped components plus the tachyon bundle.
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             Transaction::V7 { .. } => {
                 Self::verify_v7_transaction(tx, nu, script_verifier, cached_ffi_transaction)
-            }
-            // Without tachyon support compiled in, V7 is verified via the v6 path for its shared
-            // components only, and the tachyon bundle is ignored.
-            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v7")))]
-            Transaction::V7 { .. } => {
-                Self::verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
             }
         }
     }
@@ -1281,7 +1274,6 @@ where
     /// The block-level tachyon rules (block-wide tachygram distinctness, pointer-stamp coverage,
     /// covered-actions digests, and proof verification) need whole-block context, so they run in
     /// the block verifier instead; see `block::tachyon`.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     fn verify_v7_transaction(
         tx: &Transaction,
         nu: NetworkUpgrade,
@@ -1319,7 +1311,6 @@ where
     /// Verifies that a V7 `transaction` is supported by `network_upgrade`.
     ///
     /// V7 transactions are only valid from NU7 onward.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     fn verify_v7_transaction_network_upgrade(
         transaction: &Transaction,
         network_upgrade: NetworkUpgrade,
@@ -1362,7 +1353,6 @@ where
     /// Both stamp states carry actions and signatures, so proof-stamped and pointer-stamped
     /// bundles are checked the same way. RedPallas signature verification is CPU-bound, so it runs
     /// on the rayon threadpool.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
     fn verify_tachyon_signatures(tx: &Transaction, sighash: &SigHash) -> AsyncChecks {
         use zcash_tachyon::TachyonBundle;
 

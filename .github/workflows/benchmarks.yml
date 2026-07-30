@@ -14,6 +14,10 @@ concurrency:
 # Bench list shared by both jobs. New benches need a `[[bench]]` stanza
 # with `harness = false` in the crate's `Cargo.toml`.
 env:
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
   BENCHES: |
     criterion -p zebra-consensus --bench groth16
     criterion -p zebra-consensus --bench halo2

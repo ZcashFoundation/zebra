@@ -240,11 +240,10 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     // The NU6.3 (Ironwood) consensus branch id, matching zcash_protocol's `BranchId::Nu6_3`.
     (Nu6_3, ConsensusBranchId(0x37a5165b)),
     // The NU7 (tachyon) consensus branch id, matching zcash_protocol's `BranchId::Nu7`.
-    #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0x77190ad8)),
-    // Distinct test placeholder so it never collides with the `Nu7` placeholder above
-    // (which is gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
-    // the `branch_id_bijective` test under `--cfg zcash_unstable="zfuture"`.
+    // Distinct test placeholder so it never collides with the `Nu7` branch id above;
+    // a collision would break the `branch_id_bijective` test under
+    // `--cfg zcash_unstable="zfuture"`.
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xfffffffd)),
 ];
@@ -538,7 +537,6 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_2 => Self::Nu6_2,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_3 => Self::Nu6_3,
-            #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zcash_protocol::consensus::NetworkUpgrade::ZFuture => Self::ZFuture,

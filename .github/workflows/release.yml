@@ -35,6 +35,12 @@ on:
 # Deny all at workflow level; each job declares minimum permissions.
 permissions: {}
 
+env:
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
+
 jobs:
   # Runs on every push to main and leaves post-merge execution to Zebra's
   # release controller.

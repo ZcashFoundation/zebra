@@ -36,7 +36,6 @@ use crate::{error::*, transaction as tx, BoxError};
 pub mod check;
 pub mod request;
 pub mod subsidy;
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
 pub(crate) mod tachyon;
 
 pub use request::Request;
@@ -261,7 +260,6 @@ where
             // Block-level tachyon coherence rules (cheap synchronous scan), then the resulting
             // proof-stamp verification work items are pushed onto the rayon threadpool, so proofs
             // verify concurrently with the per-transaction checks below.
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             let mut tachyon_checks = tachyon::coherence(&block)?
                 .into_iter()
                 .map(|aggregate| {
@@ -351,7 +349,6 @@ where
             }
 
             // Get the tachyon proof-stamp verification results back from the rayon threadpool.
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))]
             while let Some(result) = tachyon_checks.next().await {
                 result?;
             }

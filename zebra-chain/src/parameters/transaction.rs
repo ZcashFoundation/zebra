@@ -18,8 +18,7 @@ pub const TX_V6_VERSION_GROUP_ID: u32 = 0xD884_B698;
 /// The version group ID for version 7 (tachyon) transactions.
 ///
 /// The v7 transaction reuses the v6 (Ironwood) field layout and additionally carries a
-/// [tachyon][`crate::transaction::TachyonShieldedData`] bundle. It is only produced and accepted
-/// in tachyon builds (`cfg(all(zcash_unstable = "nu7", feature = "tx_v7"))`).
+/// [tachyon][`crate::transaction::TachyonShieldedData`] bundle.
 ///
 /// NOTE: this value is a placeholder chosen by the tachyon fork ("tach" in ASCII); it is not yet
 /// specified in a ZIP. Replace it once the tachyon transaction format is finalized upstream.
