@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The indexer gRPC server now bounds concurrent HTTP/2 streams per connection (20)
+  and closes dead connections via HTTP/2 keepalive pings (30s interval, 10s timeout)
+  ([#10980](https://github.com/ZcashFoundation/zebra/pull/10980)).
+
 ### Fixed
 
 - Clarified the error message returned by `getrawtransaction` for transactions
