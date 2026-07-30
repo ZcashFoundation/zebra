@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `seeder.zec.rocks` and `seeder.testnet.zec.rocks` are now default DNS seeders in
+  `Config::default()`, for Mainnet and Testnet respectively
+  ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Connection-attempt, terminal-outcome, and remote-version metrics with bounded network,
   direction, address-family, lifecycle-stage, outcome, and implementation labels.
 
