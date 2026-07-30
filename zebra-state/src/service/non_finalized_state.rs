@@ -175,7 +175,14 @@ impl NonFinalizedState {
             return with_watch_channel(self);
         };
 
-        if skip_backup_task {
+        if !should_restore_backup {
+            tracing::info!(
+                ?backup_dir_path,
+                spawning_backup_task = !skip_backup_task,
+                "not restoring non-finalized blocks from backup, any backed up blocks that are \
+                 missing from the non-finalized state will be deleted"
+            );
+        } else if skip_backup_task {
             tracing::info!(
                 ?backup_dir_path,
                 "restoring non-finalized blocks from backup (sync write mode, backup task skipped)"
@@ -221,6 +228,8 @@ impl NonFinalizedState {
                 ?num_blocks_restored,
                 "restored blocks from non-finalized backup cache"
             );
+        } else if should_restore_backup {
+            tracing::info!("no blocks were restored from the non-finalized backup cache");
         }
 
         (non_finalized_state, sender, receiver)

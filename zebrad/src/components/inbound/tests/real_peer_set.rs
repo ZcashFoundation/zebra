@@ -700,6 +700,7 @@ async fn setup(
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_subscriber) = Mempool::new(
+        &network,
         &mempool_config,
         peer_set.clone(),
         state_service.clone(),

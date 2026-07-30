@@ -15,7 +15,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{
         testnet::{ConfiguredActivationHeights, ParametersBuilder},
-        Network,
+        Network, NetworkUpgrade,
     },
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, VerifiedUnminedTx},
@@ -38,6 +38,81 @@ type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, 
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, TransactionError>;
+
+/// A stale NU6.2 branch ID has no peer score at NU6.3 activation.
+#[test]
+fn stale_branch_id_at_nu6_3_has_no_mempool_score() {
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_2),
+            height,
+            &network,
+        ),
+        0,
+    );
+}
+
+/// An early NU6.3 branch ID has no peer score just before NU6.3 activation.
+#[test]
+fn early_branch_id_before_nu6_3_has_no_mempool_score() {
+    let network = Network::Mainnet;
+    let activation_height = NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height");
+    let height = activation_height
+        .previous()
+        .expect("NU6.3 activates above Height::MIN");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_3),
+            height,
+            &network,
+        ),
+        0,
+    );
+}
+
+/// A stale NU6.2 branch ID at a maximum-height NU6.3 activation does not panic.
+#[test]
+fn stale_branch_id_at_max_nu6_3_height_has_no_mempool_score() {
+    let network = ParametersBuilder::default()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            nu6: Some(8),
+            nu6_1: Some(9),
+            nu6_2: Some(Height::MAX.0 - 1),
+            nu6_3: Some(Height::MAX.0),
+            nu7: None,
+        })
+        .expect("activation heights at Height::MAX are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured network is valid");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu6_2),
+            Height::MAX,
+            &network,
+        ),
+        0,
+    );
+}
 
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
@@ -2085,6 +2160,7 @@ async fn setup_with_mempool_config(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(
+        network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
