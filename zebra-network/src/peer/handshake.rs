@@ -35,6 +35,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    connection_metrics::RemoteVersionOutcomeGuard,
     constants,
     meta_addr::MetaAddrChange,
     peer::{
@@ -650,6 +651,13 @@ where
         .single()
         .expect("in-range number of seconds and valid nanosecond");
 
+    // Whether this node is still syncing, used below to decide whether outbound peers must
+    // advertise `NODE_NETWORK`. Read before the match below, which can move `config.network`.
+    let is_syncing = !minimum_peer_version
+        .chain_tip()
+        .is_at_or_near_network_tip(&config.network);
+
+    let network = config.network.clone();
     let (their_addr, our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
@@ -720,6 +728,8 @@ where
     };
 
     let remote_address_services = remote.address_from.untrusted_services();
+    let mut remote_version_outcome =
+        RemoteVersionOutcomeGuard::new(&network, connected_addr, &remote.user_agent);
     if remote_address_services != remote.services {
         info!(
             ?remote.services,
@@ -744,7 +754,7 @@ where
     let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
     if nonce_reuse {
         info!(?connected_addr, "rejecting self-connection attempt");
-        Err(HandshakeError::RemoteNonceReuse)?;
+        return Err(remote_version_outcome.record_error(HandshakeError::RemoteNonceReuse));
     }
 
     // # Security
@@ -780,7 +790,48 @@ where
         .set(remote.version.0 as f64);
 
         // Disconnect if peer is using an obsolete version.
-        return Err(HandshakeError::ObsoleteVersion(remote.version));
+        return Err(
+            remote_version_outcome.record_error(HandshakeError::ObsoleteVersion(remote.version))
+        );
+    }
+
+    // # Security
+    //
+    // While syncing, require `NODE_NETWORK` from outbound peers: peers without it can't serve
+    // us historic blocks, but still occupy outbound slots and receive syncer block requests.
+    // When many reachable listeners are non-serving, those slots can fill up and stall a fresh
+    // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
+    // initial block download.
+    //
+    // At or near the network tip the requirement is dropped, because non-serving peers (like
+    // pruned nodes) can still serve recent blocks and transactions. Inbound and isolated
+    // connections are always exempt, so light clients can still connect to us.
+    if is_syncing
+        && matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
+        && !remote.services.contains(PeerServices::NODE_NETWORK)
+    {
+        debug!(
+            remote_ip = ?their_addr,
+            ?remote.services,
+            ?remote.user_agent,
+            "disconnecting from non-serving peer",
+        );
+
+        // the value is the number of rejected handshakes, by peer IP and advertised services
+        metrics::counter!(
+            "zcash.net.peers.missing_services",
+            "remote_ip" => their_addr.to_string(),
+            "remote_services" => format!("{:?}", remote.services),
+            "user_agent" => remote.user_agent.clone(),
+        )
+        .increment(1);
+
+        // Disconnect if the outbound peer doesn't advertise the required services.
+        return Err(
+            remote_version_outcome.record_error(HandshakeError::MissingRequiredServices {
+                services: remote.services,
+            }),
+        );
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
@@ -819,12 +870,19 @@ where
     )
     .set(connection_info.remote.version.0 as f64);
 
-    peer_conn.send(Message::Verack).await?;
+    if let Err(error) = peer_conn.send(Message::Verack).await {
+        return Err(remote_version_outcome.record_error(HandshakeError::from(error)));
+    }
 
-    let mut remote_msg = peer_conn
-        .next()
-        .await
-        .ok_or(HandshakeError::ConnectionClosed)??;
+    let mut remote_msg = match peer_conn.next().await {
+        Some(Ok(message)) => message,
+        Some(Err(error)) => {
+            return Err(remote_version_outcome.record_error(HandshakeError::from(error)));
+        }
+        None => {
+            return Err(remote_version_outcome.record_error(HandshakeError::ConnectionClosed));
+        }
+    };
 
     // Wait for next message if the one we got is not Verack
     loop {
@@ -834,15 +892,25 @@ where
                 break;
             }
             _ => {
-                remote_msg = peer_conn
-                    .next()
-                    .await
-                    .ok_or(HandshakeError::ConnectionClosed)??;
+                remote_msg = match peer_conn.next().await {
+                    Some(Ok(message)) => message,
+                    Some(Err(error)) => {
+                        return Err(
+                            remote_version_outcome.record_error(HandshakeError::from(error))
+                        );
+                    }
+                    None => {
+                        return Err(
+                            remote_version_outcome.record_error(HandshakeError::ConnectionClosed)
+                        );
+                    }
+                };
                 debug!(?remote_msg, "ignoring non-verack message from remote peer");
             }
         }
     }
 
+    remote_version_outcome.record_success();
     Ok(connection_info)
 }
 
@@ -961,6 +1029,9 @@ where
                         HandshakeError::Io(_) => "io_error",
                         HandshakeError::Serialization(_) => "serialization",
                         HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+                        HandshakeError::MissingRequiredServices { .. } => {
+                            "missing_required_services"
+                        }
                         HandshakeError::Timeout => "timeout",
                     };
                     metrics::histogram!(
@@ -973,6 +1044,10 @@ where
                         "reason" => reason
                     )
                     .increment(1);
+
+                    // Rejected non-serving peers are reported by the crawler's `report_failed`
+                    // without their services, so they get the standard failure backoff and can
+                    // be dialed again once the node is near the network tip (#11061).
                     return Err(err);
                 }
             };

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "release_tag": "zebra-compat-v1.0.0",
+  "release_tag": "zebra-compat-v1.1.0",
   "artifacts": [
     {
       "target_triple": "x86_64-pc-linux-gnu",
-      "runtime_archive_url": "https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.0.0/zcashd-zebra-compat-v1.0.0-linux-x86_64.tar.gz",
-      "runtime_archive_sha256": "b861ea94215647a69a944ded7c9d6c7c3dfd836e54e3e194103242935e6879f2",
+      "runtime_archive_url": "https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz",
+      "runtime_archive_sha256": "92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567",
       "runtime_archive_member_binary_path": "./bin/zcashd"
     }
   ]

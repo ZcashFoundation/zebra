@@ -129,6 +129,7 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
+    connection_metrics::network_kind_label,
     constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
@@ -1492,9 +1493,10 @@ where
         let num_ready = self.ready_services.len();
         let num_unready = self.unready_services.len();
         let num_peers = num_ready + num_unready;
-        metrics::gauge!("pool.num_ready").set(num_ready as f64);
-        metrics::gauge!("pool.num_unready").set(num_unready as f64);
-        metrics::gauge!("zcash.net.peers").set(num_peers as f64);
+        let network = network_kind_label(&self.network);
+        metrics::gauge!("pool.num_ready", "network" => network).set(num_ready as f64);
+        metrics::gauge!("pool.num_unready", "network" => network).set(num_unready as f64);
+        metrics::gauge!("zcash.net.peers", "network" => network).set(num_peers as f64);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {

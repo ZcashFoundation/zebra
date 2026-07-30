@@ -15,6 +15,7 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
     block,
+    chain_tip::AT_OR_NEAR_TIP_THRESHOLD,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
 };
@@ -721,9 +722,9 @@ fn find_blocks_stall_not_tracked_when_at_tip() {
     let (minimum_peer_version, best_tip) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
-    // Simulate being at the chain tip.
+    // Simulate being at the maximum estimated distance that is still considered near the tip.
     best_tip.send_best_tip_height(Some(block::Height(2_500_000)));
-    best_tip.send_estimated_distance_to_network_chain_tip(Some(0));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(AT_OR_NEAR_TIP_THRESHOLD));
 
     let mut handle = handles.into_iter().next().expect("there is one peer");
 
@@ -784,9 +785,9 @@ fn find_blocks_stall_tracked_when_syncing() {
     let (minimum_peer_version, best_tip) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
-    // Simulate being far behind the chain tip, as during initial sync.
+    // Simulate being just beyond the maximum estimated distance considered near the tip.
     best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
-    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(AT_OR_NEAR_TIP_THRESHOLD + 1));
 
     let mut handle = handles.into_iter().next().expect("there is one peer");
 

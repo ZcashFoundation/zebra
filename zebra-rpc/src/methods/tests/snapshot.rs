@@ -5,6 +5,11 @@
 //! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
+// `insta`'s macro expansion trips this lint, and each toolchain knows only one of its two names: https://github.com/rust-lang/rust/issues/79813
+#![allow(unknown_lints)]
+#![allow(semicolon_in_expressions_from_macros)]
+#![allow(semicolon_in_expressions_from_non_local_macros)]
+
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},

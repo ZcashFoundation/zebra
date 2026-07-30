@@ -33,6 +33,7 @@ jobs:
       attestations: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
+      source_sha: ${{ github.sha }}
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra

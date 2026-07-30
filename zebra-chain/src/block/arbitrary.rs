@@ -430,9 +430,10 @@ impl Block {
             let mut chain_value_pools = ValueBalance::zero();
             let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
             let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
-            // Ironwood reuses the Orchard note commitment tree type. Generated blocks have no
-            // Ironwood data, so this stays empty, but it must be threaded through the V3 history
-            // node (NU6.3+) using its real empty-tree root so commitments match validation.
+            // Ironwood reuses the Orchard note commitment tree type. Generated v6 transactions
+            // (NU6.3+) can carry Ironwood bundles, whose note commitments are appended below and
+            // threaded through the V3 history node so commitments match validation. For pre-NU6.3
+            // chains this stays empty, and its real empty-tree root is used the same way.
             let mut ironwood_tree = orchard::tree::NoteCommitmentTree::default();
             // The history tree usually takes care of "creating itself". But this
             // only works when blocks are pushed into it starting from genesis

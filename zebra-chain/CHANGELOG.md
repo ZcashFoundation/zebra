@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Added the `ValueBalanceError::Total` variant returned when the sum of value
+  pools is out of range
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+
+### Added
+
+- `ValueBalance::total`, which returns the sum of all value pool balances
+
+## [11.3.0] - 2026-07-27
+
+### Added
+
+- `ironwood::ShieldedData::data_mut`
+- With the `proptest-impl` feature:
+  - `transaction::Transaction::v6_strategy`
+  - `impl Arbitrary for orchard::ShieldedDataV6` and `ironwood::ShieldedData`
+  - `parameters::NetworkUpgrade::nu6_3_branch_id_strategy`
+  - `transaction::Transaction::ironwood_value_balance_mut`
+
+### Changed
+
+- `AT_OR_NEAR_TIP_THRESHOLD` is now 1,000 blocks, keeping peer stall detection disabled during
+  long gaps between blocks ([#11122](https://github.com/ZcashFoundation/zebra/pull/11122)).
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+
+### Fixed
+
+- With the `proptest-impl` feature, the arbitrary `Transaction` strategy now generates v6
+  transactions (with v6 Orchard and Ironwood bundles) for NU6.3 and later network upgrades,
+  and accepts a transaction version override of 6. Previously it only generated v4/v5
+  transactions for those upgrades, so property tests built on it could never observe
+  v6/Ironwood data ([#11075](https://github.com/ZcashFoundation/zebra/pull/11075)).
+
 ## [11.2.0] - 2026-07-17
 
 ### Added

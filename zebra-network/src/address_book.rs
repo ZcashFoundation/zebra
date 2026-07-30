@@ -18,6 +18,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
+    connection_metrics::network_kind_label,
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
@@ -754,15 +755,20 @@ impl AddressBook {
         let _ = self.address_metrics_tx.send(m);
 
         // TODO: rename to address_book.[state_name]
-        metrics::gauge!("candidate_set.responded").set(m.responded as f64);
-        metrics::gauge!("candidate_set.gossiped").set(m.never_attempted_gossiped as f64);
-        metrics::gauge!("candidate_set.failed").set(m.failed as f64);
-        metrics::gauge!("candidate_set.pending").set(m.attempt_pending as f64);
+        let network = network_kind_label(&self.network);
+        metrics::gauge!("candidate_set.responded", "network" => network).set(m.responded as f64);
+        metrics::gauge!("candidate_set.gossiped", "network" => network)
+            .set(m.never_attempted_gossiped as f64);
+        metrics::gauge!("candidate_set.failed", "network" => network).set(m.failed as f64);
+        metrics::gauge!("candidate_set.pending", "network" => network)
+            .set(m.attempt_pending as f64);
 
         // TODO: rename to address_book.responded.recently_live
-        metrics::gauge!("candidate_set.recently_live").set(m.recently_live as f64);
+        metrics::gauge!("candidate_set.recently_live", "network" => network)
+            .set(m.recently_live as f64);
         // TODO: rename to address_book.responded.stopped_responding
-        metrics::gauge!("candidate_set.disconnected").set(m.recently_stopped_responding as f64);
+        metrics::gauge!("candidate_set.disconnected", "network" => network)
+            .set(m.recently_stopped_responding as f64);
 
         std::mem::drop(_guard);
         self.log_metrics(&m, instant_now);
