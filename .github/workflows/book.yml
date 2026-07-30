@@ -15,6 +15,12 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  # A RUSTFLAGS env var replaces both the setup-rust-toolchain action's default
+  # (-D warnings) and the workspace `.cargo/config.toml` rustflags, so it must
+  # carry the NU7 cfg itself.
+  RUSTFLAGS: -D warnings --cfg zcash_unstable="nu7"
+
 jobs:
   changes:
     runs-on: ubuntu-latest
