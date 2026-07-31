@@ -390,17 +390,19 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
         ..Config::default()
     };
-    let address_book =
+    let _address_book =
         init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
     // Let the peer cache updater run for a while.
     tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
 
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
-    if approximate_peer_count > 0 {
+    // The address book also contains unverified DNS seed addresses, so only test automatic
+    // loading when the peer cache updater actually wrote at least one cacheable peer.
+    let cached_peers = config
+        .load_peer_cache()
+        .await
+        .expect("unexpected error reading peer cache");
+    if !cached_peers.is_empty() {
         // Make sure our only peers are coming from the disk cache
         config.initial_mainnet_peers = Default::default();
 
