@@ -674,7 +674,6 @@ fn read_only_open_with_ephemeral_config_returns_error() {
     let parent = tempfile::tempdir().expect("creating a temporary directory should succeed");
     let config = Config {
         ephemeral: true,
-        cache_dir: parent.path().join("missing"),
         ..Config::default()
     };
 

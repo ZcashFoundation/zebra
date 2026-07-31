@@ -366,8 +366,14 @@ async fn written_peer_cache_can_be_read_manually() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    // The default config should have an active peer cache
-    let config = Config::default();
+    // Use a temporary peer cache directory, so this test doesn't read or write the default
+    // peer cache directory, which is shared with other tests and local zebrad instances.
+    let peer_cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+        ..Config::default()
+    };
     let address_book =
         init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
@@ -403,8 +409,14 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    // The default config should have an active peer cache
-    let mut config = Config::default();
+    // Use a temporary peer cache directory, so this test doesn't read or write the default
+    // peer cache directory, which is shared with other tests and local zebrad instances.
+    let peer_cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let mut config = Config {
+        cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+        ..Config::default()
+    };
     let address_book =
         init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
