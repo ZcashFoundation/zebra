@@ -77,10 +77,29 @@ const MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS: Duration = Duration::from_
 /// The amount of time to wait for the peer set to become ready, or stay unready.
 const PEER_SET_BAN_TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The amount of time a single poll waits for the peer set to route a request, when the test
+/// expects the peer set to have no peer left.
+///
+/// [`PeerSet::poll_ready()`](crate::peer_set::PeerSet) documents that "if there are no ready
+/// peers, and no new peers, network requests will pause", so a request that can't be routed
+/// hangs rather than failing. A banned peer is dropped on the same poll that sees the ban, so
+/// once the ban is visible in the address book this only has to outlast one poll.
+const PEER_SET_UNREADY_POLL_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// The number of consecutive unanswered polls that mean the peer set has no peer left.
+///
+/// Kept below [`constants::PEERSET_BUFFER_SIZE`]: an abandoned request holds its `Buffer` permit
+/// until the worker handles it, and the worker can't make progress while there is no peer. The
+/// test asserts on the number of abandoned requests, so exceeding the buffer fails rather than
+/// hanging.
+const PEER_SET_UNREADY_POLLS: usize = 2;
+
 /// The amount of time to wait for a misbehaviour update to be flushed and turned into a ban.
 ///
-/// Misbehaviour updates are batched behind a 30 second timer in `initialize()`.
-const MISBEHAVIOR_FLUSH_TIMEOUT: Duration = Duration::from_secs(60);
+/// Misbehaviour updates are batched behind [`constants::MISBEHAVIOR_FLUSH_INTERVAL`] in
+/// `initialize()`, so this is derived from that interval rather than hard-coded.
+const MISBEHAVIOR_FLUSH_TIMEOUT: Duration =
+    constants::MISBEHAVIOR_FLUSH_INTERVAL.saturating_add(Duration::from_secs(5));
 
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
@@ -1583,10 +1602,9 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     // # Correctness
     //
-    // Misbehaviour updates are batched behind a 30 second flush timer, so the ban does not
-    // exist yet. Wait for it to actually appear in the address book before checking the peer
-    // set, otherwise this test passes whenever the timer hasn't fired, whatever the peer set
-    // does.
+    // Misbehaviour updates are batched behind a flush timer, so the ban does not exist yet.
+    // Wait for it to actually appear in the address book before checking the peer set,
+    // otherwise this test passes whenever the timer hasn't fired, whatever the peer set does.
     let ban_deadline = Instant::now() + MISBEHAVIOR_FLUSH_TIMEOUT;
     let banned_ip: IpAddr = peer_ip.into();
     loop {
@@ -1599,24 +1617,62 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
             "the misbehaviour update should be flushed and banned within {MISBEHAVIOR_FLUSH_TIMEOUT:?}"
         );
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     // The banned peer must be dropped, so there is no peer left to route a request to.
-    let response = tokio::time::timeout(
-        PEER_SET_BAN_TEST_TIMEOUT,
-        peer_set
-            .ready()
-            .await
-            .expect("peer set buffer is ready")
-            .call(Request::Peers),
-    )
-    .await;
+    //
+    // # Correctness
+    //
+    // Poll until the peer set stops answering, rather than waiting out a single long timeout.
+    // This keeps the test fast when the peer is dropped promptly, but still gives a loaded
+    // runner the full `PEER_SET_BAN_TEST_TIMEOUT` before the test fails.
+    //
+    // A single unanswered poll isn't enough: on a loaded runner it can just be scheduling
+    // jitter, and treating that as success would make this test pass while the peer is still
+    // connected. So the peer set has to miss `PEER_SET_UNREADY_POLLS` polls in a row.
+    //
+    // These polls must stay few: each request that is abandoned at the timeout keeps its
+    // `Buffer` permit until the worker handles it, and the worker is blocked precisely because
+    // there is no peer. `PEERSET_BUFFER_SIZE` is 3, so `peer_set.ready()` - which is outside
+    // the timeout - would block forever if we ever abandoned that many requests.
+    let drop_deadline = Instant::now() + PEER_SET_BAN_TEST_TIMEOUT;
+    let mut unanswered_polls = 0;
+    let mut abandoned_requests = 0;
+    while unanswered_polls < PEER_SET_UNREADY_POLLS {
+        let response = tokio::time::timeout(
+            PEER_SET_UNREADY_POLL_TIMEOUT,
+            peer_set
+                .ready()
+                .await
+                .expect("peer set buffer is ready")
+                .call(Request::Peers),
+        )
+        .await;
 
-    assert!(
-        response.is_err(),
-        "a banned peer must be dropped from the peer set, so its requests can't be routed"
-    );
+        if response.is_err() {
+            unanswered_polls += 1;
+            abandoned_requests += 1;
+
+            // Fail rather than hang if the buffer is about to fill up, because
+            // `peer_set.ready()` is outside the timeout above.
+            assert!(
+                abandoned_requests < constants::PEERSET_BUFFER_SIZE,
+                "a banned peer must be dropped from the peer set, so its requests can't be routed"
+            );
+
+            continue;
+        }
+
+        unanswered_polls = 0;
+
+        assert!(
+            Instant::now() < drop_deadline,
+            "a banned peer must be dropped from the peer set, so its requests can't be routed"
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Test the listener with the default inbound peer limit, and a handshaker that always errors.
