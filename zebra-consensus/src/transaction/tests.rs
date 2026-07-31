@@ -2310,7 +2310,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(BlockRequest {
-            transaction_hash: transaction.hash(),
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
             height: block_height,
@@ -2340,7 +2340,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(BlockRequest {
-            transaction_hash: transaction.hash(),
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
             height: block_height,
@@ -2379,7 +2379,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let verification_result = verifier
         .clone()
         .oneshot(BlockRequest {
-            transaction_hash: transaction.hash(),
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
             height,

@@ -169,7 +169,9 @@ where
 /// A request to verify a transaction as part of a block.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockRequest {
-    /// The transaction hash.
+    /// The mined transaction ID of `transaction`.
+    /// Used for efficiency: callers should already have this,
+    /// so no need to recompute it in the verifier.
     pub transaction_hash: transaction::Hash,
     /// The transaction itself.
     pub transaction: Arc<Transaction>,
@@ -281,7 +283,19 @@ where
         let state = self.state.clone();
 
         let tx = req.transaction.clone();
-        let tx_id = tx.unmined_id();
+        // Reuse the caller's precomputed hash instead of calling `Transaction::unmined_id()`,
+        // which would re-serialize and re-hash the whole transaction.
+        // `Transaction::auth_digest()` returns `None` for exactly the versions that
+        // `UnminedTxId::from(&Transaction)` maps to `Legacy` (v1-v4), and `Some` for those it
+        // maps to `Witnessed` (v5 onward), so deriving the variant from it stays correct if a
+        // later transaction version is added.
+        let tx_id = match tx.auth_digest() {
+            None => UnminedTxId::Legacy(req.transaction_hash),
+            Some(auth_digest) => UnminedTxId::Witnessed(transaction::WtxId {
+                id: req.transaction_hash,
+                auth_digest,
+            }),
+        };
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
