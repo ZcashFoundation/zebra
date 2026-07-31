@@ -107,6 +107,14 @@ impl ZebraDb {
         // checked for readability first, so a missing or unreadable directory returns a typed
         // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
         let disk_version = if read_only {
+            // While this check is also done in `DiskDB::new()` below, we must
+            // repeat it here because the `check_cache_dir_readable()` call just
+            // after this will look into `cache_dir` but that should be ignored
+            // when `ephemeral` is true.
+            if config.ephemeral {
+                return Err(StateInitError::ReadOnlyEphemeralConflict);
+            }
+
             DiskDb::check_cache_dir_readable(&config.cache_dir)?;
 
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
