@@ -1,7 +1,7 @@
 //! Asynchronous verification of transactions.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -85,13 +85,13 @@ const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
-pub struct BlockVerifier<ZS> {
+pub struct BlockTxVerifier<ZS> {
     network: Network,
     state: Timeout<ZS>,
     script_verifier: script::Verifier,
 }
 
-impl<ZS> BlockVerifier<ZS>
+impl<ZS> BlockTxVerifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -113,7 +113,7 @@ where
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
-pub struct MempoolVerifier<ZS, Mempool> {
+pub struct MempoolTxVerifier<ZS, Mempool> {
     network: Network,
     state: Timeout<ZS>,
     mempool: Option<Timeout<Mempool>>,
@@ -121,7 +121,7 @@ pub struct MempoolVerifier<ZS, Mempool> {
     mempool_setup_rx: oneshot::Receiver<Mempool>,
 }
 
-impl<ZS, Mempool> MempoolVerifier<ZS, Mempool>
+impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -144,7 +144,7 @@ where
 }
 
 impl<ZS>
-    MempoolVerifier<
+    MempoolTxVerifier<
         ZS,
         Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     >
@@ -173,8 +173,6 @@ pub struct BlockRequest {
     pub transaction_hash: transaction::Hash,
     /// The transaction itself.
     pub transaction: Arc<Transaction>,
-    /// Set of transaction hashes that create new transparent outputs.
-    pub known_outpoint_hashes: Arc<HashSet<transaction::Hash>>,
     /// Additional UTXOs which are known at the time of verification.
     pub known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     /// The height of the block containing this transaction.
@@ -221,8 +219,10 @@ pub struct BlockResponse {
     /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
     pub miner_fee: Option<Amount<NonNegative>>,
 
-    /// The number of legacy signature operations in this transaction's
-    /// transparent inputs and outputs.
+    /// The total number of transparent signature operations counted for block
+    /// verification in this transaction: legacy sigops plus P2SH sigops.
+    ///
+    /// This value is used to enforce the block-level `MAX_BLOCK_SIGOPS` limit.
     pub sigops: u32,
 }
 
@@ -258,7 +258,7 @@ impl From<VerifiedUnminedTx> for MempoolResponse {
     }
 }
 
-impl<ZS> Service<BlockRequest> for BlockVerifier<ZS>
+impl<ZS> Service<BlockRequest> for BlockTxVerifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -326,7 +326,7 @@ where
             //
             // https://zips.z.cash/zip-0213#specification
 
-            // Load spent UTXOs from state.
+            // Load spent UTXOs from the block context and state.
             // The UTXOs are required for almost all the async checks.
             let (spent_utxos, spent_outputs) =
                 Self::block_spent_utxos(tx.clone(), known_utxos, state.clone()).await?;
@@ -378,7 +378,7 @@ where
     }
 }
 
-impl<ZS> BlockVerifier<ZS>
+impl<ZS> BlockTxVerifier<ZS>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<ZS, Mempool> Service<MempoolRequest> for MempoolVerifier<ZS, Mempool>
+impl<ZS, Mempool> Service<MempoolRequest> for MempoolTxVerifier<ZS, Mempool>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
@@ -614,7 +614,7 @@ where
     }
 }
 
-impl<ZS, Mempool> MempoolVerifier<ZS, Mempool>
+impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,

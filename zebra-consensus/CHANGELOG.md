@@ -9,10 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- Replaced the unified transaction verifier API with separate
-  `transaction::BlockVerifier` and `transaction::MempoolVerifier` services and
-  dedicated request/response types. No verification behavior change is intended
+- Split the unified transaction verifier API into separate
+  `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  services with dedicated request/response types.
+- Removed the unified verifier API:
+  - `transaction::Verifier`
+  - `transaction::Request`
+  - `transaction::Response`
+- The second value returned by `router::init` and `router::init_test` is now a
+  `transaction::MempoolTxVerifier` service and can no longer verify block
+  transactions. Callers verifying transactions as part of block verification
+  should construct a `transaction::BlockTxVerifier` directly.
   ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
+### Added
+
+- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
+- `transaction::BlockRequest`, `transaction::BlockResponse`,
+  `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
   
 ## [14.0.1] - 2026-07-27
 

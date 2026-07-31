@@ -351,11 +351,11 @@ where
 
     // transaction verification
 
-    let block_transaction = transaction::BlockVerifier::new(network, state_service.clone());
+    let block_transaction = transaction::BlockTxVerifier::new(network, state_service.clone());
     let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
 
     let mempool_transaction =
-        transaction::MempoolVerifier::new(network, state_service.clone(), mempool);
+        transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
     let mempool_transaction =
         Buffer::new(BoxService::new(mempool_transaction), VERIFIER_BUFFER_BOUND);
 

@@ -1,9 +1,6 @@
 //! Randomised property tests for transaction verification.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
@@ -467,7 +464,7 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = transaction::BlockVerifier::new(&network, state_service);
+        let verifier = transaction::BlockTxVerifier::new(&network, state_service);
         let verifier = Buffer::new(verifier, 10);
         let transaction_hash = transaction.hash();
 
@@ -478,7 +475,6 @@ fn validate(
                 transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: block_time,
             })
