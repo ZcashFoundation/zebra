@@ -980,6 +980,11 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
+/// Confirms block verification always queries the state service fresh, even
+/// when the same transaction was already verified and cached by the mempool
+/// verifier. `BlockTxVerifier` has no dependency on any mempool service, so
+/// this is now also enforced structurally; this test additionally checks the
+/// runtime behavior when both verifiers share a state backend.
 #[tokio::test(flavor = "multi_thread")]
 async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();

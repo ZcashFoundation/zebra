@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
+  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
+  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
+  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
+  changelog for the underlying API split
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
 ### Added
 
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
