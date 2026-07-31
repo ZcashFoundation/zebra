@@ -7,11 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `Rpc` trait has a new required `get_deprecation_info` method. Downstream implementers of
+  the trait must add it; callers of `RpcImpl` are unaffected
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+
+### Added
+
+- New `getdeprecationinfo` RPC method and `GetDeprecationInfoResponse` type. The reported end of
+  support height is set with `RpcImpl::with_end_of_support_height`; without it the response omits
+  the `end_of_service` object ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+
+### Changed
+
+- The indexer gRPC server now bounds concurrent HTTP/2 streams per connection (20)
+  and closes dead connections via HTTP/2 keepalive pings (30s interval, 10s timeout)
+  ([#10980](https://github.com/ZcashFoundation/zebra/pull/10980)).
+
 ### Fixed
 
 - Clarified the error message returned by `getrawtransaction` for transactions
   that are not in the mempool or best chain
   ([#11014](https://github.com/ZcashFoundation/zebra/pull/11014)).
+- Fixed coinbase cache eviction that rebuilt shielded proofs on every
+  `getblocktemplate` poll when the mempool had fee-paying transactions
+  ([#10954](https://github.com/ZcashFoundation/zebra/pull/10954)).
 
 ## [15.0.0] - 2026-07-27
 

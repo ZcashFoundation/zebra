@@ -37,12 +37,12 @@ pub use crate::methods::{
         validate_address::ValidateAddressResponse,
         z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
     },
-    AddressStrings, BlockHeaderObject, BlockObject, GetAddressBalanceRequest,
+    AddressStrings, BlockHeaderObject, BlockObject, EndOfService, GetAddressBalanceRequest,
     GetAddressBalanceResponse, GetAddressTxIdsRequest, GetAddressUtxosResponse,
     GetAddressUtxosResponseObject, GetBlockHashResponse, GetBlockHeaderResponse,
     GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockTransaction, GetBlockTrees,
-    GetBlockchainInfoResponse, GetInfoResponse, GetRawTransactionResponse, Hash,
-    SendRawTransactionResponse, Utxo,
+    GetBlockchainInfoResponse, GetDeprecationInfoResponse, GetInfoResponse,
+    GetRawTransactionResponse, Hash, SendRawTransactionResponse, Utxo,
 };
 
 /// Constants needed by clients of Zebra's RPC server

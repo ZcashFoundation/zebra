@@ -9,6 +9,7 @@ pub mod zip317;
 mod tests;
 
 use std::{
+    collections::HashMap,
     fmt::{self},
     sync::{Arc, Mutex},
 };
@@ -558,22 +559,24 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     }
 }
 
-/// Caches the most recently built coinbase transaction for the next block, keyed on its height and
-/// total transaction fees.
+/// Caches recently built coinbase transactions for the next block, keyed on `(height, fee)`.
 ///
 /// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
 /// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
 /// depends on `(height, fees)` for a given miner configuration, so repeated requests within the
 /// same block can reuse the cached transaction instead of re-proving it on every call.
+///
+/// Each `getblocktemplate` call needs two coinbase transactions at the same height: a zero-fee
+/// "fake" coinbase for ZIP-317 weight estimation, and the real coinbase with actual fees. Entries
+/// from previous heights are cleared on insert to bound memory.
 #[derive(Clone, Default)]
 pub(crate) struct CoinbaseCache(
     Arc<
         Mutex<
-            Option<(
-                block::Height,
-                Amount<NonNegative>,
+            HashMap<
+                (block::Height, Amount<NonNegative>),
                 TransactionTemplate<amount::NegativeOrZero>,
-            )>,
+            >,
         >,
     >,
 );
@@ -585,18 +588,11 @@ impl CoinbaseCache {
         height: block::Height,
         fee: Amount<NonNegative>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
-        let cache = self
-            .0
+        self.0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match &*cache {
-            Some((cached_height, cached_fee, coinbase))
-                if *cached_height == height && *cached_fee == fee =>
-            {
-                Some(coinbase.clone())
-            }
-            _ => None,
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&(height, fee))
+            .cloned()
     }
 
     /// Stores `coinbase` as the cached transaction for `height` and `fee`.
@@ -606,18 +602,35 @@ impl CoinbaseCache {
         fee: Amount<NonNegative>,
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
-        *self
+        let mut map = self
             .0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((height, fee, coinbase));
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // Evict entries from previous heights so the map stays bounded.
+        map.retain(|&(h, _), _| h == height);
+        // Only 2 entries are ever useful (zero-fee fake + current real-fee coinbase), but mempool
+        // fee churn can accumulate stale entries within a block. Cap at 4 to stay well above the
+        // useful set while preventing unbounded growth. When evicting, preserve the zero-fee sizing
+        // coinbase — losing it recreates the churn this cache exists to prevent.
+        if !map.contains_key(&(height, fee)) && map.len() >= 4 {
+            let evict_key = map
+                .keys()
+                .copied()
+                .find(|&(_, f)| f != Amount::<NonNegative>::zero());
+            if let Some(key) = evict_key {
+                map.remove(&key);
+            }
+        }
+        map.insert((height, fee), coinbase);
     }
 
-    /// Discards the cached coinbase, forcing the next request to rebuild it.
+    /// Discards all cached coinbases, forcing the next request to rebuild them.
     fn clear(&self) {
-        *self
-            .0
+        self.0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 }
 
@@ -680,6 +693,10 @@ where
     /// address on a cloned handler, without changing the configured default.
     pub fn set_miner_params(&mut self, miner_params: MinerParams) {
         self.miner_params = Some(miner_params);
+        // Cached coinbases pay the previous miner address, and this handler shares
+        // its cache with the handler it was cloned from. Detach to a fresh cache so
+        // neither handler can serve a coinbase built for the other's address.
+        self.coinbase_cache = CoinbaseCache::default();
     }
 
     /// Returns a handle to the coinbase transaction cache.

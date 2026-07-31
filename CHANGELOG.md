@@ -15,9 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
   changelog for the underlying API split
   ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
+  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
+  object is only present on Mainnet, where end of support is enforced
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
 
 ### Added
 
+- Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
+  ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
@@ -27,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
+
+### Fixed
+
+- Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
+  enforcing the cap on the total monetary base
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

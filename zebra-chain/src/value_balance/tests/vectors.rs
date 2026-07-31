@@ -1,7 +1,7 @@
 //! Fixed test vectors for value balances.
 
 use crate::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative, MAX_MONEY},
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
@@ -33,6 +33,32 @@ fn ironwood_pool_enforces_non_negative_balance() {
         .expect_err("draining the ironwood pool below zero must be rejected");
 
     assert!(matches!(error, ValueBalanceError::Ironwood(_)));
+}
+
+/// Check that `add_chain_value_pool_change` rejects a chain value pool whose
+/// individual pools are each within the valid `Amount` range, but whose total
+/// exceeds `MAX_MONEY` (the total monetary base cap).
+#[test]
+fn total_over_max_money_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    // Start from a pool that already holds the maximum value in the transparent
+    // pool. This is individually valid (`transparent` is within `0..=MAX_MONEY`).
+    let mut chain = ValueBalance::<NonNegative>::zero();
+    chain.set_transparent_value_balance(ValueBalance::from_transparent_amount(
+        Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount"),
+    ));
+
+    // Add the maximum value to the sprout pool. Each pool remains individually
+    // valid (`sprout` is within `0..=MAX_MONEY`), but the total becomes
+    // `2 * MAX_MONEY`, which exceeds the `MAX_MONEY` cap on the monetary base.
+    let error = chain
+        .add_chain_value_pool_change(ValueBalance::from_sprout_amount(
+            Amount::<NegativeAllowed>::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount"),
+        ))
+        .expect_err("a total exceeding MAX_MONEY must be rejected");
+
+    assert!(matches!(error, ValueBalanceError::Total(_)));
 }
 
 /// Check that the ironwood value balance is included in a transaction's
