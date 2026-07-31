@@ -172,7 +172,7 @@ where
             // Batch misbehaviour updates so peers can't keep the address book mutex locked
             // by repeatedly sending invalid blocks or transactions.
             let mut flush_timer =
-                IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+                IntervalStream::new(tokio::time::interval(constants::MISBEHAVIOR_FLUSH_INTERVAL));
 
             loop {
                 tokio::select! {

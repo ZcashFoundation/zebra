@@ -401,6 +401,20 @@ pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// disconnected and banned.
 pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 
+/// The interval between flushes of batched peer misbehaviour updates into the address book.
+///
+/// Misbehaviour updates are batched so peers can't keep the address book mutex locked by
+/// repeatedly sending invalid blocks or transactions.
+#[cfg(not(test))]
+pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The interval between flushes of batched peer misbehaviour updates into the address book.
+///
+/// Tests use a much shorter interval, so that tests which wait for a misbehaviour update to
+/// turn into a ban don't have to wait for a production flush cycle.
+#[cfg(test)]
+pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;
 
