@@ -1103,8 +1103,11 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         time: Utc::now(),
     };
 
-    // Both block requests go through full block verification and query AwaitUtxo
-    // from the state service; verified mempool state does not bypass block checks.
+    // The mempool has already verified this transaction, and it is now submitted twice as a block
+    // request. Each request runs full block verification independently, which for this transaction
+    // means fetching the spent UTXO from the state service, so two AwaitUtxo responses are queued
+    // below. Reuse of the mempool's result — or of the first block request's result — is prevented
+    // structurally: BlockTxVerifier holds no mempool handle and caches nothing across requests.
     let utxo_clone = utxo.clone();
     tokio::spawn(async move {
         state
@@ -4207,7 +4210,14 @@ async fn mempool_zip317_ok() {
 
 /// Test for CVE-2026-34377 https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh
 ///
-/// Ensure a block with a transaction with garbage Orchard proofs is rejected, even if the mempool has a valid version of the same transaction.
+/// Ensure a block transaction with garbage Orchard proofs is rejected. Corrupting only the
+/// authorizing data leaves the txid unchanged (ZIP-244), so a valid and a garbage version of the
+/// same transaction share a mined id. The original bug let a mempool-cached result for that id
+/// stand in for verification of the block transaction.
+///
+/// [`BlockTxVerifier`] has no mempool handle, so it cannot consult mempool state at all. That
+/// makes the bypass structurally impossible rather than merely untaken, which is why this test
+/// only needs to check that the garbage proofs are rejected on their own merits.
 #[tokio::test(flavor = "multi_thread")]
 async fn block_with_garbage_orchard_proofs_is_rejected() {
     use zebra_chain::primitives::Halo2Proof;
@@ -4269,27 +4279,21 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
 
 /// Regression test for the mempool-cache expiry bypass vulnerability.
 ///
-/// A non-coinbase transaction with `nExpiryHeight = H+1` that was cached in the
-/// mempool as valid at height `H+1` can be presented inside a block at height
-/// `H+2`.  The block transaction verifier must re-run the expiry check even
-/// when it hits the mempool cache fast path in `find_verified_unmined_tx`;
-/// skipping that check lets Zebra accept a block that honest nodes reject,
-/// causing a consensus split.
+/// A non-coinbase transaction with `nExpiryHeight = H+1` can be admitted to the mempool while
+/// the best tip is still `H`, then presented inside a candidate block at height `H+2`, where it
+/// has expired. Block transaction verification must reject it.
 ///
-/// # Attack window
+/// The original bug was a fast path that returned a mempool-cached verification result for a
+/// transaction's mined id before re-running the expiry check, so the block passed semantic
+/// verification with an expired transaction inside — a consensus split, since honest nodes
+/// reject that block. The window existed because the mempool is active whenever Zebra is close
+/// to the tip (not only exactly at it), and the download pipeline verifies blocks up to
+/// `tip + full_verify_concurrency_limit` ahead of it.
 ///
-/// The attack is possible because:
-/// * The mempool is active while Zebra is "close to tip" (not only at exact tip).
-/// * The download/verification pipeline accepts blocks up to
-///   `tip + full_verify_concurrency_limit` ahead of the current tip.
-/// * `find_verified_unmined_tx` returns the cached result before the normal
-///   expiry validation.
-///
-/// Concretely: while Zebra's best tip is still `H`, the mempool can already
-/// hold a `VerifiedUnminedTx` for a transaction with `nExpiryHeight = H+1`.
-/// If the verifier is simultaneously asked to semantically verify a candidate
-/// block at `H+2` that contains the same transaction, the cache hit fires and
-/// the block passes semantic verification with an expired transaction inside.
+/// That fast path no longer exists, and [`BlockTxVerifier`] holds no mempool handle, so the
+/// bypass can no longer be reconstructed from a block request. What remains testable, and what
+/// this test pins, is the rule the bypass evaded: block verification rejects a transaction whose
+/// `nExpiryHeight` is below the block height.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() {
     let _init_guard = zebra_test::init();
@@ -4333,12 +4337,11 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     let verifier = BlockTxVerifier::new(&network, state.clone());
     let verifier = Buffer::new(verifier, 1);
 
-    // Submit the same transaction as a Block request at expired_block_height
-    // (H+2).  The known_outpoint_hashes set satisfies the dependency check
-    // inside find_verified_unmined_tx so the cache hit fires immediately.
+    // Submit the transaction as a block request at expired_block_height (H+2).
     //
     // The verifier must return Err(TransactionError::ExpiredTransaction)
-    // because H+2 > nExpiryHeight.
+    // because H+2 > nExpiryHeight. The expiry check runs before any state
+    // query, so the mock state service is never called.
     let result = timeout(
         test_timeout(),
         verifier.clone().oneshot(BlockRequest {
@@ -4354,8 +4357,8 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
 
     // Buffer boxes the service error, so downcast to check the specific variant.
     let err = result.expect_err(
-        "expected block verification to fail for a transaction with \
-         expired nExpiryHeight mined via the mempool cache path",
+        "expected block verification to fail for a transaction whose \
+         nExpiryHeight is below the block height",
     );
     let tx_err = err
         .downcast::<TransactionError>()
@@ -4363,7 +4366,7 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     assert!(
         matches!(*tx_err, TransactionError::ExpiredTransaction { .. }),
         "expected ExpiredTransaction error for block at height {expired_block_height:?} \
-         with nExpiryHeight {mempool_height:?} via mempool cache; \
+         with nExpiryHeight {mempool_height:?}; \
          got: {tx_err:?}"
     );
 }

@@ -449,7 +449,7 @@ fn scale_block_height(
     block::Height(new_height_value as u32)
 }
 
-/// Validate a `transaction` using a [`transaction::BlockVerifier`] and return the result.
+/// Validate a `transaction` using a [`transaction::BlockTxVerifier`] and return the result.
 ///
 /// Configures an asynchronous runtime to run the verifier, sets it up and then uses it verify a
 /// `transaction` using the provided parameters.
