@@ -1785,6 +1785,8 @@ async fn add_initial_peers_deadlock() {
     let config = Config {
         initial_mainnet_peers: peers,
         peerset_initial_target_size: PEERSET_INITIAL_TARGET_SIZE,
+        // Only use the configured dummy peers, not addresses from the default peer cache.
+        cache_dir: CacheDir::disabled(),
 
         network: Network::Mainnet,
         listen_addr: unused_v4,
