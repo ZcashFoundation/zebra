@@ -667,8 +667,14 @@ fn read_only_open_with_unreadable_cache_dir_returns_error() {
 fn read_only_open_with_ephemeral_config_returns_error() {
     let network = Network::Mainnet;
 
+    // While `ephemeral: true` should make `cache_dir` irrelevant, we had
+    // instances where a bug would try to read the `cache_dir` before checking
+    // `ephemeral`, so we use a missing directory to ensure that `ephemeral` is
+    // checked first.
+    let parent = tempfile::tempdir().expect("creating a temporary directory should succeed");
     let config = Config {
         ephemeral: true,
+        cache_dir: parent.path().join("missing"),
         ..Config::default()
     };
 
