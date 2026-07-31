@@ -667,7 +667,13 @@ fn read_only_open_with_unreadable_cache_dir_returns_error() {
 fn read_only_open_with_ephemeral_config_returns_error() {
     let network = Network::Mainnet;
 
+    // An existing, readable cache directory, so the open gets past the cache-dir readability
+    // check and reaches the ephemeral conflict check. The default cache directory may not
+    // exist, which returns `ReadOnlyCacheDirUnreadable` instead.
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
     let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
         ephemeral: true,
         ..Config::default()
     };
