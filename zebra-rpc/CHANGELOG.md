@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified the error message returned by `getrawtransaction` for transactions
   that are not in the mempool or best chain
   ([#11014](https://github.com/ZcashFoundation/zebra/pull/11014)).
+- Fixed coinbase cache eviction that rebuilt shielded proofs on every
+  `getblocktemplate` poll when the mempool had fee-paying transactions
+  ([#10954](https://github.com/ZcashFoundation/zebra/pull/10954)).
 
 ## [15.0.0] - 2026-07-27
 
