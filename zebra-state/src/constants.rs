@@ -58,10 +58,12 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 ///   records). The wider records are read in place when the database is opened, so this is a
 ///   major bump that is restorable from the previous major database format version (no resync,
 ///   no data migration).
-/// - 30.0.0: the NU7 tachyon pool anchor and epoch state. Adds the `tachyon_anchors`,
+/// - 30.0.0: the NU7 tachyon pool anchor and epoch state. Adds the `tachyon_anchors`
+///   (anchor → creating height, pruned to the two-epoch stamp-anchor recency window),
 ///   `tachyon_anchor_by_height`, `tachyon_epoch_anchor_by_epoch`, and `tachyon_tachygrams`
+///   (tachygram → revealing height, pruned to the two-epoch scan window)
 ///   column families (initially empty; Tachyon has no note commitment tree, its pool state is a
-///   running anchor, and tachygrams are epoch-scoped). Also widens the history-tree
+///   running anchor). Also widens the history-tree
 ///   `zcash_history::Entry` records from 326 to 399 bytes, because NU7 adds Tachyon fields to
 ///   `zcash_history::NodeData` (read code accepts the legacy widths and zero-pads them up to the
 ///   current width). New CFs are created and the wider records are read in place when the

@@ -67,12 +67,15 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     Ok(())
 }
 
-/// Reject same-epoch duplicate tachygrams against the finalized state (NU7, experimental).
+/// Reject duplicate tachygrams within the two-epoch scan window against the finalized
+/// state (NU7).
 ///
-/// Tachygrams are epoch-scoped: the same tachygram MUST NOT be revealed twice within one epoch,
-/// but may appear again in a later epoch. The finalized working set is pruned when an epoch-first
-/// block is finalized, but can still hold the previous epoch's tachygrams while that block is
-/// only in the non-finalized state, so the epochs are compared instead of trusting pruning.
+/// A tachygram MUST NOT be revealed twice within the block's own epoch or the immediately
+/// preceding one; see [`zebra_chain::tachyon::within_scan_window`] for why the window spans
+/// two epochs, and why a repeat beyond it would imply a nullifier-derivation collision. The
+/// finalized working set is pruned to that window as epoch-first blocks are finalized, but
+/// finalization lags the non-finalized tip, so the epochs are compared instead of trusting
+/// pruning.
 ///
 /// (Duplicates against other non-finalized blocks are rejected during the chain update, and
 /// duplicates within one block during semantic verification.)
@@ -83,14 +86,17 @@ fn no_duplicate_tachygrams_in_finalized_chain(
     finalized_state: &ZebraDb,
 ) -> Result<(), ValidateContextError> {
     let network = finalized_state.network();
-    let block_epoch = zebra_chain::tachyon::epoch(&network, semantically_verified.height);
 
     for transaction in &semantically_verified.block.transactions {
         for tachygram in transaction.tachyon_tachygrams() {
             if let Some(revealed_height) =
                 finalized_state.tachyon_tachygram_revealed_height(&tachygram)
             {
-                if zebra_chain::tachyon::epoch(&network, revealed_height) == block_epoch {
+                if zebra_chain::tachyon::within_scan_window(
+                    &network,
+                    revealed_height,
+                    semantically_verified.height,
+                ) {
                     Err(ValidateContextError::DuplicateTachyonTachygram {
                         tachygram,
                         in_finalized_state: true,

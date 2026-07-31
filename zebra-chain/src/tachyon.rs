@@ -55,6 +55,32 @@ pub fn epoch(network: &Network, height: crate::block::Height) -> Option<u32> {
     pool_height(network, height).map(epoch_of_pool_height)
 }
 
+/// Whether the block at `earlier` falls within the two-epoch consensus scan window of the
+/// block at `later`: `later`'s own epoch or the immediately preceding one.
+///
+/// Consensus rejects a stamp tachygram already revealed in this window, and requires a
+/// stamp's anchor to come from a block in it. The window spans *two* epochs because a
+/// spend publishes a nullifier pair — one for its anchor epoch `e` and one for epoch
+/// `e + 1` — and the next-epoch nullifier is exactly the tachygram a repeat spend of the
+/// same note would have to publish in epoch `e + 1`; scanning the preceding epoch catches
+/// that collision. Beyond the window, nullifiers are epoch-flavored (a fresh GGM leaf per
+/// epoch), so a repeated tachygram would imply a Poseidon collision: consensus neither
+/// tracks nor rejects it.
+///
+/// See the "Tachygrams" chapter of the tachyon book (`Consensus validation`).
+///
+/// Returns `false` if the pool has not started at either height.
+pub fn within_scan_window(
+    network: &Network,
+    earlier: crate::block::Height,
+    later: crate::block::Height,
+) -> bool {
+    match (epoch(network, earlier), epoch(network, later)) {
+        (Some(earlier_epoch), Some(later_epoch)) => earlier_epoch + 1 >= later_epoch,
+        _ => false,
+    }
+}
+
 /// The running anchor of the Tachyon pool after some block.
 ///
 /// Stored as the canonical 32-byte encoding of the underlying Pallas base field
@@ -123,8 +149,9 @@ impl From<zcash_tachyon::Anchor> for Anchor {
 /// A tachygram: a nullifier or note commitment revealed by a Tachyon proof stamp.
 ///
 /// Stored as the canonical 32-byte encoding of the underlying Pallas base field element.
-/// Tachygrams are tracked in the current epoch's working set; revealing the same tachygram
-/// twice within one epoch is invalid.
+/// Tachygrams are tracked in a two-epoch working set: revealing a tachygram already revealed
+/// in the block's own epoch or the immediately preceding one is invalid (see
+/// [`within_scan_window`]).
 #[derive(Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tachygram(pub [u8; 32]);
 

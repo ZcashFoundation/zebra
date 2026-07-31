@@ -214,29 +214,37 @@ pub struct ChainInner {
     pub(crate) ironwood_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
-    /// The Tachyon pool anchors created by `blocks` (NU7, experimental).
+    /// The Tachyon pool anchors created by `blocks`, and the heights that created them (NU7).
     ///
     /// Tachyon has no note commitment tree: its pool state is a running anchor, so the anchor
     /// plays both the tree and root role. Only NU7-onward anchors are tracked; the maps stay
-    /// empty before NU7 activation (and in builds without tachyon support).
+    /// empty before NU7 activation.
+    ///
+    /// The height is needed because a proof stamp's anchor must come from a block within the
+    /// two-epoch scan window (see [`tachyon::within_scan_window`]).
     ///
     /// When a chain is forked from a finalized tip with an active Tachyon pool, also contains
     /// the finalized tip anchor.
-    pub(crate) tachyon_anchors: MultiSet<tachyon::Anchor>,
+    pub(crate) tachyon_anchors: HashMap<tachyon::Anchor, Vec<block::Height>>,
     /// The Tachyon pool anchor after each block in `blocks` (NU7 onward).
     pub(crate) tachyon_anchors_by_height: BTreeMap<block::Height, tachyon::Anchor>,
     /// The Tachyon epoch-boundary anchors created by `blocks`, by epoch index (NU7 onward).
     ///
     /// An entry is added when an epoch-first block is committed to this chain: the anchor after
     /// that block's epoch lift, before any of its stamps (the epoch's initial state, which spend
-    /// lineages root at).
+    /// lineages root at *inside* proofs).
+    ///
+    /// Epoch-boundary anchors are not valid published stamp anchors: they are intra-block pool
+    /// states, and consensus only acknowledges end-of-block anchors. Proofs rooted at a boundary
+    /// are lifted to an end-of-block anchor before publication.
     pub(crate) tachyon_epoch_anchors_by_epoch: BTreeMap<u32, tachyon::Anchor>,
     /// The tachygrams revealed by proof stamps in `blocks`, and the heights that revealed them
     /// (NU7 onward).
     ///
-    /// Tachygrams are epoch-scoped: revealing the same tachygram twice in one epoch is invalid,
-    /// but the same tachygram may appear again in a later epoch, so each tachygram maps to every
-    /// height in this chain that revealed it.
+    /// Tachygrams are scanned over a two-epoch window: revealing a tachygram already revealed
+    /// in the block's own epoch or the immediately preceding one is invalid (see
+    /// [`tachyon::within_scan_window`]). Each tachygram maps to every height in this chain that
+    /// revealed it.
     pub(crate) tachyon_tachygrams: HashMap<tachyon::Tachygram, Vec<block::Height>>,
     /// The tachygrams revealed by each block in `blocks`, used to revert
     /// [`ChainInner::tachyon_tachygrams`] on forks and finalization.
@@ -330,7 +338,7 @@ impl Chain {
             ironwood_anchors_by_height: Default::default(),
             ironwood_trees_by_height: Default::default(),
             ironwood_subtrees: Default::default(),
-            tachyon_anchors: MultiSet::new(),
+            tachyon_anchors: Default::default(),
             tachyon_anchors_by_height: Default::default(),
             tachyon_epoch_anchors_by_epoch: Default::default(),
             tachyon_tachygrams: Default::default(),
@@ -1408,7 +1416,7 @@ impl Chain {
             None,
             "incorrect overwrite of tachyon anchor: anchors must be reverted then inserted",
         );
-        self.tachyon_anchors.insert(anchor);
+        self.tachyon_anchors.entry(anchor).or_default().push(height);
     }
 
     /// Removes the Tachyon pool anchor indexes at `height`.
@@ -1422,7 +1430,7 @@ impl Chain {
     fn remove_tachyon_anchor(&mut self, position: RevertPosition, height: Height) {
         trace!(?height, ?position, "removing tachyon anchor");
 
-        let removed_anchors: Vec<tachyon::Anchor> = if position == RevertPosition::Root {
+        let removed_anchors: Vec<(Height, tachyon::Anchor)> = if position == RevertPosition::Root {
             // Remove all anchors at or below the reverted root block.
             // This makes sure the temporary anchors from finalized tip forks are removed.
             let removed = self
@@ -1434,22 +1442,28 @@ impl Chain {
                 self.tachyon_anchors_by_height.remove(height);
             }
             removed
-                .into_iter()
-                .map(|(_height, anchor)| anchor)
-                .collect()
         } else {
             // Just remove the reverted tip anchor.
             self.tachyon_anchors_by_height
                 .remove(&height)
+                .map(|anchor| (height, anchor))
                 .into_iter()
                 .collect()
         };
 
-        for anchor in removed_anchors {
-            assert!(
-                self.tachyon_anchors.remove(&anchor),
-                "anchor must be present if it was added to the by-height index",
-            );
+        for (anchor_height, anchor) in removed_anchors {
+            let heights = self
+                .tachyon_anchors
+                .get_mut(&anchor)
+                .expect("anchor must be present if it was added to the by-height index");
+            let index = heights
+                .iter()
+                .position(|&h| h == anchor_height)
+                .expect("anchor height must be present if it was added to the by-height index");
+            heights.swap_remove(index);
+            if heights.is_empty() {
+                self.tachyon_anchors.remove(&anchor);
+            }
         }
     }
 
@@ -1467,7 +1481,11 @@ impl Chain {
 
     /// Adds the Tachyon epoch-boundary `anchor` for `epoch` to the epoch anchor index.
     ///
-    /// Only called from tachyon-enabled builds (the epoch boundary comes from the anchor fold).
+    /// Epoch-boundary anchors are *not* added to the valid stamp-anchor set: they are
+    /// intra-block pool states (the lift happens at the start of the epoch-first block,
+    /// before its stamps), and consensus only acknowledges end-of-block anchors. Spend
+    /// lineages root at boundaries inside proofs, then lift to an end-of-block anchor
+    /// before publication.
     fn add_tachyon_epoch_anchor(&mut self, epoch: u32, anchor: tachyon::Anchor) {
         trace!(?epoch, ?anchor, "adding tachyon epoch anchor");
 
@@ -1476,10 +1494,6 @@ impl Chain {
             None,
             "incorrect overwrite of tachyon epoch anchor: epochs start at most once per chain",
         );
-
-        // Epoch-boundary anchors are valid proof-stamp anchors (spend lineages root at them),
-        // but are no block's post anchor, so they join the anchor membership set separately.
-        self.tachyon_anchors.insert(anchor);
     }
 
     /// Removes the Tachyon epoch-boundary anchor created by the block at `height`, if that
@@ -1489,43 +1503,34 @@ impl Chain {
             return;
         };
 
-        let removed_anchors: Vec<tachyon::Anchor> = if position == RevertPosition::Root {
+        if position == RevertPosition::Root {
             // Remove the epoch anchors created at or below the reverted root block; they are
             // now (or will be) recorded in the finalized state.
             let root_epoch = tachyon::epoch_of_pool_height(pool_height);
-            let removed = self
+            let removed_epochs = self
                 .tachyon_epoch_anchors_by_epoch
                 .range(..=root_epoch)
-                .map(|(&epoch, &anchor)| (epoch, anchor))
+                .map(|(&epoch, _anchor)| epoch)
                 .collect::<Vec<_>>();
-            for (epoch, _anchor) in &removed {
-                self.tachyon_epoch_anchors_by_epoch.remove(epoch);
+            for epoch in removed_epochs {
+                self.tachyon_epoch_anchors_by_epoch.remove(&epoch);
             }
-            removed.into_iter().map(|(_epoch, anchor)| anchor).collect()
         } else if tachyon::is_epoch_first(pool_height) {
             self.tachyon_epoch_anchors_by_epoch
-                .remove(&tachyon::epoch_of_pool_height(pool_height))
-                .into_iter()
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        for anchor in removed_anchors {
-            assert!(
-                self.tachyon_anchors.remove(&anchor),
-                "epoch anchor must be in the membership set if it was in the epoch index",
-            );
+                .remove(&tachyon::epoch_of_pool_height(pool_height));
         }
     }
 
     /// Adds the tachygrams revealed by the block at `height` to the epoch working set,
     /// rejecting same-epoch duplicates.
     ///
-    /// The same tachygram may be revealed again in a later epoch; only a duplicate within the
-    /// block's own epoch is an error. Duplicates within one block are rejected during semantic
-    /// verification (block coherence), and duplicates against the finalized state during
-    /// contextual validation, so this checks this chain's other non-finalized blocks.
+    /// A duplicate within the two-epoch scan window — the block's own epoch or the immediately
+    /// preceding one — is an error (see [`tachyon::within_scan_window`] for why the window spans
+    /// two epochs). A repeat beyond the window would imply a Poseidon collision in the
+    /// epoch-flavored nullifier derivation, so it is not tracked or rejected. Duplicates within
+    /// one block are rejected during semantic verification (block coherence), and duplicates
+    /// against the finalized state during contextual validation, so this checks this chain's
+    /// other non-finalized blocks.
     fn add_tachyon_tachygrams(
         &mut self,
         height: Height,
@@ -1536,7 +1541,6 @@ impl Chain {
         }
 
         let network = self.network.clone();
-        let block_epoch = tachyon::epoch(&network, height);
 
         for &tachygram in &tachygrams {
             trace!(?tachygram, ?height, "adding tachygram");
@@ -1545,7 +1549,7 @@ impl Chain {
 
             if revealed_heights
                 .iter()
-                .any(|&revealed| tachyon::epoch(&network, revealed) == block_epoch)
+                .any(|&revealed| tachyon::within_scan_window(&network, revealed, height))
             {
                 return Err(ValidateContextError::DuplicateTachyonTachygram {
                     tachygram,
@@ -3137,7 +3141,7 @@ mod tachyon_tests {
     }
 
     #[test]
-    fn cross_epoch_duplicate_tachygram_is_allowed() {
+    fn duplicate_tachygram_scan_window_spans_two_epochs() {
         let mut chain = nu7_chain();
 
         // Epoch 0 (chain heights 10..10+EPOCH_LENGTH).
@@ -3145,14 +3149,25 @@ mod tachyon_tests {
             .add_tachyon_tachygrams(Height(20), vec![tachygram(1)])
             .expect("first reveal is accepted");
 
-        // The same tachygram in epoch 1 is a fresh reveal.
-        let epoch_1_height = epoch_first_height(1);
-        chain
-            .add_tachyon_tachygrams(epoch_1_height, vec![tachygram(1)])
-            .expect("the same tachygram is accepted again in a later epoch");
+        // The same tachygram in the immediately following epoch is still within the
+        // two-epoch scan window: a repeat there is exactly what a double spend's
+        // next-epoch nullifier would look like.
+        let result = chain.add_tachyon_tachygrams(epoch_first_height(1), vec![tachygram(1)]);
+        assert!(
+            result.is_err(),
+            "adjacent-epoch duplicate must be rejected: {result:?}",
+        );
 
-        // But a second reveal within epoch 1 is rejected.
-        let result = chain.add_tachyon_tachygrams(Height(epoch_1_height.0 + 1), vec![tachygram(1)]);
+        // Two epochs later the tachygram has left the scan window. (An honest repeat
+        // out here would imply a nullifier-derivation collision, but consensus no
+        // longer tracks it.)
+        chain
+            .add_tachyon_tachygrams(epoch_first_height(2), vec![tachygram(1)])
+            .expect("a tachygram outside the two-epoch window is accepted again");
+
+        // And the fresh reveal re-arms the window.
+        let result =
+            chain.add_tachyon_tachygrams(Height(epoch_first_height(2).0 + 1), vec![tachygram(1)]);
         assert!(result.is_err(), "same-epoch duplicate must be rejected");
     }
 

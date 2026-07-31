@@ -235,9 +235,7 @@ impl Block {
     }
 
     /// Count how many Tachyon transactions exist in a block,
-    /// i.e. transactions carrying a tachyon bundle (NU7, experimental).
-    ///
-    /// Returns zero when tachyon support is compiled out.
+    /// i.e. transactions carrying a tachyon bundle (NU7).
     pub fn tachyon_transactions_count(&self) -> u64 {
         self.transactions
             .iter()

@@ -145,10 +145,16 @@ impl ZebraDb {
         self.db.zs_contains(&ironwood_anchors, &ironwood_anchor)
     }
 
-    /// Returns `true` if the finalized state contains `tachyon_anchor` (NU7, experimental).
-    pub fn contains_tachyon_anchor(&self, tachyon_anchor: &tachyon::Anchor) -> bool {
+    /// Returns the height of the finalized block whose end-of-block anchor is
+    /// `tachyon_anchor`, if it is within the retained two-epoch window (NU7).
+    ///
+    /// Anchors older than the previous epoch are pruned along with the tachygram working
+    /// set: they can no longer be referenced by proof stamps (see
+    /// [`tachyon::within_scan_window`]).
+    #[allow(clippy::unwrap_in_result)]
+    pub fn tachyon_anchor_height(&self, tachyon_anchor: &tachyon::Anchor) -> Option<Height> {
         let tachyon_anchors = self.db.cf_handle("tachyon_anchors").unwrap();
-        self.db.zs_contains(&tachyon_anchors, &tachyon_anchor)
+        self.db.zs_get(&tachyon_anchors, tachyon_anchor)
     }
 
     /// Returns the Tachyon pool anchor after the finalized tip, or the default (pre-pool)
@@ -162,12 +168,12 @@ impl ZebraDb {
     }
 
     /// Returns the height of the finalized block that revealed `tachygram`, if it is in the
-    /// current epoch's working set (NU7, experimental).
+    /// retained working set (NU7).
     ///
-    /// The working set is pruned when an epoch-first block is finalized, so any returned height
-    /// is from the epoch of the finalized tip. Callers must still compare epochs: while an
-    /// epoch-first block is only in the non-finalized state, this set still holds the previous
-    /// epoch's tachygrams.
+    /// The working set retains the finalized tip's epoch and the one before it; older entries
+    /// are pruned when an epoch-first block is finalized. Callers must still compare epochs
+    /// (see [`tachyon::within_scan_window`]): finalization lags the non-finalized tip, so this
+    /// set can hold entries older than the tip block's two-epoch scan window.
     #[allow(clippy::unwrap_in_result)]
     pub fn tachyon_tachygram_revealed_height(
         &self,
@@ -680,12 +686,14 @@ impl DiskWriteBatch {
         self.prepare_tachyon_tachygram_batch(zebra_db, finalized);
     }
 
-    /// Prepare a database batch containing `finalized.block`'s tachygrams (NU7, experimental),
-    /// pruning the previous epoch's working set when the block starts a new epoch.
+    /// Prepare a database batch containing `finalized.block`'s tachygrams (NU7), pruning
+    /// entries that leave the two-epoch scan window when the block starts a new epoch.
     ///
-    /// Tachygrams are epoch-scoped: the finalized working set only needs the current epoch, so
-    /// finalizing an epoch-first block deletes every earlier entry (all of which belong to
-    /// previous epochs) before inserting the new block's tachygrams.
+    /// Tachygrams are scanned over a two-epoch window — the block's own epoch and the one
+    /// before it (see [`tachyon::within_scan_window`]) — so finalizing the first block of
+    /// epoch `E` prunes every entry from epochs before `E - 1`. The stamp-anchor membership
+    /// index has the same two-epoch lifetime (stamps cannot reference older anchors), so it
+    /// is pruned in the same pass.
     pub fn prepare_tachyon_tachygram_batch(
         &mut self,
         zebra_db: &ZebraDb,
@@ -710,14 +718,33 @@ impl DiskWriteBatch {
         let tachyon_tachygrams = zebra_db.db.cf_handle("tachyon_tachygrams").unwrap();
 
         if starts_epoch {
-            // Prune the previous epoch's tachygrams. The upper bound is exclusive, but
-            // `[0xff; 32]` is not the canonical encoding of any field element, so no tachygram
-            // can have that key.
-            self.zs_delete_range(
-                &tachyon_tachygrams,
-                tachyon::Tachygram([0x00; 32]),
-                tachyon::Tachygram([0xff; 32]),
-            );
+            // This block starts epoch `E`, so entries from blocks below the previous epoch's
+            // first height (`height - EPOCH_LENGTH`) belong to epochs before `E - 1` and leave
+            // the scan window. For `E <= 1` the cutoff is at or below the pool's first block,
+            // and the filters match nothing. Both column families hold at most two epochs of
+            // entries, and this scan runs once per epoch.
+            let cutoff = Height(height.0.saturating_sub(tachyon::EPOCH_LENGTH));
+
+            let expired_tachygrams: Vec<tachyon::Tachygram> = zebra_db
+                .db
+                .zs_forward_range_iter(&tachyon_tachygrams, ..)
+                .filter(|&(_, revealed): &(tachyon::Tachygram, Height)| revealed < cutoff)
+                .map(|(tachygram, _)| tachygram)
+                .collect();
+            for tachygram in expired_tachygrams {
+                self.zs_delete(&tachyon_tachygrams, tachygram);
+            }
+
+            let tachyon_anchors = zebra_db.db.cf_handle("tachyon_anchors").unwrap();
+            let expired_anchors: Vec<tachyon::Anchor> = zebra_db
+                .db
+                .zs_forward_range_iter(&tachyon_anchors, ..)
+                .filter(|&(_, anchor_height): &(tachyon::Anchor, Height)| anchor_height < cutoff)
+                .map(|(anchor, _)| anchor)
+                .collect();
+            for anchor in expired_anchors {
+                self.zs_delete(&tachyon_anchors, anchor);
+            }
         }
 
         for tachygram in block_tachygrams {
@@ -848,8 +875,9 @@ impl DiskWriteBatch {
         }
 
         // Store the Tachyon epoch-boundary anchor when finalizing an epoch-first block.
-        // Boundary anchors are valid proof-stamp anchors (spend lineages root at them), but
-        // are no block's post anchor, so they also join the anchor membership index.
+        // Boundary anchors are *not* valid published stamp anchors (they are intra-block
+        // pool states; consensus only acknowledges end-of-block anchors), so they are
+        // tracked only in the per-epoch index, not the stamp-anchor membership index.
         if let Some(epoch_anchor) = note_commitment_trees.tachyon_epoch_anchor {
             let epoch = tachyon::epoch(&zebra_db.network(), *height)
                 .expect("blocks carrying an epoch anchor are NU7-onward");
@@ -857,13 +885,11 @@ impl DiskWriteBatch {
                 .db
                 .cf_handle("tachyon_epoch_anchor_by_epoch")
                 .unwrap();
-            let tachyon_anchors = zebra_db.db.cf_handle("tachyon_anchors").unwrap();
             self.zs_insert(
                 &tachyon_epoch_anchor_by_epoch,
                 TachyonEpoch(epoch),
                 epoch_anchor,
             );
-            self.zs_insert(&tachyon_anchors, epoch_anchor, ());
         }
 
         self.update_history_tree(zebra_db, history_tree);
@@ -1049,7 +1075,8 @@ impl DiskWriteBatch {
     // Tachyon anchor methods (NU7, experimental; Tachyon has no note commitment tree)
 
     /// Inserts or overwrites the Tachyon pool anchor at the given [`Height`],
-    /// and adds it to the anchor membership index.
+    /// and adds it to the anchor membership index (which records the height, so the
+    /// stamp-anchor check can enforce the two-epoch recency window).
     pub fn create_tachyon_anchor(
         &mut self,
         zebra_db: &ZebraDb,
@@ -1059,7 +1086,7 @@ impl DiskWriteBatch {
         let tachyon_anchors = zebra_db.db.cf_handle("tachyon_anchors").unwrap();
         let tachyon_anchor_by_height = zebra_db.db.cf_handle("tachyon_anchor_by_height").unwrap();
 
-        self.zs_insert(&tachyon_anchors, anchor, ());
+        self.zs_insert(&tachyon_anchors, anchor, height);
         self.zs_insert(&tachyon_anchor_by_height, height, anchor);
     }
 

@@ -167,11 +167,20 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
         );
     }
 
-    // Tachyon proof stamps (NU7, experimental)
+    // Tachyon proof stamps (NU7)
     //
-    // A proof stamp's anchor MUST be the Tachyon pool anchor after some earlier block, or an
-    // epoch-boundary anchor (the lift no block's post anchor equals, which spend lineages root
-    // at); both are tracked in the anchor membership indexes.
+    // A proof stamp's anchor MUST be the Tachyon pool anchor after some earlier block (an
+    // end-of-block anchor), from a block in the two-epoch scan window: the stamp's own epoch
+    // or the immediately preceding one.
+    //
+    // End-of-block only: epoch-boundary anchors (and other intra-block pool states) are not
+    // valid published stamp anchors — spend lineages root at boundaries *inside* proofs, then
+    // lift to an end-of-block anchor before publication (see the tachyon book, "Anchor").
+    //
+    // Two-epoch recency: consensus retains tachygrams for the current and previous epoch and
+    // must be able to scan every block of the anchor's epoch, so older anchors cannot be
+    // referenced (see the tachyon book, "Tachygrams: Consensus validation", and
+    // [`zebra_chain::tachyon::within_scan_window`]).
     //
     // Tachyon has no note commitment tree: the pool state is a running anchor, so this
     // is the tachyon analogue of the "earlier treestate" anchor rules above. Pointer
@@ -184,6 +193,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     if let Some(tachyon_shielded_data) = transaction.tachyon_shielded_data() {
         if let zcash_tachyon::TachyonBundle::Proven(bundle) = &tachyon_shielded_data.0 {
             let anchor = zebra_chain::tachyon::Anchor::from(bundle.stamp.anchor);
+            let network = finalized_state.network();
 
             tracing::debug!(
                 ?anchor,
@@ -192,10 +202,27 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
                 "observed tachyon anchor",
             );
 
-            if !parent_chain
-                .map(|chain| chain.tachyon_anchors.contains(&anchor))
-                .unwrap_or(false)
-                && !finalized_state.contains_tachyon_anchor(&anchor)
+            let anchor_in_window = |anchor_height: Height| match height {
+                Some(height) => {
+                    zebra_chain::tachyon::within_scan_window(&network, anchor_height, height)
+                }
+                // Mempool transactions have no block height yet, so only anchor membership
+                // is checked here; the two-epoch recency window is enforced when the
+                // transaction is committed in a block.
+                None => true,
+            };
+
+            let in_parent_chain = parent_chain.is_some_and(|chain| {
+                chain
+                    .tachyon_anchors
+                    .get(&anchor)
+                    .is_some_and(|heights| heights.iter().copied().any(anchor_in_window))
+            });
+
+            if !in_parent_chain
+                && !finalized_state
+                    .tachyon_anchor_height(&anchor)
+                    .is_some_and(anchor_in_window)
             {
                 return Err(ValidateContextError::UnknownTachyonAnchor {
                     anchor,
