@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
 
+### Security
+
+- Inbound connections are canonicalized when they are accepted, so an IPv4 peer that connects to a
+  dual-stack listener as an IPv4-mapped IPv6 address (`::ffff:A.B.C.D`) is keyed on its canonical
+  IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
+  peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
+  twice towards the per-IP inbound connection limit
+  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
 This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
