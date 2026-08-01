@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
+  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
+  object is only present on Mainnet, where end of support is enforced
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+
 ### Added
 
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
@@ -29,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
+- Inbound connections are canonicalized when they are accepted, so an IPv4 peer that connects to a
+  dual-stack listener as an IPv4-mapped IPv6 address (`::ffff:A.B.C.D`) is keyed on its canonical
+  IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
+  peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
+  twice towards the per-IP inbound connection limit
+  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
 - Score misbehavior for peers that advertise a block containing duplicate transactions, matching
   the treatment of the other definitive block-validity violations
   ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))

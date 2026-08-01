@@ -194,6 +194,28 @@ pub trait Rpc {
     #[method(name = "getinfo")]
     async fn get_info(&self) -> Result<GetInfoResponse>;
 
+    /// Returns end of support information for this node release, as a
+    /// [`GetDeprecationInfoResponse`] JSON struct.
+    ///
+    /// zcashd reference: [`getdeprecationinfo`](https://zcash.github.io/rpc/getdeprecationinfo.html)
+    /// method: post
+    /// tags: network
+    ///
+    /// # Notes
+    ///
+    /// As in zcashd, the `end_of_service` object is only present on Mainnet, where end of
+    /// support is enforced. Zebra reports the estimated last height this release supports in
+    /// `end_of_service.block_height`; the node halts when the tip goes past it.
+    ///
+    /// Some fields from the zcashd reference are missing from Zebra's response: `version` and
+    /// `subversion` are available from `getinfo`, `deprecationheight` is deprecated in zcashd,
+    /// and Zebra does not have zcashd's feature deprecation framework.
+    ///
+    /// The estimate assumes the node is synced to the network tip; during initial sync it is
+    /// significantly overestimated.
+    #[method(name = "getdeprecationinfo")]
+    async fn get_deprecation_info(&self) -> Result<GetDeprecationInfoResponse>;
+
     /// Returns blockchain state information, as a [`GetBlockchainInfoResponse`] JSON struct.
     ///
     /// zcashd reference: [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html)
@@ -836,6 +858,10 @@ where
     /// no matter what the estimated height or local clock is.
     debug_force_finished_sync: bool,
 
+    /// The estimated last height this node release supports before its end of support halt,
+    /// if end of support is enforced on `network`. Reported by the `getdeprecationinfo` RPC.
+    end_of_support_height: Option<Height>,
+
     // Services
     //
     /// A handle to the mempool service.
@@ -950,6 +976,7 @@ where
             user_agent,
             network: network.clone(),
             debug_force_finished_sync,
+            end_of_support_height: None,
             mempool: mempool.clone(),
             state: state.clone(),
             read_state: read_state.clone(),
@@ -973,6 +1000,14 @@ where
     /// Returns a reference to the configured network.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// Sets the estimated end of support height reported by the `getdeprecationinfo` RPC.
+    ///
+    /// When unset, or set to `None`, `getdeprecationinfo` omits the `end_of_service` object.
+    pub fn with_end_of_support_height(mut self, end_of_support_height: Option<Height>) -> Self {
+        self.end_of_support_height = end_of_support_height;
+        self
     }
 }
 
@@ -1037,6 +1072,44 @@ where
         };
 
         Ok(response)
+    }
+
+    async fn get_deprecation_info(&self) -> Result<GetDeprecationInfoResponse> {
+        let end_of_service = self
+            .end_of_support_height
+            // End of support is only enforced on Mainnet, and the zcashd-compatible response
+            // omits `end_of_service` on other networks, even if a height was configured.
+            .filter(|_| self.network == Network::Mainnet)
+            .map(|end_of_support_height| {
+                // Estimate the halt time from the current tip and target block spacing. If the
+                // tip is not available yet, fall back to the highest compiled-in checkpoint,
+                // which is close to the network tip at release time.
+                let tip_height = self
+                    .latest_chain_tip
+                    .best_tip_height()
+                    .unwrap_or_else(|| self.network.checkpoint_list().max_height());
+                // Use the spacing at the end of support height: it is always post-Blossom, so
+                // this stays correct even when the tip is missing or before Blossom.
+                let target_block_spacing =
+                    NetworkUpgrade::target_spacing_for_height(&self.network, end_of_support_height);
+                // If the tip is already past the end of support height, the estimate is in the
+                // past, but never negative.
+                let remaining_blocks = i64::from(end_of_support_height.0) - i64::from(tip_height.0);
+                let estimated_time = Utc::now()
+                    .timestamp()
+                    .saturating_add(
+                        remaining_blocks.saturating_mul(target_block_spacing.num_seconds()),
+                    )
+                    .saturating_sub(END_OF_SERVICE_ESTIMATE_SAFETY_MARGIN)
+                    .max(0);
+
+                EndOfService {
+                    block_height: end_of_support_height.0,
+                    estimated_time,
+                }
+            });
+
+        Ok(GetDeprecationInfoResponse { end_of_service })
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -3506,6 +3579,41 @@ impl GetInfoResponse {
 
         Some(version_number)
     }
+}
+
+/// The number of seconds subtracted from the `end_of_service.estimated_time` reported by
+/// `getdeprecationinfo`.
+///
+/// Block times vary, so the halt can happen earlier than a spacing-based estimate. Reporting the
+/// estimate a day early gives consumers time to act before the actual halt.
+const END_OF_SERVICE_ESTIMATE_SAFETY_MARGIN: i64 = 24 * 60 * 60;
+
+/// Response to a `getdeprecationinfo` RPC request.
+///
+/// See the notes for the [`Rpc::get_deprecation_info` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct GetDeprecationInfoResponse {
+    /// End of service information for this node release. Only present on Mainnet, where end of
+    /// support is enforced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_of_service: Option<EndOfService>,
+}
+
+/// The `end_of_service` object in a [`GetDeprecationInfoResponse`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct EndOfService {
+    /// The estimated last height this server version supports, matching zcashd's threshold
+    /// semantics. The node halts when the chain tip goes past this height.
+    #[getter(copy)]
+    block_height: u32,
+
+    /// The approximate time of the end of support halt, in seconds since epoch, estimated from
+    /// the current chain tip height and the target block spacing.
+    ///
+    /// Reported 24 hours earlier than the spacing-based estimate, so consumers are warned early
+    /// rather than late when block times vary.
+    #[getter(copy)]
+    estimated_time: i64,
 }
 
 /// Type alias for the array of `GetBlockchainInfoBalance` objects
