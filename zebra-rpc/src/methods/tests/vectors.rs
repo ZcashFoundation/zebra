@@ -116,6 +116,189 @@ async fn rpc_getinfo() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Without a configured end of support height, `end_of_service` is not present.
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+
+    let end_of_support_height = 3_546_440;
+    let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, end_of_support_height);
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+    assert!(end_of_service.estimated_time > Utc::now().timestamp());
+    assert!(end_of_service.estimated_time <= Utc::now().timestamp() + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    let tip_height = Height(3_000_000);
+    latest_chain_tip_sender.send_best_tip_height(tip_height);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let end_of_support_height = Height(3_546_440);
+    let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
+
+    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
+    // and the estimate is reported 24 hours early.
+    let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+
+    let before = Utc::now().timestamp();
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+    let after = Utc::now().timestamp();
+
+    assert_eq!(end_of_service.block_height, end_of_support_height.0);
+    assert!(end_of_service.estimated_time >= before + expected_offset);
+    assert!(end_of_service.estimated_time <= after + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_omits_end_of_service_off_mainnet() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Network::new_default_testnet(),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Even if an end of support height is configured, `end_of_service` is only reported on
+    // Mainnet, matching zcashd and the RPC documentation.
+    let rpc = rpc.with_end_of_support_height(Some(Height(100)));
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimated_time_is_never_negative() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // A tip so far past the end of support height that an unclamped estimate would be negative.
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    latest_chain_tip_sender.send_best_tip_height(Height::MAX);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let rpc = rpc.with_end_of_support_height(Some(Height(1)));
+
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, 1);
+    // The estimate is clamped to zero instead of going negative.
+    assert_eq!(end_of_service.estimated_time, 0);
+}
+
 // Helper function that returns the nonce, final sapling root and
 // block commitments of a given Block.
 async fn get_block_data(
