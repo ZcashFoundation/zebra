@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
+  `ephemeral = true`, even when the configured `cache_dir` is missing or unreadable. Previously the
+  cache directory was checked first, so this configuration error surfaced as
+  `StateInitError::ReadOnlyCacheDirUnreadable`.
+
 ## [12.0.1] - 2026-07-27
 
 ### Changed
