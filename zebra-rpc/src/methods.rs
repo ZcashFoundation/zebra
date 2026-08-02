@@ -3029,7 +3029,10 @@ where
                 .position(|zcashd_receiver| zcashd_receiver == receiver)
         });
 
-        let is_nu6 = NetworkUpgrade::current(&net, height) == NetworkUpgrade::Nu6;
+        // Every upgrade from NU6 onwards uses the NU6-era funding stream metadata, so this is an
+        // ordering comparison: an exact match would fall back to pre-NU6 metadata on NU6.1 and
+        // later. `NetworkUpgrade`'s variants are ordered by activation height.
+        let is_post_nu6 = NetworkUpgrade::current(&net, height) >= NetworkUpgrade::Nu6;
 
         // Format the funding streams and lockbox streams
         let [funding_streams, lockbox_streams] =
@@ -3039,7 +3042,10 @@ where
                     .map(|(receiver, value)| {
                         let address = funding_stream_address(height, &net, receiver);
                         types::subsidy::FundingStream::new_internal(
-                            is_nu6, receiver, value, address,
+                            is_post_nu6,
+                            receiver,
+                            value,
+                            address,
                         )
                     })
                     .collect()

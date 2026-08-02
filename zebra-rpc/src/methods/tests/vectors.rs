@@ -3533,3 +3533,128 @@ async fn rpc_get_standard_fee() {
     assert_eq!(response.standard_fee(), 5000);
     assert_eq!(response.version(), 0);
 }
+
+/// Every upgrade from NU6 onwards must use the NU6-era funding stream metadata.
+///
+/// An exact `== Nu6` comparison falls back to pre-NU6 metadata on NU6.1 and later, which became
+/// the default Mainnet behaviour at the NU6.3 activation height.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocksubsidy_uses_nu6_metadata_for_nu6_and_later() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // The label that `FundingStreamReceiver::MajorGrants` carries in each era.
+    const POST_NU6_MAJOR_GRANTS: &str = "Zcash Community Grants NU6";
+    const PRE_NU6_MAJOR_GRANTS: &str = "Major Grants";
+
+    for upgrade in [
+        NetworkUpgrade::Nu6,
+        NetworkUpgrade::Nu6_1,
+        NetworkUpgrade::Nu6_2,
+        NetworkUpgrade::Nu6_3,
+    ] {
+        let Some(height) = upgrade.activation_height(&Mainnet) else {
+            continue;
+        };
+
+        let response = rpc
+            .get_block_subsidy(Some(height.0))
+            .await
+            .expect("getblocksubsidy should succeed at an activated upgrade height");
+
+        // Without this the assertions below would vacuously pass on an empty response.
+        let major_grants = response
+            .funding_streams()
+            .iter()
+            .find(|stream| stream.recipient() == POST_NU6_MAJOR_GRANTS)
+            .or_else(|| {
+                response
+                    .funding_streams()
+                    .iter()
+                    .find(|stream| stream.recipient() == PRE_NU6_MAJOR_GRANTS)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "{upgrade:?} at height {height:?} must return a major grants funding stream, \
+                     otherwise this test cannot detect the metadata era; got: {:?}",
+                    response.funding_streams()
+                )
+            });
+
+        assert_eq!(
+            major_grants.recipient(),
+            POST_NU6_MAJOR_GRANTS,
+            "{upgrade:?} at height {height:?} is in the NU6 funding regime, so it must use \
+             NU6-era metadata, not the pre-NU6 label"
+        );
+    }
+}
+
+/// Upgrades before NU6 must keep the pre-NU6 funding stream metadata.
+///
+/// Guards against widening the NU6 check so far that it also captures earlier upgrades.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocksubsidy_keeps_pre_nu6_metadata_before_nu6() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let nu5_height = NetworkUpgrade::Nu5
+        .activation_height(&Mainnet)
+        .expect("NU5 is activated on Mainnet");
+
+    let response = rpc
+        .get_block_subsidy(Some(nu5_height.0))
+        .await
+        .expect("getblocksubsidy should succeed at the NU5 activation height");
+
+    assert!(
+        response
+            .funding_streams()
+            .iter()
+            .any(|stream| stream.recipient() == "Major Grants"),
+        "NU5 predates the NU6 funding regime, so it must keep the pre-NU6 label; got: {:?}",
+        response.funding_streams()
+    );
+}

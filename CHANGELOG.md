@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- `getblocksubsidy` now returns NU6-era funding stream metadata for every upgrade from NU6
+  onwards. An exact comparison against NU6 meant heights governed by NU6.1 and later were
+  labelled with pre-NU6 recipient names and specification URLs, even though they are inside the
+  NU6-style funding and lockbox regime. Funding stream amounts were never affected
+  ([#11029](https://github.com/ZcashFoundation/zebra/issues/11029))
+
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
