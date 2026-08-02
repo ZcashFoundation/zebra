@@ -416,7 +416,10 @@ impl AddressBook {
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         if self.bans_by_ip.contains_key(&change.addr().ip()) {
-            tracing::warn!(
+            // This is a routine rejection, not an error: remote peers can gossip
+            // a banned address at any time, so logging it at `warn` lets them
+            // choose how much of the operator's log this fills (#11134).
+            tracing::debug!(
                 ?change,
                 "attempted to add a banned peer addr to address book"
             );
@@ -461,11 +464,15 @@ impl AddressBook {
                     most_recent_by_ip.remove(&banned_ip);
                 }
 
+                // `by_addr` is ordered by reconnection order, not grouped by IP,
+                // so entries for the banned IP can be separated by other IPs.
+                // Scan the whole book, otherwise a surviving entry is selected as
+                // a candidate forever, because the ban check above stops its state
+                // from ever changing (#11134).
                 let banned_addrs: Vec<_> = self
                     .by_addr
                     .descending_keys()
-                    .skip_while(|addr| addr.ip() != banned_ip)
-                    .take_while(|addr| addr.ip() == banned_ip)
+                    .filter(|addr| addr.ip() == banned_ip)
                     .cloned()
                     .collect();
 
@@ -647,12 +654,13 @@ impl AddressBook {
     ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        // Skip live peers, and peers pending a reconnect attempt.
+        // Skip live peers, banned peers, and peers pending a reconnect attempt.
         // The peers are already stored in sorted order.
         self.by_addr
             .descending_values()
             .filter(move |peer| {
-                peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
+                !self.bans_by_ip.contains_key(&peer.addr.ip())
+                    && peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
                     && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
             .cloned()
