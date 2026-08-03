@@ -24,6 +24,18 @@ appropriate timeline and perform a coordinated release, giving credit to the
 reporter if they would like. We align our reporting channels with the broader
 Zcash ecosystem disclosure process.
 
+### Before You Report
+
+Before submitting a report, confirm that the issue affects the latest Zebra
+release (<https://github.com/ZcashFoundation/zebra/releases/latest>) or the
+current `main` branch. Any proof of concept must be tested against one of
+those two versions — reports reproduced only on older releases, forks, or
+modified builds may not represent a vulnerability in current code and take
+substantially longer to triage.
+
+In your report, state the exact release version or `main` commit hash you
+tested against.
+
 For critical vulnerabilities, notify us on Signal. Create a new Signal group
 (do not reuse a previous group for a separate issue) that includes:
 
