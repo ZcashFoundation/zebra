@@ -1,4 +1,4 @@
-# Required source-PR gate verifying that a conventional-commit declaration is consistent with its code and changelog entries.
+# Source-PR gate verifying that a conventional-commit declaration is consistent with its code and changelog entries.
 # Mergify queue candidates skip these policy jobs because their generated metadata does not describe a source change.
 name: PR Gate
 
@@ -9,19 +9,19 @@ on:
     branches: [main]
   push:
     branches: [main]
-  # Keeps this aggregator reporting if GitHub's native merge queue is ever enabled,
-  # matching the sibling required-check workflows; jobs skip and the result skip-passes.
+  # Keeps this aggregator reporting inside a merge queue, matching the sibling
+  # aggregator workflows; jobs skip and the result skip-passes.
   merge_group:
 
 # Cancel obsolete gate runs after new commits. Unrelated label events use a
-# separate group so they cannot cancel the required PR Gate run.
+# separate group so they cannot cancel an in-progress PR Gate run.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'A-release' &&
       'ignored-label' ||
-      'required'
+      'gate'
     }}
   cancel-in-progress: true
 
@@ -162,7 +162,7 @@ jobs:
           bash .github/scripts/validate-pr-changelogs.sh \
             "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
-  # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
+  # Nothing downstream pins this worker's display name; `pr-gate-result` aggregates it.
   release-readiness:
     name: Release readiness
     if: >-
@@ -264,7 +264,7 @@ jobs:
           fi
 
   pr-gate-result:
-    # Keep skipped unrelated-label runs from replacing the required check.
+    # Keep skipped unrelated-label runs from posting a misleading green result.
     name: >-
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
