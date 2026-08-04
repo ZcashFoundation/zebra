@@ -25,6 +25,54 @@ async fn obtain_response_with_unknown_hash_reports_useful_feedback() {
     assert_eq!(observer.try_outcome(), Ok(Some(true)));
 }
 
+/// An obtain-tips response with only already-known hashes receives stall feedback.
+#[tokio::test]
+async fn obtain_response_with_only_known_hashes_reports_stall() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let known_hash = Hash([0; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    let mock_responses = async {
+        test.state
+            .expect_request(zs::Request::BlockLocator)
+            .await
+            .respond(zs::Response::BlockLocator(vec![known_hash]));
+
+        test.peers
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![known_hash],
+                stop: None,
+            })
+            .await
+            .respond(zn::Response::BlockHashes {
+                hashes: vec![known_hash],
+                feedback: Some(feedback),
+            });
+
+        test.state
+            .expect_request(zs::Request::KnownBlock(known_hash))
+            .await
+            .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+        for _ in 1..FANOUT {
+            test.peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![known_hash],
+                    stop: None,
+                })
+                .await
+                .respond(Err(zn::BoxError::from("unused fanout response")));
+        }
+    };
+
+    let (result, ()) = tokio::join!(test.sync.obtain_tips(), mock_responses);
+
+    assert!(result.unwrap().is_empty());
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
