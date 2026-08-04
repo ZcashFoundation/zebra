@@ -108,3 +108,66 @@ fn dropped_find_response_feedback_reports_unclassified() {
         "dropping the final unclassified handle must report no judgment",
     );
 }
+
+/// Checks that [`FindResponseStallTracker`] applies outcomes in request order.
+///
+/// Concurrent requests can complete out of order, but later responses must not
+/// change the consecutive stall history before earlier responses are classified.
+#[test]
+fn find_response_outcomes_are_ordered() {
+    let mut tracker = FindResponseStallTracker::new();
+    let addr = test_addr(1);
+    let first_request = FindRequestId::from(1);
+    let second_request = FindRequestId::from(2);
+
+    tracker.begin_request(addr, first_request);
+    tracker.begin_request(addr, second_request);
+
+    assert!(!tracker.record_response(FindResponseEvent::new(
+        addr,
+        second_request,
+        FindResponseOutcome::Stalled,
+    )));
+    assert!(!tracker.record_response(FindResponseEvent::new(
+        addr,
+        first_request,
+        FindResponseOutcome::Useful,
+    )));
+
+    let third_request = FindRequestId::from(3);
+    let fourth_request = FindRequestId::from(4);
+    tracker.begin_request(addr, third_request);
+    tracker.begin_request(addr, fourth_request);
+
+    assert!(!tracker.record_response(FindResponseEvent::new(
+        addr,
+        third_request,
+        FindResponseOutcome::Unclassified,
+    )));
+    assert!(!tracker.record_response(FindResponseEvent::new(
+        addr,
+        fourth_request,
+        FindResponseOutcome::Stalled,
+    )));
+
+    // An unclassified response unblocks later outcomes without counting as a stall.
+    let fifth_request = FindRequestId::from(5);
+    tracker.begin_request(addr, fifth_request);
+    assert!(tracker.record_response(FindResponseEvent::new(
+        addr,
+        fifth_request,
+        FindResponseOutcome::Stalled,
+    )));
+
+    // Removing a peer discards pending responses from its old connection.
+    let stale_request = FindRequestId::from(6);
+    tracker.begin_request(addr, stale_request);
+    tracker.clear(addr);
+
+    assert!(!tracker.record_response(FindResponseEvent::new(
+        addr,
+        stale_request,
+        FindResponseOutcome::Stalled,
+    )));
+    assert!(!tracker.record_stall(addr));
+}
