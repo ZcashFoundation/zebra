@@ -1324,31 +1324,6 @@ async fn above_lookahead_does_not_restart_sync() {
     );
 }
 
-/// Verifies fix for GHSA-gvjc-3w7c-92jx: `AboveLookaheadHeightLimit` now
-/// carries `advertiser_addr` so the offending peer can be scored.
-#[tokio::test]
-async fn above_lookahead_has_peer_attribution() {
-    let addr: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
-    let err = BlockDownloadVerifyError::AboveLookaheadHeightLimit {
-        height: block::Height(60_000),
-        hash: block::Hash::from([0xCC; 32]),
-        advertiser_addr: Some(addr),
-    };
-
-    let has_addr = match &err {
-        BlockDownloadVerifyError::AboveLookaheadHeightLimit {
-            advertiser_addr, ..
-        } => advertiser_addr.is_some(),
-        _ => false,
-    };
-
-    assert!(
-        has_addr,
-        "AboveLookaheadHeightLimit should carry advertiser_addr for peer scoring \
-         (GHSA-gvjc-3w7c-92jx fix)"
-    );
-}
-
 /// Verifies fix for GHSA-gvjc-3w7c-92jx: both height-limit errors now
 /// return `false` from `should_restart_sync` — symmetric handling.
 #[tokio::test]
@@ -1578,56 +1553,21 @@ async fn download_failed_is_only_requeued_for_not_found() {
 }
 
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
-/// height limit must NOT score the peer that served it.
+/// height limit must NOT score the peer that served it, while consensus-invalid
+/// blocks still must.
 ///
-/// A malicious peer can answer `FindBlocks` with real but far-ahead block hashes.
-/// Those hashes carry no peer attribution, and `FindBlocks` suppliers are never
-/// registered in the inventory registry, so the follow-up `BlocksByHash` getdata is
-/// routed to an independently chosen, honest peer. That honest peer returns exactly
-/// the block we asked for, the download fails with `AboveLookaheadHeightLimit`, and
-/// `advertiser_addr` names the *serving* peer, not the peer that supplied the hash.
-/// Scoring on this path therefore bans an honest peer at the attacker's direction.
-///
-/// This drives the real [`ChainSync::handle_block_response`] method and asserts that
-/// nothing at all reaches the misbehavior channel.
+/// Far-ahead hashes from a malicious `FindBlocks` response carry no peer attribution,
+/// so the follow-up `BlocksByHash` request is routed to an independently chosen,
+/// honest peer — `advertiser_addr` names the *serving* peer, not the peer that chose
+/// the height. Scoring this path bans honest peers at the attacker's direction.
 #[tokio::test]
 async fn far_ahead_block_does_not_score_serving_peer() {
     let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
 
-    let serving_peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
 
-    let _ = chain_sync.handle_block_response(Err(
-        BlockDownloadVerifyError::AboveLookaheadHeightLimit {
-            height: block::Height(60_000),
-            hash: block::Hash::from([0xBB; 32]),
-            advertiser_addr: Some(serving_peer),
-        },
-    ));
-
-    let received = misbehavior_rx.try_recv();
-
-    assert_eq!(
-        received,
-        Err(tokio::sync::mpsc::error::TryRecvError::Empty),
-        "GHSA-qhr3-cvch-5fh2: an above-lookahead block must not produce any misbehavior \
-         score. `advertiser_addr` here is the peer that *served* the block we explicitly \
-         requested, not the peer that supplied the far-ahead hash, so scoring it lets a \
-         malicious peer get arbitrary honest peers banned. Got: {received:?}"
-    );
-}
-
-/// Positive control for the GHSA-qhr3-cvch-5fh2 fix: removing the above-lookahead
-/// scoring must not disable misbehavior scoring in general.
-///
-/// A `BlockDownloadVerifyError::Invalid` with a non-zero `misbehavior_score()` and a
-/// known advertiser still has to reach the misbehavior channel. This test passes both
-/// before and after the fix.
-#[tokio::test]
-async fn invalid_block_still_scores_advertising_peer() {
-    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
-
-    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
-
+    // Positive control, and proof the channel plumbing works: a consensus-invalid
+    // block with a non-zero score must still be reported.
     let router_error = RouterError::Block {
         source: Box::new(VerifyBlockError::Subsidy(SubsidyError::NoCoinbase)),
     };
@@ -1641,14 +1581,26 @@ async fn invalid_block_still_scores_advertising_peer() {
         error: router_error,
         height: block::Height(60_000),
         hash: block::Hash::from([0xAB; 32]),
-        advertiser_addr: Some(advertiser),
+        advertiser_addr: Some(peer),
     }));
-
     assert_eq!(
         misbehavior_rx.try_recv(),
-        Ok((advertiser, expected_score)),
-        "consensus-invalid blocks must still score the advertising peer — the \
-         GHSA-qhr3-cvch-5fh2 fix only removes the above-lookahead attribution"
+        Ok((peer, expected_score)),
+        "consensus-invalid blocks must still score the serving peer"
+    );
+
+    // The fix: an above-lookahead block must not produce any misbehavior score.
+    let _ = chain_sync.handle_block_response(Err(
+        BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+            height: block::Height(60_000),
+            hash: block::Hash::from([0xBB; 32]),
+            advertiser_addr: Some(peer),
+        },
+    ));
+    assert_eq!(
+        misbehavior_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty),
+        "GHSA-qhr3-cvch-5fh2: an above-lookahead block must not score the serving peer"
     );
 }
 
