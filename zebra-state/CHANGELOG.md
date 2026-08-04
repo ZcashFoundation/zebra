@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `ReadRequest::AnyChainSaplingTree` and `ReadRequest::AnyChainOrchardTree`
+  read requests that resolve a Sapling or Orchard note commitment treestate by
+  block hash against any non-finalized chain, symmetric to
+  `ReadRequest::AnyChainBlock`.
+
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
