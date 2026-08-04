@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
+- Peer stall detection now waits for chain synchronization to classify non-empty `FindBlocks`
+  responses. Peers can no longer reset their stall count by returning only known or unrelated
+  block hashes ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).
 - Inbound connections are canonicalized when they are accepted, so an IPv4 peer that connects to a
   dual-stack listener as an IPv4-mapped IPv6 address (`::ffff:A.B.C.D`) is keyed on its canonical
   IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
