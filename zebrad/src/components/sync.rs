@@ -802,7 +802,7 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes(hashes)) => {
+                Ok(zn::Response::BlockHashes { hashes, .. }) => {
                     trace!(?hashes);
 
                     let hashes = hashes.as_slice();
@@ -930,7 +930,7 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
+                    Ok(zn::Response::BlockHashes { hashes, .. }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 

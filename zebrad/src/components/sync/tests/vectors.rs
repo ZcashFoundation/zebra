@@ -121,10 +121,13 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -205,11 +208,14 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -336,7 +342,10 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![block1_hash]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block1_hash],
+            feedback: None,
+        });
 
     // Find the first unknown hash in this peer response.
     state_service
@@ -453,7 +462,10 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![block1_hash, block2_hash]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block1_hash, block2_hash],
+            feedback: None,
+        });
 
     // Find the first unknown hash in this peer response.
     state_service
@@ -531,10 +543,13 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // expected overlap
-            block3_hash, // singleton unknown hash
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // expected overlap
+                block3_hash, // singleton unknown hash
+            ],
+            feedback: None,
+        });
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -655,12 +670,15 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash,
-            block1_hash,
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash,
+                block1_hash,
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -741,13 +759,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block3_hash,
-            block4_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+                block3_hash,
+                block4_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -950,11 +971,14 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block982k_hash,
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block982k_hash,
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 982k)
     state_service
@@ -1119,10 +1143,13 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -1203,12 +1230,15 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block982k_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+                block982k_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {

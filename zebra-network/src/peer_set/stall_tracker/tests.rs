@@ -1,9 +1,10 @@
 //! Unit tests for [`FindResponseStallTracker`].
 
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use super::*;
 
 fn test_addr(last_octet: u8) -> PeerSocketAddr {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
     SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(127, 0, 0, last_octet),
         8233,

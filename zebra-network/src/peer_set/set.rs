@@ -175,8 +175,8 @@ enum StallOutcome {
 
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
-        Ok(Response::BlockHashes(hashes)) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes(_)) => Some(StallOutcome::Clear),
+        Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => Some(StallOutcome::Stall),
+        Ok(Response::BlockHashes { .. }) => Some(StallOutcome::Clear),
         Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
         Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
         Ok(_) => None,

@@ -753,7 +753,10 @@ fn find_blocks_stall_not_tracked_when_at_tip() {
                 .expect("peer received the request");
 
             // Reply with an empty BlockHashes response — protocol-correct at tip.
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -812,7 +815,10 @@ fn find_blocks_stall_tracked_when_syncing() {
                 .request()
                 .expect("peer received the request");
 
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -870,7 +876,10 @@ fn find_blocks_stall_tracked_when_tip_unknown() {
                 .request()
                 .expect("peer received the request");
 
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -930,7 +939,10 @@ fn find_blocks_stall_count_preserved_across_tip_transition() {
                 .request()
                 .expect("peer received the request");
 
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -954,7 +966,10 @@ fn find_blocks_stall_count_preserved_across_tip_transition() {
                 .request()
                 .expect("peer received the request");
 
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -976,7 +991,10 @@ fn find_blocks_stall_count_preserved_across_tip_transition() {
                 .request()
                 .expect("peer received the request");
 
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
 
             response_fut.await.expect("response received");
         }
@@ -1035,7 +1053,10 @@ fn find_blocks_stall_not_tracked_for_zcashd_compat() {
                 .try_to_receive_outbound_client_request()
                 .request()
                 .expect("sidecar received the request");
-            let _ = client_request.tx.send(Ok(Response::BlockHashes(vec![])));
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
             response_fut.await.expect("response received");
         }
 
@@ -1109,9 +1130,10 @@ fn busy_sidecar_receives_queued_block_gossip() {
         );
 
         // Complete the in-flight request, making the sidecar ready again.
-        let _ = find_blocks_request
-            .tx
-            .send(Ok(Response::BlockHashes(vec![])));
+        let _ = find_blocks_request.tx.send(Ok(Response::BlockHashes {
+            hashes: vec![],
+            feedback: None,
+        }));
         find_blocks_fut.await.expect("response received");
 
         // Polling the peer set delivers the queued advert to the now-ready sidecar.
