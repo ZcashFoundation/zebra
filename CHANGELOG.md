@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Zebra now tracks the NU7 Tachyon pool: each block's proof stamps advance the pool's
+  running anchor, chain history commits to it, and consensus rejects duplicate
+  tachygrams and unknown or stale proof-stamp anchors within the two-epoch scan
+  window ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63)).
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
