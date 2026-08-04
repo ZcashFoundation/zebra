@@ -133,7 +133,10 @@ use crate::{
     constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
-        stall_tracker::FindResponseStallTracker,
+        stall_tracker::{
+            FindRequestId, FindResponseEvent, FindResponseFeedback, FindResponseOutcome,
+            FindResponseStallTracker,
+        },
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryChange, InventoryRegistry,
     },
@@ -164,26 +167,6 @@ pub struct CancelClientWork;
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
-/// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
-/// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
-/// the stall tracker can be updated and the peer disconnected if needed.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum StallOutcome {
-    Stall,
-    Clear,
-}
-
-fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
-    match result {
-        Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes { .. }) => Some(StallOutcome::Clear),
-        Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
-        Ok(_) => None,
-        Err(_) => Some(StallOutcome::Stall),
-    }
-}
-
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
 /// # Security
@@ -212,18 +195,21 @@ where
     /// A watch channel receiver with a copy of banned IP addresses.
     bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
 
-    /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
+    /// Tracks peers returning stalled `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
-    /// Receives stall/clear events from tracked routing futures in
+    /// Receives [`FindResponseEvent`]s from tracked routing futures in
     /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
-    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<FindResponseEvent>,
 
-    /// Producer clones handed to each tracked request's response wrapper.
-    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    /// Sends [`FindResponseEvent`]s from tracked request response wrappers.
+    stall_event_tx: tokio_mpsc::UnboundedSender<FindResponseEvent>,
+
+    /// Monotonically increasing [`FindRequestId`] source.
+    next_find_request_id: u64,
 
     // Peer Tracking: Ready Peers
     //
@@ -384,6 +370,7 @@ where
             find_response_stalls: FindResponseStallTracker::new(),
             stall_event_rx,
             stall_event_tx,
+            next_find_request_id: 0,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -820,18 +807,14 @@ where
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
-            match outcome {
-                StallOutcome::Stall => {
-                    if self.find_response_stalls.record_stall(addr) {
-                        info!(
-                            ?addr,
-                            "dropping stalled peer: exceeded FindBlocks/FindHeaders stall threshold",
-                        );
-                        self.remove(&addr);
-                    }
-                }
-                StallOutcome::Clear => self.find_response_stalls.clear(addr),
+        while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
+            let addr = event.peer;
+            if self.find_response_stalls.record_response(event) {
+                info!(
+                    ?addr,
+                    "dropping stalled peer: exceeded FindBlocks/FindHeaders stall threshold",
+                );
+                self.remove(&addr);
             }
         }
     }
@@ -1057,17 +1040,23 @@ where
             let track_stalls =
                 is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
 
+            let stall_tracker_request_id = track_stalls.then(|| {
+                let request_id = FindRequestId::from(self.next_find_request_id);
+                self.next_find_request_id = self
+                    .next_find_request_id
+                    .checked_add(1)
+                    .expect("a peer set cannot route u64::MAX find requests");
+                self.find_response_stalls.begin_request(p2c_key, request_id);
+                request_id
+            });
+
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
 
-            if track_stalls {
+            if let Some(request_id) = stall_tracker_request_id {
                 let stall_tx = self.stall_event_tx.clone();
                 return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
-                    }
-                    result.map_err(Into::into)
+                    Self::handle_tracked_find_response(fut.await, p2c_key, request_id, stall_tx)
                 }
                 .boxed();
             }
@@ -1088,6 +1077,50 @@ where
         }
         .map_err(Into::into)
         .boxed()
+    }
+
+    /// Attaches feedback or reports an immediate outcome for a tracked find response.
+    fn handle_tracked_find_response(
+        result: Result<Response, SharedPeerError>,
+        peer: PeerSocketAddr,
+        request_id: FindRequestId,
+        stall_tx: tokio_mpsc::UnboundedSender<FindResponseEvent>,
+    ) -> Result<Response, BoxError> {
+        match result {
+            Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => {
+                let _ = stall_tx.send(FindResponseEvent::new(
+                    peer,
+                    request_id,
+                    FindResponseOutcome::Stalled,
+                ));
+                Ok(Response::BlockHashes {
+                    hashes,
+                    feedback: None,
+                })
+            }
+            Ok(Response::BlockHashes { hashes, .. }) => Ok(Response::BlockHashes {
+                hashes,
+                feedback: Some(FindResponseFeedback::new(peer, request_id, stall_tx)),
+            }),
+            Ok(Response::BlockHeaders(headers)) => {
+                let outcome = if headers.is_empty() {
+                    FindResponseOutcome::Stalled
+                } else {
+                    FindResponseOutcome::Useful
+                };
+                let _ = stall_tx.send(FindResponseEvent::new(peer, request_id, outcome));
+                Ok(Response::BlockHeaders(headers))
+            }
+            Ok(response) => Ok(response),
+            Err(error) => {
+                let _ = stall_tx.send(FindResponseEvent::new(
+                    peer,
+                    request_id,
+                    FindResponseOutcome::Stalled,
+                ));
+                Err(error.into())
+            }
+        }
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
