@@ -625,8 +625,8 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
             finalized_state::FinalizedState,
             non_finalized_state::NonFinalizedState,
             read::tree::{
-                any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_tree,
-                orchard_tree, sapling_tree,
+                any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_tree, orchard_tree,
+                sapling_tree,
             },
         },
         tests::FakeChainHelper,
