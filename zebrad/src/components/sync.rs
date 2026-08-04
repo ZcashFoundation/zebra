@@ -802,7 +802,7 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes { hashes, .. }) => {
+                Ok(zn::Response::BlockHashes { hashes, feedback }) => {
                     trace!(?hashes);
 
                     let hashes = hashes.as_slice();
@@ -865,6 +865,10 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+
+                    if let Some(feedback) = feedback {
+                        feedback.mark_useful();
+                    }
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
