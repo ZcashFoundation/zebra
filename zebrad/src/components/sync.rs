@@ -996,7 +996,12 @@ where
                                 rest
                             }
                             // We ignore these responses
-                            [] => continue,
+                            [] => {
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
+                                continue;
+                            }
                             [single_hash] => {
                                 debug!(?single_hash,
                                                 ?tip.expected_next,
