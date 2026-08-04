@@ -397,7 +397,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
+/// Tests that `extend_tips` downloads a singleton unknown hash.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
