@@ -830,7 +830,10 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes { hashes, feedback }) => {
+                Ok(zn::Response::BlockHashes {
+                    hashes,
+                    mut feedback,
+                }) => {
                     trace!(?hashes);
 
                     let hashes = hashes.as_slice();
@@ -851,6 +854,9 @@ where
                     let unknown_hashes = if let Some(index) = first_unknown {
                         &hashes[index..]
                     } else {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     };
 
@@ -894,7 +900,7 @@ where
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
 
-                    if let Some(feedback) = feedback {
+                    if let Some(feedback) = feedback.take() {
                         feedback.mark_useful();
                     }
                 }
