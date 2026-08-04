@@ -149,9 +149,9 @@ Rust jobs cache `~/.cargo` and dependency artifacts in `target/` through
 which wraps [`Swatinem/rust-cache`](https://github.com/Swatinem/rust-cache). Caching is on by
 default, so a job opts *out* with `cache: false` rather than opting in.
 
-GitHub gives each repository a 10 GB cache quota and evicts least-recently-used entries when it is
-exceeded. Caches are also branch-scoped: a branch can read its own caches and the default branch's,
-but never another branch's. Those two rules together mean an unmanaged setup is self-defeating -
+GitHub gives each repository 10 GB of cache storage by default; administrators can configure a
+higher paid limit. Least-recently-used entries are evicted when the configured limit is exceeded.
+Caches are also branch-scoped: a branch can read its own caches and the default branch's,
 caches written by PRs can never be read by anyone else, but they still evict main's caches, which
 are the only ones every PR does restore from.
 

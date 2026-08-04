@@ -75,8 +75,8 @@ jobs:
           cache-on-failure: true
           # Restore on every ref, but only write from main. Actions caches are
           # branch-scoped, so a cache written by a PR can never be read by any
-          # other branch, yet it still counts against the repo-wide 10 GB quota
-          # and evicts main's caches - the only ones PRs can restore from.
+          # other branch, yet it still consumes the repo-wide cache allowance
+          # and can evict main's caches - the only ones PRs can restore from.
           # The `tests` leg seeds it, because its feature set is a superset.
           # See "Rust build caching" in .github/workflows/README.md.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.type == 'tests' }}
