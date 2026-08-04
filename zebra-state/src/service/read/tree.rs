@@ -180,6 +180,30 @@ where
         .or_else(|| db.ironwood_tree_by_hash_or_height(hash_or_height))
 }
 
+/// Returns the Ironwood
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+///
+/// Unlike [`ironwood_tree`], this checks every non-finalized chain (best chain first,
+/// then side chains), so a lookup by hash is immune to reorgs that move a block from
+/// the best chain onto a still-retained side chain.
+///
+/// Ironwood reuses the Orchard note commitment tree type, in a separate tree.
+pub fn any_ironwood_tree<'a, C: AsRef<Chain> + 'a>(
+    mut chains: impl Iterator<Item = &'a C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+    // # Correctness
+    //
+    // Since Ironwood treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chains` are always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chains
+        .find_map(|chain| chain.as_ref().ironwood_tree(hash_or_height))
+        .or_else(|| db.ironwood_tree_by_hash_or_height(hash_or_height))
+}
+
 /// Returns a list of Ironwood [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.

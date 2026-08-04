@@ -1621,6 +1621,14 @@ impl Service<ReadRequest> for ReadStateService {
                 read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::AnyChainIronwoodTree(hash_or_height) => {
+                Ok(ReadResponse::IronwoodTree(read::any_ironwood_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
                     .and_then(|limit| start_index.0.checked_add(limit.0))

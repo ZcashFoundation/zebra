@@ -272,11 +272,11 @@ penalizes them for briefly disagreeing about the NU6.3 activation.
   `ReadResponse::ForkPoint`) that returns the most recent block in a caller-supplied
   locator that is on the best chain — the fork point — for clients tracking chain
   reorganizations through a read-only state service.
-- New `zebra-state` read requests `ReadRequest::AnyChainSaplingTree` and
-  `ReadRequest::AnyChainOrchardTree` that resolve a note commitment treestate by hash
-  against any non-finalized chain (not just the best chain) before falling back to the
-  finalized state, symmetric to `ReadRequest::AnyChainBlock`. This lets a read-only
-  consumer pin a consistent, reorg-immune view by reading treestates by hash.
+- New `zebra-state` read requests `ReadRequest::AnyChainSaplingTree`,
+  `ReadRequest::AnyChainOrchardTree`, and `ReadRequest::AnyChainIronwoodTree` that resolve
+  a note commitment treestate by hash against any non-finalized chain (not just the best
+  chain) before falling back to the finalized state, symmetric to `ReadRequest::AnyChainBlock`.
+  This lets a read-only consumer pin a consistent, reorg-immune view by reading treestates by hash.
 - Added a `[notify] block_notify_command` option that runs a command on each best-chain-tip
   change, with `%s` replaced by the new block hash — Zebra's equivalent of `zcashd`'s
   `-blocknotify`.

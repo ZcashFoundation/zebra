@@ -624,7 +624,10 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         service::{
             finalized_state::FinalizedState,
             non_finalized_state::NonFinalizedState,
-            read::tree::{any_orchard_tree, any_sapling_tree, orchard_tree, sapling_tree},
+            read::tree::{
+                any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_tree,
+                orchard_tree, sapling_tree,
+            },
         },
         tests::FakeChainHelper,
     };
@@ -712,6 +715,26 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         "orchard_tree should NOT find side chain treestate by hash"
     );
 
+    // Ironwood: same expectations.
+    assert!(
+        any_ironwood_tree(
+            non_finalized_state.chain_iter(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_some(),
+        "any_ironwood_tree should find side chain treestate by hash"
+    );
+    assert!(
+        ironwood_tree(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            side_hash.into(),
+        )
+        .is_none(),
+        "ironwood_tree should NOT find side chain treestate by hash"
+    );
+
     // Both lookups find the best chain treestate by hash.
     assert!(
         any_sapling_tree(
@@ -730,6 +753,24 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         )
         .is_some(),
         "sapling_tree should find best chain treestate by hash"
+    );
+    assert!(
+        any_ironwood_tree(
+            non_finalized_state.chain_iter(),
+            &finalized_state.db,
+            best_hash.into(),
+        )
+        .is_some(),
+        "any_ironwood_tree should find best chain treestate by hash"
+    );
+    assert!(
+        ironwood_tree(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            best_hash.into(),
+        )
+        .is_some(),
+        "ironwood_tree should find best chain treestate by hash"
     );
 
     Ok(())
