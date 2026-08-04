@@ -7,6 +7,7 @@ use crate::{
     },
     history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     sapling,
     serialization::ZcashDeserializeInto,
 };
@@ -61,8 +62,11 @@ fn push_and_prune_for_network_upgrade(
     let mut tree = NonEmptyHistoryTree::from_block(
         &network,
         first_block,
-        &first_sapling_root,
-        &Default::default(),
+        BlockCommitmentTreeRoots {
+            sapling: &first_sapling_root,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
     )?;
 
     assert_eq!(tree.size(), 1);
@@ -91,8 +95,15 @@ fn push_and_prune_for_network_upgrade(
             .get(&(height + 1))
             .expect("test vector exists"),
     )?;
-    tree.push(second_block, &second_sapling_root, &Default::default())
-        .unwrap();
+    tree.push(
+        second_block,
+        BlockCommitmentTreeRoots {
+            sapling: &second_sapling_root,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
+    )
+    .unwrap();
 
     // Adding a second block will produce a 3-node tree (one parent and two leaves).
     assert_eq!(tree.size(), 3);
@@ -137,8 +148,11 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     let mut tree = NonEmptyHistoryTree::from_block(
         &network,
         block_prev,
-        &sapling_root_prev,
-        &Default::default(),
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root_prev,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
     )?;
 
     assert_eq!(tree.size(), 1);
@@ -163,8 +177,11 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     )?;
     tree.push(
         activation_block,
-        &activation_sapling_root,
-        &Default::default(),
+        BlockCommitmentTreeRoots {
+            sapling: &activation_sapling_root,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
     )
     .unwrap();
 

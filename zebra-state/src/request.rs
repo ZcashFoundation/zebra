@@ -13,12 +13,9 @@ use zebra_chain::{
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
-    orchard,
     parallel::tree::NoteCommitmentTrees,
-    sapling,
     serialization::SerializationError,
-    sprout,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+    subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -36,10 +33,15 @@ use crate::{
     CommitSemanticallyVerifiedError,
 };
 
+/// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
+/// in the shared import block because they are only referenced under the `indexer` feature.
+#[cfg(feature = "indexer")]
+use zebra_chain::{ironwood, orchard, sapling, sprout};
+
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
-/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+/// [`sapling::Nullifier`], [`orchard::Nullifier`], and [`ironwood::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg(feature = "indexer")]
 pub enum Spend {
@@ -51,6 +53,8 @@ pub enum Spend {
     Sapling(sapling::Nullifier),
     /// A spend identified by a [`orchard::Nullifier`].
     Orchard(orchard::Nullifier),
+    /// A spend identified by an [`ironwood::Nullifier`].
+    Ironwood(ironwood::Nullifier),
 }
 
 #[cfg(feature = "indexer")]
@@ -78,6 +82,13 @@ impl From<sapling::Nullifier> for Spend {
 impl From<orchard::Nullifier> for Spend {
     fn from(orchard_nullifier: orchard::Nullifier) -> Self {
         Self::Orchard(orchard_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<ironwood::Nullifier> for Spend {
+    fn from(ironwood_nullifier: ironwood::Nullifier) -> Self {
+        Self::Ironwood(ironwood_nullifier)
     }
 }
 
@@ -334,21 +345,11 @@ pub struct Treestate {
 impl Treestate {
     #[allow(missing_docs)]
     pub(crate) fn new(
-        sprout: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling: Arc<sapling::tree::NoteCommitmentTree>,
-        orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
-        orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+        note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
         Self {
-            note_commitment_trees: NoteCommitmentTrees {
-                sprout,
-                sapling,
-                sapling_subtree,
-                orchard,
-                orchard_subtree,
-            },
+            note_commitment_trees,
             history_tree,
         }
     }
@@ -1342,6 +1343,15 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     AnyChainOrchardTree(HashOrHeight),
 
+    /// Looks up an Ironwood note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::IronwoodTree)
+    ///   if the corresponding block contains an Ironwood note commitment tree.
+    /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
+    IronwoodTree(HashOrHeight),
+
     /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
     /// `start_index`, and returning up to `limit` subtrees.
     ///
@@ -1364,6 +1374,20 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::OrchardSubtrees)
     /// * An empty list if there is no subtree at `start_index`.
     OrchardSubtrees {
+        /// The index of the first 2^16-leaf subtree to return.
+        start_index: NoteCommitmentSubtreeIndex,
+        /// The maximum number of subtree values to return.
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    },
+
+    /// Returns a list of Ironwood note commitment subtrees by their indexes, starting at
+    /// `start_index`, and returning up to `limit` subtrees.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::IronwoodSubtrees)
+    /// * An empty list if there is no subtree at `start_index`.
+    IronwoodSubtrees {
         /// The index of the first 2^16-leaf subtree to return.
         start_index: NoteCommitmentSubtreeIndex,
         /// The maximum number of subtree values to return.
@@ -1500,8 +1524,10 @@ impl ReadRequest {
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::AnyChainSaplingTree { .. } => "any_chain_sapling_tree",
             ReadRequest::AnyChainOrchardTree { .. } => "any_chain_orchard_tree",
+            ReadRequest::IronwoodTree { .. } => "ironwood_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
+            ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",

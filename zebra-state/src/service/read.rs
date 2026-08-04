@@ -40,11 +40,11 @@ pub use block::spending_transaction_hash;
 pub use find::{
     best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
     find_chain_headers, find_fork_point, hash_by_height, height_by_hash, next_median_time_past,
-    non_finalized_state_contains_block_hash, tip, tip_height, tip_with_value_balance,
+    non_finalized_state_contains_block_hash, tip, tip_with_value_balance,
 };
 pub use tree::{
-    any_orchard_tree, any_sapling_tree, orchard_subtrees, orchard_tree, sapling_subtrees,
-    sapling_tree,
+    any_orchard_tree, any_sapling_tree, ironwood_subtrees, ironwood_tree, orchard_subtrees,
+    orchard_tree, sapling_subtrees, sapling_tree,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

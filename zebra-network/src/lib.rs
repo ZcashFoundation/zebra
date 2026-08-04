@@ -155,6 +155,7 @@ pub mod constants;
 
 mod address_book;
 mod address_book_updater;
+mod connection_metrics;
 mod isolated;
 mod meta_addr;
 mod peer;
@@ -187,7 +188,7 @@ pub use crate::{
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
-    peer_set::init,
+    peer_set::{init, init_with_block_gossip_peer_ips},
     policies::RetryLimit,
     protocol::{
         external::{Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},

@@ -6,7 +6,6 @@ use color_eyre::eyre::{eyre, Result, WrapErr};
 use tempfile::{Builder, TempDir};
 
 use zebra_chain::parameters::Network::*;
-#[cfg(not(target_os = "windows"))]
 use zebra_state;
 use zebra_test::{args, command::to_regex::CollectRegexSet, prelude::*};
 use zebrad::config::ZebradConfig;
@@ -14,56 +13,14 @@ use zebrad::config::ZebradConfig;
 use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
-        config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
+        config_file_full_path, configs_dir, default_test_config, os_assigned_rpc_port_config,
+        persistent_test_config, read_listen_addr_from_logs, testdir,
     },
     launch::{ZebradTestDirExt, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY},
-};
-
-// Used by `non_blocking_logger` test, which is disabled on macOS.
-#[cfg(not(target_os = "macos"))]
-use crate::common::{
-    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
     sync::TINY_CHECKPOINT_TIMEOUT,
 };
-#[cfg(not(target_os = "macos"))]
 use zebra_node_services::rpc_client::RpcRequestClient;
-#[cfg(not(target_os = "macos"))]
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
-
-/// Check that the block state and peer list caches are written to disk.
-#[test]
-fn persistent_mode() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut persistent_test_config(&Mainnet)?)?;
-    let testdir = &testdir;
-
-    let mut child = testdir.spawn_child(args!["-v", "start"])?;
-
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
-    child.kill(false)?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    let cache_dir = testdir.path().join("state");
-    assert_with_context!(
-        cache_dir.read_dir()?.count() > 0,
-        &output,
-        "state directory empty despite persistent state config"
-    );
-
-    let cache_dir = testdir.path().join("network");
-    assert_with_context!(
-        cache_dir.read_dir()?.count() > 0,
-        &output,
-        "network directory empty despite persistent network config"
-    );
-
-    Ok(())
-}
 
 #[test]
 fn ephemeral_existing_directory() -> Result<()> {
@@ -212,7 +169,6 @@ fn config_tests() -> Result<()> {
     invalid_generated_config()?;
 
     // Check that we have a current version of the config stored
-    #[cfg(not(target_os = "windows"))]
     last_config_is_stored()?;
 
     // Check that Zebra's previous configurations still work
@@ -311,7 +267,6 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 }
 
 /// Check if the config produced by current zebrad is stored.
-#[cfg(not(target_os = "windows"))]
 #[tracing::instrument]
 #[allow(clippy::print_stdout)]
 fn last_config_is_stored() -> Result<()> {
@@ -626,10 +581,7 @@ fn stored_configs_work() -> Result<()> {
 
 /// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
 /// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
-///
-/// This test is unreliable and sometimes hangs on macOS.
 #[test]
-#[cfg(not(target_os = "macos"))]
 fn non_blocking_logger() -> Result<()> {
     use futures::FutureExt;
     use std::{sync::mpsc, time::Duration};

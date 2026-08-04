@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "10.0.1"
+version = "15.0.0"
 authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license.workspace = true
@@ -24,8 +24,6 @@ categories = [
 exclude = ["*.proto"]
 
 [features]
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zcash_primitives/zip-233"]
-
 # Production features that activate extra dependencies, or extra features in
 # dependencies
 
@@ -65,6 +63,8 @@ strum_macros = { workspace = true }
 # RPC endpoint basic auth
 base64 = { workspace = true }
 rand = { workspace = true }
+# Constant-time cookie comparison to prevent a timing oracle on RPC auth.
+subtle = { workspace = true }
 
 # Error handling
 color-eyre = { workspace = true }
@@ -109,16 +109,16 @@ zcash_transparent = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "10.1.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "11.3.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "9.0.1" }
-zebra-network = { path = "../zebra-network", version = "9.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "8.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "14.0.1" }
+zebra-network = { path = "../zebra-network", version = "11.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "9.1.2", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "9.0.0" }
-zebra-state = { path = "../zebra-state", version = "9.0.1" }
+zebra-script = { path = "../zebra-script", version = "10.1.2" }
+zebra-state = { path = "../zebra-state", version = "12.0.1" }
 
 [build-dependencies]
 openrpsee = { workspace = true }
@@ -136,20 +136,20 @@ proptest = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "10.1.0", features = [
+zebra-chain = { path = "../zebra-chain", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "9.0.1", features = [
+zebra-consensus = { path = "../zebra-consensus", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "9.0.0", features = [
+zebra-network = { path = "../zebra-network", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "9.0.1", features = [
+zebra-state = { path = "../zebra-state", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "3.0.0" }
+zebra-test = { path = "../zebra-test" }
 
 [lints]
 workspace = true

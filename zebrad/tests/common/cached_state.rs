@@ -13,7 +13,7 @@ use std::{
 
 use color_eyre::eyre::{eyre, Result};
 use semver::Version;
-use tower::{util::BoxService, Service};
+use tower::util::BoxService;
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -132,11 +132,7 @@ pub async fn start_state_service_with_cache_dir(
     cache_dir: impl Into<PathBuf>,
 ) -> Result<(
     BoxStateService,
-    impl Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
+    zebra_state::ReadStateService,
     LatestChainTip,
     ChainTipChange,
 )> {

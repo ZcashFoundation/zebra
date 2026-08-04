@@ -23,23 +23,23 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 homepage = "https://zfnd.org/zebra/"
 keywords = ["zebra", "zcash"]
-rust-version = "1.85.1"
+rust-version = "1.88"
 edition = "2021"
 
 # `cargo release` settings
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.14"
+orchard = "0.15.0"
 sapling-crypto = "0.7"
-zcash_address = "0.12"
+zcash_address = "0.13.0"
 zcash_encoding = "0.4"
-zcash_history = "0.4"
-zcash_keys = "0.14"
-zcash_primitives = "0.28"
-zcash_proofs = "0.28"
-zcash_transparent = "0.8"
-zcash_protocol = "0.9"
+zcash_history = "0.5.0"
+zcash_keys = "0.16"
+zcash_primitives = "0.30"
+zcash_proofs = "0.30"
+zcash_transparent = "0.10.0"
+zcash_protocol = "0.10.0"
 zip32 = "0.2"
 abscissa_core = "0.7"
 base64 = "0.22.1"
@@ -69,7 +69,7 @@ ed25519-zebra = "4.2"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
 equihash = "0.3"
 ff = "0.13"
-futures = "0.3.31"
+futures = "0.3.32"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
 group = "0.13"
@@ -123,7 +123,7 @@ regex = "1.11"
 reqwest = { version = "0.12", default-features = false }
 ripemd = "0.1"
 rlimit = "0.10"
-rocksdb = { version = "0.22", default-features = false }
+rocksdb = { version = "0.24", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
 sentry = { version = "0.47", default-features = false }
@@ -141,6 +141,7 @@ anyhow = "1.0"
 strum = "0.27"
 strum_macros = "0.27"
 syn = "2.0.100"
+subtle = { version = "2.6", default-features = false }
 tempfile = "3.20"
 thiserror = "2.0"
 thread-priority = "1.2"
@@ -329,7 +330,7 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
 ] }
 
 # High-risk code

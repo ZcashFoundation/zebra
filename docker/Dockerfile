@@ -40,8 +40,8 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-    libclang-dev=1:19.0-63 \
-    protobuf-compiler=3.21.12-11 \
+    libclang-dev=1:19.0-* \
+    protobuf-compiler=3.21.12-* \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 # Build arguments and variables
@@ -92,7 +92,7 @@ ARG CARGO_TARGET_DIR
 
 # Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-1+b1 curl=8.14.1-2+deb13u3 && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev=9.10.0-* curl=8.14.1-* && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -209,8 +209,8 @@ ENV HOME=${HOME}
 # Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
-    adduser=3.152 \
-    curl=8.14.1-2+deb13u3 \
+    adduser=3.152* \
+    curl=8.14.1-* \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
@@ -240,3 +240,32 @@ CMD ["zebrad"]
 # - with mining enabled using S-nomp and `nheqminer`.
 #
 # We can add further functionality to this stage for further purposes.
+
+# zcashd-compat runtime image: the runtime image plus the hash-pinned zcashd
+# wallet sidecar (and its RPC client) from the ZcashFoundation/zcashd
+# `zebra-compat` release, for the supervised sidecar configuration
+# (`zebrad start --zcashd-compat` with `manage_zcashd = true`).
+#
+# The sidecar release only ships x86_64 Linux binaries, so this stage is
+# amd64-only (CI already builds non-`runtime` targets for amd64 only).
+# Override the ARGs to bake in a different sidecar release.
+FROM runtime AS runtime-zcashd-compat
+
+ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz"
+ARG ZCASHD_COMPAT_ARCHIVE_SHA256="92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# ca-certificates is needed for the HTTPS download: curl is installed above
+# with --no-install-recommends, which skips it.
+RUN apt-get -q update && \
+    apt-get -q install -y --no-install-recommends \
+    ca-certificates=20250419 \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache \
+    && curl -fsSL "${ZCASHD_COMPAT_ARCHIVE_URL}" -o /tmp/zcashd.tar.gz \
+    && echo "${ZCASHD_COMPAT_ARCHIVE_SHA256}  /tmp/zcashd.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/zcashd.tar.gz -C /tmp ./bin/zcashd ./bin/zcash-cli \
+    && install -m 0755 /tmp/bin/zcashd /tmp/bin/zcash-cli /usr/local/bin/ \
+    && rm -rf /tmp/zcashd.tar.gz /tmp/bin \
+    && /usr/local/bin/zcashd --version \
+    && /usr/local/bin/zcash-cli --version

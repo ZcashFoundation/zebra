@@ -44,8 +44,15 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
     // Build initial MMR tree with only Block 0
     let sapling_root0 =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
-    let (mut tree, _) =
-        Tree::<V1>::new_from_block(network, block0, &sapling_root0, &Default::default())?;
+    let (mut tree, _) = Tree::<V1>::new_from_block(
+        network,
+        block0,
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root0,
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
+    )?;
 
     // Compute root hash of the MMR tree, which will be included in the next block
     let hash0 = tree.hash();
@@ -70,7 +77,14 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
             .expect("test vector exists"),
     )?;
     let append = tree
-        .append_leaf(block1, &sapling_root1, &Default::default())
+        .append_leaf(
+            block1,
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root1,
+                orchard: &Default::default(),
+                ironwood: &Default::default(),
+            },
+        )
         .unwrap();
 
     // Tree how has 3 nodes: two leaves for each block, and one parent node

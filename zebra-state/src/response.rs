@@ -182,6 +182,16 @@ pub struct MinedTx {
 
     /// The time of the block where the transaction was mined.
     pub block_time: DateTime<Utc>,
+
+    /// The best-chain tip hash captured in the same state snapshot used to
+    /// compute `confirmations`.
+    ///
+    /// Callers that combine this response with other state queries should
+    /// pin those follow-up queries to this hash (or to the resolved block
+    /// hash for the transaction) rather than issuing a separate `Tip` /
+    /// `BestChainBlockHash` request, which would re-sample the chain and
+    /// can race with reorgs or new blocks. See issue #10550.
+    pub best_chain_tip_hash: block::Hash,
 }
 
 impl MinedTx {
@@ -191,12 +201,14 @@ impl MinedTx {
         height: block::Height,
         confirmations: u32,
         block_time: DateTime<Utc>,
+        best_chain_tip_hash: block::Hash,
     ) -> Self {
         Self {
             tx,
             height,
             confirmations,
             block_time,
+            best_chain_tip_hash,
         }
     }
 }
@@ -448,6 +460,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::OrchardTree`] with the specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
+    /// Response to [`ReadRequest::IronwoodTree`] with the specified Ironwood note commitment tree.
+    IronwoodTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
+
     /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
     /// subtrees.
     SaplingSubtrees(
@@ -457,6 +472,12 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
     /// subtrees.
     OrchardSubtrees(
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
+    ),
+
+    /// Response to [`ReadRequest::IronwoodSubtrees`] with the specified Ironwood note commitment
+    /// subtrees. Ironwood reuses the Orchard note type.
+    IronwoodSubtrees(
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
@@ -594,8 +615,10 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
+            | ReadResponse::IronwoodTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
+            | ReadResponse::IronwoodSubtrees(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)

@@ -88,21 +88,24 @@ If you are having trouble with:
 - **clang:** Install both `libclang` and `clang` - they are usually different
   packages.
 - **libclang:** Check out the [clang-sys
-  documentation](https://github.com/KyleMayes/clang-sys#dependencies).
+  documentation](https://github.com/KyleMayes/clang-sys#dependencies). If the
+  build fails with `couldn't find any valid shared libraries matching:
+  ['libclang.so', 'libclang-*.so']`, libclang is not installed or is not on the
+  search path: install the `libclang-dev` package (Debian/Ubuntu) or set
+  `LIBCLANG_PATH` to the directory that contains `libclang.so`.
+- **shared libraries:** If the build fails with `error while loading shared
+  libraries: libclang-*.so.*: cannot open shared object file`, you have the
+  libclang **dev** files but are missing the matching **runtime** library.
+  Install the runtime package (`libclang1-<version>` on Debian/Ubuntu) or run
+  `sudo ldconfig`.
 - **g++ or MSVC++:** Try using `clang` or `Xcode` instead.
 - **rustc:** Use the latest stable `rustc` and `cargo` versions.
 - **dependencies**: Use `cargo install` without `--locked` to build with the
   latest versions of each dependency.
 
-#### Optional Tor feature
+#### Tor feature
 
-The `zebra-network/tor` feature has an optional dependency named `libsqlite3`.
-If you don't have it installed, you might see errors like `note: /usr/bin/ld:
-cannot find -lsqlite3`. Follow [the arti
-instructions](https://gitlab.torproject.org/tpo/core/arti/-/blob/main/CONTRIBUTING.md#setting-up-your-development-environment)
-to install `libsqlite3`, or use one of these commands instead:
-
-```sh
-cargo build
-cargo build -p zebrad --all-features
-```
+Experimental Tor support is currently
+[disabled](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648)
+until Zebra upgrades to the latest `arti-client`, and the `zebra-network/tor`
+feature cannot be built.

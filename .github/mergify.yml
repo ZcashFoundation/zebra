@@ -12,9 +12,10 @@ merge_queue:
 defaults:
   # Define our default queue rules
   queue_rule:
+    merge_method: merge
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
-    batch_max_wait_time: "10 minutes"
+    batch_max_wait_time: "2 minutes"
     queue_conditions:
       # Mergify can auto-mirror classic branch protection, but not GitHub
       # Rulesets. The conditions below restate the gates we actually rely on
@@ -30,12 +31,13 @@ defaults:
       - "#approved-reviews-by >= 1"
       # no reviewer has requested changes
       - "#changes-requested-reviews-by = 0"
-      # The three required aggregator check runs must pass. After the
+      # The four required aggregator check runs must pass. After the
       # `changes` + paths-filter refactor (#10637), each aggregator is
       # produced by exactly one workflow, so the names below are stable.
       - check-success=lint
       - check-success=unit-tests
       - check-success=test-crates
+      - check-success=pr-gate-result
 
 
 # Allows to define the rules that reign over our merge queues
@@ -57,11 +59,14 @@ queue_rules:
       - check-success=lint
       - check-success=unit-tests
       - check-success=test-crates
+      - check-success=pr-gate-result
       # is labeled with Critical priority
       - 'label~=^P-Critical'
 
   - name: batched
-    batch_size: 20
+    batch_size:
+      min: 1
+      max: 5
 
 pull_request_rules:
   - name: move to any queue if GitHub Rulesets are satisfied
@@ -78,14 +83,14 @@ priority_rules:
     conditions:
       # is labeled with Critical priority
       - 'label~=^P-Critical'
-    allow_checks_interruption: true
+    allow_checks_interruption: false
     priority: high
 
   - name: low
     conditions:
       # is labeled with Optional or Low priority
       - 'label~=^P-(Optional|Low)'
-    allow_checks_interruption: true
+    allow_checks_interruption: false
     priority: low
 merge_protections_settings:
   reporting_method: check-runs

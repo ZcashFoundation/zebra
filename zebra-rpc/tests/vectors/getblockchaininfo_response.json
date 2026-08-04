@@ -41,6 +41,12 @@
             "monitored": true
         },
         {
+            "id": "ironwood",
+            "chainValue": 2159448.18601405,
+            "chainValueZat": 215944818601405,
+            "monitored": true
+        },
+        {
             "id": "deferred",
             "chainValue": 38572.125,
             "chainValueZat": 3857212500000,

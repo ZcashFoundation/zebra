@@ -119,7 +119,14 @@ impl Arbitrary for Flags {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<u8>()).prop_map(Self::from_bits_truncate).boxed()
+        // Only generate flags valid for Orchard-pool bundles: bit 2 (`ENABLE_CROSS_ADDRESS`) is
+        // reserved for the Orchard pool in every transaction version (v5 and v6), so generating
+        // it would produce Orchard bundles that do not round-trip. Only the Ironwood bundle
+        // permits that flag; its strategy re-generates the flags (see `ironwood::ShieldedData`).
+        let pre_nu6_3 = Self::ENABLE_SPENDS.bits() | Self::ENABLE_OUTPUTS.bits();
+        (any::<u8>())
+            .prop_map(move |bits| Self::from_bits_truncate(bits & pre_nu6_3))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;

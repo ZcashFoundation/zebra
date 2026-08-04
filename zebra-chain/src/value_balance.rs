@@ -26,6 +26,7 @@ pub struct ValueBalance<C> {
     sapling: Amount<C>,
     orchard: Amount<C>,
     deferred: Amount<C>,
+    ironwood: Amount<C>,
 }
 
 impl<C> ValueBalance<C>
@@ -60,6 +61,14 @@ where
     pub fn from_orchard_amount(orchard_amount: Amount<C>) -> Self {
         ValueBalance {
             orchard: orchard_amount,
+            ..ValueBalance::zero()
+        }
+    }
+
+    /// Creates a [`ValueBalance`] from the given ironwood amount.
+    pub fn from_ironwood_amount(ironwood_amount: Amount<C>) -> Self {
+        ValueBalance {
+            ironwood: ironwood_amount,
             ..ValueBalance::zero()
         }
     }
@@ -126,6 +135,18 @@ where
         self
     }
 
+    /// Get the ironwood amount from the [`ValueBalance`].
+    pub fn ironwood_amount(&self) -> Amount<C> {
+        self.ironwood
+    }
+
+    /// Insert an ironwood value balance into a given [`ValueBalance`]
+    /// leaving the other values untouched.
+    pub fn set_ironwood_value_balance(&mut self, ironwood_value_balance: ValueBalance<C>) -> &Self {
+        self.ironwood = ironwood_value_balance.ironwood;
+        self
+    }
+
     /// Creates a [`ValueBalance`] where all the pools are zero.
     pub fn zero() -> Self {
         let zero = Amount::zero();
@@ -135,7 +156,25 @@ where
             sapling: zero,
             orchard: zero,
             deferred: zero,
+            ironwood: zero,
         }
+    }
+
+    /// Returns the sum of all value pool balances.
+    pub fn total(self) -> Result<Amount<C>, amount::Error> {
+        let total: i128 = [
+            self.transparent,
+            self.sprout,
+            self.sapling,
+            self.orchard,
+            self.deferred,
+            self.ironwood,
+        ]
+        .into_iter()
+        .map(|amount| i128::from(amount.zatoshis()))
+        .sum();
+
+        Amount::try_from(total)
     }
 
     /// Convert this value balance to a different ValueBalance type,
@@ -150,6 +189,7 @@ where
             sapling: self.sapling.constrain().map_err(Sapling)?,
             orchard: self.orchard.constrain().map_err(Orchard)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
+            ironwood: self.ironwood.constrain().map_err(Ironwood)?,
         })
     }
 }
@@ -168,12 +208,16 @@ impl ValueBalance<NegativeAllowed> {
     ///
     /// Design: <https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/rfcs/0012-value-pools.md#definitions>
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
-        // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
-        // as specified in:
+        // Calculated by summing the transparent, sprout, sapling, orchard, and ironwood value
+        // balances, as specified in:
         // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
         //
+        // The ironwood bundle (NU6.3 onward) contributes to the transaction value pool exactly
+        // like the orchard bundle; it is zero for transactions without an ironwood bundle.
+        //
         // This will error if the remaining value in the transaction value pool is negative.
-        (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()
+        (self.transparent + self.sprout + self.sapling + self.orchard + self.ironwood)?
+            .constrain::<NonNegative>()
     }
 }
 
@@ -291,60 +335,80 @@ impl ValueBalance<NonNegative> {
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
-        chain_value_pool.constrain()
+        let chain_value_pool = chain_value_pool.constrain::<NonNegative>()?;
+
+        // The sum of all chain value pools is the total monetary base, which consensus caps at
+        // `MAX_MONEY`. Reject any change that would push the chain value pool total over that cap.
+        chain_value_pool.total().map_err(ValueBalanceError::Total)?;
+
+        Ok(chain_value_pool)
     }
 
     /// Create a fake value pool for testing purposes.
     ///
-    /// The resulting [`ValueBalance`] will have half of the MAX_MONEY amount on each pool.
+    /// The resulting [`ValueBalance`] has `MAX_MONEY / 8` on the transparent, Sprout, Sapling,
+    /// Orchard, and Ironwood pools; the deferred pool is zero. This keeps the total within the
+    /// valid `Amount` range (see [`ValueBalance::total`]), while leaving headroom for value pool
+    /// changes that tests commit on top of it.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn fake_populated_pool() -> ValueBalance<NonNegative> {
         let mut fake_value_pool = ValueBalance::zero();
 
         let fake_transparent_value_balance =
-            ValueBalance::from_transparent_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_transparent_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_sprout_value_balance =
-            ValueBalance::from_sprout_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_sprout_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_sapling_value_balance =
-            ValueBalance::from_sapling_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_sapling_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
         let fake_orchard_value_balance =
-            ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 2).unwrap());
+            ValueBalance::from_orchard_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
+        let fake_ironwood_value_balance =
+            ValueBalance::from_ironwood_amount(Amount::try_from(MAX_MONEY / 8).unwrap());
 
         fake_value_pool.set_transparent_value_balance(fake_transparent_value_balance);
         fake_value_pool.set_sprout_value_balance(fake_sprout_value_balance);
         fake_value_pool.set_sapling_value_balance(fake_sapling_value_balance);
         fake_value_pool.set_orchard_value_balance(fake_orchard_value_balance);
+        fake_value_pool.set_ironwood_value_balance(fake_ironwood_value_balance);
 
         fake_value_pool
     }
 
     /// To byte array
-    pub fn to_bytes(self) -> [u8; 40] {
+    ///
+    /// The `ironwood` pool (NU6.3 onward) is appended after `deferred`, so that records written by
+    /// earlier Zebra versions (32 bytes without `deferred`, or 40 bytes with it) remain parsable by
+    /// [`Self::from_bytes`].
+    pub fn to_bytes(self) -> [u8; 48] {
         match [
             self.transparent.to_bytes(),
             self.sprout.to_bytes(),
             self.sapling.to_bytes(),
             self.orchard.to_bytes(),
             self.deferred.to_bytes(),
+            self.ironwood.to_bytes(),
         ]
         .concat()
         .try_into()
         {
             Ok(bytes) => bytes,
             _ => unreachable!(
-                "five [u8; 8] should always concat with no error into a single [u8; 40]"
+                "six [u8; 8] should always concat with no error into a single [u8; 48]"
             ),
         }
     }
 
     /// From byte array
+    ///
+    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), and 48-byte records; missing
+    /// trailing pools default to zero.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
 
         // Return an error early if bytes don't have the right length instead of panicking later.
         match bytes_length {
-            32 | 40 => {}
+            32 | 40 | 48 => {}
             _ => return Err(Unparsable),
         };
 
@@ -378,12 +442,23 @@ impl ValueBalance<NonNegative> {
 
         let deferred = match bytes_length {
             32 => Amount::zero(),
-            40 => Amount::from_bytes(
+            40 | 48 => Amount::from_bytes(
                 bytes[32..40]
                     .try_into()
                     .expect("deferred amount should be parsable"),
             )
             .map_err(Deferred)?,
+            _ => return Err(Unparsable),
+        };
+
+        let ironwood = match bytes_length {
+            32 | 40 => Amount::zero(),
+            48 => Amount::from_bytes(
+                bytes[40..48]
+                    .try_into()
+                    .expect("ironwood amount should be parsable"),
+            )
+            .map_err(Ironwood)?,
             _ => return Err(Unparsable),
         };
 
@@ -393,6 +468,7 @@ impl ValueBalance<NonNegative> {
             sapling,
             orchard,
             deferred,
+            ironwood,
         })
     }
 }
@@ -415,6 +491,12 @@ pub enum ValueBalanceError {
     /// deferred amount error {0}
     Deferred(amount::Error),
 
+    /// ironwood amount error {0}
+    Ironwood(amount::Error),
+
+    /// total amount error {0}
+    Total(amount::Error),
+
     /// ValueBalance is unparsable
     Unparsable,
 }
@@ -427,6 +509,8 @@ impl fmt::Display for ValueBalanceError {
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
+            Ironwood(e) => format!("ironwood amount err: {e}"),
+            Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
     }
@@ -444,6 +528,7 @@ where
             sapling: (self.sapling + rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
+            ironwood: (self.ironwood + rhs.ironwood).map_err(Ironwood)?,
         })
     }
 }
@@ -493,6 +578,7 @@ where
             sapling: (self.sapling - rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
+            ironwood: (self.ironwood - rhs.ironwood).map_err(Ironwood)?,
         })
     }
 }
@@ -562,6 +648,7 @@ where
             sapling: self.sapling.neg(),
             orchard: self.orchard.neg(),
             deferred: self.deferred.neg(),
+            ironwood: self.ironwood.neg(),
         }
     }
 }

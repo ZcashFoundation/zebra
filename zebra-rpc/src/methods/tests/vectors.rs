@@ -106,7 +106,7 @@ async fn rpc_getinfo() {
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
-    assert_eq!(get_info.subversion, format!("RPC test"));
+    assert_eq!(get_info.subversion, "RPC test".to_string());
 
     mempool.expect_no_requests().await;
     read_state.expect_no_requests().await;
@@ -114,6 +114,189 @@ async fn rpc_getinfo() {
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
     assert!(rpc_tx_queue_task_result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Without a configured end of support height, `end_of_service` is not present.
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+
+    let end_of_support_height = 3_546_440;
+    let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, end_of_support_height);
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+    assert!(end_of_service.estimated_time > Utc::now().timestamp());
+    assert!(end_of_service.estimated_time <= Utc::now().timestamp() + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    let tip_height = Height(3_000_000);
+    latest_chain_tip_sender.send_best_tip_height(tip_height);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let end_of_support_height = Height(3_546_440);
+    let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
+
+    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
+    // and the estimate is reported 24 hours early.
+    let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+
+    let before = Utc::now().timestamp();
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+    let after = Utc::now().timestamp();
+
+    assert_eq!(end_of_service.block_height, end_of_support_height.0);
+    assert!(end_of_service.estimated_time >= before + expected_offset);
+    assert!(end_of_service.estimated_time <= after + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_omits_end_of_service_off_mainnet() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Network::new_default_testnet(),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Even if an end of support height is configured, `end_of_service` is only reported on
+    // Mainnet, matching zcashd and the RPC documentation.
+    let rpc = rpc.with_end_of_support_height(Some(Height(100)));
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimated_time_is_never_negative() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // A tip so far past the end of support height that an unclamped estimate would be negative.
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    latest_chain_tip_sender.send_best_tip_height(Height::MAX);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let rpc = rpc.with_end_of_support_height(Some(Height(1)));
+
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, 1);
+    // The estimate is clamped to zero instead of going negative.
+    assert_eq!(end_of_service.estimated_time, 0);
 }
 
 // Helper function that returns the nonce, final sapling root and
@@ -281,7 +464,12 @@ async fn rpc_getblock() {
     // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
     let orchard = OrchardTrees { size: 0 };
-    let trees = GetBlockTrees { sapling, orchard };
+    let ironwood = IronwoodTrees { size: 0 };
+    let trees = GetBlockTrees {
+        sapling,
+        orchard,
+        ironwood,
+    };
 
     // Make height calls with verbosity=1 and check response
     let mut prev_block_info: Option<BlockInfo> = None;
@@ -831,6 +1019,123 @@ async fn rpc_getblock_missing_error() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
+/// Regression test for GHSA-x6v8-c2xp-928m — panics (aborts) before the fix.
+///
+/// When `Depth` returns `None` (side-chain block), `get_block_header` sets
+/// `confirmations = -1`:
+/// https://github.com/ZcashFoundation/zebra/blob/v5.2.0/zebra-rpc/src/methods.rs#L1508
+/// The old code narrowed that to `u32` via `.try_into().expect()`, which panicked.
+///
+/// The fix changes `TransactionObject.confirmations` from `u32` to `i64`, matching
+/// zcashd's signed `int`:
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/rawtransaction.cpp#L311
+/// https://github.com/zcash/zcash/blob/v6.3.0/src/rpc/blockchain.cpp#L404
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block.hash();
+    let block_header = block.header.clone();
+    let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let rpc_clone = rpc.clone();
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
+
+    // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block_header,
+            hash: block_hash,
+            height: zebra_chain::block::Height(0),
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(None));
+
+    // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
+    read_state
+        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+    read_state
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(None));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
+
+    let block_response = block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed for side-chain blocks");
+
+    let GetBlockResponse::Object(obj) = block_response else {
+        panic!("expected verbosity-2 getblock to return an object");
+    };
+
+    assert_eq!(
+        obj.confirmations, -1,
+        "side-chain confirmations should be -1"
+    );
+
+    // Each transaction object must be labeled as side-chain (height=-1,
+    // confirmations=0) rather than panicking on the u32 cast.
+    for actual_tx in &obj.tx {
+        let GetBlockTransaction::Object(tx_obj) = actual_tx else {
+            panic!("verbosity-2 returns transaction objects");
+        };
+        assert_eq!(tx_obj.height, Some(-1));
+        assert_eq!(tx_obj.confirmations, Some(0));
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockheader() {
     let _init_guard = zebra_test::init();
@@ -1146,7 +1451,7 @@ async fn rpc_getrawtransaction() {
                 panic!("unexpected response to Depth request");
             };
 
-            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            let expected_confirmations: i64 = (1 + depth.expect("depth should be Some")).into();
 
             (confirmations, expected_confirmations)
         }
@@ -3189,4 +3494,42 @@ async fn rpc_gettxout() {
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
     assert!(rpc_tx_queue_task_result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_get_standard_fee() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (tip, _tip_sender) = MockChainTip::new();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let response = rpc
+        .get_standard_fee()
+        .await
+        .expect("get_standard_fee should succeed");
+
+    // Static v0 placeholder: the ZIP-317 marginal fee and version 0.
+    assert_eq!(response.standard_fee(), 5000);
+    assert_eq!(response.version(), 0);
 }

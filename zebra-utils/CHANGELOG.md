@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0] - 2026-07-27
+
+### Breaking Changes
+
+- Requires `zebra-rpc` 15.0.0, which in turn requires `zebra-network` 11.0.0
+  ([#11071](https://github.com/ZcashFoundation/zebra/pull/11071)).
+
+### Changed
+
+- Updated `zcash_primitives` to 0.30
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-rpc` dependency bumped to `15.0.0`.
+
+## [9.1.4] - 2026-07-24
+
+### Changed
+
+- `zebrad-log-filter` no longer requires GNU sed, and no longer reads the `GNU_SED`
+  environment variable. Backslashes in log lines are now printed as-is
+  ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050))
+- `zebra-rpc` dependency bumped to `14.0.0`.
+
+### Security
+
+- `zebrad-log-filter` no longer runs log text as a shell command. Previously a log line
+  containing a single quote could execute arbitrary commands as the user running the filter
+  ([#11050](https://github.com/ZcashFoundation/zebra/pull/11050))
+
+## [9.1.3] - 2026-07-22
+
+### Changed
+
+- `zebra-rpc` dependency bumped to `13.0.0`.
+
+## [9.1.2] - 2026-07-17
+
+### Changed
+
+- `zebra-rpc` dependency bumped to `12.1.0`.
+
+## [9.1.1] - 2026-07-17
+
+### Changed
+
+- Dependencies bumped: `zebra-chain` to `11.2.0`, `zebra-rpc` to `12.0.0`, and
+  `zebra-node-services` to `9.1.1`.
+
+## [9.1.0] - 2026-07-10
+
+### Changed
+
+- MSRV is now 1.88
+
+## [9.0.0] - 2026-07-02
+
+### Changed
+
+- `zebra-chain` dependency bumped to `11.0.0`, `zebra-rpc` to `11.0.0`, and
+  `zebra-node-services` to `9.0.0`.
+- Migrated to `zcash_primitives 0.29.0-pre.0` and `zcash_protocol 0.10.0-pre.0`.
+- Replaced the unmaintained `structopt` dependency with `clap` for command-line parsing
+  ([#10766](https://github.com/ZcashFoundation/zebra/pull/10766))
+
 ## [8.0.1] - 2026-06-18
 
 ### Changed

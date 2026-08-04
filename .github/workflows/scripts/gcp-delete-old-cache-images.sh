@@ -15,7 +15,7 @@ delete_images() {
             echo "Keeping image ${kept_images} named ${image}"
         else
             echo "Deleting image: ${image}"
-            gcloud compute images delete "${image}" || echo "Failed to delete image: ${image}"
+            gcloud compute images delete "${image}" --quiet || echo "Failed to delete image: ${image}"
         fi
     done
 }

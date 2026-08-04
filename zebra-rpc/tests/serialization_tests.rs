@@ -23,14 +23,14 @@ use zebra_rpc::client::zebra_chain::{
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_rpc::client::{
-    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
+    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots, EndOfService,
     FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
     GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
     GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
     GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
-    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetNetworkInfoResponse,
-    GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetBlockchainInfoResponse, GetDeprecationInfoResponse, GetInfoResponse, GetMiningInfoResponse,
+    GetNetworkInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
     GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject,
     Orchard, OrchardAction, OrchardFlags, Output, ScriptPubKey, ScriptSig,
     SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
@@ -87,6 +87,43 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
         errors_timestamp,
     );
 
+    assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_deprecation_info() -> Result<(), Box<dyn std::error::Error>> {
+    // On Mainnet, the response contains an `end_of_service` object.
+    let json = r#"
+{
+  "end_of_service": {
+    "block_height": 3546440,
+    "estimated_time": 1769900000
+  }
+}"#;
+    let obj: GetDeprecationInfoResponse = serde_json::from_str(json)?;
+
+    let end_of_service = obj
+        .end_of_service()
+        .clone()
+        .expect("end_of_service is present in the JSON");
+    let block_height = end_of_service.block_height();
+    let estimated_time = end_of_service.estimated_time();
+
+    assert_eq!(block_height, 3546440);
+    assert_eq!(estimated_time, 1769900000);
+
+    let new_obj =
+        GetDeprecationInfoResponse::new(Some(EndOfService::new(block_height, estimated_time)));
+    assert_eq!(obj, new_obj);
+
+    // On other networks, the `end_of_service` object is omitted entirely.
+    let obj: GetDeprecationInfoResponse = serde_json::from_str("{}")?;
+    assert_eq!(*obj.end_of_service(), None);
+    assert_eq!(serde_json::to_string(&obj)?, "{}");
+
+    let new_obj = GetDeprecationInfoResponse::new(None);
     assert_eq!(obj, new_obj);
 
     Ok(())
@@ -240,6 +277,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let trees = block.trees();
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
+    let trees_ironwood = trees.ironwood();
     // We already tested that GetBlockHash is readable with `hash`, so we don't
     // bother unpacking it here
     let previous_block_hash = block.previous_block_hash();
@@ -269,7 +307,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         difficulty,
         chain_supply,
         value_pools,
-        GetBlockTrees::new(trees_sapling, trees_orchard),
+        GetBlockTrees::new(trees_sapling, trees_orchard, trees_ironwood),
         previous_block_hash,
         next_block_hash,
     )));
@@ -600,6 +638,7 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         Treestate::new(Commitments::new(sapling_final_root, sapling_final_state)),
         Treestate::new(Commitments::new(orchard_final_root, orchard_final_state)),
+        obj.ironwood().clone(),
     );
 
     assert_eq!(obj, new_obj);
@@ -823,6 +862,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             binding_sig,
         )
     });
+    // Ironwood reuses the Orchard-shaped `Orchard` object, so round-trip it by value.
+    let ironwood = tx.ironwood().clone();
     let binding_sig = tx.binding_sig();
     let joinsplit_pub_key = tx.joinsplit_pub_key();
     let joinsplit_sig = tx.joinsplit_sig();
@@ -855,6 +896,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         joinsplit_pub_key,
         joinsplit_sig,
         orchard,
+        ironwood,
         value_balance,
         value_balance_zat,
         size,

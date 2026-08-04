@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.1] - 2026-07-27
+
+### Changed
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-script` dependency bumped to `10.1.2`.
+- `zebra-state` dependency bumped to `12.0.1`.
+
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
+## [13.0.0] - 2026-07-22
+
+### Added
+
+- `error::TransactionError`:
+  - `Halo2VerificationFailed`
+  - `SaplingVerificationFailed`
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
+
+### Security
+
+- Check the ZIP-317 mempool rules before verifying a transaction's shielded proofs, so an
+  underpaying transaction is rejected before the expensive cryptographic checks run
+  ([#11053](https://github.com/ZcashFoundation/zebra/pull/11053)).
+- Score failed shielded proof and signature verifications, and non-canonical Orchard and
+  Ironwood proof sizes, as mempool misbehaviour, so a peer sending invalid shielded transactions
+  is disconnected instead of repeatedly forcing their verification
+  ([#11054](https://github.com/ZcashFoundation/zebra/pull/11054)).
+
+## [12.0.1] - 2026-07-17
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.0`.
+
+## [12.0.0] - 2026-07-17
+
+### Changed
+
+- Requires `zebra-state` 11.0.0. `zebra-state` types (`error::ValidateContextError`,
+  `request::Request`, `response::{Response, KnownBlock}`) appear in this crate's public API,
+  so `zebra-state`'s major bump is breaking here too.
+- `tower-batch-control` dependency bumped to `1.1.1`.
+- `tower-fallback` dependency bumped to `0.2.43`.
+- `zebra-chain` dependency bumped to `11.2.0`.
+- `zebra-node-services` dependency bumped to `9.1.1`.
+- `zebra-script` dependency bumped to `10.1.1`.
+
+## [11.0.0] - 2026-07-10
+
+### Added
+
+- `error::TransactionError`:
+  - `NonStandardInputs`
+  - `NonStandardScriptSigNotPushOnly { input_index }`
+  - `NonStandardScriptSigSize { input_index, size }`
+- `transaction::check`:
+  - `MAX_P2SH_SIGOPS`
+  - `MAX_STANDARD_SCRIPTSIG_SIZE`
+  - `are_inputs_standard`
+  - `mempool_standard_input_scripts`
+  - `standard_script_kind`
+
+### Changed
+
+- MSRV is now 1.88
+
+### Security
+
+- Mempool transactions with non-standard transparent inputs are now rejected before
+  script verification, reducing DoS surface
+  ([GHSA-84j3-rw4c-gqmj](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-84j3-rw4c-gqmj)).
+  Thanks to @ouicate for reporting the issue. Script verification also now runs on
+  the shared Rayon thread pool to avoid blocking the runtime.
+
+## [10.0.0] - 2026-07-02
+
+### Added
+
+- `error::TransactionError`:
+  - `CoinbaseHasEnableSpendsIronwood`
+  - `CoinbaseHasOrchardActions`
+  - `DuplicateIronwoodNullifier`
+  - `IronwoodProofSize`
+  - `NegativeOrchardValueBalance`
+  - `NotEnoughIronwoodFlags`
+  - `OrchardHasEnableCrossAddress`
+- `transaction::check`:
+  - `coinbase_orchard_component_empty`
+  - `has_enough_ironwood_flags`
+  - `orchard_cross_address_disabled`
+  - `orchard_value_balance_non_negative`
+- A third Orchard Action verifier era for the NU6.3 cross-address circuit:
+  - `halo2::VERIFYING_KEY_NU6_3_ONWARD` and `halo2::VERIFIER_NU6_3_ONWARD`
+  - `halo2::orchard_v6_verifier` (for v6 Orchard and Ironwood bundles) and `halo2::VerifierService`
+
+### Changed
+
+- Migrated to `zcash_primitives 0.29.0-pre.0` (and the rest of the librustzcash NU6.3
+  pre-release wave: `orchard 0.15.0-pre.1`, `zcash_proofs 0.29.0-pre.0`,
+  `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`).
+- `error::TransactionError::NotEnoughFlags` renamed to `NotEnoughOrchardFlags`, for symmetry with
+  the new `NotEnoughIronwoodFlags` variant.
+- `halo2::VERIFIER_PRE_NU6_2` is now declared via the `halo2::VerifierService` alias (the
+  underlying type is unchanged).
+- The Orchard Action verifying keys are now named by circuit era rather than transaction version,
+  because a bundle's key is selected by block era, not transaction version:
+  - `halo2::VERIFYING_KEY_POST_NU6_2` renamed to `halo2::VERIFYING_KEY_NU6_2`, and
+    `halo2::VERIFIER_POST_NU6_2` to `halo2::VERIFIER_NU6_2`.
+  - `halo2::verifier_for` renamed to `halo2::orchard_v5_verifier_for`; from NU6.3 it routes v5
+    Orchard bundles to the NU6.3 key (the same key as v6 Orchard and Ironwood).
+
 ## [9.0.1] - 2026-06-18
 
 ### Changed

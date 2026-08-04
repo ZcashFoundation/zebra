@@ -17,6 +17,7 @@ use zebra_chain::{
     fmt::{humantime_seconds, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     LedgerState,
 };
 
@@ -172,8 +173,11 @@ impl Strategy for PreparedChain {
                 &network,
                 blocks[0].block.clone(),
                 // Dummy roots since this is only used for tests
-                &Default::default(),
-                &Default::default(),
+                BlockCommitmentTreeRoots {
+                    sapling: &Default::default(),
+                    orchard: &Default::default(),
+                    ironwood: &Default::default(),
+                },
             )
             .expect("history tree should be created");
             *chain = Some((

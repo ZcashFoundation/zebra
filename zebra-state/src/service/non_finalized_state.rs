@@ -175,7 +175,14 @@ impl NonFinalizedState {
             return with_watch_channel(self);
         };
 
-        if skip_backup_task {
+        if !should_restore_backup {
+            tracing::info!(
+                ?backup_dir_path,
+                spawning_backup_task = !skip_backup_task,
+                "not restoring non-finalized blocks from backup, any backed up blocks that are \
+                 missing from the non-finalized state will be deleted"
+            );
+        } else if skip_backup_task {
             tracing::info!(
                 ?backup_dir_path,
                 "restoring non-finalized blocks from backup (sync write mode, backup task skipped)"
@@ -221,6 +228,8 @@ impl NonFinalizedState {
                 ?num_blocks_restored,
                 "restored blocks from non-finalized backup cache"
             );
+        } else if should_restore_backup {
+            tracing::info!("no blocks were restored from the non-finalized backup cache");
         }
 
         (non_finalized_state, sender, receiver)
@@ -329,7 +338,9 @@ impl NonFinalizedState {
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.insert(side_chain);
+            if !side_chain.is_empty() {
+                self.insert(side_chain);
+            }
         }
 
         // Remove all invalidated_blocks at or below the finalized height
@@ -463,9 +474,7 @@ impl NonFinalizedState {
                 finalized_state
                     .finalized_tip_height()
                     .ok_or(ReconsiderError::ParentChainNotFound(block_hash))?,
-                finalized_state.sprout_tree_for_tip(),
-                finalized_state.sapling_tree_for_tip(),
-                finalized_state.orchard_tree_for_tip(),
+                finalized_state.note_commitment_trees_for_tip(),
                 finalized_state.history_tree(),
                 finalized_state.finalized_value_pool(),
             );
@@ -527,9 +536,7 @@ impl NonFinalizedState {
         let chain = Chain::new(
             &self.network,
             finalized_tip_height,
-            finalized_state.sprout_tree_for_tip(),
-            finalized_state.sapling_tree_for_tip(),
-            finalized_state.orchard_tree_for_tip(),
+            finalized_state.note_commitment_trees_for_tip(),
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );

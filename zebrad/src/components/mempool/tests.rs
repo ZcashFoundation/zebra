@@ -47,11 +47,11 @@ impl Mempool {
         self.dummy_call().await;
     }
 
-    /// Disable the mempool by pretending the synchronization is far from the tip.
-    pub async fn disable(&mut self, recent_syncs: &mut RecentSyncLengths) {
+    /// Pretend the synchronization is far from the tip and poll the mempool.
+    async fn sync_far_from_tip(&mut self, recent_syncs: &mut RecentSyncLengths) {
         // Pretend we're far from the tip
         SyncStatus::sync_far_from_tip(recent_syncs);
-        // Make a dummy request to poll the mempool and make it disable itself
+        // Make a dummy request to poll the mempool.
         self.dummy_call().await;
     }
 

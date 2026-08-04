@@ -12,17 +12,20 @@ use thiserror::Error;
 
 use zcash_protocol::value::BalanceError;
 use zebra_chain::{
-    amount, block, orchard,
+    amount, block, ironwood, orchard,
     parameters::subsidy::SubsidyError,
     sapling, sprout,
     transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
 };
 use zebra_state::ValidateContextError;
 
-use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
+use crate::{block::MAX_BLOCK_SIGOPS, transaction::check::MAX_STANDARD_SCRIPTSIG_SIZE, BoxError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+#[cfg(test)]
+mod tests;
 
 /// Workaround for format string identifier rules.
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
@@ -49,6 +52,15 @@ pub enum TransactionError {
 
     #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
     CoinbaseHasEnableSpendsOrchard,
+
+    #[error("coinbase transaction MUST NOT have the EnableSpendsIronwood flag set")]
+    CoinbaseHasEnableSpendsIronwood,
+
+    #[error("coinbase transaction MUST have an empty Orchard component (no Orchard actions) from NU6.3 onward")]
+    CoinbaseHasOrchardActions,
+
+    #[error("Orchard transaction MUST NOT have the EnableCrossAddress flag set")]
+    OrchardHasEnableCrossAddress,
 
     #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
     CoinbaseOutputsNotDecryptable,
@@ -152,8 +164,13 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedPallas(zebra_chain::primitives::reddsa::Error),
 
-    // temporary error type until #1186 is fixed
-    #[error("Downcast from BoxError to redjubjub::Error failed: {0}")]
+    #[error("Sapling proof or signature verification failed")]
+    SaplingVerificationFailed,
+
+    #[error("Orchard or Ironwood Halo2 proof verification failed")]
+    Halo2VerificationFailed,
+
+    #[error("could not convert an asynchronous verification error: {0}")]
     InternalDowncastError(String),
 
     #[error("either vpub_old or vpub_new must be zero")]
@@ -161,6 +178,9 @@ pub enum TransactionError {
 
     #[error("adding to the sprout pool is disabled after Canopy")]
     DisabledAddToSproutPool,
+
+    #[error("the Orchard value balance must be non-negative from NU6.3 onward")]
+    NegativeOrchardValueBalance,
 
     #[error("could not calculate the transaction fee")]
     IncorrectFee,
@@ -177,8 +197,14 @@ pub enum TransactionError {
     #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
     DuplicateOrchardNullifier(orchard::Nullifier),
 
+    #[error("ironwood double-spend: duplicate nullifier: {_0:?}")]
+    DuplicateIronwoodNullifier(ironwood::Nullifier),
+
     #[error("must have at least one active orchard flag")]
-    NotEnoughFlags,
+    NotEnoughOrchardFlags,
+
+    #[error("must have at least one active ironwood flag")]
+    NotEnoughIronwoodFlags,
 
     #[error("could not find transparent input UTXO in the best chain or mempool")]
     TransparentInputNotFound,
@@ -224,6 +250,20 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
 
+    // Mempool standardness (policy) rejections, applied before script verification.
+    // These are not consensus rules: the same input scripts are valid in blocks.
+    #[error(
+        "mempool transaction input {input_index} has a {size} byte scriptSig, \
+         above the {MAX_STANDARD_SCRIPTSIG_SIZE} byte standardness limit"
+    )]
+    NonStandardScriptSigSize { input_index: usize, size: usize },
+
+    #[error("mempool transaction input {input_index} has a non-push-only scriptSig")]
+    NonStandardScriptSigNotPushOnly { input_index: usize },
+
+    #[error("mempool transaction has non-standard transparent inputs")]
+    NonStandardInputs,
+
     #[error("transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,
 
@@ -244,6 +284,9 @@ pub enum TransactionError {
 
     #[error("Orchard proof has a non-canonical size")]
     OrchardProofSize,
+
+    #[error("Ironwood proof has a non-canonical size")]
+    IronwoodProofSize,
 
     #[error("unexpected error")]
     Other(String),
@@ -300,9 +343,23 @@ impl From<amount::Error> for TransactionError {
 // TODO: use a dedicated variant and From impl for each concrete type, and update callers (#5732)
 impl From<BoxError> for TransactionError {
     fn from(mut err: BoxError) -> Self {
-        // TODO: handle redpallas::Error, ScriptInvalid, InvalidSignature
+        // Preserve the concrete shielded proof/signature verification error types so they keep
+        // their mempool misbehaviour score. Without these downcasts a failed Orchard/Ironwood
+        // Halo2 proof, Orchard binding signature, or Sprout JoinSplit signature would collapse to
+        // `InternalDowncastError` (score 0), letting a peer force verification without being banned.
+        // See <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2p4c-3q4q-p463>.
+        match err.downcast::<zebra_chain::primitives::ed25519::Error>() {
+            Ok(e) => return TransactionError::Ed25519(*e),
+            Err(e) => err = e,
+        }
+
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => return TransactionError::RedJubjub(*e),
+            Err(e) => err = e,
+        }
+
+        match err.downcast::<zebra_chain::primitives::reddsa::Error>() {
+            Ok(e) => return TransactionError::RedPallas(*e),
             Err(e) => err = e,
         }
 
@@ -339,6 +396,9 @@ impl TransactionError {
             | CoinbaseHasSpend
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
+            | CoinbaseHasEnableSpendsIronwood
+            | CoinbaseHasOrchardActions
+            | OrchardHasEnableCrossAddress
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
@@ -356,14 +416,23 @@ impl TransactionError {
             | Ed25519(_)
             | RedJubjub(_)
             | RedPallas(_)
+            | SaplingVerificationFailed
+            | Halo2VerificationFailed
+            | OrchardProofSize
+            | IronwoodProofSize
             | BothVPubsNonZero
             | DisabledAddToSproutPool
-            | NotEnoughFlags
+            | NegativeOrchardValueBalance
+            | NotEnoughOrchardFlags
+            | NotEnoughIronwoodFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId
             | LockedUntilAfterBlockHeight(_)
             | LockedUntilAfterBlockTime(_) => 100,
 
+            // Standardness (policy) rejections must not be punished: non-standard
+            // transactions are consensus-valid, and zcashd relays a reject message
+            // without a DoS score for them.
             _other => 0,
         }
     }

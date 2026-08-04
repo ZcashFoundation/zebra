@@ -565,6 +565,10 @@ impl Storage {
             .iter()
             .flat_map(|transaction| transaction.orchard_nullifiers())
             .collect();
+        let ironwood_nullifiers: HashSet<_> = transactions
+            .iter()
+            .flat_map(|transaction| transaction.ironwood_nullifiers())
+            .collect();
 
         let duplicate_spend_ids: HashSet<_> = self
             .verified
@@ -582,7 +586,11 @@ impl Storage {
                         .any(|nullifier| sapling_nullifiers.contains(nullifier))
                     || tx
                         .orchard_nullifiers()
-                        .any(|nullifier| orchard_nullifiers.contains(nullifier)))
+                        .any(|nullifier| orchard_nullifiers.contains(nullifier))
+                    // `ironwood_nullifiers()` yields owned `ironwood::Nullifier`s.
+                    || tx
+                        .ironwood_nullifiers()
+                        .any(|nullifier| ironwood_nullifiers.contains(&nullifier)))
                 .then_some(tx_id)
             })
             .collect();

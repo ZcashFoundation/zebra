@@ -7,7 +7,9 @@ use zebra_chain::{
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, NetworkUpgrade},
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
     transaction::Transaction,
@@ -34,9 +36,7 @@ fn construct_empty() {
     let _chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::zero(),
     );
@@ -51,9 +51,7 @@ fn construct_single() -> Result<()> {
     let mut chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -85,9 +83,7 @@ fn construct_many() -> Result<()> {
     let mut chain = Chain::new(
         &Network::Mainnet,
         (initial_height - 1).expect("Initial height should be at least 1."),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -112,9 +108,7 @@ fn ord_matches_work() -> Result<()> {
     let mut lesser_chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
@@ -123,9 +117,7 @@ fn ord_matches_work() -> Result<()> {
     let mut bigger_chain = Chain::new(
         &Network::Mainnet,
         Height(0),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::zero(),
     );
@@ -874,8 +866,11 @@ fn history_tree_is_updated_for_network_upgrade(
     let tree = NonEmptyHistoryTree::from_block(
         &Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree_for_tip().root(),
-        &chain.orchard_note_commitment_tree_for_tip().root(),
+        BlockCommitmentTreeRoots {
+            sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
+            orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
+            ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+        },
     )
     .unwrap();
 
@@ -958,8 +953,11 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let tree = NonEmptyHistoryTree::from_block(
         &Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree_for_tip().root(),
-        &chain.orchard_note_commitment_tree_for_tip().root(),
+        BlockCommitmentTreeRoots {
+            sapling: &chain.sapling_note_commitment_tree_for_tip().root(),
+            orchard: &chain.orchard_note_commitment_tree_for_tip().root(),
+            ironwood: &chain.ironwood_note_commitment_tree_for_tip().root(),
+        },
     )
     .unwrap();
 
@@ -1067,9 +1065,7 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     let mut chain = Chain::new(
         &network,
         (block1.coinbase_height().unwrap() - 1).unwrap(),
-        Default::default(),
-        Default::default(),
-        Default::default(),
+        NoteCommitmentTrees::default(),
         Default::default(),
         ValueBalance::fake_populated_pool(),
     );
