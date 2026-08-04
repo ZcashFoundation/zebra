@@ -430,7 +430,10 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
+/// Tests that `extend_tips` downloads a singleton unknown hash.
+///
+/// A response is useful only when its expected overlap is followed by an
+/// unknown hash.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
@@ -573,6 +576,8 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // ChainSync::extend_tips
 
+    let (response_feedback, response_feedback_observer) = zn::FindResponseFeedback::new_for_test();
+
     peer_set
         .expect_request(zn::Request::FindBlocks {
             known_blocks: vec![block1_hash],
@@ -584,7 +589,7 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
                 block2_hash, // expected overlap
                 block3_hash, // singleton unknown hash
             ],
-            feedback: None,
+            feedback: Some(response_feedback),
         });
 
     for _ in 1..sync::FANOUT {
@@ -607,6 +612,12 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             block3.clone(),
             None,
         ))]));
+
+    assert_eq!(
+        response_feedback_observer.outcome(),
+        Some(true),
+        "a matching unknown block hash is a useful find blocks response",
+    );
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block3))
