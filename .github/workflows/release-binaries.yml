@@ -7,12 +7,14 @@
 # This workflow is triggered if:
 # - A release is published
 # - A pre-release is changed to a release
+# - A maintainer manually validates binary preparation before a release
 name: Release binaries
 
 on:
   release:
     types:
       - released
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -65,7 +67,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "version=${RELEASE_TAG#v}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${RELEASE_TAG#v}" >> "${GITHUB_OUTPUT}"
 
   prepare-binaries:
     name: Prepare release binaries
@@ -76,8 +78,19 @@ jobs:
       attestations: write # store binary provenance
     uses: ./.github/workflows/zfnd-release-binaries.yml
     with:
-      source_sha: ${{ github.sha }}
       version: ${{ needs.binary-version.outputs.version }}
+      features: default-release-binaries
+
+  validate-binaries:
+    name: Validate release binary preparation
+    if: github.event_name == 'workflow_dispatch' && github.repository_owner == 'ZcashFoundation'
+    permissions:
+      contents: read
+      id-token: write # authenticate test provenance and signatures
+      attestations: write # store test provenance
+    uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      version: 0.0.0-test
       features: default-release-binaries
 
   attach-binaries:

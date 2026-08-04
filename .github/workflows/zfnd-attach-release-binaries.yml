@@ -16,6 +16,14 @@ permissions: {}
 jobs:
   attach:
     name: Attach release binaries
+    if: >-
+      ${{
+        github.repository == 'ZcashFoundation/zebra' &&
+        github.event_name == 'release' &&
+        github.event.action == 'released' &&
+        startsWith(inputs.release_tag, 'v') &&
+        inputs.release_tag == github.event.release.tag_name
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
