@@ -1,5 +1,7 @@
 //! Focused tests for feedback attribution across synchronization stages.
 
+use std::collections::HashSet;
+
 use indexmap::IndexSet;
 use tokio::sync::mpsc;
 use zebra_chain::{
@@ -10,7 +12,7 @@ use zebra_network::{self as zn, FindResponseFeedback, FindResponseFeedbackObserv
 use zebra_state as zs;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use super::super::{ChainSync, FANOUT};
+use super::super::{ChainSync, CheckedTip, FANOUT};
 use crate::config::ZebradConfig;
 
 mod prop;
@@ -106,6 +108,44 @@ impl TestScenario {
 
         let (result, ()) = tokio::join!(self.sync.obtain_tips(), mock_responses);
         result.expect("mocked obtain stage queues its hashes");
+
+        observer
+    }
+
+    /// Queues an extend response with the expected overlap and supplied continuation.
+    async fn hashes_for_extend_tips(&mut self, hashes: Vec<Hash>) -> FindResponseFeedbackObserver {
+        let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+        self.sync.prospective_tips = HashSet::from([CheckedTip {
+            tip: Hash([0; 32]),
+            expected_next: Hash([1; 32]),
+        }]);
+
+        let mock_responses = async {
+            self.peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![Hash([0; 32])],
+                    stop: None,
+                })
+                .await
+                .respond(zn::Response::BlockHashes {
+                    hashes: [vec![Hash([1; 32])], hashes].concat(),
+                    feedback: Some(feedback),
+                });
+
+            for _ in 1..FANOUT {
+                self.peers
+                    .expect_request(zn::Request::FindBlocks {
+                        known_blocks: vec![Hash([0; 32])],
+                        stop: None,
+                    })
+                    .await
+                    .respond(Err(zn::BoxError::from("unused fanout response")));
+            }
+        };
+
+        let (result, ()) = tokio::join!(self.sync.extend_tips(), mock_responses);
+        result.expect("mocked extend stage queues its hashes");
 
         observer
     }
