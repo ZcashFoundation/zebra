@@ -280,7 +280,10 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
+/// Tests that `obtain_tips` downloads a singleton unknown hash.
+///
+/// Unknown hashes make a response useful, while a response containing only
+/// known hashes must preserve the responding peer's stall.
 #[tokio::test]
 async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     let (
@@ -336,6 +339,8 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::BlockLocator(vec![block0_hash]));
 
+    let (response_feedback, response_feedback_observer) = zn::FindResponseFeedback::new_for_test();
+
     peer_set
         .expect_request(zn::Request::FindBlocks {
             known_blocks: vec![block0_hash],
@@ -344,7 +349,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zn::Response::BlockHashes {
             hashes: vec![block1_hash],
-            feedback: None,
+            feedback: Some(response_feedback),
         });
 
     // Find the first unknown hash in this peer response.
@@ -379,6 +384,12 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
             block1.clone(),
             None,
         ))]));
+
+    assert_eq!(
+        response_feedback_observer.outcome(),
+        Some(true),
+        "an unknown block hash is a useful find blocks response",
+    );
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block1))
