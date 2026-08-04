@@ -1022,7 +1022,15 @@ where
                         };
 
                         if unknown_hashes.is_empty() {
-                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
+                            debug!(
+                                ?tip.tip,
+                                "response contained no new hashes after the expected overlap",
+                            );
+
+                            if let Some(feedback) = feedback.take() {
+                                feedback.mark_stalled();
+                            }
+
                             continue;
                         }
 
