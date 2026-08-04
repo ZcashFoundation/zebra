@@ -971,7 +971,10 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes { hashes, feedback }) => {
+                    Ok(zn::Response::BlockHashes {
+                        hashes,
+                        mut feedback,
+                    }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -999,6 +1002,9 @@ where
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                             [first_hash, second_hash, rest @ ..] => {
@@ -1057,7 +1063,7 @@ where
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
 
-                        if let Some(feedback) = feedback {
+                        if let Some(feedback) = feedback.take() {
                             feedback.mark_useful();
                         }
                     }
