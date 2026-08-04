@@ -358,7 +358,26 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    for _ in 1..sync::FANOUT {
+    let (known_response_feedback, known_response_feedback_observer) =
+        zn::FindResponseFeedback::new_for_test();
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block0_hash],
+            feedback: Some(known_response_feedback),
+        });
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    for _ in 2..sync::FANOUT {
         peer_set
             .expect_request(zn::Request::FindBlocks {
                 known_blocks: vec![block0_hash],
@@ -376,6 +395,12 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .expect_request(zs::Request::KnownBlock(block1_hash))
         .await
         .respond(zs::Response::KnownBlock(None));
+
+    assert_eq!(
+        known_response_feedback_observer.outcome(),
+        Some(false),
+        "a response containing only known hashes is not useful",
+    );
 
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
