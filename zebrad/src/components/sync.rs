@@ -943,7 +943,7 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes { hashes, .. }) => {
+                    Ok(zn::Response::BlockHashes { hashes, feedback }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -1028,6 +1028,10 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+
+                        if let Some(feedback) = feedback {
+                            feedback.mark_useful();
+                        }
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
