@@ -943,7 +943,10 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes { hashes, feedback }) => {
+                    Ok(zn::Response::BlockHashes {
+                        hashes,
+                        mut feedback,
+                    }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -965,12 +968,20 @@ where
                                 rest
                             }
                             // We ignore these responses
-                            [] => continue,
+                            [] => {
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
+                                continue;
+                            }
                             [single_hash] => {
                                 debug!(?single_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                             [first_hash, second_hash, rest @ ..] => {
@@ -980,12 +991,23 @@ where
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response that starts with two unexpected hashes");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                         };
 
                         if unknown_hashes.is_empty() {
-                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
+                            debug!(
+                                ?tip.tip,
+                                "response contained no new hashes after the expected overlap",
+                            );
+
+                            if let Some(feedback) = feedback.take() {
+                                feedback.mark_stalled();
+                            }
+
                             continue;
                         }
 
@@ -1029,7 +1051,7 @@ where
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
 
-                        if let Some(feedback) = feedback {
+                        if let Some(feedback) = feedback.take() {
                             feedback.mark_useful();
                         }
                     }
