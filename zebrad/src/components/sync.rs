@@ -972,6 +972,7 @@ where
                         };
 
                         if unknown_hashes.is_empty() {
+                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
                             continue;
                         }
 
