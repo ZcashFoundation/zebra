@@ -1324,6 +1324,16 @@ async fn advertise_and_serve_block(
     Ok(())
 }
 
+/// The [`RouterError`] served by the misbehaving stub verifier: a misbehaviour-scoring
+/// consensus failure, wrapped exactly like the router wraps it.
+fn invalid_gossiped_block_router_error() -> RouterError {
+    RouterError::Block {
+        source: Box::new(VerifyBlockError::Subsidy(
+            zebra_chain::parameters::subsidy::SubsidyError::NoCoinbase,
+        )),
+    }
+}
+
 /// A peer that gossips a consensus-invalid block must have its misbehaviour score raised.
 ///
 /// The production inbound block verifier is a `BlockVerifierRouter`, so a failed
@@ -1343,14 +1353,18 @@ async fn gossiped_block_router_error_scores_advertising_peer() -> Result<(), Box
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
     let peer = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
 
-    // A misbehaviour-scoring consensus failure, wrapped exactly like the router wraps it.
+    // Derive the expected score, so the test tracks scoring policy changes. If the sample
+    // error's score ever drops to zero, the guard fails loudly instead of the report
+    // assertion becoming vacuous.
+    let expected_score = invalid_gossiped_block_router_error().misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "the test error must have a non-zero misbehaviour score",
+    );
+
     let block_verifier = Buffer::new(
         BoxService::new(tower::service_fn(|_req: zebra_consensus::Request| async {
-            Err::<zebra_chain::block::Hash, RouterError>(RouterError::Block {
-                source: Box::new(VerifyBlockError::Subsidy(
-                    zebra_chain::parameters::subsidy::SubsidyError::NoCoinbase,
-                )),
-            })
+            Err::<zebra_chain::block::Hash, RouterError>(invalid_gossiped_block_router_error())
         })),
         10,
     );
@@ -1364,7 +1378,7 @@ async fn gossiped_block_router_error_scores_advertising_peer() -> Result<(), Box
 
     assert_eq!(
         report,
-        Some((peer, 100)),
+        Some((peer, expected_score)),
         "a peer that gossips a consensus-invalid block must be reported for misbehaviour",
     );
 
