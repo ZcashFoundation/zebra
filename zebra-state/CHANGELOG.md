@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `ReadRequest`, which is not `#[non_exhaustive]`, gains two variants
+  (`AnyChainSaplingTree` and `AnyChainOrchardTree`). Consumers that match on
+  `ReadRequest` exhaustively must handle the new variants.
+
 ### Added
 
 - New `ReadRequest::AnyChainSaplingTree` and `ReadRequest::AnyChainOrchardTree`
