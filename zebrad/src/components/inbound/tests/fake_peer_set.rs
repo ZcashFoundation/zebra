@@ -1297,18 +1297,22 @@ async fn poll_for_misbehavior_report(
 }
 
 /// Sends the gossiped block advertisement, and serves the block to the download task.
+///
+/// The advertisement is attributed to `advertiser`, and the `Blocks` response to
+/// `serving_peer` — the address a misbehaviour report is attached to.
 async fn advertise_and_serve_block(
     inbound: &mut Inbound,
     peer_set: &mut MockService<Request, Response, PanicAssertion>,
     block: Arc<Block>,
-    peer: PeerSocketAddr,
+    advertiser: PeerSocketAddr,
+    serving_peer: PeerSocketAddr,
 ) -> Result<(), BoxError> {
     let hash = block.hash();
 
     let response = inbound
         .ready()
         .await?
-        .call(Request::AdvertiseBlock(hash, Some(peer)))
+        .call(Request::AdvertiseBlock(hash, Some(advertiser)))
         .await?;
     assert_eq!(
         response,
@@ -1319,7 +1323,10 @@ async fn advertise_and_serve_block(
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(hash).collect()))
         .await
-        .respond(Response::Blocks(vec![Available((block, Some(peer)))]));
+        .respond(Response::Blocks(vec![Available((
+            block,
+            Some(serving_peer),
+        ))]));
 
     Ok(())
 }
@@ -1334,7 +1341,8 @@ fn invalid_gossiped_block_router_error() -> RouterError {
     }
 }
 
-/// A peer that gossips a consensus-invalid block must have its misbehaviour score raised.
+/// A peer that serves a consensus-invalid gossiped block must have its misbehaviour score
+/// raised.
 ///
 /// The production inbound block verifier is a `BlockVerifierRouter`, so a failed
 /// verification is boxed as a [`RouterError`]. The cleanup loop in `Inbound::poll_ready()`
@@ -1347,7 +1355,7 @@ fn invalid_gossiped_block_router_error() -> RouterError {
 ///
 /// Regression test for `GHSA-8hh2-hrf2-cqf4`.
 #[tokio::test(flavor = "multi_thread")]
-async fn gossiped_block_router_error_scores_advertising_peer() -> Result<(), BoxError> {
+async fn gossiped_block_router_error_scores_serving_peer() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
@@ -1372,14 +1380,59 @@ async fn gossiped_block_router_error_scores_advertising_peer() -> Result<(), Box
     let (mut inbound, mut peer_set, mut misbehavior_rx) =
         setup_gossiped_block_misbehavior(block_verifier).await;
 
-    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer).await?;
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
 
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
     assert_eq!(
         report,
         Some((peer, expected_score)),
-        "a peer that gossips a consensus-invalid block must be reported for misbehaviour",
+        "a peer that serves a consensus-invalid gossiped block must be reported for misbehaviour",
+    );
+
+    Ok(())
+}
+
+/// The misbehaviour report is attached to the peer that served the invalid block, not to
+/// the advertiser that announced it: the download task takes the reported address from the
+/// `Blocks` response, which is set by the connection that actually delivered the bytes.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_scores_serving_peer_not_advertiser() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let advertiser = PeerSocketAddr::from(([192, 168, 180, 12], 10_000));
+    let serving_peer = PeerSocketAddr::from(([192, 168, 180, 13], 10_000));
+
+    let expected_score = invalid_gossiped_block_router_error().misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "the test error must have a non-zero misbehaviour score",
+    );
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(|_req: zebra_consensus::Request| async {
+            Err::<zebra_chain::block::Hash, RouterError>(invalid_gossiped_block_router_error())
+        })),
+        10,
+    );
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior(block_verifier).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, advertiser, serving_peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report,
+        Some((serving_peer, expected_score)),
+        "the peer that served the invalid block must be scored, not the advertiser",
+    );
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        None,
+        "no other peer may be reported for this download",
     );
 
     Ok(())
@@ -1390,8 +1443,7 @@ async fn gossiped_block_router_error_scores_advertising_peer() -> Result<(), Box
 /// Guards against over-banning after the `GHSA-8hh2-hrf2-cqf4` fix: only errors whose
 /// `misbehavior_score()` is non-zero may be reported.
 #[tokio::test(flavor = "multi_thread")]
-async fn gossiped_block_benign_router_error_does_not_score_advertising_peer() -> Result<(), BoxError>
-{
+async fn gossiped_block_benign_router_error_does_not_score_serving_peer() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
@@ -1412,7 +1464,7 @@ async fn gossiped_block_benign_router_error_does_not_score_advertising_peer() ->
     let (mut inbound, mut peer_set, mut misbehavior_rx) =
         setup_gossiped_block_misbehavior(block_verifier).await;
 
-    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer).await?;
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
 
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
@@ -1424,7 +1476,7 @@ async fn gossiped_block_benign_router_error_does_not_score_advertising_peer() ->
     Ok(())
 }
 
-/// A block verification timeout must not raise the advertising peer's misbehaviour score.
+/// A block verification timeout must not raise the serving peer's misbehaviour score.
 ///
 /// The inbound verifier is wrapped in a tower [`tower::timeout::Timeout`], so a slow
 /// verification produces a boxed `tower::timeout::error::Elapsed`, not a [`RouterError`].
@@ -1432,7 +1484,7 @@ async fn gossiped_block_benign_router_error_does_not_score_advertising_peer() ->
 ///
 /// Negative control for `GHSA-8hh2-hrf2-cqf4`.
 #[tokio::test]
-async fn gossiped_block_verify_timeout_does_not_score_advertising_peer() -> Result<(), BoxError> {
+async fn gossiped_block_verify_timeout_does_not_score_serving_peer() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
@@ -1456,7 +1508,7 @@ async fn gossiped_block_verify_timeout_does_not_score_advertising_peer() -> Resu
     let (mut inbound, mut peer_set, mut misbehavior_rx) =
         setup_gossiped_block_misbehavior(block_verifier).await;
 
-    advertise_and_serve_block(&mut inbound, &mut peer_set, block.clone(), peer).await?;
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block.clone(), peer, peer).await?;
 
     verifier_called_rx
         .recv()
@@ -1480,7 +1532,7 @@ async fn gossiped_block_verify_timeout_does_not_score_advertising_peer() -> Resu
     // have been drained by the cleanup loop. If it were still in flight, the per-IP and
     // per-hash caps would drop this second advertisement, and no `BlocksByHash` request
     // would reach the peer set.
-    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer).await?;
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
 
     Ok(())
 }
