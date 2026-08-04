@@ -81,8 +81,8 @@ use downloads::{
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type TxVerifier = Buffer<
-    BoxService<transaction::Request, transaction::Response, TransactionError>,
-    transaction::Request,
+    BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
+    transaction::MempoolRequest,
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
