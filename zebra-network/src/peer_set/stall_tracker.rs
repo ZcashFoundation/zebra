@@ -46,7 +46,6 @@ impl FindResponseStallTracker {
     }
 
     /// Registers `peer` and `request_id` before the response future is polled.
-    #[allow(dead_code)]
     pub(super) fn begin_request(&mut self, peer: PeerSocketAddr, request_id: FindRequestId) {
         self.pending
             .entry(peer)
@@ -60,7 +59,6 @@ impl FindResponseStallTracker {
     /// Records a [`FindResponseEvent`] and applies outcomes in request order.
     ///
     /// Returns `true` if the peer reaches the stall threshold.
-    #[allow(dead_code)]
     pub(super) fn record_response(&mut self, event: FindResponseEvent) -> bool {
         let Some(responses) = self.pending.get_mut(&event.peer) else {
             return false;
