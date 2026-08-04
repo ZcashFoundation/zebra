@@ -1014,6 +1014,9 @@ where
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response that starts with two unexpected hashes");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                         };
