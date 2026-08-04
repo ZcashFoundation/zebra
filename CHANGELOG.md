@@ -63,10 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
   ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
-- Blocks above the sync lookahead height limit no longer score the peer that served them.
-  A `FindBlocks` response does not record who supplied its hashes, so the block request is
-  routed to an unrelated honest peer, and scoring it let a malicious peer get honest peers
-  banned throughout initial block download (GHSA-qhr3-cvch-5fh2)
+- Blocks above the sync lookahead height limit no longer score the peer that served
+  them, since that request is routed to an unrelated honest peer — scoring it let a
+  malicious `FindBlocks` responder get honest peers banned during initial block
+  download (GHSA-qhr3-cvch-5fh2)
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

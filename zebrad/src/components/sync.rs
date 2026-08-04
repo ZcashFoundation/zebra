@@ -1234,18 +1234,14 @@ where
                 let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
             }
 
-            // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must stay
-            // that way (GHSA-qhr3-cvch-5fh2). GHSA-gvjc-3w7c-92jx originally scored
-            // `advertiser_addr` 100 here, but that names the peer that *served* the block,
-            // not the one that chose its height: `Response::BlockHashes` carries no address
-            // and multi-block `inv`s are never registered as inventory, so the follow-up
-            // getdata goes to an independently chosen, honest peer. Scoring it let a
-            // malicious `FindBlocks` responder evict honest peers throughout IBD.
-            //
-            // Unlike the behind-tip sibling advisory, the block here is genuine, so there is
-            // no local proof of forgery to re-attribute with. The block is still dropped in
-            // `downloads.rs` and the hash is re-requested once our tip advances. Do not
-            // restore symmetry with the arms above by adding scoring back.
+            // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
+            // stay that way (GHSA-qhr3-cvch-5fh2): `advertiser_addr` names the peer that
+            // *served* the block, not the one that chose its height — `FindBlocks`
+            // responses carry no address, so the follow-up request goes to an
+            // independently chosen, honest peer, and scoring it let a malicious
+            // `FindBlocks` responder evict honest peers throughout IBD. Unlike the
+            // behind-tip sibling advisory, the block here is genuine, so there is no
+            // local proof of forgery to re-attribute with. Do not add scoring back.
             Err(_) => {}
         };
 
