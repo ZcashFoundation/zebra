@@ -122,13 +122,13 @@ jobs:
           # One cache for the whole matrix instead of one per crate. These jobs
           # compile overlapping subsets of the same dependency graph, so 12
           # per-crate caches stored ~12 GB of near-duplicate artifacts and blew
-          # through the repo-wide 10 GB quota on their own.
+          # through the repo's default 10 GB quota on their own.
           cache-shared-key: crate-build
           cache-on-failure: true
           # Only main writes the shared cache, and only from the crate with the
           # widest dependency closure, so the other legs restore a superset
           # rather than whichever leg happened to finish first.
-          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebrad' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
