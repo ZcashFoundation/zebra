@@ -1,0 +1,121 @@
+//! Focused tests for feedback attribution across synchronization stages.
+
+use indexmap::IndexSet;
+use tokio::sync::mpsc;
+use zebra_chain::{
+    block::{Hash, Height},
+    chain_tip::mock::MockChainTip,
+};
+use zebra_network::{self as zn, FindResponseFeedback, FindResponseFeedbackObserver};
+use zebra_state as zs;
+use zebra_test::mock_service::{MockService, PanicAssertion};
+
+use super::super::{ChainSync, FANOUT};
+use crate::config::ZebradConfig;
+
+/// An obtain-tips response containing an unknown hash receives useful feedback.
+#[tokio::test]
+async fn obtain_response_with_unknown_hash_reports_useful_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+
+    let observer = test.hashes_for_obtain_tips(vec![Hash([2; 32])]).await;
+
+    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+}
+
+/// A mock service with strict request assertions.
+type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
+
+/// A syncer whose network, state and verifier are controlled by the test.
+type TestSync = ChainSync<
+    Mock<zn::Request, zn::Response>,
+    Mock<zs::Request, zs::Response>,
+    Mock<zs::ReadRequest, zs::ReadResponse>,
+    Mock<zebra_consensus::Request, Hash>,
+    MockChainTip,
+>;
+
+/// Services used to exercise one sync stage without spawning the entire sync loop.
+struct TestScenario {
+    sync: TestSync,
+    peers: Mock<zn::Request, zn::Response>,
+    state: Mock<zs::Request, zs::Response>,
+}
+
+impl TestScenario {
+    /// Creates a syncer with an empty mocked state.
+    fn new() -> Self {
+        let peers = MockService::build().for_unit_tests();
+        let state = MockService::build().for_unit_tests();
+        let read_state = MockService::build().for_unit_tests();
+        let verifier = MockService::build().for_unit_tests();
+
+        let (tip, _tip_sender) = MockChainTip::new();
+        let (misbehavior, _receiver) = mpsc::channel(1);
+
+        let (sync, _) = ChainSync::new(
+            &ZebradConfig::default(),
+            Height(0),
+            peers.clone(),
+            verifier,
+            state.clone(),
+            read_state,
+            tip,
+            misbehavior,
+        );
+
+        Self { sync, peers, state }
+    }
+
+    /// Queues an obtain response whose hashes are absent from local state.
+    async fn hashes_for_obtain_tips(&mut self, hashes: Vec<Hash>) -> FindResponseFeedbackObserver {
+        let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+        let mock_responses = async {
+            self.state
+                .expect_request(zs::Request::BlockLocator)
+                .await
+                .respond(zs::Response::BlockLocator(vec![Hash([0; 32])]));
+
+            self.peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![Hash([0; 32])],
+                    stop: None,
+                })
+                .await
+                .respond(zn::Response::BlockHashes {
+                    hashes: hashes.clone(),
+                    feedback: Some(feedback),
+                });
+
+            self.state
+                .expect_request(zs::Request::KnownBlock(hashes[0]))
+                .await
+                .respond(zs::Response::KnownBlock(None));
+
+            for _ in 1..FANOUT {
+                self.peers
+                    .expect_request(zn::Request::FindBlocks {
+                        known_blocks: vec![Hash([0; 32])],
+                        stop: None,
+                    })
+                    .await
+                    .respond(Err(zn::BoxError::from("unused fanout response")));
+            }
+
+            for hash in hashes.into_iter().collect::<IndexSet<_>>() {
+                self.state
+                    .expect_request(zs::Request::KnownBlock(hash))
+                    .await
+                    .respond(zs::Response::KnownBlock(None));
+            }
+        };
+
+        let (result, ()) = tokio::join!(self.sync.obtain_tips(), mock_responses);
+        result.expect("mocked obtain stage queues its hashes");
+
+        observer
+    }
+}
