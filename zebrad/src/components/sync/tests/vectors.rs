@@ -433,7 +433,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 /// Tests that `extend_tips` downloads a singleton unknown hash.
 ///
 /// A response is useful only when its expected overlap is followed by an
-/// unknown hash.
+/// unknown hash; a mismatched response must preserve the responding peer's stall.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
@@ -592,7 +592,21 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             feedback: Some(response_feedback),
         });
 
-    for _ in 1..sync::FANOUT {
+    let (mismatched_response_feedback, mismatched_response_feedback_observer) =
+        zn::FindResponseFeedback::new_for_test();
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block1_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block0_hash],
+            feedback: Some(mismatched_response_feedback),
+        });
+
+    for _ in 2..sync::FANOUT {
         peer_set
             .expect_request(zn::Request::FindBlocks {
                 known_blocks: vec![block1_hash],
@@ -612,6 +626,12 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             block3.clone(),
             None,
         ))]));
+
+    assert_eq!(
+        mismatched_response_feedback_observer.outcome(),
+        Some(false),
+        "a response without the expected overlap is not useful",
+    );
 
     assert_eq!(
         response_feedback_observer.outcome(),
