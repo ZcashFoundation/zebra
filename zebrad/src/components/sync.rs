@@ -838,6 +838,9 @@ where
 
                     let hashes = hashes.as_slice();
                     if hashes.is_empty() {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     }
 
