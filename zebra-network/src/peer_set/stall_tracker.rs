@@ -11,7 +11,7 @@
 //! inventory" answer, so those don't feed the tracker.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::{self, Debug, Formatter},
     sync::{Arc, Mutex},
 };
@@ -30,11 +30,79 @@ pub(super) const FIND_RESPONSE_STALL_THRESHOLD: usize = 3;
 #[derive(Default)]
 pub(super) struct FindResponseStallTracker {
     counts: HashMap<PeerSocketAddr, usize>,
+    pending: HashMap<PeerSocketAddr, VecDeque<PendingFindResponse>>,
+}
+
+/// A routed find request waiting for an ordered [`FindResponseOutcome`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct PendingFindResponse {
+    request_id: FindRequestId,
+    outcome: Option<FindResponseOutcome>,
 }
 
 impl FindResponseStallTracker {
     pub(super) fn new() -> Self {
         Self::default()
+    }
+
+    /// Registers `peer` and `request_id` before the response future is polled.
+    #[allow(dead_code)]
+    pub(super) fn begin_request(&mut self, peer: PeerSocketAddr, request_id: FindRequestId) {
+        self.pending
+            .entry(peer)
+            .or_default()
+            .push_back(PendingFindResponse {
+                request_id,
+                outcome: None,
+            });
+    }
+
+    /// Records a [`FindResponseEvent`] and applies outcomes in request order.
+    ///
+    /// Returns `true` if the peer reaches the stall threshold.
+    #[allow(dead_code)]
+    pub(super) fn record_response(&mut self, event: FindResponseEvent) -> bool {
+        let Some(responses) = self.pending.get_mut(&event.peer) else {
+            return false;
+        };
+        let Some(response) = responses
+            .iter_mut()
+            .find(|response| response.request_id == event.request_id)
+        else {
+            return false;
+        };
+
+        if response.outcome.is_some() {
+            return false;
+        }
+        response.outcome = Some(event.outcome);
+
+        self.apply_completed_outcomes(event.peer)
+    }
+
+    /// Applies completed response outcomes for `peer` in request order.
+    fn apply_completed_outcomes(&mut self, peer: PeerSocketAddr) -> bool {
+        let Some(mut responses) = self.pending.remove(&peer) else {
+            return false;
+        };
+
+        while let Some(outcome) = responses.front().and_then(|response| response.outcome) {
+            responses.pop_front();
+            match outcome {
+                FindResponseOutcome::Useful => self.counts.remove(&peer),
+                FindResponseOutcome::Stalled if self.record_stall(peer) => {
+                    self.clear(peer);
+                    return true;
+                }
+                FindResponseOutcome::Stalled | FindResponseOutcome::Unclassified => None,
+            };
+        }
+
+        if !responses.is_empty() {
+            self.pending.insert(peer, responses);
+        }
+
+        false
     }
 
     /// Records a stall for `addr`. Returns `true` once the peer reaches
@@ -55,6 +123,7 @@ impl FindResponseStallTracker {
     /// Clears tracking for a peer that sent a useful response or disconnected.
     pub(super) fn clear(&mut self, addr: PeerSocketAddr) {
         self.counts.remove(&addr);
+        self.pending.remove(&addr);
     }
 }
 
