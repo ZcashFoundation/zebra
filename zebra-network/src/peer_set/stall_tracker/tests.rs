@@ -56,3 +56,31 @@ fn independent_per_peer() {
     assert!(!tracker.record_stall(addr_b));
     assert!(tracker.record_stall(addr_b));
 }
+
+/// Checks that cloned [`FindResponseFeedback`] handles classify only once.
+#[test]
+fn find_response_feedback_is_one_shot() {
+    let addr = test_addr(1);
+    let request_id = FindRequestId::from(1);
+    let (feedback_tx, mut feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let useful_feedback = FindResponseFeedback::new(addr, request_id, feedback_tx.clone());
+    let duplicate_feedback = useful_feedback.clone();
+
+    useful_feedback.mark_useful();
+    duplicate_feedback.mark_stalled();
+
+    assert_eq!(
+        feedback_rx.try_recv(),
+        Ok(FindResponseEvent::new(
+            addr,
+            request_id,
+            FindResponseOutcome::Useful,
+        )),
+    );
+    assert_eq!(
+        feedback_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty),
+        "a cloned feedback handle must not classify the same response twice",
+    );
+}
