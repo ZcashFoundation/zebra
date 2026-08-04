@@ -39,7 +39,7 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
     // are never actually driven in this test.
     let peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
         MockService::build().for_unit_tests();
-    let verifier: MockService<tx::Request, tx::Response, PanicAssertion> =
+    let verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let state: MockService<zs::Request, zs::Response, PanicAssertion> =
         MockService::build().for_unit_tests();
