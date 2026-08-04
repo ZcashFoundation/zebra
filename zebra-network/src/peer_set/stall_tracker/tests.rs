@@ -84,3 +84,26 @@ fn find_response_feedback_is_one_shot() {
         "a cloned feedback handle must not classify the same response twice",
     );
 }
+
+/// Checks that dropping unclassified [`FindResponseFeedback`] reports no judgment.
+///
+/// Consumers can abandon responses on local error or cancellation paths, which
+/// must not count against the responding peer.
+#[test]
+fn dropped_find_response_feedback_reports_unclassified() {
+    let addr = test_addr(1);
+    let request_id = FindRequestId::from(1);
+    let (feedback_tx, mut feedback_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    drop(FindResponseFeedback::new(addr, request_id, feedback_tx));
+
+    assert_eq!(
+        feedback_rx.try_recv(),
+        Ok(FindResponseEvent::new(
+            addr,
+            request_id,
+            FindResponseOutcome::Unclassified,
+        )),
+        "dropping the final unclassified handle must report no judgment",
+    );
+}
