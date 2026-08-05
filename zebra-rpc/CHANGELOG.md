@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [16.0.0] - 2026-08-05
+
 ### Breaking Changes
 
 - The `Rpc` trait has a new required `get_deprecation_info` method. Downstream implementers of
