@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
+- Verifying a block transaction with many transparent inputs now asks the state for its spent
+  outputs in batches of up to 64, rather than one at a time, reducing the round trips needed to
+  verify a block. Outputs that have not reached the state yet are still awaited individually
+  ([#11185](https://github.com/ZcashFoundation/zebra/issues/11185)).
 
 ### Fixed
 
