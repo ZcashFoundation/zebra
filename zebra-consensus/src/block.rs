@@ -8,7 +8,6 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -26,7 +25,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
-    transaction, transparent,
+    transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -163,7 +162,10 @@ impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
-    V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    V: Service<tx::BlockRequest, Response = tx::BlockResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     V::Future: Send + 'static,
 {
     /// Creates a new SemanticBlockVerifier
@@ -180,7 +182,10 @@ impl<S, V> Service<Request> for SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
-    V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    V: Service<tx::BlockRequest, Response = tx::BlockResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     V::Future: Send + 'static,
 {
     type Response = block::Hash;
@@ -285,9 +290,6 @@ where
                 &transaction_hashes,
             ));
 
-            let known_outpoint_hashes: Arc<HashSet<transaction::Hash>> =
-                Arc::new(known_utxos.keys().map(|outpoint| outpoint.hash).collect());
-
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())
             {
@@ -295,10 +297,9 @@ where
                     .ready()
                     .await
                     .expect("transaction verifier is always ready")
-                    .call(tx::Request::Block {
+                    .call(tx::BlockRequest {
                         transaction_hash,
                         transaction: transaction.clone(),
-                        known_outpoint_hashes: known_outpoint_hashes.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,
@@ -320,16 +321,11 @@ where
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?;
 
-                assert!(
-                    matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {response:?}"
-                );
-
-                sigops += response.sigops();
+                sigops += response.sigops;
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee() {
+                if let Some(miner_fee) = response.miner_fee {
                     block_miner_fees += miner_fee;
                 }
             }

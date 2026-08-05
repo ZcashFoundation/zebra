@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
+- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
+  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
+  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
+  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
+  changelog for the underlying API split
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - New `getdeprecationinfo` RPC returning the block height and estimated time at which this
   release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
   object is only present on Mainnet, where end of support is enforced
@@ -22,9 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
   as labels.
+- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
+  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
+  object is only present on Mainnet, where end of support is enforced
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
 
 ### Changed
 
+- Chain synchronization now downloads a peer's only unknown block hash from a short
+  `FindBlocks` response, allowing nodes near the chain tip to continue advancing
+  ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
 
