@@ -11,12 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
-- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
-  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
-  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
-  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
-  changelog for the underlying API split
-  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - New `getdeprecationinfo` RPC returning the block height and estimated time at which this
   release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
   object is only present on Mainnet, where end of support is enforced
