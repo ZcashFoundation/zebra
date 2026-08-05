@@ -449,11 +449,19 @@ async fn sync_singleton_extend_tips_multiple_mismatches_stall() -> Result<(), cr
     .await
 }
 
+/// Tests that `extend_tips` rejects an expected overlap without a continuation.
+#[tokio::test]
+async fn sync_singleton_extend_tips_no_continuation_stalls() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(RejectedExtendTipsResponse::NoContinuation)
+        .await
+}
+
 /// A rejected `extend_tips` response shape used by feedback tests.
 #[derive(Copy, Clone, Debug)]
 enum RejectedExtendTipsResponse {
     SingleMismatch,
     MultipleMismatches,
+    NoContinuation,
 }
 
 /// Runs the singleton `extend_tips` test with `rejected_response`.
@@ -622,6 +630,7 @@ async fn sync_singleton_extend_tips_with_rejected_response(
     let rejected_hashes = match rejected_response {
         RejectedExtendTipsResponse::SingleMismatch => vec![block0_hash],
         RejectedExtendTipsResponse::MultipleMismatches => vec![block0_hash, block1_hash],
+        RejectedExtendTipsResponse::NoContinuation => vec![block2_hash],
     };
 
     peer_set
