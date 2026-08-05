@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-08-10
 
-### Breaking Changes
-
-- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
-  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
-  object is only present on Mainnet, where end of support is enforced
-  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
-
 ### Added
 
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
