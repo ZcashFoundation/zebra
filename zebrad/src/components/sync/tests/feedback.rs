@@ -143,6 +143,24 @@ async fn extend_response_with_one_unexpected_hash_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// An extend-tips response reports a stall when neither of its first two hashes matches the overlap.
+///
+/// Both positions matter because a matching second hash permits an unrelated first hash.
+#[tokio::test]
+async fn extend_response_with_two_unexpected_hashes_reports_stall() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let first_unexpected_hash = Hash([4; 32]);
+    let second_unexpected_hash = Hash([5; 32]);
+
+    let observer = test
+        .raw_hashes_for_extend_tips(vec![first_unexpected_hash, second_unexpected_hash])
+        .await;
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
