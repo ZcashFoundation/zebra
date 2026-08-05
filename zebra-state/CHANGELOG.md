@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added the concrete error type `AwaitUtxoError` for handling failed `AwaitUtxo` state requests
+  [#11205](https://github.com/ZcashFoundation/zebra/pull/11205).
+- Added `MappedRequest` for `AwaitUtxoRequest`
+  [#11205](https://github.com/ZcashFoundation/zebra/pull/11205).
+
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
