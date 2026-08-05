@@ -1289,6 +1289,7 @@ async fn should_restart_sync_returns_false() {
     let restart = ChainSync::<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >::should_restart_sync(&err);
@@ -1311,6 +1312,7 @@ async fn above_lookahead_does_not_restart_sync() {
     let restart = ChainSync::<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >::should_restart_sync(&err);
@@ -1353,6 +1355,7 @@ async fn both_height_limits_do_not_restart_sync() {
     let below = BlockDownloadVerifyError::BehindTipHeightLimit {
         height: block::Height(1),
         hash: block::Hash::from([0xDD; 32]),
+        advertiser_addr: None,
     };
 
     let above = BlockDownloadVerifyError::AboveLookaheadHeightLimit {
@@ -1364,6 +1367,7 @@ async fn both_height_limits_do_not_restart_sync() {
     let restart_below = ChainSync::<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >::should_restart_sync(&below);
@@ -1371,6 +1375,7 @@ async fn both_height_limits_do_not_restart_sync() {
     let restart_above = ChainSync::<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >::should_restart_sync(&above);
@@ -1398,6 +1403,7 @@ async fn invalid_height_does_not_restart_sync() {
     let restart = ChainSync::<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >::should_restart_sync(&err);
@@ -1417,6 +1423,198 @@ async fn invalid_height_does_not_restart_sync() {
         has_addr,
         "InvalidHeight should carry advertiser_addr for peer scoring"
     );
+}
+
+/// Regression test for GHSA-g95h-hw6g-pvgv: a behind-tip drop scores the supplying peer and
+/// re-queues the hash the syncer still needs.
+///
+/// Before this fix the drop was free for the peer: it satisfied the download request without
+/// delivering a usable block, was never scored, and the hash waited for the next sync round.
+#[tokio::test]
+async fn behind_tip_height_limit_scores_peer_and_requeues_hash() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0xAB; 32]);
+
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+            height: block::Height(1),
+            hash,
+            advertiser_addr: Some(advertiser),
+        }))
+        .expect("behind-tip drop is non-fatal and must not restart the syncer");
+
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        Some((advertiser, 100)),
+        "BehindTipHeightLimit must score the supplying peer at the ban threshold"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "BehindTipHeightLimit must re-queue the hash the syncer still needs"
+    );
+}
+
+/// A behind-tip drop with no peer attribution still re-queues the hash.
+///
+/// Responses from isolated connections have no transient address, so there is nothing to score, but
+/// the hash is still missing.
+#[tokio::test]
+async fn behind_tip_height_limit_without_advertiser_is_still_requeued() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0xBC; 32]);
+
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+            height: block::Height(1),
+            hash,
+            advertiser_addr: None,
+        }))
+        .expect("behind-tip drop is non-fatal and must not restart the syncer");
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "an unattributed behind-tip drop must not score any peer"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "an unattributed behind-tip drop must still re-queue the hash"
+    );
+}
+
+/// The behind-tip re-request is bounded, so a peer cannot turn it into an unbounded download loop.
+#[tokio::test]
+async fn behind_tip_height_limit_requeue_is_bounded() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0xCD; 32]);
+
+    for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+        chain_sync
+            .handle_block_response(Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+                height: block::Height(1),
+                hash,
+                advertiser_addr: Some(advertiser),
+            }))
+            .expect("behind-tip drop is non-fatal and must not restart the syncer");
+
+        if attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES {
+            assert!(
+                chain_sync.reobtain_hashes.contains(&hash),
+                "attempt {attempt} of {} must re-queue the hash",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+        } else {
+            assert!(
+                chain_sync.reobtain_hashes.is_empty(),
+                "the hash must not be re-queued after {} retries",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+            assert!(
+                !chain_sync.block_reobtain_retries.contains_key(&hash),
+                "exhausted retry bookkeeping must be dropped"
+            );
+        }
+
+        // Stand in for `reobtain_missing_blocks()`, which drains the set each sync round.
+        chain_sync.reobtain_hashes.clear();
+    }
+}
+
+/// The pre-existing `NotFound` re-request (#5709) still works, and only fires for `NotFound`.
+///
+/// Both cases now share one bounded re-queue, so this pins the behavior the behind-tip fix reuses.
+#[tokio::test]
+async fn download_failed_is_only_requeued_for_not_found() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let missing_hash = block::Hash::from([0xDE; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadFailed {
+            error: std::io::Error::new(std::io::ErrorKind::NotFound, "NotFoundResponse").into(),
+            hash: missing_hash,
+        }))
+        .expect("a missing block is non-fatal and must not restart the syncer");
+
+    assert!(
+        chain_sync.reobtain_hashes.contains(&missing_hash),
+        "a block no peer delivered must be re-queued (#5709)"
+    );
+
+    // A download that failed for any other reason is a syncer restart, and is not re-queued.
+    let failed_hash = block::Hash::from([0xEF; 32]);
+    let restart = chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadFailed {
+            error: std::io::Error::new(std::io::ErrorKind::ConnectionReset, "connection reset")
+                .into(),
+            hash: failed_hash,
+        }))
+        .is_err();
+    assert!(
+        restart,
+        "a download that failed for another reason must restart the syncer"
+    );
+
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&failed_hash),
+        "a download that failed for another reason must not be re-queued"
+    );
+
+    // Neither case attributes misbehavior: the download never produced a block to judge.
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "a failed download must not score any peer"
+    );
+}
+
+/// Build a [`ChainSync`] wired to mock services, returning the receiver end of the misbehavior
+/// channel so a test can assert whether a peer was scored.
+///
+/// Unlike [`setup`], this returns the `ChainSync` value itself rather than its `sync` future, so a
+/// test can call response-handling methods directly.
+#[allow(clippy::type_complexity)]
+fn new_chain_sync_with_misbehavior() -> (
+    ChainSync<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >,
+    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+) {
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let (chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    (chain_sync, misbehavior_rx)
 }
 
 fn setup() -> (
@@ -1456,6 +1654,11 @@ fn setup() -> (
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
 
+    let read_state_service: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
+        MockService::build()
+            .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+            .for_unit_tests();
+
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
@@ -1465,6 +1668,7 @@ fn setup() -> (
         peer_set.clone(),
         block_verifier_router.clone(),
         state_service.clone(),
+        read_state_service,
         mock_chain_tip,
         misbehavior_tx,
     );

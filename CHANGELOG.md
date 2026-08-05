@@ -159,6 +159,12 @@ penalizes them for briefly disagreeing about the NU6.3 activation.
 - Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
   underpaying and structurally invalid shielded mempool transactions before their expensive proof
   verification, and disconnect peers that send transactions with invalid shielded proofs.
+- Prevent a peer from delaying tip discovery by answering a block download with a canonical header
+  and a rewritten coinbase height. Zebra now re-requests the hash immediately instead of waiting for
+  a later sync round to rediscover it, and scores the peer when a parent block Zebra already holds
+  proves the claimed height wrong
+  ([GHSA-g95h-hw6g-pvgv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g95h-hw6g-pvgv)).
+  Thanks to @zakura-security for reporting the issue.
 
 ## [Zebra 6.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.0) - 2026-07-17
 
