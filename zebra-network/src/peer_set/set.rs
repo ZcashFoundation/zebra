@@ -134,8 +134,7 @@ use crate::{
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::{
-            FindRequestId, FindResponseEvent, FindResponseFeedback, FindResponseOutcome,
-            FindResponseStallTracker,
+            FindRequestId, FindResponseEvent, FindResponseFeedback, FindResponseStallTracker,
         },
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryChange, InventoryRegistry,
@@ -1054,11 +1053,10 @@ where
             self.push_unready(p2c_key, svc);
 
             if let Some(request_id) = stall_tracker_request_id {
-                let stall_tx = self.stall_event_tx.clone();
-                return async move {
-                    Self::handle_tracked_find_response(fut.await, p2c_key, request_id, stall_tx)
-                }
-                .boxed();
+                let feedback =
+                    FindResponseFeedback::new(p2c_key, request_id, self.stall_event_tx.clone());
+                return async move { Self::handle_tracked_find_response(fut.await, feedback) }
+                    .boxed();
             }
 
             return fut.map_err(Into::into).boxed();
@@ -1082,17 +1080,11 @@ where
     /// Attaches feedback or reports an immediate outcome for a tracked find response.
     fn handle_tracked_find_response(
         result: Result<Response, SharedPeerError>,
-        peer: PeerSocketAddr,
-        request_id: FindRequestId,
-        stall_tx: tokio_mpsc::UnboundedSender<FindResponseEvent>,
+        feedback: FindResponseFeedback,
     ) -> Result<Response, BoxError> {
         match result {
             Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => {
-                let _ = stall_tx.send(FindResponseEvent::new(
-                    peer,
-                    request_id,
-                    FindResponseOutcome::Stalled,
-                ));
+                feedback.mark_stalled();
                 Ok(Response::BlockHashes {
                     hashes,
                     feedback: None,
@@ -1100,24 +1092,19 @@ where
             }
             Ok(Response::BlockHashes { hashes, .. }) => Ok(Response::BlockHashes {
                 hashes,
-                feedback: Some(FindResponseFeedback::new(peer, request_id, stall_tx)),
+                feedback: Some(feedback),
             }),
             Ok(Response::BlockHeaders(headers)) => {
-                let outcome = if headers.is_empty() {
-                    FindResponseOutcome::Stalled
+                if headers.is_empty() {
+                    feedback.mark_stalled();
                 } else {
-                    FindResponseOutcome::Useful
-                };
-                let _ = stall_tx.send(FindResponseEvent::new(peer, request_id, outcome));
+                    feedback.mark_useful();
+                }
                 Ok(Response::BlockHeaders(headers))
             }
             Ok(response) => Ok(response),
             Err(error) => {
-                let _ = stall_tx.send(FindResponseEvent::new(
-                    peer,
-                    request_id,
-                    FindResponseOutcome::Stalled,
-                ));
+                feedback.mark_stalled();
                 Err(error.into())
             }
         }
