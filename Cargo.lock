@@ -7522,7 +7522,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "16.0.0"
+version = "15.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
