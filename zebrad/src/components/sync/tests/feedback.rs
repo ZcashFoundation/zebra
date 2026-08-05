@@ -161,6 +161,21 @@ async fn extend_response_with_two_unexpected_hashes_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// An extend-tips response containing the expected overlap but no continuation reports a stall.
+#[tokio::test]
+async fn extend_response_without_continuation_reports_stall() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let expected_overlap_hash = Hash([1; 32]);
+
+    let observer = test
+        .raw_hashes_for_extend_tips(vec![expected_overlap_hash])
+        .await;
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
