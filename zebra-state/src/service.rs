@@ -1163,14 +1163,19 @@ impl Service<Request> for StateService {
 
             // Uses pending_utxos and non_finalized_state_queued_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
+            //
+            // The expected error type for this request is `AwaitUtxoError`.
             Request::AwaitUtxo(outpoint) => {
                 let timer = CodeTimer::start();
-                // Prepare the AwaitUtxo future from PendingUxtos.
+                // Prepare the AwaitUtxo future from PendingUtxos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 // Only instrument `response_fut`, the ReadStateService already
                 // instruments its requests with the same span.
 
-                let response_fut = response_fut.instrument(span).boxed();
+                let response_fut = response_fut
+                    .map(|result| result.map_err(BoxError::from))
+                    .instrument(span)
+                    .boxed();
 
                 // Check the non-finalized block queue outside the returned future,
                 // so we can access mutable state fields.
