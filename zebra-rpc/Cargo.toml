@@ -109,7 +109,7 @@ zcash_transparent = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "11.3.1", features = [
+zebra-chain = { path = "../zebra-chain", version = "12.0.0", features = [
     "json-conversion",
 ] }
 zebra-consensus = { path = "../zebra-consensus", version = "14.0.2" }
