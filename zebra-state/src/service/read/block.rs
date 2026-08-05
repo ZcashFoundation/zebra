@@ -12,7 +12,7 @@
 //! - the cached [`Chain`] or [`NonFinalizedState`], and
 //! - the shared finalized [`ZebraDb`] reference.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -323,8 +323,14 @@ where
         .or_else(|| db.spending_transaction_hash(&spend))
 }
 
-/// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in any chain
-/// in the `non_finalized_state`, or in the finalized `db`.
+/// Returns the [`Utxo`]s for every [`transparent::OutPoint`] in `outpoints` that exists in
+/// any chain in the `non_finalized_state`, or in the finalized `db`.
+///
+/// Outpoints that were not found are absent from the returned map, so the caller can tell
+/// which ones still have to arrive in the state.
+///
+/// Resolving the whole set in one call means a transaction with many inputs does not need
+/// one request per input.
 ///
 /// Non-finalized UTXOs are returned regardless of whether they have been spent.
 ///
@@ -335,8 +341,23 @@ where
 ///
 /// UTXO spends are checked once the block reaches the non-finalized state,
 /// by [`check::utxo::transparent_spend()`](crate::service::check::utxo::transparent_spend).
-pub fn any_utxo(
+pub fn any_utxos(
     non_finalized_state: NonFinalizedState,
+    db: &ZebraDb,
+    outpoints: impl IntoIterator<Item = transparent::OutPoint>,
+) -> HashMap<transparent::OutPoint, Utxo> {
+    outpoints
+        .into_iter()
+        .filter_map(|outpoint| {
+            any_utxo_in(&non_finalized_state, db, outpoint).map(|utxo| (outpoint, utxo))
+        })
+        .collect()
+}
+
+/// Returns the [`Utxo`] for `outpoint`, if it exists in any chain in `non_finalized_state`,
+/// or in the finalized `db`.
+fn any_utxo_in(
+    non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     outpoint: transparent::OutPoint,
 ) -> Option<Utxo> {

@@ -1207,7 +1207,7 @@ impl Service<Request> for StateService {
 
                 // Run the request in an async block, so we can await the response.
                 async move {
-                    let req = ReadRequest::AnyChainUtxo(outpoint);
+                    let req = ReadRequest::AnyChainUtxos(vec![outpoint]);
 
                     let rsp = read_service.oneshot(req).await?;
 
@@ -1223,11 +1223,13 @@ impl Service<Request> for StateService {
                     //
                     // And if the block is in the finalized queue,
                     // that's rare enough that a retry is ok.
-                    if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
-                        // We got a UTXO, so we replace the response future with the result own.
-                        timer.finish_desc("AwaitUtxo/any-chain");
+                    if let ReadResponse::AnyChainUtxos(mut utxos) = rsp {
+                        if let Some(utxo) = utxos.remove(&outpoint) {
+                            // We got a UTXO, so we replace the response future with the result own.
+                            timer.finish_desc("AwaitUtxo/any-chain");
 
-                        return Ok(Response::Utxo(utxo));
+                            return Ok(Response::Utxo(utxo));
+                        }
                     }
 
                     // We're finished, but the returned future is waiting on the respond() channel.
@@ -1235,6 +1237,67 @@ impl Service<Request> for StateService {
 
                     response_fut.await
                 }
+                .boxed()
+            }
+
+            // Uses non_finalized_state_queued_blocks and the sent block hashes in the
+            // StateService, then looks up the rest using the ReadStateService.
+            //
+            // Unlike AwaitUtxo, this never waits for a UTXO to arrive, so it never registers a
+            // pending request. That keeps the state it can hold independent of how many
+            // outpoints it is given.
+            Request::AnyChainUtxos(outpoints) => {
+                let timer = CodeTimer::start();
+
+                let mut utxos = HashMap::with_capacity(outpoints.len());
+                let mut unknown = Vec::new();
+
+                // Check the sent non-finalized blocks.
+                self.drain_non_finalized_rejected_hashes();
+
+                for outpoint in outpoints {
+                    // Check the queued blocks, then the blocks already sent to the write task.
+                    if let Some(utxo) = self
+                        .non_finalized_state_queued_blocks
+                        .utxo(&outpoint)
+                        .or_else(|| self.non_finalized_block_write_sent_hashes.utxo(&outpoint))
+                    {
+                        utxos.insert(outpoint, utxo);
+                    } else {
+                        unknown.push(outpoint);
+                    }
+                }
+
+                // We ignore any UTXOs in FinalizedState.finalized_state_queued_blocks,
+                // because it is only used during checkpoint verification.
+                //
+                // This creates a rare race condition, but it doesn't seem to happen much in practice.
+                // See #5126 for details.
+
+                if unknown.is_empty() {
+                    timer.finish_desc("AnyChainUtxos/queued-non-finalized");
+
+                    return async move { Ok(Response::AnyChainUtxos(utxos)) }.boxed();
+                }
+
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let rsp = read_service
+                        .oneshot(ReadRequest::AnyChainUtxos(unknown))
+                        .await?;
+
+                    let ReadResponse::AnyChainUtxos(found) = rsp else {
+                        unreachable!("AnyChainUtxos always responds with AnyChainUtxos")
+                    };
+
+                    utxos.extend(found);
+
+                    timer.finish_desc("AnyChainUtxos/any-chain");
+
+                    Ok(Response::AnyChainUtxos(utxos))
+                }
+                .instrument(span)
                 .boxed()
             }
 
@@ -1534,12 +1597,11 @@ impl Service<ReadRequest> for ReadStateService {
                 read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint),
             )),
 
-            // Manually used by the StateService to implement part of AwaitUtxo.
-            ReadRequest::AnyChainUtxo(outpoint) => Ok(ReadResponse::AnyChainUtxo(read::any_utxo(
-                state.latest_non_finalized_state(),
-                &state.db,
-                outpoint,
-            ))),
+            // Manually used by the StateService to implement Request::AnyChainUtxos, and part
+            // of Request::AwaitUtxo.
+            ReadRequest::AnyChainUtxos(outpoints) => Ok(ReadResponse::AnyChainUtxos(
+                read::any_utxos(state.latest_non_finalized_state(), &state.db, outpoints),
+            )),
 
             // Used by the StateService.
             ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(
