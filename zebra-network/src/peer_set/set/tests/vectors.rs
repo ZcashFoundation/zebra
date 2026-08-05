@@ -912,6 +912,87 @@ fn unusable_find_blocks_response_does_not_clear_stalls() {
     });
 }
 
+/// Tests that cancelling a `FindBlocks` response does not block later stall outcomes.
+///
+/// A routed response future can be dropped before the peer responds. Its pending
+/// outcome must not remain at the front of the peer's ordered response queue.
+#[test]
+fn cancelled_find_blocks_response_does_not_block_stalls() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    best_tip.send_best_tip_height(Some(block::Height(2_490_000)));
+    best_tip.send_estimated_distance_to_network_chain_tip(Some(10_000));
+
+    let mut handle = handles.into_iter().next().expect("there is one peer");
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+
+        for _ in 0..(FIND_RESPONSE_STALL_THRESHOLD - 1) {
+            let peer_ready = peer_set.ready().await.expect("peer set is ready");
+            let response_fut = peer_ready.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+            let client_request = handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("peer received the request");
+            let _ = client_request.tx.send(Ok(Response::BlockHashes {
+                hashes: vec![],
+                feedback: None,
+            }));
+            response_fut.await.expect("response received");
+        }
+
+        let peer_ready = peer_set.ready().await.expect("peer set is ready");
+        let cancelled_response = peer_ready.call(Request::FindBlocks {
+            known_blocks: vec![],
+            stop: None,
+        });
+        handle
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("peer received the cancelled request");
+        drop(cancelled_response);
+
+        let peer_ready = peer_set.ready().await.expect("peer set is ready");
+        let response_fut = peer_ready.call(Request::FindBlocks {
+            known_blocks: vec![],
+            stop: None,
+        });
+        let client_request = handle
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("peer received the request after cancellation");
+        let _ = client_request.tx.send(Ok(Response::BlockHashes {
+            hashes: vec![],
+            feedback: None,
+        }));
+        response_fut.await.expect("response received");
+
+        let _ = peer_set.ready().now_or_never();
+
+        assert!(
+            !handle.wants_connection_heartbeats(),
+            "peer should be disconnected when cancellation unblocks the threshold stall",
+        );
+    });
+}
+
 /// Check that stall tracking is active when the chain tip state is unknown (empty node state),
 /// so that stalling peers are still disconnected even before the first block is synced.
 #[test]
