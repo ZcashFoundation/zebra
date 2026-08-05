@@ -416,9 +416,7 @@ impl AddressBook {
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         if self.bans_by_ip.contains_key(&change.addr().ip()) {
-            // This is a routine rejection, not an error: remote peers can gossip
-            // a banned address at any time, so logging it at `warn` lets them
-            // choose how much of the operator's log this fills (#11134).
+            // Remote peers control how often this fires, so keep it below `warn` (#11134).
             tracing::debug!(
                 ?change,
                 "attempted to add a banned peer addr to address book"
@@ -464,11 +462,6 @@ impl AddressBook {
                     most_recent_by_ip.remove(&banned_ip);
                 }
 
-                // `by_addr` is ordered by reconnection order, not grouped by IP,
-                // so entries for the banned IP can be separated by other IPs.
-                // Scan the whole book, otherwise a surviving entry is selected as
-                // a candidate forever, because the ban check above stops its state
-                // from ever changing (#11134).
                 let banned_addrs: Vec<_> = self
                     .by_addr
                     .descending_keys()

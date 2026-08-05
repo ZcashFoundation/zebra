@@ -23,20 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so multiple
   network instances in one process do not overwrite each other's values.
-- `AddressBook::update()` logs a rejected change for a banned peer IP at `debug` level instead of
-  `warn`. Remote peers can gossip a banned address at any time, so the level of this message was
-  effectively chosen by them ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+- `AddressBook::update()` logs a change rejected for a banned peer IP at `debug` instead of `warn`,
+  since remote peers control how often it fires
+  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
 
 ### Fixed
 
 - Banning a peer IP now removes every address book entry for that IP, and `reconnection_peers()`
-  never returns an address whose IP is banned. Previously the ban path scanned `by_addr` with
-  `skip_while(...).take_while(...)`, which stops at the first entry for a different IP. Because
-  `by_addr` is ordered by reconnection order rather than grouped by IP, an entry for the banned IP
-  on another port could survive the ban, and then stay at the front of the reconnection order for
-  the lifetime of the process: it was selected as a candidate on every crawl, the ban check
-  rejected the resulting `UpdateAttempt`, and so its state never changed
-  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+  never returns an address whose IP is banned. Previously an entry for the banned IP on another
+  port could survive the ban and stay at the front of the reconnection order for the lifetime of
+  the process ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
 
 ### Security
 
