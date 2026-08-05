@@ -436,6 +436,20 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 /// unknown hash; a mismatched response must preserve the responding peer's stall.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(RejectedExtendTipsResponse::SingleMismatch)
+        .await
+}
+
+/// A rejected `extend_tips` response shape used by feedback tests.
+#[derive(Copy, Clone, Debug)]
+enum RejectedExtendTipsResponse {
+    SingleMismatch,
+}
+
+/// Runs the singleton `extend_tips` test with `rejected_response`.
+async fn sync_singleton_extend_tips_with_rejected_response(
+    rejected_response: RejectedExtendTipsResponse,
+) -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
@@ -592,8 +606,12 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             feedback: Some(response_feedback),
         });
 
-    let (mismatched_response_feedback, mismatched_response_feedback_observer) =
+    let (rejected_response_feedback, rejected_response_feedback_observer) =
         zn::FindResponseFeedback::new_for_test();
+
+    let rejected_hashes = match rejected_response {
+        RejectedExtendTipsResponse::SingleMismatch => vec![block0_hash],
+    };
 
     peer_set
         .expect_request(zn::Request::FindBlocks {
@@ -602,8 +620,8 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
         })
         .await
         .respond(zn::Response::BlockHashes {
-            hashes: vec![block0_hash],
-            feedback: Some(mismatched_response_feedback),
+            hashes: rejected_hashes,
+            feedback: Some(rejected_response_feedback),
         });
 
     for _ in 2..sync::FANOUT {
@@ -628,9 +646,9 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
         ))]));
 
     assert_eq!(
-        mismatched_response_feedback_observer.outcome(),
+        rejected_response_feedback_observer.outcome(),
         Some(false),
-        "a response without the expected overlap is not useful",
+        "a {rejected_response:?} response is not useful",
     );
 
     assert_eq!(
