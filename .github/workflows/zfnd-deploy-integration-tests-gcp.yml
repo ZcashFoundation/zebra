@@ -193,8 +193,19 @@ jobs:
           slug-maxlength: 23
 
       - name: Downcase network name for disks and labels
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
-          NETWORK_CAPS="${{ inputs.network }}"
+          NETWORK_CAPS="${INPUT_NETWORK}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
@@ -246,19 +257,24 @@ jobs:
         env:
           WORKFLOW_ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
           PRIMARY_ZONE: ${{ vars.GCP_ZONE }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
         run: |
-          NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          NAME="${INPUT_TEST_ID}-${{ env.GITHUB_SHA_SHORT }}"
+          INSTANCE_NAME="${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
-          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
+          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${INPUT_ZEBRA_STATE_DIR},name=${NAME},mode=rw"
 
           # Mount the same disk to the lwd path if needed
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
+          if [[ "${INPUT_NEEDS_LWD_STATE}" == "true" || "${INPUT_TEST_ID}" == "lwd-sync-full" ]]; then
+            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${INPUT_LWD_STATE_DIR},name=${NAME},mode=rw"
           fi
 
           # Environment variables for the container
-          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${WORKFLOW_ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
+          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${WORKFLOW_ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${INPUT_TEST_ID}"
 
           # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
@@ -311,8 +327,8 @@ jobs:
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-            --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
-            --tags ${{ inputs.app_name }} \
+            --labels=app=${INPUT_APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${INPUT_TEST_ID} \
+            --tags ${INPUT_APP_NAME} \
             --zone "${zone}"
           }
 
@@ -351,8 +367,19 @@ jobs:
       # Find the container ID and save it for use in subsequent steps
       - name: Find container ID
         id: find-container
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          INSTANCE_NAME="${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
           CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
 
           echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
@@ -381,8 +408,19 @@ jobs:
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
         if: ${{ failure() }}
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -405,10 +443,21 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
           CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           echo "Using pre-discovered container ID: ${CONTAINER_ID}"
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -560,8 +609,19 @@ jobs:
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
       # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
-          NETWORK_CAPS="${{ inputs.network }}"
+          NETWORK_CAPS="${INPUT_NETWORK}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
           LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
@@ -595,15 +655,26 @@ jobs:
       #
       # Also sets a unique date and time suffix $TIME_SUFFIX.
       - name: Set update and time suffixes
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
           UPDATE_SUFFIX=""
 
-          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "zebrad" ]]; then
+          if [[ "${INPUT_NEEDS_ZEBRA_STATE}" == "true" ]] && [[ "${INPUT_APP_NAME}" == "zebrad" ]]; then
               UPDATE_SUFFIX="-u"
           fi
 
           # TODO: find a better logic for the lwd-sync-full case
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "lightwalletd" ]] && [[ "${{ inputs.test_id }}" != 'lwd-sync-full' ]]; then
+          if [[ "${INPUT_NEEDS_LWD_STATE}" == "true" ]] && [[ "${INPUT_APP_NAME}" == "lightwalletd" ]] && [[ "${INPUT_TEST_ID}" != 'lwd-sync-full' ]]; then
               UPDATE_SUFFIX="-u"
           fi
 
@@ -625,13 +696,24 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
           DB_VERSION_SUMMARY=""
 
           # Get Instance Name
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          INSTANCE_NAME="${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
@@ -724,11 +806,22 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
           SYNC_HEIGHT=""
 
           # Get Instance Name
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          INSTANCE_NAME="${INPUT_TEST_ID}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
@@ -824,9 +917,20 @@ jobs:
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container.
       - name: Create image from state disk
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_TEST_ID: ${{ inputs.test_id }}
+          INPUT_APP_NAME: ${{ inputs.app_name }}
+          INPUT_NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          INPUT_NEEDS_ZEBRA_STATE: ${{ inputs.needs_zebra_state }}
+          INPUT_FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          INPUT_ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          INPUT_LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
         run: |
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
-          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${{ inputs.force_save_to_disk }}" == "true" ]]; then
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${INPUT_FORCE_SAVE_TO_DISK}" == "true" ]]; then
 
              # Use RUNNING_DB_VERSION for image naming (more reliable than STATE_VERSION)
              # Extract just the major version number for the image name
@@ -847,11 +951,11 @@ jobs:
              gcloud compute images create \
               "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
-              --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+              --source-disk=${INPUT_TEST_ID}-${{ env.GITHUB_SHA_SHORT }} \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${INPUT_FORCE_SAVE_TO_DISK},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${INPUT_TEST_ID},app-name=${INPUT_APP_NAME}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi

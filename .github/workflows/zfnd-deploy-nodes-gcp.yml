@@ -151,17 +151,22 @@ jobs:
       environment: ${{ steps.set-matrix.outputs.environment }}
     steps:
       - id: set-matrix
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_ZONE: ${{ inputs.zone }}
         run: |
-          case "${{ github.event_name }}" in
+          case "$EVENT_NAME" in
             release)           ENV="prod" ;;
-            workflow_dispatch) ENV="${{ inputs.environment }}" ;;
+            workflow_dispatch) ENV="$INPUT_ENVIRONMENT" ;;
             push)              ENV="stage" ;;
             *)                 ENV="dev" ;;
           esac
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            NETWORKS='["${{ inputs.network }}"]'
-            ZONES='["${{ inputs.zone }}"]'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            NETWORKS='["'"$INPUT_NETWORK"'"]'
+            ZONES='["'"$INPUT_ZONE"'"]'
           else
             NETWORKS='["Mainnet","Testnet"]'
             ZONES='["us-east1-b","us-east1-c","us-east1-d"]'
@@ -438,11 +443,15 @@ jobs:
           echo "IP_ADDRESS=${IP_ADDRESS}" >> "$GITHUB_ENV"
 
       - name: Create instance template
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_LOG_FILE: ${{ inputs.log_file }}
+          CD_LOG_FILE: ${{ vars.CD_LOG_FILE }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.log_file }}" ]; then
-            LOG_FILE="${{ inputs.log_file }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_LOG_FILE" ]; then
+            LOG_FILE="$INPUT_LOG_FILE"
           else
-            LOG_FILE="${{ vars.CD_LOG_FILE }}"
+            LOG_FILE="$CD_LOG_FILE"
           fi
           if [ "${{ matrix.network }}" = "Mainnet" ]; then
             P2P=8233; RPC=8232
