@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+- Banning a misbehaving peer now removes every address book entry for that IP, and a banned IP is
+  never selected as a reconnection candidate. Previously an entry on a different port could survive
+  the ban and occupy the first candidate slot until the node restarted
+  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
 
 ### Security
 

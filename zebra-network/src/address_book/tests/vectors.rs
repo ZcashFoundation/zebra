@@ -250,3 +250,69 @@ fn test_reconnection_peers_skips_recently_updated_ip<
         assert_ne!(next_reconnection_peer, None,);
     }
 }
+
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/11134>.
+///
+/// `by_addr` is ordered by reconnection order, not grouped by IP, so the ban path's old
+/// `skip_while(ip != banned).take_while(ip == banned)` scan stopped at the first entry for a
+/// different IP, and any later entry on the banned IP survived. That survivor then stayed at the
+/// front of the reconnection order for the lifetime of the process: it was selected as a candidate
+/// on every crawl, and `update()` rejected the resulting `UpdateAttempt` because the IP was
+/// banned, so its state never changed.
+#[test]
+fn ban_removes_every_entry_for_the_banned_ip() {
+    let banned_addr: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let unrelated_addr: crate::PeerSocketAddr = "127.0.0.2:8233".parse().unwrap();
+    // An ephemeral-port entry for the same IP, like the one in #11134.
+    let zombie_addr: crate::PeerSocketAddr = "127.0.0.1:43562".parse().unwrap();
+
+    // `max_connections_per_ip` is above one, so `reconnection_peers` does not skip the second
+    // entry on the banned IP for being a duplicate IP.
+    let mut address_book =
+        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+
+    // `MetaAddr`'s `Ord` sorts more recently gossiped addresses first, so these last seen times
+    // place the unrelated IP between the two entries for the banned IP.
+    for (addr, last_seen) in [(banned_addr, 2), (unrelated_addr, 1), (zombie_addr, 0)] {
+        address_book.update(gossiped_change(
+            addr,
+            PeerServices::NODE_NETWORK,
+            DateTime32::MIN.saturating_add(Duration32::from_seconds(last_seen)),
+        ));
+    }
+
+    // Without this ordering the test would also pass before the fix, because a contiguous scan
+    // removes contiguous entries correctly.
+    assert_eq!(
+        address_book.by_addr.descending_keys().collect::<Vec<_>>(),
+        vec![&banned_addr, &unrelated_addr, &zombie_addr],
+        "test setup: the unrelated IP must sort between the two entries for the banned IP",
+    );
+
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: banned_addr,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    assert!(
+        address_book.bans().contains_key(&banned_addr.ip()),
+        "ban-threshold misbehavior should ban the peer IP",
+    );
+    assert_eq!(
+        address_book.by_addr.descending_keys().collect::<Vec<_>>(),
+        vec![&unrelated_addr],
+        "the ban should remove every entry for the banned IP, including the one that does not \
+         sort next to the banned address",
+    );
+
+    let candidates: Vec<_> = address_book
+        .reconnection_peers(Instant::now(), Utc::now())
+        .map(|peer| peer.addr)
+        .collect();
+
+    assert_eq!(
+        candidates,
+        vec![unrelated_addr],
+        "a banned IP must never be a reconnection candidate",
+    );
+}
