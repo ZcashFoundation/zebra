@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-08-06
+## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-06
 
 ### Added
 
