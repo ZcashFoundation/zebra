@@ -3029,7 +3029,8 @@ where
                 .position(|zcashd_receiver| zcashd_receiver == receiver)
         });
 
-        let is_nu6 = NetworkUpgrade::current(&net, height) == NetworkUpgrade::Nu6;
+        // NU6.1 and later minor upgrades keep the NU6 funding stream structure (ZIP 1015).
+        let is_post_nu6 = NetworkUpgrade::current(&net, height) >= NetworkUpgrade::Nu6;
 
         // Format the funding streams and lockbox streams
         let [funding_streams, lockbox_streams] =
@@ -3039,7 +3040,10 @@ where
                     .map(|(receiver, value)| {
                         let address = funding_stream_address(height, &net, receiver);
                         types::subsidy::FundingStream::new_internal(
-                            is_nu6, receiver, value, address,
+                            is_post_nu6,
+                            receiver,
+                            value,
+                            address,
                         )
                     })
                     .collect()
