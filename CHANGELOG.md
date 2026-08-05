@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   malicious `FindBlocks` responder get honest peers banned during initial block
   download (GHSA-qhr3-cvch-5fh2)
 
+- Peers that gossip consensus-invalid blocks are scored for misbehavior again. The inbound
+  download cleanup only recognized `VerifyBlockError`, but the gossiped block verifier is a
+  `BlockVerifierRouter`, which returns `RouterError`, so no score was ever applied and such
+  peers were never banned (GHSA-8hh2-hrf2-cqf4)
+
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
 This is an optional release with network hardenings for operators that experience issues with their nodes peer set connectivity or otherwise want to be proactive about avoiding such issues.
