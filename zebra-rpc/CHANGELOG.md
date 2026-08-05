@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
+  specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
+  affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
 - Clarified the error message returned by `getrawtransaction` for transactions
   that are not in the mempool or best chain
   ([#11014](https://github.com/ZcashFoundation/zebra/pull/11014)).

@@ -1,0 +1,46 @@
+# Attaches a prepared `release-binaries` workflow artifact to an existing
+# GitHub release. Binary construction and signing belong to
+# `zfnd-release-binaries.yml`.
+name: Attach release binaries (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Existing GitHub release tag that receives the binaries"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  attach:
+    name: Attach release binaries
+    if: >-
+      ${{
+        github.repository == 'ZcashFoundation/zebra' &&
+        github.event_name == 'release' &&
+        github.event.action == 'released' &&
+        startsWith(inputs.release_tag, 'v') &&
+        inputs.release_tag == github.event.release.tag_name
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # attach assets to the existing release
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: release-binaries
+          path: dist
+
+      - name: Upload binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${RELEASE_TAG}" \
+            dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS dist/SHA256SUMS.sigstore.json \
+            --repo "${REPOSITORY}" --clobber
