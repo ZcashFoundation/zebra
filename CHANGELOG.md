@@ -46,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
   specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
   affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
-
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
@@ -63,15 +62,22 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
   ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+- Prevent a peer from delaying tip discovery by answering a block download with a canonical header
+  and a rewritten coinbase height. Zebra now re-requests the hash immediately instead of waiting for
+  a later sync round to rediscover it, and scores the peer when a parent block Zebra already holds
+  proves the claimed height wrong
+  ([GHSA-g95h-hw6g-pvgv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g95h-hw6g-pvgv)).
+  Thanks to @zakura-security for reporting the issue.
 - Blocks above the sync lookahead height limit no longer score the peer that served
   them, since that request is routed to an unrelated honest peer — scoring it let a
   malicious `FindBlocks` responder get honest peers banned during initial block
-  download (GHSA-qhr3-cvch-5fh2)
-
+  download
+  ([GHSA-qhr3-cvch-5fh2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qhr3-cvch-5fh2)).
 - Peers that gossip consensus-invalid blocks are scored for misbehavior again. The inbound
   download cleanup only recognized `VerifyBlockError`, but the gossiped block verifier is a
   `BlockVerifierRouter`, which returns `RouterError`, so no score was ever applied and such
-  peers were never banned (GHSA-8hh2-hrf2-cqf4)
+  peers were never banned
+  ([GHSA-8hh2-hrf2-cqf4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8hh2-hrf2-cqf4)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
@@ -168,12 +174,6 @@ penalizes them for briefly disagreeing about the NU6.3 activation.
 - Mitigate a peer-driven CPU-exhaustion vector on nodes with NU6.3 (Ironwood) active: reject
   underpaying and structurally invalid shielded mempool transactions before their expensive proof
   verification, and disconnect peers that send transactions with invalid shielded proofs.
-- Prevent a peer from delaying tip discovery by answering a block download with a canonical header
-  and a rewritten coinbase height. Zebra now re-requests the hash immediately instead of waiting for
-  a later sync round to rediscover it, and scores the peer when a parent block Zebra already holds
-  proves the claimed height wrong
-  ([GHSA-g95h-hw6g-pvgv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g95h-hw6g-pvgv)).
-  Thanks to @zakura-security for reporting the issue.
 
 ## [Zebra 6.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.0) - 2026-07-17
 
