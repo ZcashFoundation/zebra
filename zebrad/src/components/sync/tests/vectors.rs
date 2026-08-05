@@ -440,10 +440,20 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
         .await
 }
 
+/// Tests that `extend_tips` rejects a response containing multiple mismatched hashes.
+#[tokio::test]
+async fn sync_singleton_extend_tips_multiple_mismatches_stall() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(
+        RejectedExtendTipsResponse::MultipleMismatches,
+    )
+    .await
+}
+
 /// A rejected `extend_tips` response shape used by feedback tests.
 #[derive(Copy, Clone, Debug)]
 enum RejectedExtendTipsResponse {
     SingleMismatch,
+    MultipleMismatches,
 }
 
 /// Runs the singleton `extend_tips` test with `rejected_response`.
@@ -611,6 +621,7 @@ async fn sync_singleton_extend_tips_with_rejected_response(
 
     let rejected_hashes = match rejected_response {
         RejectedExtendTipsResponse::SingleMismatch => vec![block0_hash],
+        RejectedExtendTipsResponse::MultipleMismatches => vec![block0_hash, block1_hash],
     };
 
     peer_set
