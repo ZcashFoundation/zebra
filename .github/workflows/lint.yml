@@ -70,7 +70,16 @@ jobs:
         with:
           components: clippy
           toolchain: 1.97.0
+          # Both matrix legs build the same workspace, so they share one cache.
+          cache-shared-key: clippy
           cache-on-failure: true
+          # Restore on every ref, but only write from main. Actions caches are
+          # branch-scoped, so a cache written by a PR can never be read by any
+          # other branch, yet it still consumes the repo-wide cache allowance
+          # and can evict main's caches - the only ones PRs can restore from.
+          # The `tests` leg seeds it, because its feature set is a superset.
+          # See "Rust build caching" in .github/workflows/README.md.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.type == 'tests' }}
       - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
@@ -90,6 +99,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
+          # Only main writes caches, see the clippy job above.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-hack
@@ -118,6 +129,8 @@ jobs:
         with:
           toolchain: 1.91.0 # MSRV
           cache-on-failure: true
+          # Only main writes caches, see the clippy job above.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo build --bin "${{ matrix.binary }}" --workspace
 
@@ -138,6 +151,8 @@ jobs:
         with:
           toolchain: 1.91.0
           components: rustfmt
+          # `cargo fmt` builds nothing, so a cache here only consumes quota.
+          cache: false
       - name: Run fmt
         run: cargo fmt --all -- --check
 
@@ -154,7 +169,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: 1.97.0
-          cache-on-failure: true
+          # `cargo tree` builds nothing, so a cache here only consumes quota.
+          cache: false
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package zebrad -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
@@ -175,6 +191,8 @@ jobs:
         with:
           toolchain: 1.97.0
           cache-on-failure: true
+          # Only main writes caches, see the clippy job above.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo check --locked --all-features --all-targets
 
@@ -211,7 +229,9 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          cache-on-failure: true
+          # cargo-deny reads the dependency graph without building it, and this
+          # matrix is 12 jobs wide, so caching here is pure quota consumption.
+          cache: false
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
         uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 #v2.0.18
         with:
