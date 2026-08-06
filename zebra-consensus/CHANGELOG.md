@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
   services with dedicated request/response types
   ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
-- Removed the unified verifier API:
+- Removed the unified verifier API ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)):
   - `transaction::Verifier`
   - `transaction::Request`
   - `transaction::Response`
