@@ -1307,7 +1307,6 @@ async fn above_lookahead_does_not_restart_sync() {
     let err = BlockDownloadVerifyError::AboveLookaheadHeightLimit {
         height: block::Height(60_000),
         hash: block::Hash::from([0xBB; 32]),
-        advertiser_addr: None,
     };
 
     let restart = ChainSync::<
@@ -1337,7 +1336,6 @@ async fn both_height_limits_do_not_restart_sync() {
     let above = BlockDownloadVerifyError::AboveLookaheadHeightLimit {
         height: block::Height(60_000),
         hash: block::Hash::from([0xEE; 32]),
-        advertiser_addr: None,
     };
 
     let restart_below = ChainSync::<
@@ -1558,10 +1556,10 @@ async fn download_failed_is_only_requeued_for_not_found() {
 ///
 /// Far-ahead hashes from a malicious `FindBlocks` response carry no peer attribution,
 /// so the follow-up `BlocksByHash` request is routed to an independently chosen,
-/// honest peer — `advertiser_addr` names the *serving* peer, not the peer that chose
-/// the height. Scoring this path bans honest peers at the attacker's direction.
+/// honest peer. That serving peer did not choose the height, so scoring this path bans
+/// honest peers at the attacker's direction.
 #[tokio::test]
-async fn far_ahead_block_does_not_score_serving_peer() {
+async fn far_ahead_block_does_not_produce_misbehavior_score() {
     let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
 
     let peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
@@ -1594,7 +1592,6 @@ async fn far_ahead_block_does_not_score_serving_peer() {
         BlockDownloadVerifyError::AboveLookaheadHeightLimit {
             height: block::Height(60_000),
             hash: block::Hash::from([0xBB; 32]),
-            advertiser_addr: Some(peer),
         },
     ));
     assert_eq!(

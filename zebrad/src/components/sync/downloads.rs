@@ -119,7 +119,6 @@ pub enum BlockDownloadVerifyError {
     AboveLookaheadHeightLimit {
         height: block::Height,
         hash: block::Hash,
-        advertiser_addr: Option<PeerSocketAddr>,
     },
 
     /// A downloaded block claimed a height a long way behind the state chain tip.
@@ -488,7 +487,10 @@ where
                 };
 
                 if block_height > lookahead_drop_height {
-                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash, advertiser_addr })?;
+                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+                        height: block_height,
+                        hash,
+                    })?;
                 } else if block_height > lookahead_pause_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
                     // So we only log at info level for the first above-height block.

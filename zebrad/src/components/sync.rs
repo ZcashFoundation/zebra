@@ -1235,12 +1235,11 @@ where
             }
 
             // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
-            // stay that way (GHSA-qhr3-cvch-5fh2): `advertiser_addr` names the peer that
-            // *served* the block, not the one that chose its height — `FindBlocks`
-            // responses carry no address, so the follow-up request goes to an
-            // independently chosen, honest peer, and scoring it let a malicious
-            // `FindBlocks` responder evict honest peers throughout IBD. Unlike the
-            // behind-tip sibling advisory, the block here is genuine, so there is no
+            // stay that way (GHSA-qhr3-cvch-5fh2): `FindBlocks` responses carry no
+            // address, so the follow-up request goes to an independently chosen, honest
+            // peer that served the block but did not choose its height. Scoring it let a
+            // malicious `FindBlocks` responder evict honest peers throughout IBD. Unlike
+            // the behind-tip sibling advisory, the block here is genuine, so there is no
             // local proof of forgery to re-attribute with. Do not add scoring back.
             Err(_) => {}
         };
