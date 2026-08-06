@@ -964,7 +964,7 @@ where
         + Send
         + 'static,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     use CrawlerAction::*;
@@ -1185,7 +1185,7 @@ async fn crawl<S>(
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     // update() has timeouts, and briefly holds the address book

@@ -1,12 +1,17 @@
 //! Candidate peer selection for outbound connections using the [`CandidateSet`].
 
-use std::{any::type_name, cmp::min};
+use std::{
+    any::type_name,
+    cmp::min,
+    task::{Context, Poll},
+};
 
 use futures::{
+    future::BoxFuture,
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-use tokio::time::{sleep_until, timeout, Instant};
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::serialization::DateTime32;
@@ -19,6 +24,10 @@ use crate::{
     types::MetaAddr,
     BoxError, Request, Response,
 };
+
+mod rate_limit;
+
+pub(crate) use rate_limit::{RateLimitOnYield, SkipRateLimit};
 
 #[cfg(test)]
 mod tests;
@@ -124,55 +133,79 @@ mod tests;
 //   * show all possible transitions between Attempt/Responded/Failed,
 //     except Failed -> Responded is invalid, must go through Attempt
 //
-// Note: the CandidateSet can't be cloned, because there needs to be a single
-// instance of its timers, so that rate limits are enforced correctly.
+// Note: rate limits are enforced by shared middleware layers, so every clone
+// of a rate-limited service enforces the same limit.
 pub(crate) struct CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     /// The buffered service handle to the address book updater task,
     /// which owns the outbound address book for this peer set.
+    ///
+    /// Used for requests that aren't rate-limited.
     address_book_service: AddressBookService,
 
-    /// The peer set used to crawl the network for peers.
-    peer_service: S,
+    /// Chooses the next reconnection candidate from the address book.
+    ///
+    /// # Security
+    ///
+    /// Rate-limited so new outbound connections are started at least
+    /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
+    /// apart. The rate limit is only charged when a candidate is actually
+    /// yielded: an empty address book returns `None` immediately.
+    next_peer_service: RateLimitOnYield<AddressBookService, AddressBookResponse>,
 
-    /// A timer that enforces a rate-limit on new outbound connections.
-    min_next_handshake: Instant,
-
-    /// A timer that enforces a rate-limit on peer set requests for more peers.
-    min_next_crawl: Instant,
+    /// Crawls the network for more peer addresses.
+    ///
+    /// # Security
+    ///
+    /// Rate-limited to at most one crawl per
+    /// [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL],
+    /// to prevent sending a burst of repeated requests for new peer
+    /// addresses. While the rate limit applies, crawls are skipped.
+    crawl_service: SkipRateLimit<CrawlFanout<S>>,
 }
 
 impl<S> std::fmt::Debug for CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CandidateSet")
             .field("address_book_service", &type_name::<AddressBookService>())
             .field("peer_service", &type_name::<S>())
-            .field("min_next_handshake", &self.min_next_handshake)
-            .field("min_next_crawl", &self.min_next_crawl)
             .finish()
     }
 }
 
 impl<S> CandidateSet<S>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Send,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     /// Uses `address_book_service` and `peer_service` to manage a
     /// [`CandidateSet`] of peers.
     pub fn new(address_book_service: AddressBookService, peer_service: S) -> CandidateSet<S> {
+        let next_peer_service = RateLimitOnYield::new(
+            address_book_service.clone(),
+            constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
+            |response| matches!(response, AddressBookResponse::NextReconnectPeer(Some(_))),
+        );
+
+        let crawl_service = SkipRateLimit::new(
+            CrawlFanout {
+                peer_service,
+                address_book_service: address_book_service.clone(),
+            },
+            constants::MIN_PEER_GET_ADDR_INTERVAL,
+        );
+
         CandidateSet {
             address_book_service,
-            peer_service,
-            min_next_handshake: Instant::now(),
-            min_next_crawl: Instant::now(),
+            next_peer_service,
+            crawl_service,
         }
     }
 
@@ -225,156 +258,19 @@ where
     }
 
     /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`, and imposing a timeout on the entire fanout.
+    /// `fanout_limit`.
     ///
     /// See [`update_initial`][Self::update_initial] for details.
     async fn update_timeout(
         &mut self,
         fanout_limit: Option<usize>,
     ) -> Result<Option<MorePeers>, BoxError> {
-        let mut more_peers = None;
-
         // SECURITY
         //
-        // Rate limit sending `GetAddr` messages to peers.
-        if self.min_next_crawl <= Instant::now() {
-            // CORRECTNESS
-            //
-            // Use a timeout to avoid deadlocks when there are no connected
-            // peers, and:
-            // - we're waiting on a handshake to complete so there are peers, or
-            // - another task that handles or adds peers is waiting on this task
-            //   to complete.
-            if let Ok(fanout_result) = timeout(
-                constants::PEER_GET_ADDR_TIMEOUT,
-                self.update_fanout(fanout_limit),
-            )
-            .await
-            {
-                more_peers = fanout_result?;
-            } else {
-                // update must only return an error for permanent failures
-                info!("timeout waiting for peer service readiness or peer responses");
-            }
-
-            self.min_next_crawl = Instant::now() + constants::MIN_PEER_GET_ADDR_INTERVAL;
-        }
-
-        Ok(more_peers)
-    }
-
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`.
-    ///
-    /// Opportunistically crawl the network on every update call to ensure
-    /// we're actively fetching peers. Continue independently of whether we
-    /// actually receive any peers, but always ask the network for more.
-    ///
-    /// Because requests are load-balanced across existing peers, we can make
-    /// multiple requests concurrently, which will be randomly assigned to
-    /// existing peers, but we don't make too many because update may be
-    /// called while the peer set is already loaded.
-    ///
-    /// See [`update_initial`][Self::update_initial] for more details.
-    ///
-    /// # Correctness
-    ///
-    /// This function does not have a timeout.
-    /// Use [`update_timeout`][Self::update_timeout] instead.
-    async fn update_fanout(
-        &mut self,
-        fanout_limit: Option<usize>,
-    ) -> Result<Option<MorePeers>, BoxError> {
-        let fanout_limit = fanout_limit
-            .map(|fanout_limit| min(fanout_limit, constants::GET_ADDR_FANOUT))
-            .unwrap_or(constants::GET_ADDR_FANOUT);
-        debug!(?fanout_limit, "sending GetPeers requests");
-
-        let mut responses = FuturesUnordered::new();
-        let mut more_peers = None;
-
-        // Launch requests
-        for attempt in 0..fanout_limit {
-            if attempt > 0 {
-                // Let other tasks run, so we're more likely to choose a different peer.
-                //
-                // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
-                tokio::task::yield_now().await;
-            }
-
-            let peer_service = self.peer_service.ready().await?;
-            responses.push(peer_service.call(Request::Peers));
-        }
-
-        let mut address_book_updates = FuturesUnordered::new();
-
-        // Process responses
-        while let Some(rsp) = responses.next().await {
-            match rsp {
-                Ok(Response::Peers(addrs)) => {
-                    trace!(
-                        addr_count = ?addrs.len(),
-                        ?addrs,
-                        "got response to GetPeers"
-                    );
-                    let addrs = validate_addrs(addrs, DateTime32::now());
-                    address_book_updates.push(self.send_addrs(addrs));
-                    more_peers = Some(MorePeers);
-                }
-                Err(e) => {
-                    // since we do a fanout, and new updates are triggered by
-                    // each demand, we can ignore errors in individual responses
-                    trace!(?e, "got error in GetPeers request");
-                }
-                Ok(_) => unreachable!("Peers requests always return Peers responses"),
-            }
-        }
-
-        // Wait until all the address book updates have finished
-        while let Some(()) = address_book_updates.next().await {}
-
-        Ok(more_peers)
-    }
-
-    /// Add new `addrs` to the address book.
-    async fn send_addrs(&self, addrs: impl IntoIterator<Item = MetaAddr>) {
-        // # Security
-        //
-        // New gossiped peers are rate-limited because:
-        // - Zebra initiates requests for new gossiped peers
-        // - the fanout is limited
-        // - the number of addresses per peer is limited
-        let addrs: Vec<MetaAddrChange> = addrs
-            .into_iter()
-            .map(MetaAddr::new_gossiped_change)
-            .map(|maybe_addr| maybe_addr.expect("Received gossiped peers always have services set"))
-            .collect();
-
-        debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
-
-        // Don't bother making a request if there are no addresses left.
-        if addrs.is_empty() {
-            return;
-        }
-
-        // Extend handles duplicate addresses internally.
-        //
-        // Correctness: box the request future, so its captured types don't
-        // leak into generic callers (rustc's async Send inference struggles
-        // with boxed trait objects inside generic spawned tasks).
-        let result = self
-            .address_book_service
-            .clone()
-            .oneshot(AddressBookRequest::ExtendGossiped(addrs))
-            .boxed()
-            .await;
-
-        if let Err(error) = result {
-            debug!(
-                ?error,
-                "error sending gossiped addresses to the address book, is Zebra shutting down?"
-            );
-        }
+        // Rate limit sending `GetAddr` messages to peers:
+        // while the crawl service is rate-limited, calls are skipped,
+        // and return `None` without contacting any peers.
+        self.crawl_service.ready().await?.call(fanout_limit).await
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -405,32 +301,29 @@ where
         // Atomically choose the next peer and mark it as `AttemptPending`,
         // in a single address book updater request.
         //
-        // It's okay to return without sleeping when there is no peer, because
-        // we only need to sleep before yielding an address.
-        let response = self
-            .address_book_service
-            .clone()
-            .oneshot(AddressBookRequest::NextReconnectPeer)
-            .boxed()
-            .await;
+        // Security: new outbound peer connections are rate-limited by the
+        // [`RateLimitOnYield`] middleware, which only sleeps before yielding
+        // an address: when there is no peer, `None` is returned immediately.
+        let response = match self.next_peer_service.ready().await {
+            Ok(next_peer_service) => {
+                next_peer_service
+                    .call(AddressBookRequest::NextReconnectPeer)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
 
-        let next_peer = match response {
-            Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer?,
+        match response {
+            Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer,
             Ok(_) => unreachable!("NextReconnectPeer requests always return NextReconnectPeer"),
             Err(error) => {
                 debug!(
                     ?error,
                     "error requesting next reconnection peer, is Zebra shutting down?"
                 );
-                return None;
+                None
             }
-        };
-
-        // Security: rate-limit new outbound peer connections
-        sleep_until(self.min_next_handshake).await;
-        self.min_next_handshake = Instant::now() + constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL;
-
-        Some(next_peer)
+        }
     }
 
     /// Returns the number of candidate peers that are currently ready for a
@@ -457,6 +350,189 @@ where
                 0
             }
         }
+    }
+}
+
+/// A service that crawls the network for more peer addresses.
+///
+/// It fans out `GetPeers` requests to the peer set, validates the responses,
+/// and sends the validated addresses to the address book updater.
+///
+/// The request is an optional fanout limit, and the response is
+/// `Some(MorePeers)` if the crawl received any new peers.
+#[derive(Clone)]
+pub(crate) struct CrawlFanout<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    /// The peer set used to crawl the network for peers.
+    peer_service: S,
+
+    /// The buffered service handle to the address book updater task.
+    address_book_service: AddressBookService,
+}
+
+impl<S> Service<Option<usize>> for CrawlFanout<S>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Option<MorePeers>;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Option<MorePeers>, BoxError>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Readiness of the peer service is checked before each fanout
+        // request inside `call`.
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, fanout_limit: Option<usize>) -> Self::Future {
+        let peer_service = self.peer_service.clone();
+        let address_book_service = self.address_book_service.clone();
+
+        async move {
+            // CORRECTNESS
+            //
+            // Use a timeout to avoid deadlocks when there are no connected
+            // peers, and:
+            // - we're waiting on a handshake to complete so there are peers, or
+            // - another task that handles or adds peers is waiting on this task
+            //   to complete.
+            match timeout(
+                constants::PEER_GET_ADDR_TIMEOUT,
+                crawl_fanout(peer_service, address_book_service, fanout_limit),
+            )
+            .await
+            {
+                Ok(fanout_result) => fanout_result,
+                Err(_elapsed) => {
+                    // crawls must only return an error for permanent failures
+                    info!("timeout waiting for peer service readiness or peer responses");
+                    Ok(None)
+                }
+            }
+        }
+        .boxed()
+    }
+}
+
+/// Crawl the network for more peer addresses, limiting the fanout to
+/// `fanout_limit`.
+///
+/// Opportunistically crawl the network on every call to ensure
+/// we're actively fetching peers. Continue independently of whether we
+/// actually receive any peers, but always ask the network for more.
+///
+/// Because requests are load-balanced across existing peers, we can make
+/// multiple requests concurrently, which will be randomly assigned to
+/// existing peers, but we don't make too many because crawls may be
+/// started while the peer set is already loaded.
+///
+/// # Correctness
+///
+/// This function does not have a timeout.
+/// Use the [`CrawlFanout`] service instead.
+async fn crawl_fanout<S>(
+    mut peer_service: S,
+    address_book_service: AddressBookService,
+    fanout_limit: Option<usize>,
+) -> Result<Option<MorePeers>, BoxError>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    let fanout_limit = fanout_limit
+        .map(|fanout_limit| min(fanout_limit, constants::GET_ADDR_FANOUT))
+        .unwrap_or(constants::GET_ADDR_FANOUT);
+    debug!(?fanout_limit, "sending GetPeers requests");
+
+    let mut responses = FuturesUnordered::new();
+    let mut more_peers = None;
+
+    // Launch requests
+    for attempt in 0..fanout_limit {
+        if attempt > 0 {
+            // Let other tasks run, so we're more likely to choose a different peer.
+            //
+            // TODO: move fanouts into the PeerSet, so we always choose different peers (#2214)
+            tokio::task::yield_now().await;
+        }
+
+        let peer_service = peer_service.ready().await?;
+        responses.push(peer_service.call(Request::Peers));
+    }
+
+    let mut address_book_updates = FuturesUnordered::new();
+
+    // Process responses
+    while let Some(rsp) = responses.next().await {
+        match rsp {
+            Ok(Response::Peers(addrs)) => {
+                trace!(
+                    addr_count = ?addrs.len(),
+                    ?addrs,
+                    "got response to GetPeers"
+                );
+                let addrs = validate_addrs(addrs, DateTime32::now());
+                address_book_updates.push(send_addrs(address_book_service.clone(), addrs));
+                more_peers = Some(MorePeers);
+            }
+            Err(e) => {
+                // since we do a fanout, and new updates are triggered by
+                // each demand, we can ignore errors in individual responses
+                trace!(?e, "got error in GetPeers request");
+            }
+            Ok(_) => unreachable!("Peers requests always return Peers responses"),
+        }
+    }
+
+    // Wait until all the address book updates have finished
+    while let Some(()) = address_book_updates.next().await {}
+
+    Ok(more_peers)
+}
+
+/// Add new `addrs` to the address book.
+async fn send_addrs(
+    address_book_service: AddressBookService,
+    addrs: impl IntoIterator<Item = MetaAddr>,
+) {
+    // # Security
+    //
+    // New gossiped peers are rate-limited because:
+    // - Zebra initiates requests for new gossiped peers
+    // - the fanout is limited
+    // - the number of addresses per peer is limited
+    let addrs: Vec<MetaAddrChange> = addrs
+        .into_iter()
+        .map(MetaAddr::new_gossiped_change)
+        .map(|maybe_addr| maybe_addr.expect("Received gossiped peers always have services set"))
+        .collect();
+
+    debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
+
+    // Don't bother making a request if there are no addresses left.
+    if addrs.is_empty() {
+        return;
+    }
+
+    // Extend handles duplicate addresses internally.
+    //
+    // Correctness: box the request future, so its captured types don't
+    // leak into generic callers (rustc's async Send inference struggles
+    // with boxed trait objects inside generic spawned tasks).
+    let result = address_book_service
+        .oneshot(AddressBookRequest::ExtendGossiped(addrs))
+        .boxed()
+        .await;
+
+    if let Err(error) = result {
+        debug!(
+            ?error,
+            "error sending gossiped addresses to the address book, is Zebra shutting down?"
+        );
     }
 }
 

@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of locking the shared mutex, making pick-and-mark-`AttemptPending` atomic. Hot reads and
   `init()` are unchanged, and there is no network-visible behavior change
   ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- The manual `min_next_handshake`/`min_next_crawl` rate-limit timers in the candidate set are
+  replaced by small tower middlewares: outbound connection pacing is only charged when a
+  candidate is actually yielded, and crawls are still skipped while rate-limited. The intervals
+  and the existing rate-limit test assertions are unchanged
+  ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
 
 ### Added
 
