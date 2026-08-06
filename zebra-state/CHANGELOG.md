@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [12.0.2] - 2026-08-07
+## [13.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Requires `zebra-chain` 12.0.0 and `zebra-node-services` 10.0.0, whose types and service traits
+  appear in this crate's public API.
 
 ### Fixed
 
