@@ -11,6 +11,7 @@ use zebra_chain::{
     block::Height,
     ironwood, orchard, sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    tachyon,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -94,6 +95,55 @@ impl FromDisk for orchard::tree::Root {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
         array.try_into().expect("finalized data must be valid")
+    }
+}
+
+impl IntoDisk for tachyon::Anchor {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl FromDisk for tachyon::Anchor {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
+        array.into()
+    }
+}
+
+impl IntoDisk for tachyon::Tachygram {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.into()
+    }
+}
+
+impl FromDisk for tachyon::Tachygram {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array: [u8; 32] = bytes.as_ref().try_into().unwrap();
+        array.into()
+    }
+}
+
+/// The on-disk key for a Tachyon epoch index: 4 big-endian bytes, so epochs sort in order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TachyonEpoch(pub u32);
+
+impl IntoDisk for TachyonEpoch {
+    type Bytes = [u8; 4];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0.to_be_bytes()
+    }
+}
+
+impl FromDisk for TachyonEpoch {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array: [u8; 4] = bytes.as_ref().try_into().unwrap();
+        Self(u32::from_be_bytes(array))
     }
 }
 

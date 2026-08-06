@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The finalized and non-finalized state track the Tachyon pool (NU7): per-block and
+  epoch-boundary anchors and revealed tachygrams, stored in the new `tachyon_anchors`,
+  `tachyon_anchor_by_height`, `tachyon_epoch_anchor_by_epoch`, and
+  `tachyon_tachygrams` column families (database format version 29). Contextual
+  validation rejects duplicate tachygrams within the two-epoch scan window, and
+  proof-stamp anchors that are not end-of-block anchors from that window, with new
+  `ValidateContextError` variants
+  ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
+
 ## [12.0.1] - 2026-07-27
 
 ### Changed

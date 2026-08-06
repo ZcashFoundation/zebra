@@ -24,6 +24,7 @@ pub fn fake_history_tree(network: &Network) -> Arc<HistoryTree> {
             sapling: &first_sapling_root,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )
     .unwrap();

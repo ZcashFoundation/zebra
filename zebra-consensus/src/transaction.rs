@@ -1267,9 +1267,11 @@ where
     /// bundles), plus the tachyon bundle's transaction-level semantic checks:
     ///
     /// - no action `cv`/`rk` is the identity point ([`check::tachyon_actions_have_valid_digests`])
-    /// - proof-stamp tachygrams are distinct ([`check::tachyon_tachygrams_are_distinct`])
     /// - the action and binding signatures verify over the transaction sighash
     ///   ([`Self::verify_tachyon_signatures`])
+    ///
+    /// Distinctness of the tachygrams within one proof stamp is enforced at parse time: they
+    /// deserialize into a set, and the wire parser rejects duplicates.
     ///
     /// The block-level tachyon rules (block-wide tachygram distinctness, pointer-stamp coverage,
     /// covered-actions digests, and proof verification) need whole-block context, so they run in
@@ -1283,7 +1285,6 @@ where
         Self::verify_v7_transaction_network_upgrade(tx, nu)?;
 
         check::tachyon_actions_have_valid_digests(tx)?;
-        check::tachyon_tachygrams_are_distinct(tx)?;
 
         let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();

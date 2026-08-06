@@ -12,10 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the `ValueBalanceError::Total` variant returned when the sum of value
   pools is out of range
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+- `primitives::zcash_history::BlockCommitmentTreeRoots` gains a `tachyon` field, and
+  the new `V4` history-tree version extends `V3` node data with the Tachyon pool
+  anchor and bundle count from NU7 onward, so chain history commits to the Tachyon
+  pool ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
 
 ### Added
 
 - `ValueBalance::total`, which returns the sum of all value pool balances
+- The `tachyon` module: the Tachyon pool's running anchor (`Anchor`, `AnchorAdvance`,
+  `Tachygram`), epoch helpers, and `within_scan_window`, the two-epoch consensus scan
+  window for tachygram duplicates and proof-stamp anchor recency
+  ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
+- `Transaction::tachyon_tachygrams` and `Block::tachyon_transactions_count`
 
 ## [11.3.0] - 2026-07-27
 

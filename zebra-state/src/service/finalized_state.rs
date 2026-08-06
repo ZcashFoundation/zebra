@@ -105,6 +105,16 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "ironwood_anchors",
     "ironwood_note_commitment_tree",
     "ironwood_note_commitment_subtree",
+    // Tachyon (NU7, experimental). Always registered so the database format is stable
+    // across build flags; these stay empty until the Tachyon pool starts at NU7.
+    // Tachyon has no note commitment tree: its pool state is a running anchor, stored
+    // by height (for the tip anchor and reorgs) and by anchor (for membership checks).
+    // Tachygrams are epoch-scoped: `tachyon_tachygrams` holds the current epoch's
+    // working set, and is pruned when an epoch-first block is finalized.
+    "tachyon_anchors",
+    "tachyon_anchor_by_height",
+    "tachyon_epoch_anchor_by_epoch",
+    "tachyon_tachygrams",
     // Chain
     "history_tree",
     "tip_chain_value_pool",
@@ -386,10 +396,25 @@ impl FinalizedState {
                 //
                 // TODO: run this CPU-intensive cryptography in a parallel rayon
                 // thread, if it shows up in profiles
+                // Advance the Tachyon pool anchor with this block, if the pool has
+                // started. The anchor in `note_commitment_trees` still holds the
+                // parent block's anchor here (`update_trees_parallel` doesn't touch
+                // it, because the fold is indexed by pool height).
+                if let Some(pool_height) =
+                    zebra_chain::tachyon::pool_height(&self.network(), checkpoint_verified.height)
+                {
+                    let advance = note_commitment_trees
+                        .tachyon_anchor
+                        .advance_with_block(pool_height, &block);
+                    note_commitment_trees.tachyon_anchor = advance.post_block;
+                    note_commitment_trees.tachyon_epoch_anchor = advance.epoch_boundary;
+                }
+
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
                 let ironwood_root = note_commitment_trees.ironwood.root();
+                let tachyon_anchor = note_commitment_trees.tachyon_anchor;
                 history_tree_mut
                     .push(
                         &self.network(),
@@ -398,6 +423,7 @@ impl FinalizedState {
                             sapling: &sapling_root,
                             orchard: &orchard_root,
                             ironwood: &ironwood_root,
+                            tachyon: &tachyon_anchor,
                         },
                     )
                     .map_err(Arc::new)

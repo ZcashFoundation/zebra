@@ -20,22 +20,25 @@ use std::collections::{BTreeSet, HashMap};
 
 use zebra_chain::{block::Block, transaction::WtxId};
 
-use zcash_tachyon::{action::Descriptor, ProofStamp, Tachygram, TachyonBundle};
+use zcash_tachyon::{
+    stamp::StampState as _, Bundle, PointerStamp, ProofStamp, Tachygram, TachyonBundle,
+    VerifyCoverageError,
+};
 
 use crate::error::BlockError;
 
 #[cfg(test)]
 mod tests;
 
-/// A tachyon proof stamp and the full covered action descriptor set it must verify against:
-/// the stamp's own bundle actions plus those of every pointer-stamped transaction naming it.
+/// A tachyon aggregate and the pointer-stamped bundles it covers: the proof-verification work
+/// item for one proof stamp (rule 4 in the module docs).
 #[derive(Debug)]
 pub(crate) struct AggregateCoverage {
-    /// The proof stamp to verify.
-    pub stamp: ProofStamp,
+    /// The proof-stamped bundle whose stamp must verify.
+    pub bundle: Bundle<ProofStamp>,
 
-    /// The descriptors of every action the stamp covers.
-    pub covered_descriptors: Vec<Descriptor>,
+    /// The pointer-stamped bundles naming this aggregate, whose actions the stamp also covers.
+    pub adjuncts: Vec<Bundle<PointerStamp>>,
 }
 
 /// Checks the synchronous block-level tachyon rules (1-3 in the module docs), and returns the
@@ -49,22 +52,22 @@ pub(crate) struct AggregateCoverage {
 /// > proof-stamped transaction in the same block covering its actions
 ///
 /// > For each proof stamp, collect the descriptors of the bundle's own actions together with
-/// > those of every pointer-stamped transaction naming it, sort them, and compute the descriptor
-/// > digest; reject on mismatch with the carried `hStampActionsTachyon`.
+/// > those of every pointer-stamped transaction naming it, and compute the descriptor digest;
+/// > reject on a duplicate descriptor or a mismatch with the carried `hStampActionsTachyon`.
 ///
 /// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
 pub(crate) fn coherence(block: &Block) -> Result<Vec<AggregateCoverage>, BlockError> {
     let mut seen_tachygrams: BTreeSet<Tachygram> = BTreeSet::new();
 
-    // Each proof-stamped bundle's stamp and covered descriptors (starting with its own actions),
-    // keyed by position, plus a wtxid index into it for pointer-stamp resolution. Duplicate
-    // wtxids can't occur here: the block verifier already rejects duplicate transactions, and a
-    // wtxid collision between distinct transactions is a hash collision.
+    // Each proof-stamped bundle keyed by position, plus a wtxid index into it for pointer-stamp
+    // resolution. Duplicate wtxids can't occur here: the block verifier already rejects
+    // duplicate transactions, and a wtxid collision between distinct transactions is a hash
+    // collision.
     let mut aggregates: Vec<AggregateCoverage> = Vec::new();
     let mut aggregates_by_wtxid: HashMap<[u8; 64], usize> = HashMap::new();
 
-    // The pointer-stamped bundles' targets and action descriptors.
-    let mut adjuncts: Vec<([u8; 64], Vec<Descriptor>)> = Vec::new();
+    // The pointer-stamped bundles, with the aggregate wtxid their stamp names.
+    let mut adjuncts: Vec<([u8; 64], Bundle<PointerStamp>)> = Vec::new();
 
     for transaction in &block.transactions {
         let Some(tachyon_shielded_data) = transaction.tachyon_shielded_data() else {
@@ -78,8 +81,8 @@ pub(crate) fn coherence(block: &Block) -> Result<Vec<AggregateCoverage>, BlockEr
 
             TachyonBundle::Proven(bundle) => {
                 // Rule 1: block-wide tachygram distinctness, in a single scan over the proof
-                // stamps (pointer-stamped bundles carry no tachygrams). This also subsumes the
-                // per-stamp distinctness rule for mined blocks.
+                // stamps (pointer-stamped bundles carry no tachygrams). Distinctness within one
+                // stamp is structural: its tachygrams parse into a set.
                 for &tachygram in &bundle.stamp.tachygrams {
                     if !seen_tachygrams.insert(tachygram) {
                         return Err(BlockError::DuplicateTachygram);
@@ -93,37 +96,47 @@ pub(crate) fn coherence(block: &Block) -> Result<Vec<AggregateCoverage>, BlockEr
 
                 aggregates_by_wtxid.insert(wtxid, aggregates.len());
                 aggregates.push(AggregateCoverage {
-                    stamp: bundle.stamp.clone(),
-                    covered_descriptors: bundle.descriptors(),
+                    bundle: bundle.clone(),
+                    adjuncts: Vec::new(),
                 });
             }
 
             TachyonBundle::Adjunct(bundle) => {
-                adjuncts.push((<[u8; 64]>::from(bundle.stamp), bundle.descriptors()));
+                // A pointer stamp's digest is the aggregate wtxid it names.
+                adjuncts.push((bundle.stamp.stamp_digest(), bundle.clone()));
             }
         }
     }
 
     // Rule 2: every pointer stamp resolves to a proof-stamped transaction in this block. A
     // pointer to a non-proof-stamped transaction is inherently absent from the index. Resolved
-    // adjunct actions accumulate into their aggregate's covered descriptor set for rule 3.
-    for (target_wtxid, mut descriptors) in adjuncts {
+    // adjuncts group under their aggregate for rules 3 and 4.
+    for (target_wtxid, bundle) in adjuncts {
         let Some(&aggregate_index) = aggregates_by_wtxid.get(&target_wtxid) else {
             return Err(BlockError::TachyonAggregateNotFound);
         };
 
-        aggregates[aggregate_index]
-            .covered_descriptors
-            .append(&mut descriptors);
+        aggregates[aggregate_index].adjuncts.push(bundle);
     }
 
-    // Rule 3: each proof stamp's carried `hStampActionsTachyon` matches the digest of its
-    // covered descriptors. `covers` sorts the descriptors internally, so the accumulation order
-    // above doesn't matter. An autonome with no adjuncts simply covers its own actions.
+    // Rule 3: each proof stamp's carried `hStampActionsTachyon` matches the digest of the
+    // combined unique descriptors of its own and its adjuncts' actions. An autonome with no
+    // adjuncts simply covers its own actions. (The pointer check inside `Bundle::verify` is
+    // unnecessary here: adjuncts were grouped by the very wtxid it would recheck.)
     for aggregate in &aggregates {
-        if !aggregate.stamp.covers(&aggregate.covered_descriptors) {
-            return Err(BlockError::TachyonCoverageMismatch);
-        }
+        let adjunct_refs: Vec<_> = aggregate
+            .adjuncts
+            .iter()
+            .map(|adjunct| adjunct.as_dyn())
+            .collect();
+
+        aggregate
+            .bundle
+            .verify_coverage(&adjunct_refs)
+            .map_err(|err| match err {
+                VerifyCoverageError::DuplicateActions => BlockError::TachyonDuplicateAction,
+                VerifyCoverageError::StampActionsMismatch => BlockError::TachyonCoverageMismatch,
+            })?;
     }
 
     Ok(aggregates)

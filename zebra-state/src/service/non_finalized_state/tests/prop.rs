@@ -579,14 +579,14 @@ fn different_blocks_different_chains() -> Result<()> {
 
         let finalized_tree1: Arc<HistoryTree> = if height1 >= Heartwood.activation_height(&Network::Mainnet).unwrap() {
             Arc::new(
-                NonEmptyHistoryTree::from_block(&Network::Mainnet, prev_block1, BlockCommitmentTreeRoots { sapling: &Default::default(), orchard: &Default::default(), ironwood: &Default::default() }).unwrap().into()
+                NonEmptyHistoryTree::from_block(&Network::Mainnet, prev_block1, BlockCommitmentTreeRoots { sapling: &Default::default(), orchard: &Default::default(), ironwood: &Default::default(), tachyon: &Default::default() }).unwrap().into()
             )
         } else {
             Default::default()
         };
         let finalized_tree2: Arc<HistoryTree> = if height2 >= NetworkUpgrade::Heartwood.activation_height(&Network::Mainnet).unwrap() {
             Arc::new(
-                NonEmptyHistoryTree::from_block(&Network::Mainnet, prev_block2, BlockCommitmentTreeRoots { sapling: &Default::default(), orchard: &Default::default(), ironwood: &Default::default() }).unwrap().into()
+                NonEmptyHistoryTree::from_block(&Network::Mainnet, prev_block2, BlockCommitmentTreeRoots { sapling: &Default::default(), orchard: &Default::default(), ironwood: &Default::default(), tachyon: &Default::default() }).unwrap().into()
             )
         } else {
             Default::default()

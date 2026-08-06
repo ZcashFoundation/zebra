@@ -1298,6 +1298,32 @@ impl Transaction {
         }
     }
 
+    /// Does this transaction carry a tachyon bundle?
+    pub fn has_tachyon_shielded_data(&self) -> bool {
+        self.tachyon_shielded_data().is_some()
+    }
+
+    /// The tachygrams revealed by this transaction's tachyon proof stamp, in the stamp's
+    /// canonical (sorted) order.
+    ///
+    /// Pointer-stamped bundles carry no tachygrams (theirs are revealed by the aggregate's proof
+    /// stamp). Returns an empty list for non-V7 transactions.
+    pub fn tachyon_tachygrams(&self) -> Vec<crate::tachyon::Tachygram> {
+        match self.tachyon_shielded_data() {
+            Some(shielded_data) => match &shielded_data.0 {
+                zcash_tachyon::TachyonBundle::Proven(bundle) => bundle
+                    .stamp
+                    .tachygrams
+                    .iter()
+                    .map(|&tachygram| crate::tachyon::Tachygram::from(tachygram))
+                    .collect(),
+                zcash_tachyon::TachyonBundle::NoBundle
+                | zcash_tachyon::TachyonBundle::Adjunct(_) => Vec::new(),
+            },
+            None => Vec::new(),
+        }
+    }
+
     /// Does this transaction have any tachyon actions?
     pub fn has_tachyon_actions(&self) -> bool {
         self.tachyon_shielded_data()

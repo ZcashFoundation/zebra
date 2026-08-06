@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `error::BlockError::TachyonDuplicateTachygram` is replaced by
+  `TachyonDuplicateAction`: block verification now rejects duplicate action
+  descriptors across a proof stamp's own bundle and the pointer-stamped bundles
+  naming it, while duplicate tachygrams are rejected by `zebra-state` contextual
+  validation over the two-epoch scan window
+  ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
+
 ## [14.0.1] - 2026-07-27
 
 ### Changed

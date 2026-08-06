@@ -918,30 +918,3 @@ pub fn tachyon_actions_have_valid_digests(tx: &Transaction) -> Result<(), Transa
 
     Ok(())
 }
-
-/// Checks that the tachygrams within a tachyon proof stamp are distinct.
-///
-/// # Consensus
-///
-/// > The tachygrams within one proof stamp MUST be distinct
-///
-/// <https://github.com/turbocrime/tachyon/blob/main/book/src/zips/tachyon-bundle.md>
-///
-/// Parsing already rejects unsorted tachygram lists, but sortedness permits equal neighbours, so
-/// distinctness reduces to checking that no adjacent pair is equal. Pointer-stamped bundles carry
-/// no tachygrams, so there is nothing to check for them.
-pub fn tachyon_tachygrams_are_distinct(tx: &Transaction) -> Result<(), TransactionError> {
-    let Some(tachyon_shielded_data) = tx.tachyon_shielded_data() else {
-        return Ok(());
-    };
-
-    if let zcash_tachyon::TachyonBundle::Proven(bundle) = &tachyon_shielded_data.0 {
-        let tachygrams = &bundle.stamp.tachygrams;
-
-        if tachygrams.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(TransactionError::TachyonDuplicateTachygram);
-        }
-    }
-
-    Ok(())
-}

@@ -51,6 +51,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
             sapling: &sapling_root0,
             orchard: &Default::default(),
             ironwood: &Default::default(),
+            tachyon: &Default::default(),
         },
     )?;
 
@@ -83,6 +84,7 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
                 sapling: &sapling_root1,
                 orchard: &Default::default(),
                 ironwood: &Default::default(),
+                tachyon: &Default::default(),
             },
         )
         .unwrap();

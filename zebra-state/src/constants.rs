@@ -53,11 +53,18 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-/// - 29.0.0: the NU7 tachyon value pool. Widens the chain value pool `ValueBalance`
-///   serialization from 48 to 56 bytes for the `tachyon` pool (read code accepts 32/40/48/56-byte
-///   records). The wider records are read in place when the database is opened, so this is a
-///   major bump that is restorable from the previous major database format version (no resync,
-///   no data migration).
+/// - 29.0.0: the NU7 tachyon pool. Widens the chain value pool `ValueBalance` serialization
+///   from 48 to 56 bytes for the `tachyon` pool (read code accepts 32/40/48/56-byte records),
+///   and widens the history-tree `zcash_history::Entry` records from 326 to 399 bytes, because
+///   NU7 adds Tachyon fields to `zcash_history::NodeData` (read code accepts the legacy widths
+///   and zero-pads them up to the current width). Adds the `tachyon_anchors`
+///   (anchor → creating height, pruned to the two-epoch stamp-anchor recency window),
+///   `tachyon_anchor_by_height`, `tachyon_epoch_anchor_by_epoch`, and `tachyon_tachygrams`
+///   (tachygram → revealing height, pruned to the two-epoch scan window)
+///   column families (initially empty; Tachyon has no note commitment tree, its pool state is a
+///   running anchor). New CFs are created and the wider records are read in place when the
+///   database is opened, so this is a major bump that is restorable from the previous major
+///   database format version (no resync, no data migration).
 const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a

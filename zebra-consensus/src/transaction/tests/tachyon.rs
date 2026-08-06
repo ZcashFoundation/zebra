@@ -65,11 +65,11 @@ fn v7_transaction(
 }
 
 /// A proof stamp with an unasserted covered-actions digest and no proof: tx-level verification
-/// never checks the stamp's proof or coverage (those are block-level rules), only its tachygrams.
+/// never checks the stamp's proof or coverage (those are block-level rules).
 fn mock_proof_stamp(tachygrams: Vec<Tachygram>) -> ProofStamp {
     ProofStamp {
-        actions: [0u8; 32],
-        tachygrams,
+        coverage: [0u8; 32],
+        tachygrams: tachygrams.into_iter().collect(),
         anchor: zcash_tachyon::Anchor::read(&[0u8; 64][..]).expect("zero anchor reads"),
         proof: Box::new(ragu::Proof::trivial()),
     }
@@ -90,7 +90,7 @@ fn random_note(
     (sk, note)
 }
 
-/// A spend-only bundle plan worth `value` zatoshis, with its spend authorizing key.
+/// A spend-only bundle plan worth `value`, with its spend authorizing key.
 ///
 /// A spend contributes its value positively to the transaction value pool, so the resulting
 /// transaction has a valid (non-negative) miner fee.
@@ -229,8 +229,7 @@ async fn v7_with_signed_tachyon_bundle_is_accepted() {
         .expect("a signed proof-stamped tachyon transaction should verify");
 
     // Pointer-stamped: signature checks still run, proof coverage is deferred to the block.
-    // The sighash excludes the stamp, so stripping the proof stamp to a pointer stamp doesn't
-    // invalidate the signatures.
+    // The sighash excludes the stamp, so stripping a signed bundle keeps its signatures valid.
     let adjunct = signed_spend_bundle(100)
         .stamp(mock_proof_stamp(vec![]))
         .strip(PointerStamp::try_from([0xEEu8; 64]).expect("nonzero wtxid"));
@@ -300,25 +299,10 @@ async fn v7_with_identity_cv_is_rejected() {
     );
 }
 
-/// A proof stamp with duplicate tachygrams is rejected.
-#[tokio::test(flavor = "multi_thread")]
-async fn v7_with_duplicate_tachygrams_is_rejected() {
-    let _init_guard = zebra_test::init();
-    let (network, height) = nu7_network();
-
-    // A duplicated tachygram list is sorted (parsing allows it), but not distinct. The sighash
-    // excludes the stamp, so the bundle's signatures stay valid under the altered stamp — the
-    // distinctness check is what rejects the transaction.
-    let tachygram = Tachygram::from(halo2::pasta::pallas::Base::from(42u64));
-    let bundle = signed_spend_bundle(100).stamp(mock_proof_stamp(vec![tachygram, tachygram]));
-    let tx = v7_transaction(NetworkUpgrade::Nu7, Some(TachyonBundle::Proven(bundle)));
-
-    let result = verify_block_transaction(&network, height, tx).await;
-    assert!(
-        matches!(result, Err(TransactionError::TachyonDuplicateTachygram)),
-        "expected TachyonDuplicateTachygram, got: {result:?}",
-    );
-}
+// Distinctness of the tachygrams within one proof stamp is enforced at parse time in
+// `zcash_tachyon`: they deserialize into a set, and the wire parser rejects duplicate or
+// unsorted entries. A duplicate-tachygram transaction is unrepresentable in Zebra, so there
+// is no transaction-level semantic check (or test) for it.
 
 /// V7 transactions are rejected before NU7 activation.
 #[tokio::test(flavor = "multi_thread")]

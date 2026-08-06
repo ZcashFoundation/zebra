@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Test utilities construct fake history trees with the Tachyon pool anchor root added
+  to `zebra-chain`'s `BlockCommitmentTreeRoots`; no RPC behavior changes
+  ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
+
 ### Fixed
 
 - Clarified the error message returned by `getrawtransaction` for transactions

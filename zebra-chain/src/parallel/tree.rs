@@ -8,6 +8,7 @@ use crate::{
     block::Block,
     orchard, sapling, sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+    tachyon,
 };
 
 /// An argument wrapper struct for note commitment trees.
@@ -38,6 +39,24 @@ pub struct NoteCommitmentTrees {
 
     /// The ironwood note commitment subtree (NU6.3).
     pub ironwood_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+
+    /// The Tachyon pool anchor (NU7, experimental).
+    ///
+    /// Tachyon has no note commitment tree; its pool state is a running anchor. This field is
+    /// *not* updated by [`Self::update_trees_parallel`]: advancing the anchor needs the network's
+    /// NU7 activation height (the fold is indexed by pool height), so the state service computes
+    /// it with [`tachyon::Anchor::advance_with_block`] and stores the result here. It rides in
+    /// this struct so the previous block's anchor threads through the same treestate plumbing as
+    /// the note commitment trees.
+    pub tachyon_anchor: tachyon::Anchor,
+
+    /// The Tachyon epoch-boundary anchor (NU7, experimental).
+    ///
+    /// Set by the state service only for the treestate of an epoch-first block: the anchor after
+    /// the block's epoch lift, before any of its stamps. `None` for mid-epoch blocks. Like
+    /// [`Self::tachyon_anchor`], it is not touched by [`Self::update_trees_parallel`]; it rides
+    /// here so the finalized state can persist epoch anchors by epoch index.
+    pub tachyon_epoch_anchor: Option<tachyon::Anchor>,
 }
 
 /// Note commitment tree errors.
