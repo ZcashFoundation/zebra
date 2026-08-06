@@ -1221,12 +1221,12 @@ where
                 let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
             }
 
-            // The downloader only sets `advertiser_addr` here when the parent Zebra already holds
-            // proves the body's claimed height wrong. A peer can answer with a canonical header and
-            // a rewritten coinbase height because the initial hash check does not recompute the
-            // header's commitment to the body's authorizing data (GHSA-g95h-hw6g-pvgv). Peers that
-            // serve genuinely old blocks arrive unattributed and fall through unscored. Score a
-            // proven rewrite like the mirror-image above-lookahead drop.
+            // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
+            // header and it proves the body's claimed height wrong. A peer can answer with a
+            // canonical header and a rewritten coinbase height because the initial hash check does
+            // not recompute the header's commitment to the body's authorizing data
+            // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
+            // fall through unscored. Score only a parent-proven rewrite.
             Err(BlockDownloadVerifyError::BehindTipHeightLimit {
                 advertiser_addr: Some(advertiser_addr),
                 ..
