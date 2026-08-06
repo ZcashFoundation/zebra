@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Banning a misbehaving peer now removes every address book entry for that IP, and a banned IP is
   never selected as a reconnection candidate. Previously an entry on a different port could survive
   the ban and occupy the first candidate slot until the node restarted
-  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+  ([#11173](https://github.com/ZcashFoundation/zebra/pull/11173)).
 
 ### Security
 
