@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so multiple
-  network instances in one process do not overwrite each other's values.
+  network instances in one process do not overwrite each other's values
+  ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 - `AddressBook::update()` logs a change rejected for a banned peer IP at `debug` instead of `warn`,
   since remote peers control how often it fires
   ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
