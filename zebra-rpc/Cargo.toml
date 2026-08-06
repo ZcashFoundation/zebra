@@ -114,7 +114,7 @@ zebra-chain = { path = "../zebra-chain", version = "12.0.0", features = [
 ] }
 zebra-consensus = { path = "../zebra-consensus", version = "15.0.0" }
 zebra-network = { path = "../zebra-network", version = "11.1.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "9.1.3", features = [
+zebra-node-services = { path = "../zebra-node-services", version = "10.0.0", features = [
     "rpc-client",
 ] }
 zebra-script = { path = "../zebra-script", version = "10.1.3" }
