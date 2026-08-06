@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 - `AddressBook::update()` logs a change rejected for a banned peer IP at `debug` instead of `warn`,
   since remote peers control how often it fires
-  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+  ([#11173](https://github.com/ZcashFoundation/zebra/pull/11173)).
 
 ### Fixed
 
