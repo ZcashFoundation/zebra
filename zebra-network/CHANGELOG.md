@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
-  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+  ([#11129](https://github.com/ZcashFoundation/zebra/pull/11129)).
 
 ## [11.0.0] - 2026-07-27
 
