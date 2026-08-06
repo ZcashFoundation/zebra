@@ -1,6 +1,6 @@
 [package]
 name = "zebra-node-services"
-version = "9.1.3"
+version = "10.0.0"
 authors.workspace = true
 description = "The interfaces of some Zebra node services"
 license.workspace = true
