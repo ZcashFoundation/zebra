@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
-  as labels.
+  as labels ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 - New `getdeprecationinfo` RPC returning the block height and estimated time at which this
   release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
   object is only present on Mainnet, where end of support is enforced
