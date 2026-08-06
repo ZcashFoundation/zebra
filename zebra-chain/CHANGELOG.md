@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ValueBalance::total`, which returns the sum of all value pool balances
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817)).
 
-### Fixed
-
-- Comments in `zebra-chain/src/transaction/tests/vectors.rs`
-
 ## [11.3.0] - 2026-07-27
 
 ### Added
