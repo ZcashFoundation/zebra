@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Consensus rules that apply to a transaction in both block and mempool context
+  are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+
 ## [15.0.0] - 2026-08-10
 
 ### Breaking Changes
