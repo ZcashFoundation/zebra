@@ -20,7 +20,7 @@ use crate::{
         MetaAddr, MetaAddrChange,
         PeerAddrState::*,
     },
-    peer_set::candidate_set::CandidateSet,
+    peer_set::candidate_set::{crawler_services, next_reconnect_peer},
     protocol::{external::canonical_peer_addr, types::PeerServices},
     AddressBook, PeerSocketAddr,
 };
@@ -109,7 +109,7 @@ proptest! {
     ///
     /// This is the simple version of the test, which checks [`MetaAddr`]s by
     /// themselves. It detects bugs in [`MetaAddr`]s, even if there are
-    /// compensating bugs in the [`CandidateSet`] or [`AddressBook`].
+    /// compensating bugs in candidate selection or the [`AddressBook`].
     #[test]
     fn individual_peer_retry_limit_meta_addr(
         (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
@@ -305,7 +305,7 @@ proptest! {
     /// applied to a single peer's entries in the [`AddressBook`].
     ///
     /// This is the complex version of the test, which checks [`MetaAddr`],
-    /// [`CandidateSet`] and [`AddressBook`] together.
+    /// candidate selection and the [`AddressBook`] together.
     #[test]
     fn individual_peer_retry_limit_candidate_set(
         (addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
@@ -345,7 +345,8 @@ proptest! {
         let (address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
             AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let mut candidate_set = CandidateSet::new(address_book_service, peer_service);
+        let (mut next_peer_service, _crawl_service) =
+            crawler_services(address_book_service, peer_service);
 
         runtime.block_on(async move {
             tokio::time::pause();
@@ -357,7 +358,7 @@ proptest! {
             let mut attempt_count: usize = 0;
 
             for (i, change) in changes.into_iter().enumerate() {
-                while let Some(candidate_addr) = candidate_set.next().await {
+                while let Some(candidate_addr) = next_reconnect_peer(&mut next_peer_service).await {
                     prop_assert_eq!(candidate_addr.addr, addr.addr);
 
                     attempt_count += 1;
@@ -402,9 +403,9 @@ proptest! {
     ///
     /// This is the simple version of the test, which checks [`MetaAddr`]s by
     /// themselves. It detects bugs in [`MetaAddr`]s, even if there are
-    /// compensating bugs in the [`CandidateSet`] or [`AddressBook`].
+    /// compensating bugs in candidate selection or the [`AddressBook`].
     //
-    // TODO: write a similar test using the AddressBook and CandidateSet
+    // TODO: write a similar test using the AddressBook and candidate selection
     #[test]
     fn multiple_peer_retry_order_meta_addr(
         addr_changes_lists in vec(

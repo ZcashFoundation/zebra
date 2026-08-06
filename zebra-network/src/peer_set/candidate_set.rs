@@ -1,7 +1,106 @@
-//! Candidate peer selection for outbound connections using the [`CandidateSet`].
+//! Candidate peer selection for outbound connections.
+//!
+//! The crawler in [`crawl_and_dial`][crate::peer_set::initialize] manages
+//! outbound peer connection attempts using the services in this module.
+//! Successful connections become peers in the
+//! [`PeerSet`](super::set::PeerSet).
+//!
+//! Candidate selection divides the set of all possible outbound peers into
+//! disjoint subsets, using the [`PeerAddrState`](crate::PeerAddrState):
+//!
+//! 1. [`Responded`] peers, which we have had an outbound connection to.
+//! 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
+//!    but have never connected to. This includes gossiped peers, DNS seeder peers,
+//!    cached peers, canonical addresses from the [`Version`] messages of inbound
+//!    and outbound connections, and remote IP addresses of inbound connections.
+//! 3. [`Failed`] peers, which failed a connection attempt, or had an error
+//!    during an outbound connection.
+//! 4. [`AttemptPending`] peers, which we've recently queued for a connection.
+//!
+//! Never attempted peers are always available for connection.
+//!
+//! If a peer's attempted, responded, or failure time is recent
+//! (within the liveness limit), we avoid reconnecting to it.
+//! Otherwise, we assume that it has disconnected or hung,
+//! and attempt reconnection.
+//!
+//! ```ascii,no_run
+//!                         ┌──────────────────┐
+//!                         │   Config / DNS   │
+//!             ┌───────────│       Seed       │───────────┐
+//!             │           │    Addresses     │           │
+//!             │           └──────────────────┘           │
+//!             │                    │ untrusted_last_seen │
+//!             │                    │     is unknown      │
+//!             ▼                    │                     ▼
+//!    ┌──────────────────┐          │          ┌──────────────────┐
+//!    │    Handshake     │          │          │     Peer Set     │
+//!    │    Canonical     │──────────┼──────────│     Gossiped     │
+//!    │    Addresses     │          │          │    Addresses     │
+//!    └──────────────────┘          │          └──────────────────┘
+//!     untrusted_last_seen          │                provides
+//!         set to now               │           untrusted_last_seen
+//!                                  ▼
+//!                                  Λ   if attempted, responded, or failed:
+//!                                 ╱ ╲         ignore gossiped info
+//!                                ▕   ▏    otherwise, if never attempted:
+//!                                 ╲ ╱    skip updates to existing fields
+//!                                  V
+//!  ┌───────────────────────────────┼───────────────────────────────┐
+//!  │ AddressBook                   │                               │
+//!  │ disjoint `PeerAddrState`s     ▼                               │
+//!  │ ┌─────────────┐  ┌─────────────────────────┐  ┌─────────────┐ │
+//!  │ │ `Responded` │  │`NeverAttemptedGossiped` │  │  `Failed`   │ │
+//! ┌┼▶│    Peers    │  │          Peers          │  │   Peers     │◀┼┐
+//! ││ └─────────────┘  └─────────────────────────┘  └─────────────┘ ││
+//! ││        │                      │                      │        ││
+//! ││ #1 oldest_first        #2 newest_first        #3 oldest_first ││
+//! ││        ├──────────────────────┴──────────────────────┘        ││
+//! ││        ▼                                                      ││
+//! ││        Λ                                                      ││
+//! ││       ╱ ╲              filter by                              ││
+//! ││      ▕   ▏   is_ready_for_connection_attempt                  ││
+//! ││       ╲ ╱     to remove recent `Responded`,                   ││
+//! ││        V  `AttemptPending`, and `Failed` peers                ││
+//! ││        │                                                      ││
+//! ││        │    try outbound connection,                          ││
+//! ││        ▼  update last_attempt to now()                        ││
+//! ││┌────────────────┐                                             ││
+//! │││`AttemptPending`│                                             ││
+//! │││     Peers      │                                             ││
+//! ││└────────────────┘                                             ││
+//! │└────────┼──────────────────────────────────────────────────────┘│
+//! │         ▼                                                       │
+//! │         Λ                                                       │
+//! │        ╱ ╲                                                      │
+//! │       ▕   ▏─────────────────────────────────────────────────────┘
+//! │        ╲ ╱   connection failed, update last_failure to now()
+//! │         V
+//! │         │
+//! │         │ connection succeeded
+//! │         ▼
+//! │  ┌────────────┐
+//! │  │    send    │
+//! │  │peer::Client│
+//! │  │to Discover │
+//! │  └────────────┘
+//! │         │
+//! │         ▼
+//! │┌───────────────────────────────────────┐
+//! ││ when connection succeeds, and every   │
+//! ││  time we receive a peer heartbeat:    │
+//! └│  * update state to `Responded`        │
+//!  │  * update last_response to now()      │
+//!  └───────────────────────────────────────┘
+//! ```
+//!
+//! [`Responded`]: crate::PeerAddrState::Responded
+//! [`Version`]: crate::protocol::external::types::Version
+//! [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
+//! [`Failed`]: crate::PeerAddrState::Failed
+//! [`AttemptPending`]: crate::PeerAddrState::AttemptPending
 
 use std::{
-    any::type_name,
     cmp::min,
     task::{Context, Poll},
 };
@@ -32,323 +131,186 @@ pub(crate) use rate_limit::{RateLimitOnYield, SkipRateLimit};
 #[cfg(test)]
 mod tests;
 
-/// The [`CandidateSet`] manages outbound peer connection attempts. Successful
-/// connections become peers in the [`PeerSet`](super::set::PeerSet).
+/// The service that chooses the next reconnection candidate.
 ///
-/// The candidate set divides the set of all possible outbound peers into
-/// disjoint subsets, using the [`PeerAddrState`](crate::PeerAddrState):
+/// # Security
 ///
-/// 1. [`Responded`] peers, which we have had an outbound connection to.
-/// 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
-///    but have never connected to. This includes gossiped peers, DNS seeder peers,
-///    cached peers, canonical addresses from the [`Version`] messages of inbound
-///    and outbound connections, and remote IP addresses of inbound connections.
-/// 3. [`Failed`] peers, which failed a connection attempt, or had an error
-///    during an outbound connection.
-/// 4. [`AttemptPending`] peers, which we've recently queued for a connection.
+/// Rate-limited so new outbound connections are started at least
+/// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
+/// apart. The rate limit is only charged when a candidate is actually
+/// yielded: an empty address book returns `None` immediately.
 ///
-/// Never attempted peers are always available for connection.
+/// Clones share the same rate limit.
+pub(crate) type NextPeerService = RateLimitOnYield<AddressBookService, AddressBookResponse>;
+
+/// The service that crawls the network for more peer addresses.
 ///
-/// If a peer's attempted, responded, or failure time is recent
-/// (within the liveness limit), we avoid reconnecting to it.
-/// Otherwise, we assume that it has disconnected or hung,
-/// and attempt reconnection.
+/// # Security
 ///
-/// ```ascii,no_run
-///                         ┌──────────────────┐
-///                         │   Config / DNS   │
-///             ┌───────────│       Seed       │───────────┐
-///             │           │    Addresses     │           │
-///             │           └──────────────────┘           │
-///             │                    │ untrusted_last_seen │
-///             │                    │     is unknown      │
-///             ▼                    │                     ▼
-///    ┌──────────────────┐          │          ┌──────────────────┐
-///    │    Handshake     │          │          │     Peer Set     │
-///    │    Canonical     │──────────┼──────────│     Gossiped     │
-///    │    Addresses     │          │          │    Addresses     │
-///    └──────────────────┘          │          └──────────────────┘
-///     untrusted_last_seen          │                provides
-///         set to now               │           untrusted_last_seen
-///                                  ▼
-///                                  Λ   if attempted, responded, or failed:
-///                                 ╱ ╲         ignore gossiped info
-///                                ▕   ▏    otherwise, if never attempted:
-///                                 ╲ ╱    skip updates to existing fields
-///                                  V
-///  ┌───────────────────────────────┼───────────────────────────────┐
-///  │ AddressBook                   │                               │
-///  │ disjoint `PeerAddrState`s     ▼                               │
-///  │ ┌─────────────┐  ┌─────────────────────────┐  ┌─────────────┐ │
-///  │ │ `Responded` │  │`NeverAttemptedGossiped` │  │  `Failed`   │ │
-/// ┌┼▶│    Peers    │  │          Peers          │  │   Peers     │◀┼┐
-/// ││ └─────────────┘  └─────────────────────────┘  └─────────────┘ ││
-/// ││        │                      │                      │        ││
-/// ││ #1 oldest_first        #2 newest_first        #3 oldest_first ││
-/// ││        ├──────────────────────┴──────────────────────┘        ││
-/// ││        ▼                                                      ││
-/// ││        Λ                                                      ││
-/// ││       ╱ ╲              filter by                              ││
-/// ││      ▕   ▏   is_ready_for_connection_attempt                  ││
-/// ││       ╲ ╱     to remove recent `Responded`,                   ││
-/// ││        V  `AttemptPending`, and `Failed` peers                ││
-/// ││        │                                                      ││
-/// ││        │    try outbound connection,                          ││
-/// ││        ▼  update last_attempt to now()                        ││
-/// ││┌────────────────┐                                             ││
-/// │││`AttemptPending`│                                             ││
-/// │││     Peers      │                                             ││
-/// ││└────────────────┘                                             ││
-/// │└────────┼──────────────────────────────────────────────────────┘│
-/// │         ▼                                                       │
-/// │         Λ                                                       │
-/// │        ╱ ╲                                                      │
-/// │       ▕   ▏─────────────────────────────────────────────────────┘
-/// │        ╲ ╱   connection failed, update last_failure to now()
-/// │         V
-/// │         │
-/// │         │ connection succeeded
-/// │         ▼
-/// │  ┌────────────┐
-/// │  │    send    │
-/// │  │peer::Client│
-/// │  │to Discover │
-/// │  └────────────┘
-/// │         │
-/// │         ▼
-/// │┌───────────────────────────────────────┐
-/// ││ when connection succeeds, and every   │
-/// ││  time we receive a peer heartbeat:    │
-/// └│  * update state to `Responded`        │
-///  │  * update last_response to now()      │
-///  └───────────────────────────────────────┘
-/// ```
+/// Rate-limited to at most one crawl per
+/// [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL],
+/// to prevent sending a burst of repeated requests for new peer addresses.
+/// While the rate limit applies, crawls are skipped.
+///
+/// Clones share the same rate limit.
+pub(crate) type CrawlService<S> = SkipRateLimit<CrawlFanout<S>>;
+
+/// Builds the candidate selection services used by the crawler:
+/// a [`NextPeerService`] and a [`CrawlService`].
+///
+/// Uses `address_book_service` to choose candidates and store crawled
+/// addresses, and `peer_service` to crawl the network for more addresses.
+pub(crate) fn crawler_services<S>(
+    address_book_service: AddressBookService,
+    peer_service: S,
+) -> (NextPeerService, CrawlService<S>)
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    let next_peer_service = RateLimitOnYield::new(
+        address_book_service.clone(),
+        constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
+        |response| matches!(response, AddressBookResponse::NextReconnectPeer(Some(_))),
+    );
+
+    let crawl_service = SkipRateLimit::new(
+        CrawlFanout {
+            peer_service,
+            address_book_service,
+        },
+        constants::MIN_PEER_GET_ADDR_INTERVAL,
+    );
+
+    (next_peer_service, crawl_service)
+}
+
+/// Crawl the network for more peer addresses, limiting the fanout to
+/// `fanout_limit` if it is `Some`.
+///
+/// - Ask a few live [`Responded`] peers to send us more peers.
+/// - Process all completed peer responses, adding new peers in the
+///   [`NeverAttemptedGossiped`] state.
+///
+/// Returns `Some(MorePeers)` if the crawl was successful and the crawler
+/// should ask for more peers. Returns `None` if there are no new peers.
+///
+/// ## Correctness
+///
+/// Pass the initial peer set size as `fanout_limit` during initialization,
+/// so that Zebra does not send duplicate requests to the same peer.
+///
+/// The crawler exits when a crawl returns an error, so errors are only
+/// returned on permanent failures.
+///
+/// The handshaker sets up the peer message receiver so it also sends a
+/// [`Responded`] peer address update.
+///
+/// [`next_reconnect_peer`] puts peers into the [`AttemptPending`] state.
+///
+/// ## Security
+///
+/// This call is rate-limited to prevent sending a burst of repeated requests for new peer
+/// addresses. Each call will only crawl the network if more time
+/// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
+/// the last crawl. Otherwise, the crawl is skipped.
 ///
 /// [`Responded`]: crate::PeerAddrState::Responded
-/// [`Version`]: crate::protocol::external::types::Version
 /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
 /// [`Failed`]: crate::PeerAddrState::Failed
 /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
-// TODO:
-//   * show all possible transitions between Attempt/Responded/Failed,
-//     except Failed -> Responded is invalid, must go through Attempt
-//
-// Note: rate limits are enforced by shared middleware layers, so every clone
-// of a rate-limited service enforces the same limit.
-pub(crate) struct CandidateSet<S>
+pub(crate) async fn crawl_once<S>(
+    crawl_service: &mut CrawlService<S>,
+    fanout_limit: Option<usize>,
+) -> Result<Option<MorePeers>, BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    /// The buffered service handle to the address book updater task,
-    /// which owns the outbound address book for this peer set.
-    ///
-    /// Used for requests that aren't rate-limited.
-    address_book_service: AddressBookService,
-
-    /// Chooses the next reconnection candidate from the address book.
-    ///
-    /// # Security
-    ///
-    /// Rate-limited so new outbound connections are started at least
-    /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
-    /// apart. The rate limit is only charged when a candidate is actually
-    /// yielded: an empty address book returns `None` immediately.
-    next_peer_service: RateLimitOnYield<AddressBookService, AddressBookResponse>,
-
-    /// Crawls the network for more peer addresses.
-    ///
-    /// # Security
-    ///
-    /// Rate-limited to at most one crawl per
-    /// [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL],
-    /// to prevent sending a burst of repeated requests for new peer
-    /// addresses. While the rate limit applies, crawls are skipped.
-    crawl_service: SkipRateLimit<CrawlFanout<S>>,
+    // SECURITY
+    //
+    // Rate limit sending `GetAddr` messages to peers:
+    // while the crawl service is rate-limited, calls are skipped,
+    // and return `None` without contacting any peers.
+    crawl_service.ready().await?.call(fanout_limit).await
 }
 
-impl<S> std::fmt::Debug for CandidateSet<S>
-where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CandidateSet")
-            .field("address_book_service", &type_name::<AddressBookService>())
-            .field("peer_service", &type_name::<S>())
-            .finish()
+/// Returns the next candidate for a connection attempt, if any are available.
+///
+/// Returns peers in reconnection order, based on
+/// [`AddressBook::reconnection_peers`](crate::AddressBook::reconnection_peers).
+///
+/// Skips peers that have recently been active, attempted, or failed.
+///
+/// ## Correctness
+///
+/// `AttemptPending` peers will become [`Responded`] if they respond, or
+/// become `Failed` if they time out or provide a bad response.
+///
+/// Live [`Responded`] peers will stay live if they keep responding, or
+/// become a reconnection candidate if they stop responding.
+///
+/// ## Security
+///
+/// Zebra resists distributed denial of service attacks by making sure that
+/// new peer connections are initiated at least
+/// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
+/// apart. If a peer was recently provided, then this future will sleep
+/// until the rate-limit has passed.
+///
+/// [`Responded`]: crate::PeerAddrState::Responded
+pub(crate) async fn next_reconnect_peer(
+    next_peer_service: &mut NextPeerService,
+) -> Option<MetaAddr> {
+    // Atomically choose the next peer and mark it as `AttemptPending`,
+    // in a single address book updater request.
+    //
+    // Security: new outbound peer connections are rate-limited by the
+    // [`RateLimitOnYield`] middleware, which only sleeps before yielding
+    // an address: when there is no peer, `None` is returned immediately.
+    let response = match next_peer_service.ready().await {
+        Ok(next_peer_service) => {
+            next_peer_service
+                .call(AddressBookRequest::NextReconnectPeer)
+                .await
+        }
+        Err(error) => Err(error),
+    };
+
+    match response {
+        Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer,
+        Ok(_) => unreachable!("NextReconnectPeer requests always return NextReconnectPeer"),
+        Err(error) => {
+            debug!(
+                ?error,
+                "error requesting next reconnection peer, is Zebra shutting down?"
+            );
+            None
+        }
     }
 }
 
-impl<S> CandidateSet<S>
-where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    /// Uses `address_book_service` and `peer_service` to manage a
-    /// [`CandidateSet`] of peers.
-    pub fn new(address_book_service: AddressBookService, peer_service: S) -> CandidateSet<S> {
-        let next_peer_service = RateLimitOnYield::new(
-            address_book_service.clone(),
-            constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
-            |response| matches!(response, AddressBookResponse::NextReconnectPeer(Some(_))),
-        );
+/// Returns the number of candidate peers that are currently ready for a
+/// connection attempt, as selected by [`next_reconnect_peer`].
+///
+/// The returned count is a snapshot: candidates can become ready or be
+/// attempted by other tasks immediately afterwards.
+pub(crate) async fn ready_peer_count(address_book_service: &AddressBookService) -> usize {
+    let response = address_book_service
+        .clone()
+        .oneshot(AddressBookRequest::ReadyPeerCount)
+        .boxed()
+        .await;
 
-        let crawl_service = SkipRateLimit::new(
-            CrawlFanout {
-                peer_service,
-                address_book_service: address_book_service.clone(),
-            },
-            constants::MIN_PEER_GET_ADDR_INTERVAL,
-        );
-
-        CandidateSet {
-            address_book_service,
-            next_peer_service,
-            crawl_service,
-        }
-    }
-
-    /// Update the peer set from the network, using the default fanout limit.
-    ///
-    /// See [`update_initial`][Self::update_initial] for details.
-    pub async fn update(&mut self) -> Result<Option<MorePeers>, BoxError> {
-        self.update_timeout(None).await
-    }
-
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`.
-    ///
-    /// - Ask a few live [`Responded`] peers to send us more peers.
-    /// - Process all completed peer responses, adding new peers in the
-    ///   [`NeverAttemptedGossiped`] state.
-    ///
-    /// Returns `Some(MorePeers)` if the crawl was successful and the crawler
-    /// should ask for more peers. Returns `None` if there are no new peers.
-    ///
-    /// ## Correctness
-    ///
-    /// Pass the initial peer set size as `fanout_limit` during initialization,
-    /// so that Zebra does not send duplicate requests to the same peer.
-    ///
-    /// The crawler exits when update returns an error, so it must only return
-    /// errors on permanent failures.
-    ///
-    /// The handshaker sets up the peer message receiver so it also sends a
-    /// [`Responded`] peer address update.
-    ///
-    /// [`next`][Self::next] puts peers into the [`AttemptPending`] state.
-    ///
-    /// ## Security
-    ///
-    /// This call is rate-limited to prevent sending a burst of repeated requests for new peer
-    /// addresses. Each call will only update the [`CandidateSet`] if more time
-    /// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
-    /// the last call. Otherwise, the update is skipped.
-    ///
-    /// [`Responded`]: crate::PeerAddrState::Responded
-    /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
-    /// [`Failed`]: crate::PeerAddrState::Failed
-    /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
-    pub async fn update_initial(
-        &mut self,
-        fanout_limit: usize,
-    ) -> Result<Option<MorePeers>, BoxError> {
-        self.update_timeout(Some(fanout_limit)).await
-    }
-
-    /// Update the peer set from the network, limiting the fanout to
-    /// `fanout_limit`.
-    ///
-    /// See [`update_initial`][Self::update_initial] for details.
-    async fn update_timeout(
-        &mut self,
-        fanout_limit: Option<usize>,
-    ) -> Result<Option<MorePeers>, BoxError> {
-        // SECURITY
-        //
-        // Rate limit sending `GetAddr` messages to peers:
-        // while the crawl service is rate-limited, calls are skipped,
-        // and return `None` without contacting any peers.
-        self.crawl_service.ready().await?.call(fanout_limit).await
-    }
-
-    /// Returns the next candidate for a connection attempt, if any are available.
-    ///
-    /// Returns peers in reconnection order, based on
-    /// [`AddressBook::reconnection_peers`].
-    ///
-    /// Skips peers that have recently been active, attempted, or failed.
-    ///
-    /// ## Correctness
-    ///
-    /// `AttemptPending` peers will become [`Responded`] if they respond, or
-    /// become `Failed` if they time out or provide a bad response.
-    ///
-    /// Live [`Responded`] peers will stay live if they keep responding, or
-    /// become a reconnection candidate if they stop responding.
-    ///
-    /// ## Security
-    ///
-    /// Zebra resists distributed denial of service attacks by making sure that
-    /// new peer connections are initiated at least
-    /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
-    /// apart. If `next()` has recently provided a peer, then its future will sleep
-    /// until the rate-limit has passed.
-    ///
-    /// [`Responded`]: crate::PeerAddrState::Responded
-    pub async fn next(&mut self) -> Option<MetaAddr> {
-        // Atomically choose the next peer and mark it as `AttemptPending`,
-        // in a single address book updater request.
-        //
-        // Security: new outbound peer connections are rate-limited by the
-        // [`RateLimitOnYield`] middleware, which only sleeps before yielding
-        // an address: when there is no peer, `None` is returned immediately.
-        let response = match self.next_peer_service.ready().await {
-            Ok(next_peer_service) => {
-                next_peer_service
-                    .call(AddressBookRequest::NextReconnectPeer)
-                    .await
-            }
-            Err(error) => Err(error),
-        };
-
-        match response {
-            Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer,
-            Ok(_) => unreachable!("NextReconnectPeer requests always return NextReconnectPeer"),
-            Err(error) => {
-                debug!(
-                    ?error,
-                    "error requesting next reconnection peer, is Zebra shutting down?"
-                );
-                None
-            }
-        }
-    }
-
-    /// Returns the number of candidate peers that are currently ready for a
-    /// connection attempt, as selected by [`Self::next`].
-    ///
-    /// The returned count is a snapshot: candidates can become ready or be
-    /// attempted by other tasks immediately afterwards.
-    pub async fn ready_peer_count(&self) -> usize {
-        let response = self
-            .address_book_service
-            .clone()
-            .oneshot(AddressBookRequest::ReadyPeerCount)
-            .boxed()
-            .await;
-
-        match response {
-            Ok(AddressBookResponse::ReadyPeerCount(ready_peer_count)) => ready_peer_count,
-            Ok(_) => unreachable!("ReadyPeerCount requests always return ReadyPeerCount"),
-            Err(error) => {
-                debug!(
-                    ?error,
-                    "error requesting ready peer count, is Zebra shutting down?"
-                );
-                0
-            }
+    match response {
+        Ok(AddressBookResponse::ReadyPeerCount(ready_peer_count)) => ready_peer_count,
+        Ok(_) => unreachable!("ReadyPeerCount requests always return ReadyPeerCount"),
+        Err(error) => {
+            debug!(
+                ?error,
+                "error requesting ready peer count, is Zebra shutting down?"
+            );
+            0
         }
     }
 }
@@ -539,7 +501,7 @@ async fn send_addrs(
 /// Check new `addrs` before adding them to the address book.
 ///
 /// `last_seen_limit` is the maximum permitted last seen time, typically
-/// [`Utc::now`].
+/// [`Utc::now`](chrono::Utc::now).
 ///
 /// If the data in an address is invalid, this function can:
 /// - modify the address data, or

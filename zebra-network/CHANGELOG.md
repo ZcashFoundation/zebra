@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   candidate is actually yielded, and crawls are still skipped while rate-limited. The intervals
   and the existing rate-limit test assertions are unchanged
   ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- The internal `CandidateSet` struct is dissolved into the peer crawler: candidate selection and
+  crawling are now plain cloneable service handles with shared rate limits, removing the async
+  mutex that used to serialize them
+  ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
 
 ### Added
 
