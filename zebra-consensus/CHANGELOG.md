@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transaction::BlockRequest::transaction_hash` must now be the hash of the request's
   `transaction`. It is used to build `BlockResponse::tx_id` instead of re-hashing the
   transaction, so a mismatched value yields a response identifying a different transaction.
-  A debug assertion checks this in test and debug builds.
+  A debug assertion checks this in test and debug builds
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - The second value returned by `router::init` and `router::init_test` is now a
   `transaction::MempoolTxVerifier` service and can no longer verify block
   transactions. Callers verifying transactions as part of block verification
