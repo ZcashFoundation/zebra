@@ -118,7 +118,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "10.0.0", fea
     "rpc-client",
 ] }
 zebra-script = { path = "../zebra-script", version = "11.0.0" }
-zebra-state = { path = "../zebra-state", version = "12.0.2" }
+zebra-state = { path = "../zebra-state", version = "13.0.0" }
 
 [build-dependencies]
 openrpsee = { workspace = true }

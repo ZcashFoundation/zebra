@@ -162,7 +162,7 @@ zebra-consensus = { path = "../zebra-consensus", version = "15.0.0" }
 zebra-network = { path = "../zebra-network", version = "12.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "10.0.0", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "16.0.0" }
-zebra-state = { path = "../zebra-state", version = "12.0.2" }
+zebra-state = { path = "../zebra-state", version = "13.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
