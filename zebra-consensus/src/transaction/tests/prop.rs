@@ -10,17 +10,29 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{Network, NetworkUpgrade},
-    serialization::arbitrary::{datetime_full, datetime_u32},
-    transaction::{LockTime, Transaction},
+    serialization::{
+        arbitrary::{datetime_full, datetime_u32},
+        DateTime32,
+    },
+    transaction::{LockTime, Transaction, UnminedTx},
     transparent,
 };
+use zebra_state as zs;
 
-use crate::{error::TransactionError, transaction};
+use crate::{error::TransactionError, transaction, BoxError};
 
 use super::mock_transparent_transfer;
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
+
+/// The value of each UTXO spent by a mock transaction that must pay a mempool fee.
+///
+/// Every mock transfer creates an output worth 1 zatoshi, so each input contributes
+/// `MEMPOOL_FUNDED_INPUT_VALUE - 1` zatoshis of miner fee. This is far above the ZIP-317
+/// conventional fee for the number of logical actions these transactions have, so
+/// `zip317::mempool_checks()` accepts them.
+const MEMPOOL_FUNDED_INPUT_VALUE: i64 = 100_000;
 
 proptest! {
     /// Test if a transaction that has a zero value as the lock time is always unlocked.
@@ -231,6 +243,95 @@ proptest! {
         );
         prop_assert_eq!(result.unwrap().tx_id, transaction_id);
     }
+
+    /// Test that any transaction accepted by the mempool verifier is also accepted by the
+    /// block verifier, given the same transaction, height and spent UTXOs.
+    ///
+    /// # Correctness
+    ///
+    /// This is the invariant that keeps Zebra's block templates mineable. If the mempool
+    /// accepts a transaction that block verification would reject, that transaction is
+    /// selected into a block template, and every block mined from that template is refused
+    /// by the same node that produced it. An attacker who can craft such a transaction
+    /// stalls block production for every mining pool running Zebra.
+    ///
+    /// [`BlockTxVerifier`](transaction::BlockTxVerifier) and
+    /// [`MempoolTxVerifier`](transaction::MempoolTxVerifier) are separate services, so
+    /// nothing in the type system enforces this. See
+    /// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+    ///
+    /// The block time is the next median-time-past plus one second, mirroring the `min_time`
+    /// that `getblocktemplate` gives miners, which is the earliest time a block containing a
+    /// mempool transaction can have.
+    #[test]
+    fn mempool_acceptance_implies_block_acceptance(
+        (network, block_height) in sapling_onwards_strategy(),
+        next_median_time_past in datetime_u32(),
+        relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
+        transaction_version in 4_u8..=5,
+        lock_time in lock_time_strategy(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        // The mempool rejects transactions whose lock time has not passed as of the next
+        // median-time-past, so a block containing them can only be mined at a later time.
+        prop_assume!(next_median_time_past < DateTime::<Utc>::MAX_UTC);
+        let block_time = next_median_time_past + Duration::seconds(1);
+
+        let (transaction, known_utxos) = mock_funded_transparent_transaction(
+            &network,
+            block_height,
+            relative_source_fund_heights,
+            transaction_version,
+            lock_time,
+        );
+
+        let mempool_result = validate_mempool(
+            transaction.clone(),
+            block_height,
+            next_median_time_past,
+            known_utxos.clone(),
+            network.clone(),
+        );
+
+        // Transactions the mempool rejects say nothing about block verification: the mempool
+        // applies policy rules (ZIP-317, input standardness) that blocks do not.
+        if let Ok(mempool_response) = mempool_result {
+            let block_result = validate_with_state(
+                transaction,
+                block_height,
+                block_time,
+                next_median_time_past,
+                known_utxos,
+                network,
+            );
+
+            prop_assert!(
+                block_result.is_ok(),
+                "the mempool accepted a transaction that block verification rejected, \
+                 so it would make a block template unmineable: {}",
+                block_result.unwrap_err()
+            );
+
+            prop_assert_eq!(
+                block_result.unwrap().tx_id.mined_id(),
+                mempool_response.transaction.transaction.id.mined_id()
+            );
+        }
+    }
+}
+
+/// Generates a [`LockTime`], weighted so that a substantial share of the generated
+/// transactions are unlocked and therefore reach the later verification checks.
+///
+/// An unweighted `any::<LockTime>()` almost always produces a lock time in the far future,
+/// which the mempool rejects, leaving
+/// [`mempool_acceptance_implies_block_acceptance`] with nothing to compare.
+fn lock_time_strategy() -> impl Strategy<Value = LockTime> {
+    prop_oneof![
+        2 => Just(LockTime::Height(block::Height(0))),
+        1 => any::<LockTime>(),
+    ]
 }
 
 /// Generates an arbitrary [`block::Height`] after the Sapling activation height
@@ -447,6 +548,211 @@ fn scale_block_height(
     let new_height_value = (height_range * scale + min_height_value).floor();
 
     block::Height(new_height_value as u32)
+}
+
+/// Create a mock transaction that only transfers transparent amounts, and pays a miner fee
+/// large enough to satisfy the mempool's ZIP-317 policy checks.
+///
+/// This is [`mock_transparent_transaction`] with higher-value input UTXOs. The mempool
+/// verifier applies `zip317::mempool_checks()`, which the 1-zatoshi inputs used by
+/// [`mock_transparent_transaction`] cannot pay for, so transactions built by that function
+/// are always rejected before reaching the checks this module compares.
+///
+/// See [`mock_transparent_transaction`] for the parameters and panics.
+fn mock_funded_transparent_transaction(
+    network: &Network,
+    block_height: block::Height,
+    relative_source_heights: Vec<f64>,
+    transaction_version: u8,
+    lock_time: LockTime,
+) -> (
+    Transaction,
+    HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) {
+    let (transaction_version, network_upgrade) =
+        sanitize_transaction_version(network, transaction_version, block_height);
+
+    let transfer_count = relative_source_heights.len();
+    let mut inputs = Vec::with_capacity(transfer_count);
+    let mut outputs = Vec::with_capacity(transfer_count);
+    let mut known_utxos = HashMap::with_capacity(transfer_count);
+
+    for (index, relative_source_height) in relative_source_heights.into_iter().enumerate() {
+        let fake_source_fund_height =
+            scale_block_height(None, block_height, relative_source_height);
+
+        let outpoint_index = index
+            .try_into()
+            .expect("too many mock transparent transfers requested");
+
+        let (input, output, new_utxos) = mock_transparent_transfer(
+            fake_source_fund_height,
+            true,
+            outpoint_index,
+            Amount::try_from(MEMPOOL_FUNDED_INPUT_VALUE).expect("invalid value"),
+        );
+
+        inputs.push(input);
+        outputs.push(output);
+        known_utxos.extend(new_utxos);
+    }
+
+    let expiry_height = block_height;
+
+    let transaction = match transaction_version {
+        4 => Transaction::V4 {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            joinsplit_data: None,
+            sapling_shielded_data: None,
+        },
+        5 => Transaction::V5 {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade,
+        },
+        6 => Transaction::V6 {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            ironwood_shielded_data: None,
+            network_upgrade,
+        },
+        invalid_version => unreachable!("invalid transaction version: {}", invalid_version),
+    };
+
+    (transaction, known_utxos)
+}
+
+/// Returns a mock state service that answers every request the block and mempool transaction
+/// verifiers make, using `known_utxos` as the entire best chain UTXO set.
+///
+/// Nullifier and anchor checks always succeed: this module compares the two verifiers against
+/// each other, and contextual validity is not what distinguishes them.
+fn mock_state_service(
+    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    next_median_time_past: DateTime32,
+) -> impl tower::Service<
+    zs::Request,
+    Response = zs::Response,
+    Error = BoxError,
+    Future = impl Send + 'static,
+> + Send
+       + Clone
+       + 'static {
+    let known_utxos = Arc::new(known_utxos);
+
+    tower::service_fn(move |request: zs::Request| {
+        let known_utxos = known_utxos.clone();
+
+        async move {
+            let response = match request {
+                // The mempool verifier looks up spent outputs in the best chain.
+                zs::Request::UnspentBestChainUtxo(outpoint) => zs::Response::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&outpoint)
+                        .map(|ordered_utxo| ordered_utxo.utxo.clone()),
+                ),
+                // The block verifier only reaches the state for outputs that are not in the
+                // request's `known_utxos`.
+                zs::Request::AwaitUtxo(outpoint) => zs::Response::Utxo(
+                    known_utxos
+                        .get(&outpoint)
+                        .expect("mock state contains every spent UTXO")
+                        .utxo
+                        .clone(),
+                ),
+                zs::Request::BestChainNextMedianTimePast => {
+                    zs::Response::BestChainNextMedianTimePast(next_median_time_past)
+                }
+                zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                    zs::Response::ValidBestChainTipNullifiersAndAnchors
+                }
+                request => unreachable!("unexpected state request: {request:?}"),
+            };
+
+            Ok::<_, BoxError>(response)
+        }
+    })
+}
+
+/// Validate a `transaction` using a [`transaction::MempoolTxVerifier`] and return the result.
+///
+/// The verifier is given no mempool handle, so every spent output must be in `known_utxos`.
+fn validate_mempool(
+    transaction: Transaction,
+    height: block::Height,
+    next_median_time_past: DateTime<Utc>,
+    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    network: Network,
+) -> Result<transaction::MempoolResponse, TransactionError> {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let next_median_time_past = DateTime32::try_from(next_median_time_past)
+            .expect("test median-time-past is generated by `datetime_u32()`");
+        let state_service = mock_state_service(known_utxos, next_median_time_past);
+
+        let verifier = transaction::MempoolTxVerifier::new_for_tests(&network, state_service);
+        let verifier = Buffer::new(verifier, 10);
+
+        verifier
+            .oneshot(transaction::MempoolRequest {
+                transaction: UnminedTx::from(transaction),
+                height,
+            })
+            .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            })
+    })
+}
+
+/// Validate a `transaction` using a [`transaction::BlockTxVerifier`] backed by a state
+/// service, and return the result.
+///
+/// Unlike [`validate`], this passes empty `known_utxos` in the request so that the verifier
+/// resolves every spent output through the same mock state as [`validate_mempool`]. This
+/// keeps the two verification paths comparable.
+fn validate_with_state(
+    transaction: Transaction,
+    height: block::Height,
+    block_time: DateTime<Utc>,
+    next_median_time_past: DateTime<Utc>,
+    known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    network: Network,
+) -> Result<transaction::BlockResponse, TransactionError> {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let next_median_time_past = DateTime32::try_from(next_median_time_past)
+            .expect("test median-time-past is generated by `datetime_u32()`");
+        let state_service = mock_state_service(known_utxos, next_median_time_past);
+
+        let verifier = transaction::BlockTxVerifier::new(&network, state_service);
+        let verifier = Buffer::new(verifier, 10);
+        let transaction_hash = transaction.hash();
+
+        verifier
+            .oneshot(transaction::BlockRequest {
+                transaction_hash,
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: block_time,
+            })
+            .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            })
+    })
 }
 
 /// Validate a `transaction` using a [`transaction::BlockTxVerifier`] and return the result.

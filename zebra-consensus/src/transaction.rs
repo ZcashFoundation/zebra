@@ -306,24 +306,7 @@ where
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do quick checks first
-            check_structure_and_network_rules(tx.as_ref(), height, &network)?;
-
-            if tx.is_coinbase() {
-                check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
-            } else if !tx.is_valid_non_coinbase() {
-                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
-            }
-
-            // Validate `nExpiryHeight` consensus rules
-            if tx.is_coinbase() {
-                check::coinbase_expiry_height(&height, &tx, &network)?;
-            } else {
-                check::non_coinbase_expiry_height(&height, &tx)?;
-            }
-
-            // Transaction invariants that apply regardless of request type or transaction version.
-            // These are pure consensus rules over the transaction structure and must always hold.
-            check_transaction_invariants(tx.as_ref(), height, &network)?;
+            check_common_consensus_rules(tx.as_ref(), height, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -498,24 +481,12 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            // Do quick checks first
-            check_structure_and_network_rules(tx.as_ref(), height, &network)?;
-
-            // Validate the coinbase input consensus rules
             if tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);
             }
 
-            if !tx.is_valid_non_coinbase() {
-                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
-            }
-
-            // Validate `nExpiryHeight` consensus rules
-            check::non_coinbase_expiry_height(&height, &tx)?;
-
-            // Transaction invariants that apply regardless of request type or transaction version.
-            // These are pure consensus rules over the transaction structure and must always hold.
-            check_transaction_invariants(tx.as_ref(), height, &network)?;
+            // Do quick checks first
+            check_common_consensus_rules(tx.as_ref(), height, &network)?;
 
             tracing::trace!(?tx_id, "passed quick checks");
 
@@ -784,6 +755,52 @@ where
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
+}
+
+/// Applies every consensus rule that a transaction must satisfy in both block and mempool
+/// context.
+///
+/// # Correctness
+///
+/// [`BlockTxVerifier`] and [`MempoolTxVerifier`] are separate services with no shared code
+/// path, so a rule added to only one of them silently makes the two disagree. When the
+/// mempool accepts a transaction that block verification would reject, that transaction
+/// reaches block templates but makes the resulting block unmineable, stalling block
+/// production for every pool running Zebra. See
+/// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+///
+/// Any new rule that applies to a transaction regardless of where it is being verified
+/// belongs here, so that both verifiers pick it up. Rules that only apply to one context
+/// (mempool policy such as ZIP-317 and input standardness, or whole-block context such as
+/// the block's own time) stay in the respective service.
+///
+/// The `is_coinbase` branches are unreachable from mempool verification, which rejects
+/// coinbase transactions before calling this.
+fn check_common_consensus_rules(
+    tx: &Transaction,
+    height: block::Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    check_structure_and_network_rules(tx, height, network)?;
+
+    if tx.is_coinbase() {
+        check::coinbase_tx_no_prevout_joinsplit_spend(tx)?;
+    } else if !tx.is_valid_non_coinbase() {
+        return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
+    }
+
+    // Validate `nExpiryHeight` consensus rules
+    if tx.is_coinbase() {
+        check::coinbase_expiry_height(&height, tx, network)?;
+    } else {
+        check::non_coinbase_expiry_height(&height, tx)?;
+    }
+
+    // Transaction invariants that apply regardless of request type or transaction version.
+    // These are pure consensus rules over the transaction structure and must always hold.
+    check_transaction_invariants(tx, height, network)?;
+
+    Ok(())
 }
 
 /// Performs basic structural validation and Orchard-related network upgrade rules.

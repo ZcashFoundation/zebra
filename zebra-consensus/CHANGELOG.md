@@ -31,7 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
-  
+
+### Changed
+
+- Consensus rules that apply to a transaction in both block and mempool context
+  are now applied by a single shared `check_common_consensus_rules()` function,
+  so that a rule added to one verifier cannot be omitted from the other. Mempool
+  verification now rejects coinbase transactions before these shared rules, so a
+  coinbase transaction that is also invalid for another reason reports
+  `CoinbaseInMempool` rather than the other error. Both were, and remain,
+  rejections ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+
 ## [14.0.1] - 2026-07-27
 
 ### Changed
