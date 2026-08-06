@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `FindBlocks` response, allowing nodes near the chain tip to continue advancing
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
-  and Testnet values no longer overwrite each other in processes that run both networks.
+  and Testnet values no longer overwrite each other in processes that run both networks
+  ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 
 ### Fixed
 
