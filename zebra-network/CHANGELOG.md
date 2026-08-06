@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Banning a peer IP now removes every address book entry for that IP, and `reconnection_peers()`
   never returns an address whose IP is banned. Previously an entry for the banned IP on another
   port could survive the ban and stay at the front of the reconnection order for the lifetime of
-  the process ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+  the process ([#11173](https://github.com/ZcashFoundation/zebra/pull/11173)).
 
 ### Security
 
