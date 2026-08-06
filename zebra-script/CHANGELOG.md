@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [10.1.3] - 2026-08-07
+## [11.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Requires `zebra-chain` 12.0.0, whose transaction, transparent output, network upgrade, and error
+  types appear in this crate's public API.
 
 ### Changed
 
