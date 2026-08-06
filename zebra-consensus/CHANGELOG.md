@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
+- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
   
