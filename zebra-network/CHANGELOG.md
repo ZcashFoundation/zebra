@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.0] - 2026-08-06
+
 ### Added
 
 - `seeder.zec.rocks` and `seeder.testnet.zec.rocks` are now default DNS seeders in
