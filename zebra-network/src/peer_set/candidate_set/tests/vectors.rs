@@ -3,7 +3,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::Arc,
     time::Duration as StdDuration,
 };
 
@@ -15,6 +14,7 @@ use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
@@ -145,10 +145,15 @@ fn candidate_set_updates_are_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
-        peer_service.clone(),
-    );
+    let (
+        _address_book,
+        _bans_receiver,
+        _change_sender,
+        address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let mut candidate_set = CandidateSet::new(address_book_service, peer_service.clone());
 
     runtime.block_on(async move {
         time::pause();
@@ -191,10 +196,15 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
-        peer_service.clone(),
-    );
+    let (
+        _address_book,
+        _bans_receiver,
+        _change_sender,
+        address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let mut candidate_set = CandidateSet::new(address_book_service, peer_service.clone());
 
     runtime.block_on(async move {
         time::pause();

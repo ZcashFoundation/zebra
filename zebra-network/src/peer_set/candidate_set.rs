@@ -1,17 +1,22 @@
 //! Candidate peer selection for outbound connections using the [`CandidateSet`].
 
-use std::{any::type_name, cmp::min, sync::Arc};
+use std::{any::type_name, cmp::min};
 
-use chrono::Utc;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    stream::{FuturesUnordered, StreamExt},
+    FutureExt,
+};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
-use tracing::Span;
 
-use zebra_chain::{diagnostic::task::WaitForPanics, serialization::DateTime32};
+use zebra_chain::serialization::DateTime32;
 
 use crate::{
-    constants, meta_addr::MetaAddrChange, peer_set::set::MorePeers, types::MetaAddr, AddressBook,
+    address_book_updater::{AddressBookRequest, AddressBookResponse, AddressBookService},
+    constants,
+    meta_addr::MetaAddrChange,
+    peer_set::set::MorePeers,
+    types::MetaAddr,
     BoxError, Request, Response,
 };
 
@@ -126,13 +131,9 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
-    /// The outbound address book for this peer set.
-    ///
-    /// # Correctness
-    ///
-    /// The address book must be private, so all operations are performed on a blocking thread
-    /// (see #1976).
-    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// The buffered service handle to the address book updater task,
+    /// which owns the outbound address book for this peer set.
+    address_book_service: AddressBookService,
 
     /// The peer set used to crawl the network for peers.
     peer_service: S,
@@ -151,7 +152,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CandidateSet")
-            .field("address_book", &self.address_book)
+            .field("address_book_service", &type_name::<AddressBookService>())
             .field("peer_service", &type_name::<S>())
             .field("min_next_handshake", &self.min_next_handshake)
             .field("min_next_crawl", &self.min_next_crawl)
@@ -164,13 +165,11 @@ where
     S: Service<Request, Response = Response, Error = BoxError> + Send,
     S::Future: Send + 'static,
 {
-    /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
-    pub fn new(
-        address_book: Arc<std::sync::Mutex<AddressBook>>,
-        peer_service: S,
-    ) -> CandidateSet<S> {
+    /// Uses `address_book_service` and `peer_service` to manage a
+    /// [`CandidateSet`] of peers.
+    pub fn new(address_book_service: AddressBookService, peer_service: S) -> CandidateSet<S> {
         CandidateSet {
-            address_book,
+            address_book_service,
             peer_service,
             min_next_handshake: Instant::now(),
             min_next_crawl: Instant::now(),
@@ -353,24 +352,29 @@ where
 
         debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
 
-        // Don't bother spawning a task if there are no addresses left.
+        // Don't bother making a request if there are no addresses left.
         if addrs.is_empty() {
             return;
         }
 
-        // # Correctness
-        //
-        // Spawn address book accesses on a blocking thread,
-        // to avoid deadlocks (see #1976).
-        //
         // Extend handles duplicate addresses internally.
-        let address_book = self.address_book.clone();
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().extend(addrs))
-        })
-        .wait_for_panics()
-        .await
+        //
+        // Correctness: box the request future, so its captured types don't
+        // leak into generic callers (rustc's async Send inference struggles
+        // with boxed trait objects inside generic spawned tasks).
+        let result = self
+            .address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::ExtendGossiped(addrs))
+            .boxed()
+            .await;
+
+        if let Err(error) = result {
+            debug!(
+                ?error,
+                "error sending gossiped addresses to the address book, is Zebra shutting down?"
+            );
+        }
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -398,35 +402,29 @@ where
     ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        // Correctness: To avoid hangs, computation in the critical section should be kept to a minimum.
-        let address_book = self.address_book.clone();
-        let next_peer = move || -> Option<MetaAddr> {
-            let mut guard = address_book.lock().unwrap();
+        // Atomically choose the next peer and mark it as `AttemptPending`,
+        // in a single address book updater request.
+        //
+        // It's okay to return without sleeping when there is no peer, because
+        // we only need to sleep before yielding an address.
+        let response = self
+            .address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::NextReconnectPeer)
+            .boxed()
+            .await;
 
-            // Now we have the lock, get the current time
-            let instant_now = std::time::Instant::now();
-            let chrono_now = Utc::now();
-
-            // It's okay to return without sleeping here, because we're returning
-            // `None`. We only need to sleep before yielding an address.
-            let next_peer = guard.reconnection_peers(instant_now, chrono_now).next()?;
-
-            // TODO: only mark the peer as AttemptPending when it is actually used (#1976)
-            //
-            // If the future is dropped before `next` returns, the peer will be marked as AttemptPending,
-            // even if its address is not actually used for a connection.
-            //
-            // We could send a reconnect change to the AddressBookUpdater when the peer is actually used,
-            // but channel order is not guaranteed, so we could accidentally re-use the same peer.
-            let next_peer = MetaAddr::new_reconnect(next_peer.addr);
-            guard.update(next_peer)
+        let next_peer = match response {
+            Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer?,
+            Ok(_) => unreachable!("NextReconnectPeer requests always return NextReconnectPeer"),
+            Err(error) => {
+                debug!(
+                    ?error,
+                    "error requesting next reconnection peer, is Zebra shutting down?"
+                );
+                return None;
+            }
         };
-
-        // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-        let span = Span::current();
-        let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
-            .wait_for_panics()
-            .await?;
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;
@@ -441,29 +439,24 @@ where
     /// The returned count is a snapshot: candidates can become ready or be
     /// attempted by other tasks immediately afterwards.
     pub async fn ready_peer_count(&self) -> usize {
-        let address_book = self.address_book.clone();
-        let ready_peer_count = move || -> usize {
-            let guard = address_book.lock().unwrap();
+        let response = self
+            .address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::ReadyPeerCount)
+            .boxed()
+            .await;
 
-            // Now we have the lock, get the current time
-            let instant_now = std::time::Instant::now();
-            let chrono_now = Utc::now();
-
-            guard.reconnection_peers(instant_now, chrono_now).count()
-        };
-
-        // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || span.in_scope(ready_peer_count))
-            .wait_for_panics()
-            .await
-    }
-
-    /// Returns the address book for this `CandidateSet`.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    #[allow(dead_code)]
-    pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
-        self.address_book.clone()
+        match response {
+            Ok(AddressBookResponse::ReadyPeerCount(ready_peer_count)) => ready_peer_count,
+            Ok(_) => unreachable!("ReadyPeerCount requests always return ReadyPeerCount"),
+            Err(error) => {
+                debug!(
+                    ?error,
+                    "error requesting ready peer count, is Zebra shutting down?"
+                );
+                0
+            }
+        }
     }
 }
 

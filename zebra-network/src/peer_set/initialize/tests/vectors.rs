@@ -785,6 +785,7 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         address_book,
         _bans_receiver,
         address_book_updater,
+        address_book_service,
         _address_metrics,
         _address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, config.listen_addr);
@@ -843,7 +844,7 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
     // The demand channel starts empty: all dials must come from the crawler timer.
     let (demand_tx, demand_rx) = mpsc::channel::<MorePeers>(candidate_count);
 
-    let candidates = CandidateSet::new(address_book.clone(), empty_peer_set);
+    let candidates = CandidateSet::new(address_book_service, empty_peer_set);
     let active_outbound_connections = ActiveConnectionCounter::new_counter();
 
     let crawl_task_handle = tokio::spawn(crawl_and_dial(
@@ -2280,6 +2281,7 @@ where
         address_book,
         _bans_receiver,
         address_book_updater,
+        address_book_service,
         _address_metrics,
         _address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, config.listen_addr);
@@ -2325,7 +2327,7 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_peers);
     let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(over_limit_peers);
 
-    let candidates = CandidateSet::new(address_book.clone(), nil_peer_set);
+    let candidates = CandidateSet::new(address_book_service, nil_peer_set);
 
     // In zebra_network::initialize() the counter would already have some initial peer connections,
     // but in this test we start with an empty counter.
@@ -2586,6 +2588,7 @@ where
         _address_book,
         _bans_receiver,
         address_book_updater,
+        _address_book_service,
         _address_metrics,
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, unused_v4);

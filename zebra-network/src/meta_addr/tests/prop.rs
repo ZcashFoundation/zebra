@@ -1,6 +1,6 @@
 //! Randomised property tests for MetaAddr and MetaAddrChange.
 
-use std::{collections::HashMap, env, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, net::SocketAddr, str::FromStr, time::Duration};
 
 use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
@@ -10,6 +10,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::{
         DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE,
         MIN_PEER_RECONNECTION_DELAY,
@@ -333,16 +334,18 @@ proptest! {
             None
         };
 
-        let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new_with_addrs(
+        let address_book = AddressBook::new_with_addrs(
             SocketAddr::from_str("0.0.0.0:0").unwrap(),
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addrs,
-        )));
+        );
+        let (address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
+            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let mut candidate_set = CandidateSet::new(address_book.clone(), peer_service);
+        let mut candidate_set = CandidateSet::new(address_book_service, peer_service);
 
         runtime.block_on(async move {
             tokio::time::pause();

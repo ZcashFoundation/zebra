@@ -4,7 +4,6 @@ use std::{
     env,
     net::SocketAddr,
     str::FromStr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -18,6 +17,7 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
@@ -73,7 +73,9 @@ proptest! {
         // Since the address book is empty, there won't be any available peers
         let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
+            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+        let mut candidate_set = CandidateSet::new(address_book_service, peer_service);
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
@@ -116,7 +118,9 @@ proptest! {
         let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
+            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+        let mut candidate_set = CandidateSet::new(address_book_service, peer_service);
 
         let checks = async move {
             // Check rate limiting for initial peers

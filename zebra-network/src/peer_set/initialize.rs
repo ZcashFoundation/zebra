@@ -35,13 +35,13 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
+    address_book_updater::{AddressBookChangeSender, AddressBookUpdater, MIN_CHANNEL_SIZE},
     connection_metrics::{
         network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
         record_inbound_connection_rejected, ConnectionDirection,
     },
     constants,
-    meta_addr::{MetaAddr, MetaAddrChange},
+    meta_addr::MetaAddr,
     peer::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
@@ -153,6 +153,7 @@ where
         address_book,
         bans_receiver,
         address_book_updater,
+        address_book_service,
         address_metrics,
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, listen_addr);
@@ -292,7 +293,7 @@ where
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
     // 3. Outgoing peers we connect to in response to load.
-    let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
+    let mut candidates = CandidateSet::new(address_book_service.clone(), peer_set.clone());
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
@@ -337,7 +338,7 @@ where
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
     // Start the peer disk cache updater
-    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_fut = peer_cache_updater(config, address_book_service);
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
 
     handle_tx
@@ -361,7 +362,7 @@ async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -525,7 +526,7 @@ where
 /// Also sends every initial peer to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> HashSet<PeerSocketAddr> {
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
@@ -952,7 +953,7 @@ async fn crawl_and_dial<C, S>(
     outbound_connector: C,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> Result<(), BoxError>
 where
     C: Service<
@@ -1250,7 +1251,7 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
     outbound_connections: usize,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
@@ -1332,10 +1333,7 @@ where
 
 /// Mark `addr` as a failed peer to `address_book_updater`.
 #[instrument(skip(address_book_updater))]
-async fn report_failed(
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-    addr: MetaAddr,
-) {
+async fn report_failed(address_book_updater: AddressBookChangeSender, addr: MetaAddr) {
     // The connection info is the same as what's already in the address book.
     let addr = MetaAddr::new_errored(addr.addr, None);
 

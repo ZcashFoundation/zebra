@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The address book updater is now a `Buffer`-wrapped tower service that owns the address book
+  write path. Candidate selection and cache reads use its single ordered request queue instead
+  of locking the shared mutex, making pick-and-mark-`AttemptPending` atomic. Hot reads and
+  `init()` are unchanged, and there is no network-visible behavior change
+  ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+
 ### Added
 
 - `seeder.zec.rocks` and `seeder.testnet.zec.rocks` are now default DNS seeders in
