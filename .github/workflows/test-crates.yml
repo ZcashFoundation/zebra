@@ -192,8 +192,9 @@ jobs:
           # One cache for the whole matrix, see the `build` job above.
           cache-shared-key: crate-build-msrv
           cache-on-failure: true
-          # `zebra-rpc` is also the seed here: this matrix skips `zebrad`, and
-          # `zebra-rpc` pulls in the rest of the workspace.
+          # `zebrad` can't seed this matrix: the build step below skips it, so
+          # that leg compiles nothing. `zebra-rpc` has the widest closure of
+          # the crates that do build here.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
 
       - uses: ./.github/actions/setup-zebra-build

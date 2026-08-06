@@ -147,7 +147,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 Rust jobs cache `~/.cargo` and dependency artifacts in `target/` through
 [`actions-rust-lang/setup-rust-toolchain`](https://github.com/actions-rust-lang/setup-rust-toolchain),
 which wraps [`Swatinem/rust-cache`](https://github.com/Swatinem/rust-cache). Caching is on by
-default, so a job opts *out* with `cache: false` rather than opting in.
+default, so a job opts _out_ with `cache: false` rather than opting in.
 
 GitHub gives each repository 10 GB of cache storage by default; administrators can configure a
 higher paid limit. Least-recently-used entries are evicted when the configured limit is exceeded.
@@ -157,19 +157,14 @@ are the only ones every PR does restore from.
 
 Three rules keep the quota usable:
 
-1. **Only main writes.** Every job that builds the workspace sets
-   `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing.
-2. **Wide matrices share one key.** The `test-crates.yml` matrices use `cache-shared-key` and seed
-   the shared cache from a single leg (`zebra-rpc`, which has the widest dependency closure), rather
-   than one ~1 GB near-duplicate cache per crate.
+1. **Only main writes.** The main building jobs set
+   `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing. (There are some minor exceptions to this rule.)
+2. **Wide matrices share one key.** The `test-crates.yml` matrices use
+   `cache-shared-key` and seed the shared cache from a single build (`zebrad`
+   which has the widest dependency closure; `zebra-rpc` for the MSRV build since
+   it does not build `zebrad` and `zebra-rpc` is second widest option).
 3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
    crate-matrix generator in `test-crates.yml` set `cache: false`.
-
-Some jobs are deliberate exceptions to rule 1, because they never run on main and so would get no
-cache at all under it: `check-no-git-dependencies` in `tests-unit.yml` and `release-readiness` in
-`pr-gate.yml` (both A-release PRs only), and `benchmarks.yml` (label-gated). They do build, and
-they reuse their own cache across pushes to the same PR, so they keep saving. All three are
-infrequent enough not to dominate the quota.
 
 To inspect the current state:
 
