@@ -40,8 +40,7 @@ zebrad::commands::start: config=ZebradConfig {
     initial_mainnet_peers: {
       "dnsseed.z.cash:8233",
       "mainnet.seeder.shieldedinfra.net:8233",
-      "mainnet.seeder.zfnd.org:8233",
-      "dnsseed.str4d.xyz:8233"
+      "mainnet.seeder.zfnd.org:8233"
     },
     peerset_initial_target_size: 25, ...
   },
