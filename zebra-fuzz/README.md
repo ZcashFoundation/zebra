@@ -100,9 +100,11 @@ libFuzzer takes as its starting corpus. Without one, a run spends its first week
 rediscovering the input format instead of exercising the code under test.
 
 The archives are minimised with `cargo fuzz cmin`, which is libFuzzer's
-`-merge=1`: the output is the smallest subset of the input that retains every
-coverage feature, so minimisation does not cost coverage by construction. The
-inputs are derived from public chain data.
+`-merge=1`: it keeps an input only when that input contributes a coverage
+feature the ones before it did not, so the result is a reduced subset that
+retains every coverage feature of what went in. It is not necessarily the
+smallest such subset — the pass is greedy and order-dependent — but no coverage
+is lost by construction. The inputs are derived from public chain data.
 
 `seeds/` (checked in) and `corpus/` (git-ignored) are deliberately separate
 directories: the first is the committed starting point, the second is the
