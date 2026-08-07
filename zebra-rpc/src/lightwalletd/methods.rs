@@ -30,10 +30,11 @@ use super::{
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
 
-/// The maximum number of addresses a `GetTaddressBalanceStream` client can send.
+/// The maximum number of addresses a client can send in one request.
 ///
-/// Bounds the memory used to buffer the client-streamed addresses.
-const MAX_ADDRESS_STREAM_ADDRESSES: usize = 10_000;
+/// Bounds the addresses buffered from a client stream, and the work a single unary
+/// request can start.
+const MAX_REQUEST_ADDRESSES: usize = 10_000;
 
 /// How long to wait for a backpressured send to a response stream before treating
 /// the consumer as hung and dropping the stream.
@@ -249,9 +250,9 @@ where
         while let Some(address) = address_stream.message().await? {
             // Bound the buffered addresses, because the client controls how many
             // messages it streams.
-            if addresses.len() >= MAX_ADDRESS_STREAM_ADDRESSES {
+            if addresses.len() >= MAX_REQUEST_ADDRESSES {
                 return Err(Status::invalid_argument(format!(
-                    "too many addresses: the limit is {MAX_ADDRESS_STREAM_ADDRESSES}"
+                    "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
                 )));
             }
 
@@ -779,11 +780,24 @@ fn serialize_transaction(tx: &transaction::Transaction) -> Result<Vec<u8>, Statu
         .map_err(|_| Status::internal("failed to serialize transaction"))
 }
 
+/// Returns an error if `addresses` exceeds [`MAX_REQUEST_ADDRESSES`].
+fn check_address_count(addresses: &[String]) -> Result<(), Status> {
+    if addresses.len() > MAX_REQUEST_ADDRESSES {
+        return Err(Status::invalid_argument(format!(
+            "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Fetches the total balance of a list of transparent addresses.
 async fn address_balance<Rpc: RpcMethods>(
     rpc: &Rpc,
     addresses: Vec<String>,
 ) -> Result<Balance, Status> {
+    check_address_count(&addresses)?;
+
     let balance = rpc
         .get_address_balance(GetAddressBalanceRequest::new(addresses))
         .await
@@ -801,6 +815,8 @@ async fn address_utxos<Rpc: RpcMethods>(
     rpc: &Rpc,
     args: GetAddressUtxosArg,
 ) -> Result<Vec<GetAddressUtxosReply>, Status> {
+    check_address_count(&args.addresses)?;
+
     let response = rpc
         .get_address_utxos(GetAddressUtxosRequest::new(args.addresses, false))
         .await
