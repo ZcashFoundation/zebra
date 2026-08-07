@@ -105,6 +105,7 @@ miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
 cache_dir = false
 initial_testnet_peers = [
   "dnsseed.testnet.z.cash:18233",
+  "seeder.testnet.zec.rocks:18233",
   "testnet.seeder.zfnd.org:18233",
 ]
 listen_addr = "0.0.0.0:18233"

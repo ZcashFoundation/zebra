@@ -39,9 +39,11 @@ The `zebra-mining` branch of the ZcashFoundation s-nomp fork includes fixes that
        'dnsseed.z.cash:8233',
        'mainnet.seeder.shieldedinfra.net:8233',
        'mainnet.seeder.zfnd.org:8233',
+       'seeder.zec.rocks:8233',
    ]
    initial_testnet_peers = [
        'dnsseed.testnet.z.cash:18233',
+       'seeder.testnet.zec.rocks:18233',
        'testnet.seeder.zfnd.org:18233',
    ]
    listen_addr = '0.0.0.0:18233'

@@ -38,9 +38,11 @@ zebrad::commands::start: config=ZebradConfig {
     listen_addr: 127.0.0.1:8233,
     network: Mainnet,
     initial_mainnet_peers: {
+      "dnsseed.str4d.xyz:8233",
       "dnsseed.z.cash:8233",
       "mainnet.seeder.shieldedinfra.net:8233",
-      "mainnet.seeder.zfnd.org:8233"
+      "mainnet.seeder.zfnd.org:8233",
+      "seeder.zec.rocks:8233"
     },
     peerset_initial_target_size: 25, ...
   },
