@@ -375,8 +375,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 ///
 /// Before the fix, the stall tracker ran unconditionally and disconnected peers after 3
 /// consecutive empty-response `FindBlocks` cycles, even when both nodes were already at
-/// the same tip. The fix gates stall tracking on `is_at_or_near_network_tip`, so the
-/// peer is only tracked during genuine catch-up, not once the node is fully synced.
+/// the same tip. The fix gates stall tracking per peer on the height it advertised in its
+/// version handshake, so a peer is only tracked while it claims to be ahead of the local
+/// tip, not once the node has caught up to it.
 ///
 /// Sets up two regtest nodes:
 /// - Node A (upstream): mines a small chain and listens for P2P connections

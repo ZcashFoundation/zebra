@@ -110,6 +110,31 @@ impl PeerVersions {
     }
 }
 
+/// Build a single mock peer with the given protocol version and advertised handshake start
+/// height, exposed as a [`Discover`]-compatible stream (like
+/// [`PeerVersions::mock_peer_discovery`]).
+///
+/// The stall-tracker tests use this to control the peer's reported height relative to the local
+/// tip, which is what the `route_p2c` stall gate keys on.
+fn mock_peer_discovery_with_start_height(
+    version: Version,
+    start_height: block::Height,
+) -> (
+    impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
+    Vec<ClientTestHarness>,
+) {
+    let (client, harness) = ClientTestHarness::build()
+        .with_version(version)
+        .with_start_height(start_height)
+        .finish();
+
+    let peer_address: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), 1).into();
+    let discovered_peers =
+        stream::iter([Ok(Change::Insert(peer_address, client.into()))]).chain(stream::pending());
+
+    (discovered_peers, vec![harness])
+}
+
 /// A helper builder type for creating test [`PeerSet`] instances.
 ///
 /// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use

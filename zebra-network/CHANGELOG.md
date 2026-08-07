@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never returns an address whose IP is banned. Previously an entry for the banned IP on another
   port could survive the ban and stay at the front of the reconnection order for the lifetime of
   the process ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+- `FindBlocks`/`FindHeaders` stall tracking is now gated per peer on the height the peer
+  advertised in its version handshake instead of a wall-clock estimate of the node's distance to
+  the network tip, so peers at or below a stale local tip are no longer disconnected
+  ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).
 
 ### Security
 
