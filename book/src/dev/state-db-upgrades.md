@@ -332,6 +332,7 @@ We use the following rocksdb column families:
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
+| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
 | _Sprout_                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
@@ -346,23 +347,31 @@ We use the following rocksdb column families:
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
+| _Ironwood_                         |                        |                               |         |
+| `ironwood_nullifiers`              | `ironwood::Nullifier`  | `()`                          | Create  |
+| `ironwood_anchors`                 | `orchard::tree::Root`  | `()`                          | Create  |
+| `ironwood_note_commitment_tree`    | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
+| `ironwood_note_commitment_subtree` | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | _Chain_                            |                        |                               |         |
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 | `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
 
-With the following additional modifications when compiled with the `indexer` feature:
+With the following additional modifications when compiled with the `indexer` feature
+(the column families themselves are always registered — see `STATE_COLUMN_FAMILIES_IN_CODE`
+in `zebra-state/src/service/finalized_state.rs` — but the nullifier column families store
+these richer values instead of `()`):
 
 | Column Family             | Keys                 | Values                | Changes |
 | ------------------------- | -------------------- | --------------------- | ------- |
-| _Transparent_             |                      |                       |         |
-| `tx_loc_by_spent_out_loc` | `OutputLocation`     | `TransactionLocation` | Create  |
 | _Sprout_                  |                      |                       |         |
 | `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
 | _Sapling_                 |                      |                       |         |
 | `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
 | _Orchard_                 |                      |                       |         |
 | `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
+| _Ironwood_                |                      |                       |         |
+| `ironwood_nullifiers`     | `ironwood::Nullifier` | `TransactionLocation` | Create |
 
 ### Data Formats
 
@@ -493,7 +502,8 @@ So ReadStateService queries that only access a single key or value will always s
 a consistent view of the database.
 
 If a ReadStateService query only uses column families that have keys and values appended
-(`Never` in the Updates table above), it should ignore extra appended values.
+(`Create` in the Changes column of the tables above — entries are never updated or deleted),
+it should ignore extra appended values.
 Most queries do this by default.
 
 For more complex queries, there are several options:
