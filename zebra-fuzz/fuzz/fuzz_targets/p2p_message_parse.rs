@@ -47,6 +47,22 @@ const PROTO_VERSION_PLAUSIBLE_MIN: u32 = 170_000;
 /// errors elsewhere.
 const PROTO_VERSION_PLAUSIBLE_MAX: u32 = 200_000;
 
+/// What a Testnet decoder did with a complete, valid Mainnet frame.
+///
+/// Only `Rejected` is correct. The frame carries a full 24-byte header, so
+/// `decode` reaches the magic check and returns an error there; it never runs
+/// out of bytes, and it never reaches the command dispatch that drops unknown
+/// commands with `Ok(None)` — that arm is downstream of the magic check.
+#[derive(Debug)]
+enum CrossNetwork {
+    /// Rejected by the magic check, as it should be.
+    Rejected,
+    /// Returned `Ok(None)` — asked for more bytes on a complete frame.
+    Incomplete,
+    /// Decoded a message across networks.
+    Accepted(&'static str),
+}
+
 fuzz_target!(|data: &[u8]| {
     // ═══════════════════════════════════════════════════════════════════
     // Layer 1: Codec Decode — Multi-message Extraction
@@ -260,21 +276,37 @@ fuzz_target!(|data: &[u8]| {
         // I-6: cross-network magic mismatch must be rejected.
         //
         // Encode the message with the Mainnet codec and feed the result
-        // into a Testnet decoder. The codec must reject without panicking
-        // (either a parse error, or `Ok(None)` if framed-bytes haven't
-        // arrived). Any panic here is a magic-byte handling regression.
+        // into a Testnet decoder. The frame is complete, so `decode` reads
+        // the whole header and reaches the magic check, which rejects it —
+        // "need more bytes" is not reachable here. The decode runs inside
+        // `catch_unwind` (a panic here is a magic-byte handling
+        // regression), but the verdict is asserted outside it, so the
+        // oracle does not depend on unwind behaviour.
         // ---------------------------------------------------------------
-        let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let cross_network = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut codec_main = Codec::builder().for_network(&Network::Mainnet).finish();
             let mut out = BytesMut::new();
             if codec_main.encode(msg.clone(), &mut out).is_err() {
-                return;
+                return None;
             }
             let mut codec_test = Codec::builder().for_network(&Network::new_default_testnet()).finish();
-            // Rejection (Err) and "need-more-bytes" (Ok(None)) are both
-            // valid; a panic is the only outcome we treat as a bug.
-            let _ = codec_test.decode(&mut out);
+            Some(match codec_test.decode(&mut out) {
+                Err(_) => CrossNetwork::Rejected,
+                Ok(None) => CrossNetwork::Incomplete,
+                Ok(Some(decoded)) => CrossNetwork::Accepted(decoded.command()),
+            })
         }));
+        match cross_network {
+            Ok(Some(CrossNetwork::Accepted(command))) => panic!(
+                "I-6 violated: Testnet codec accepted a Mainnet-encoded {command} frame"
+            ),
+            Ok(Some(CrossNetwork::Incomplete)) => panic!(
+                "I-6 violated: Testnet codec returned Ok(None) for a complete Mainnet frame \
+                 of {}; the magic check should have rejected it",
+                msg.command(),
+            ),
+            _ => {}
+        }
 
         // ---------------------------------------------------------------
         // I-7: partial-frame truncation invariant.
