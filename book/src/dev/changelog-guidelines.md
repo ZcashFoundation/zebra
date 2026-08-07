@@ -26,7 +26,7 @@ The GitHub release wraps `CHANGELOG.md` content with operational context:
 GitHub Release
   - Update Priority (who should upgrade)
   - Highlights (TL;DR)
-  - CHANGELOG.md content (Breaking Changes, Added, etc.)
+  - CHANGELOG.md content (Added, Changed, etc.)
   - How to Upgrade (per-platform steps)
   - Compatibility (OS, protocol, MSRV)
 ```
@@ -70,7 +70,6 @@ Use [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) section order:
 
 [2-4 sentence summary]
 
-### Breaking Changes
 ### Added
 ### Changed
 ### Deprecated
@@ -79,21 +78,20 @@ Use [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) section order:
 ### Security
 ```
 
-Only include sections that have entries.
+Only include sections that have entries. There is no `Breaking Changes` section: a breaking change goes in the section that names what happened to the API, and the release's major version bump is what records that it breaks. Removing something is `Removed`; changing a signature, a field, a type, or the behavior a caller can rely on is `Changed`, written as prose saying what a caller must now do differently. Sections named `Breaking Changes` in already-published releases stay as they are; they are the historical record of what shipped.
 
 ### Section priority
 
 When a single change touches multiple categories, place it in **one section only** based on the most impactful aspect. Priority order:
 
-1. Breaking Changes
-2. Security
-3. Removed
-4. Changed
-5. Deprecated
-6. Added
-7. Fixed
+1. Security
+2. Removed
+3. Changed
+4. Deprecated
+5. Added
+6. Fixed
 
-Exception for crate changelogs: a change that is both breaking and additive (for example, adding a variant to a public enum that is not `#[non_exhaustive]`) is listed under Breaking Changes for its impact and under Added for the new capability, so consumers see both signals.
+Adding a variant to a public enum that is not `#[non_exhaustive]` is breaking, but it still gets a single `Added` entry: the entry names the new capability, and the major version bump carries the break. Do not list one change in two sections.
 
 Fixed vs Changed: use Fixed only when the fix is invisible, meaning the bug is gone but output looks the same. If users see anything different (error messages, logs, behavior), use Changed.
 
@@ -159,7 +157,7 @@ A change is breaking if upgrading `zebrad` could cause existing setups to fail:
 | Internal refactors | No operator-visible effect |
 | CI/workflow changes | No runtime impact |
 | Test changes | No runtime impact |
-| Dependency bumps | Unless security fixes |
+| Dependency bumps | Unless they carry a security fix. This row is about **this** file only — see [Dependency updates](#dependency-updates) for when a crate changelog needs an entry |
 
 Red flags an entry does not belong:
 
@@ -206,10 +204,10 @@ Bad:
 - Added mempool standardness checks (#10224)
 ```
 
-Breaking change format:
+Breaking change, filed under the section naming what happened:
 
 ```text
-### Breaking Changes
+### Changed
 
 - Environment variables now use `ZEBRA_SECTION__KEY` format (double underscore).
   Update scripts: `ZEBRA_RPC_PORT` to `ZEBRA_RPC__LISTEN_ADDR` ([#9768](link))
@@ -334,6 +332,22 @@ Adding a variant to a public enum that is not marked `#[non_exhaustive]` is also
 | Performance improvements | Internal optimization | Same API, faster |
 | Documentation changes | Better rustdoc | No code changes needed |
 
+### Dependency updates
+
+A crate changelog needs a `Changed` entry when a dependency's version moves **and that dependency's types appear in the crate's public API**. Two semver-incompatible versions of a crate do not unify, so a consumer is forced to upgrade in lockstep; that is a breaking change for them even though nothing in the crate's own signatures moved.
+
+Name the dependency, the new version, and where it surfaces:
+
+```text
+### Changed
+
+- Requires `zebra-consensus` 14.0.0 and `zebra-state` 12.0.0, whose types appear in this
+  crate's public API (`methods::RpcImpl`, `indexer::server::IndexerRPC`).
+- Migrated to `zcash_primitives 0.30.0` and `zcash_transparent 0.10.0`.
+```
+
+A dependency used only internally, or only as a dev-dependency, needs no entry: consumers never see it. The zebrad changelog is the other way round — it excludes dependency bumps entirely unless they carry a security fix, because operators do not compile against these crates.
+
 ### Release summary (crates)
 
 - 2-4 sentences maximum
@@ -357,12 +371,12 @@ This release improves code organization and internal structure.
 
 ### Entry examples (crates)
 
-Good, breaking change:
+Good, breaking change — the reduced visibility is a removal from the public API:
 
 ```text
-### Breaking Changes
+### Removed
 
-- `subsidy::MAX_BLOCK_SUBSIDY` is now `pub(crate)`. Use `Block::max_subsidy()`
+- `subsidy::MAX_BLOCK_SUBSIDY` is no longer public. Use `Block::max_subsidy()`
   instead ([#10185](link))
 ```
 
@@ -421,6 +435,9 @@ Same PR, different perspectives:
 | Internal refactor | No | No |
 | Performance improvement | If API-relevant | If user-noticeable |
 | Bug fix | If API-relevant | If operator-noticeable |
+| Dependency whose types are in the public API | Yes | Only if it carries a security fix |
+| Dependency used only internally | No | Only if it carries a security fix |
+| MSRV increased | Yes | Yes, for anyone building from source |
 
 A change can appear in both if it affects both audiences. Document it appropriately for each:
 
@@ -498,10 +515,12 @@ Document what this release works with:
 | Component | Supported |
 |-----------|-----------|
 | Operating Systems | Linux (glibc 2.31+), macOS 13+ |
-| Zcash Protocol | All upgrades through NU6.1 |
+| Zcash Protocol | All upgrades through NU6.3 |
 | zcashd RPC Compatibility | 5.x compatible |
-| Minimum Rust (source builds) | 1.75+ |
+| Minimum Rust (source builds) | 1.91 for `zebrad`, 1.88 for the library crates |
 ```
+
+Fill the table from the release you are documenting rather than copying these values: the Rust versions come from `rust-version` in `zebrad/Cargo.toml` and in the workspace `Cargo.toml`, and they change without notice because an MSRV bump is itself a breaking change.
 
 ### Release templates
 
@@ -520,7 +539,7 @@ Standard release:
 
 ---
 
-[CHANGELOG.md content: Breaking Changes, Added, Changed, Fixed sections]
+[CHANGELOG.md content: Added, Changed, Removed, Fixed sections]
 
 ---
 

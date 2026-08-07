@@ -118,7 +118,8 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 
 ## Commit & Pull Request Guidelines
 
-- PR titles must follow [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) (PRs are squash-merged — the PR title becomes the commit message)
+- PR titles must follow [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) (the PR title becomes the merge commit's subject)
+- PRs are merged with merge commits, not squashed, so every commit on the branch lands on `main`. Keep the history clean: discrete semantic commits, no "WIP" or "address review comments" commits, and a short title plus a body giving the motivation on each one
 - Do not add `Co-Authored-By` tags for AI tools
 - Do not add "Generated with [tool]" footers
 - Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
