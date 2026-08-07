@@ -78,6 +78,22 @@ const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::
 /// response from the transaction verifier.
 const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
 
+/// How many outpoints a block transaction's UTXO lookups ask the state for at a time.
+///
+/// Lookups are batched so that a transaction with many inputs does not need one state request
+/// per input. They are chunked rather than sent as one request so that batching cannot make a
+/// transaction cost the state more lookups than verifying it sequentially used to: lookups
+/// stop at the first chunk that isn't fully present in the state, so at most one chunk of them
+/// is speculative.
+///
+/// This bounds the extra work additively, by one chunk. It does not make the work independent
+/// of the input count: a transaction that references many outputs which really are in the
+/// state still costs one lookup per input, exactly as it did before batching.
+///
+/// The exact value trades round trips against the size of that additive bound. It matches the
+/// cryptographic batch size in [`crate::primitives`], which is the same kind of tradeoff.
+pub(crate) const UTXO_LOOKUP_CHUNK_SIZE: usize = 64;
+
 /// Asynchronous verification of block transactions.
 ///
 /// # Correctness
@@ -400,6 +416,15 @@ where
     /// Looks up UTXOs spent by `tx` from the best chain state, also checking
     /// `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
+    /// Looks up the outpoints that aren't in `known_utxos` in batches of
+    /// [`UTXO_LOOKUP_CHUNK_SIZE`], so a transaction whose inputs are already verified costs
+    /// one state request per chunk rather than one per input.
+    ///
+    /// Any outpoints that haven't reached the state yet are then awaited one at a time, as
+    /// [`zebra_state::Request::AwaitUtxo`] registers a pending request per outpoint. Waiting
+    /// for them sequentially bounds how many pending requests one transaction can create,
+    /// and the first wait to time out fails the whole transaction.
+    ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
     async fn block_spent_utxos(
@@ -417,34 +442,102 @@ where
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        // Stores (input_idx, outpoint) for the outpoints that need a state lookup.
+        let mut lookups: Vec<(usize, transparent::OutPoint)> = Vec::new();
 
         for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
-                tracing::trace!("awaiting outpoint lookup");
+                if let Some(ordered_utxo) = known_utxos.get(outpoint) {
+                    tracing::trace!(?outpoint, "UTXO in known_utxos, discarding query");
 
-                let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UTXO in known_utxos, discarding query");
-                    output.utxo.clone()
+                    spent_outputs[input_idx] = Some(ordered_utxo.utxo.output.clone());
+                    spent_utxos.insert(*outpoint, ordered_utxo.utxo.clone());
                 } else {
+                    lookups.push((input_idx, *outpoint));
+                }
+            }
+        }
+
+        if lookups.is_empty() {
+            let spent_outputs = spent_outputs.into_iter().flatten().collect();
+
+            return Ok((spent_utxos, spent_outputs));
+        }
+
+        tracing::trace!(count = lookups.len(), "looking up outpoints");
+
+        // Look the outpoints up a chunk at a time, stopping at the first chunk that isn't
+        // fully present in the state.
+        //
+        // # Correctness
+        //
+        // Stopping early bounds how much of this is speculative: the sequential loop below
+        // fails on the outpoint this chunk didn't find, so looking up any later chunk would be
+        // wasted work. A transaction whose inputs are all unknown therefore costs one chunk of
+        // lookups rather than one per input.
+        //
+        // This is an additive bound, not input-count independence. A transaction that
+        // references outputs which really are in the state still costs one lookup per input,
+        // as it did when each input was looked up on its own.
+        let mut found = HashMap::new();
+
+        for chunk in lookups.chunks(UTXO_LOOKUP_CHUNK_SIZE) {
+            let response = state
+                .clone()
+                .oneshot(zebra_state::Request::AnyChainUtxos(
+                    chunk.iter().map(|&(_, outpoint)| outpoint).collect(),
+                ))
+                .await
+                .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                    Ok(_) => TransactionError::TransparentInputNotFound,
+                    Err(boxed_error) => TransactionError::from(boxed_error),
+                })?;
+
+            let zebra_state::Response::AnyChainUtxos(utxos) = response else {
+                unreachable!("AnyChainUtxos always responds with AnyChainUtxos")
+            };
+
+            let chunk_is_complete = chunk
+                .iter()
+                .all(|(_, outpoint)| utxos.contains_key(outpoint));
+
+            found.extend(utxos);
+
+            if !chunk_is_complete {
+                break;
+            }
+        }
+
+        for (input_idx, outpoint) in lookups {
+            let utxo = match found.remove(&outpoint) {
+                Some(utxo) => utxo,
+                // The block creating this UTXO is still in the verification pipeline, so wait
+                // for it to arrive. `AwaitUtxo` re-checks the state as it registers the wait,
+                // so a block that arrived since the lookup above is not missed.
+                None => {
+                    tracing::trace!(?outpoint, "awaiting outpoint lookup");
+
                     let response = state
                         .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
+                        .oneshot(zebra_state::Request::AwaitUtxo(outpoint))
                         .await
                         .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
                             Ok(_) => TransactionError::TransparentInputNotFound,
                             Err(boxed_error) => TransactionError::from(boxed_error),
                         })?;
 
-                    if let zebra_state::Response::Utxo(utxo) = response {
-                        utxo
-                    } else {
+                    let zebra_state::Response::Utxo(utxo) = response else {
                         unreachable!("AwaitUtxo always responds with Utxo")
-                    }
-                };
-                tracing::trace!(?utxo, "got UTXO");
-                spent_outputs[input_idx] = Some(utxo.output.clone());
-                spent_utxos.insert(*outpoint, utxo);
-            }
+                    };
+
+                    utxo
+                }
+            };
+
+            tracing::trace!(?outpoint, ?utxo, "got UTXO");
+
+            spent_outputs[input_idx] = Some(utxo.output.clone());
+            spent_utxos.insert(outpoint, utxo);
         }
 
         let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();

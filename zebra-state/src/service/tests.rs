@@ -114,7 +114,12 @@ async fn test_populated_state_responds_correctly(
                         from_coinbase,
                     };
 
-                    transcript.push((Request::AwaitUtxo(outpoint), Ok(Response::Utxo(utxo))));
+                    transcript.push((
+                        Request::AnyChainUtxos(vec![outpoint]),
+                        Ok(Response::AnyChainUtxos(
+                            [(outpoint, utxo)].into_iter().collect(),
+                        )),
+                    ));
                 }
             }
         }

@@ -943,6 +943,32 @@ pub enum Request {
     /// Outdated requests are pruned on a regular basis.
     AwaitUtxo(transparent::OutPoint),
 
+    /// Looks up the UTXOs identified by the given [`OutPoint`](transparent::OutPoint)s,
+    /// returning only the ones that are already available.
+    ///
+    /// Checks the finalized chain, all non-finalized chains, and queued unverified blocks.
+    /// Unlike [`Request::AwaitUtxo`], this request never waits for a UTXO to arrive, and
+    /// never registers a pending request, so the number of outpoints it is given does not
+    /// affect how much state it can hold.
+    ///
+    /// Callers that need to wait for the outpoints this request did not find should follow
+    /// up with [`Request::AwaitUtxo`], which re-checks the state as it registers each wait.
+    ///
+    /// The outpoints are resolved together, so a transaction whose inputs are all already
+    /// verified costs one request instead of one per input.
+    ///
+    /// Every outpoint still costs a lookup, so callers whose outpoints come from untrusted
+    /// data should send them in bounded chunks and stop at the first chunk with a miss, rather
+    /// than passing an entire transaction's inputs at once. Zebra's block transaction verifier
+    /// does this with its `UTXO_LOOKUP_CHUNK_SIZE`.
+    ///
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXOs remain unspent or are on the best chain, or any chain.
+    ///
+    /// Returns [`Response::AnyChainUtxos`]; outpoints that were not found are absent from
+    /// the map.
+    AnyChainUtxos(Vec<transparent::OutPoint>),
+
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.
     ///
@@ -1047,6 +1073,7 @@ impl Request {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
+            Request::AnyChainUtxos(_) => "any_chain_utxos",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
@@ -1204,14 +1231,14 @@ pub enum ReadRequest {
     /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
     UnspentBestChainUtxo(transparent::OutPoint),
 
-    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
-    /// returning `None` immediately if it is unknown.
+    /// Looks up the UTXOs identified by the given [`OutPoint`](transparent::OutPoint)s,
+    /// omitting any that are unknown instead of waiting for them.
     ///
     /// Checks verified blocks in the finalized chain and _all_ non-finalized chains.
     ///
     /// This request is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    AnyChainUtxo(transparent::OutPoint),
+    /// the UTXOs remain unspent in the best chain.
+    AnyChainUtxos(Vec<transparent::OutPoint>),
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -1487,7 +1514,7 @@ impl ReadRequest {
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
-            ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
+            ReadRequest::AnyChainUtxos { .. } => "any_chain_utxos",
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
@@ -1571,8 +1598,12 @@ impl TryFrom<Request> for ReadRequest {
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                     Manually convert the request to ReadRequest::AnyChainUtxo, \
+                     Manually convert the request to ReadRequest::AnyChainUtxos, \
                      and handle pending UTXOs"),
+
+            Request::AnyChainUtxos(_) => Err("ReadService does not track queued blocks. \
+                     Manually convert the request to ReadRequest::AnyChainUtxos, \
+                     and check the queued blocks"),
 
             Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 

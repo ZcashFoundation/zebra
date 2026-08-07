@@ -40,7 +40,10 @@ use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
-use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
+use crate::{
+    error::TransactionError,
+    transaction::{POLL_MEMPOOL_DELAY, UTXO_LOOKUP_CHUNK_SIZE},
+};
 
 use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerifier};
 
@@ -1110,22 +1113,27 @@ async fn block_verification_does_not_use_mempool_verified_state() {
 
     // The mempool has already verified this transaction, and it is now submitted twice as a block
     // request. Each request runs full block verification independently, which for this transaction
-    // means fetching the spent UTXO from the state service, so two AwaitUtxo responses are queued
-    // below. Reuse of the mempool's result — or of the first block request's result — is prevented
-    // structurally: BlockTxVerifier holds no mempool handle and caches nothing across requests.
+    // means fetching the spent UTXO from the state service, so two AnyChainUtxos responses are
+    // queued below. Reuse of the mempool's result — or of the first block request's result — is
+    // prevented structurally: BlockTxVerifier holds no mempool handle and caches nothing across
+    // requests.
     let utxo_clone = utxo.clone();
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::AnyChainUtxos(vec![input_outpoint]))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::Utxo(utxo_clone));
+            .respond(zebra_state::Response::AnyChainUtxos(
+                [(input_outpoint, utxo_clone)].into_iter().collect(),
+            ));
 
         state
-            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::AnyChainUtxos(vec![input_outpoint]))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::Utxo(utxo));
+            .respond(zebra_state::Response::AnyChainUtxos(
+                [(input_outpoint, utxo)].into_iter().collect(),
+            ));
     });
 
     // Briefly yield and sleep so the spawned task can first expect the requests.
@@ -1151,6 +1159,265 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         2,
         "the mempool service should have been polled twice"
     );
+}
+
+/// The number of external transparent inputs used by the bulk UTXO lookup tests that fit in a
+/// single chunk.
+const BULK_LOOKUP_INPUT_COUNT: u32 = 3;
+
+/// Builds a non-coinbase V5 transaction spending `input_count` transparent outputs, none of
+/// which are in the transaction's own block, so the block verifier has to look all of them up
+/// in the state.
+///
+/// Returns the transaction, its hash, the outpoints it spends in input order, and the UTXOs
+/// those outpoints point to.
+fn mock_multi_input_block_tx(
+    height: block::Height,
+    input_count: u32,
+) -> (
+    Transaction,
+    Hash,
+    Vec<transparent::OutPoint>,
+    HashMap<transparent::OutPoint, transparent::Utxo>,
+) {
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    let mut outpoints = Vec::new();
+    let mut utxos = HashMap::new();
+
+    for outpoint_index in 0..input_count {
+        // Each call uses a different outpoint index, so the inputs spend distinct outputs.
+        let (input, output, known_utxos) = mock_transparent_transfer(
+            fund_height,
+            true,
+            outpoint_index,
+            Amount::try_from(10001).expect("invalid value"),
+        );
+
+        let outpoint = match &input {
+            transparent::Input::PrevOut { outpoint, .. } => *outpoint,
+            transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+        };
+
+        utxos.extend(
+            known_utxos
+                .into_iter()
+                .map(|(outpoint, ordered_utxo)| (outpoint, ordered_utxo.utxo)),
+        );
+
+        inputs.push(input);
+        outputs.push(output);
+        outpoints.push(outpoint);
+    }
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu6,
+        inputs,
+        outputs,
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let tx_hash = tx.hash();
+
+    (tx, tx_hash, outpoints, utxos)
+}
+
+/// The block transaction verifier must look up every outpoint that is missing from
+/// `known_utxos` with a single [`zebra_state::Request::AnyChainUtxos`], so a transaction with
+/// many inputs does not need one state request per input.
+///
+/// Duplicate outpoints cannot reach this lookup: `check::spend_conflicts` rejects them first,
+/// which `v4_transaction_with_conflicting_transparent_spend_is_rejected` proves by failing if
+/// the state service is called at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_utxo_lookups_use_one_bulk_request() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = BlockTxVerifier::new(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&network)
+        .expect("Nu6 activation height is specified");
+
+    let (tx, tx_hash, outpoints, utxos) =
+        mock_multi_input_block_tx(height, BULK_LOOKUP_INPUT_COUNT);
+
+    // One request, carrying every spent outpoint in input order.
+    let expected_request = zebra_state::Request::AnyChainUtxos(outpoints.clone());
+
+    let mut state_clone = state.clone();
+    tokio::spawn(async move {
+        state_clone
+            .expect_request(expected_request)
+            .await
+            // `for_unit_tests()` panics on an unexpected request, so there is nothing to unwrap.
+            .respond(zebra_state::Response::AnyChainUtxos(utxos));
+    });
+
+    let response = timeout(
+        test_timeout(),
+        verifier.oneshot(BlockRequest {
+            transaction_hash: tx_hash,
+            transaction: Arc::new(tx),
+            // Empty, so every input needs a state lookup.
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: Utc::now(),
+        }),
+    )
+    .await
+    .expect("block request should not time out")
+    .expect("transaction spending valid transparent outputs should verify");
+
+    let crate::transaction::BlockResponse { .. } = response;
+
+    // The bulk lookup answered everything, so there must be no per-input `AwaitUtxo` requests.
+    state.expect_no_requests().await;
+}
+
+/// When the bulk lookup does not find every outpoint, the block transaction verifier must wait
+/// for the missing ones with [`zebra_state::Request::AwaitUtxo`], and only those.
+///
+/// Awaiting them one at a time is what bounds the number of pending UTXO requests a single
+/// transaction can register in the state: the first wait to time out fails the transaction
+/// before any later outpoint is registered.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_utxo_lookups_await_only_the_missing_outpoints() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = BlockTxVerifier::new(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&network)
+        .expect("Nu6 activation height is specified");
+
+    let (tx, tx_hash, outpoints, mut utxos) =
+        mock_multi_input_block_tx(height, BULK_LOOKUP_INPUT_COUNT);
+
+    // Withhold one outpoint from the bulk response, as if the block creating it were still in
+    // the verification pipeline.
+    let missing_outpoint = outpoints[1];
+    let missing_utxo = utxos
+        .remove(&missing_outpoint)
+        .expect("mock UTXOs should contain every spent outpoint");
+
+    let expected_request = zebra_state::Request::AnyChainUtxos(outpoints.clone());
+
+    let mut state_clone = state.clone();
+    tokio::spawn(async move {
+        state_clone
+            .expect_request(expected_request)
+            .await
+            // `for_unit_tests()` panics on an unexpected request, so there is nothing to unwrap.
+            .respond(zebra_state::Response::AnyChainUtxos(utxos));
+
+        state_clone
+            .expect_request(zebra_state::Request::AwaitUtxo(missing_outpoint))
+            .await
+            // `for_unit_tests()` panics on an unexpected request, so there is nothing to unwrap.
+            .respond(zebra_state::Response::Utxo(missing_utxo));
+    });
+
+    let response = timeout(
+        test_timeout(),
+        verifier.oneshot(BlockRequest {
+            transaction_hash: tx_hash,
+            transaction: Arc::new(tx),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: Utc::now(),
+        }),
+    )
+    .await
+    .expect("block request should not time out")
+    .expect("transaction spending valid transparent outputs should verify");
+
+    let crate::transaction::BlockResponse { .. } = response;
+
+    // The outpoints the bulk lookup did find must not be awaited as well.
+    state.expect_no_requests().await;
+}
+
+/// The block transaction verifier must stop looking outpoints up after the first chunk that
+/// isn't fully present in the state.
+///
+/// This bounds the speculative part of batching to one chunk. Without it, a transaction whose
+/// inputs are all unknown would make the state look up every one of them before the sequential
+/// fallback failed on the first, which is more work than looking each input up on its own used
+/// to cost.
+///
+/// It does not make the work independent of the input count: a transaction that references
+/// outputs which really are in the state is still looked up in full, as it was before batching.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_utxo_lookups_stop_at_the_first_chunk_with_misses() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = BlockTxVerifier::new(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&network)
+        .expect("Nu6 activation height is specified");
+
+    // More inputs than fit in one chunk, so a second chunk is available to look up.
+    let input_count = u32::try_from(UTXO_LOOKUP_CHUNK_SIZE)
+        .expect("chunk size fits in a u32")
+        .checked_add(8)
+        .expect("input count is not too large");
+
+    let (tx, tx_hash, outpoints, _utxos) = mock_multi_input_block_tx(height, input_count);
+
+    // Only the first chunk may be looked up, and none of its outpoints are in the state.
+    let first_chunk: Vec<_> = outpoints[..UTXO_LOOKUP_CHUNK_SIZE].to_vec();
+    let first_outpoint = outpoints[0];
+
+    let mut state_clone = state.clone();
+    tokio::spawn(async move {
+        state_clone
+            .expect_request(zebra_state::Request::AnyChainUtxos(first_chunk))
+            .await
+            .respond(zebra_state::Response::AnyChainUtxos(HashMap::new()));
+
+        // The fallback fails on the first outpoint, so no later chunk is ever looked up.
+        state_clone
+            .expect_request(zebra_state::Request::AwaitUtxo(first_outpoint))
+            .await
+            .respond_error("no such UTXO".into());
+    });
+
+    let result = timeout(
+        test_timeout(),
+        verifier.oneshot(BlockRequest {
+            transaction_hash: tx_hash,
+            transaction: Arc::new(tx),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: Utc::now(),
+        }),
+    )
+    .await
+    .expect("block request should not time out");
+
+    assert!(
+        result.is_err(),
+        "transaction spending unknown outpoints must not verify, got: {result:?}"
+    );
+
+    // Exactly one chunk was looked up: the outpoints after it were never requested.
+    state.expect_no_requests().await;
 }
 
 /// Tests that calls to the transaction verifier with a mempool request that spends

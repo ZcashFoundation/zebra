@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Request::AnyChainUtxos` and `Response::AnyChainUtxos`, which look up a list of outpoints in
+  one request and return only the ones already in the state. Unlike `Request::AwaitUtxo`, they
+  never wait for a UTXO to arrive and never register a pending request, so callers must follow
+  up with `Request::AwaitUtxo` for the outpoints that were not found.
+- `ReadRequest::AnyChainUtxos`
+- `ReadResponse::AnyChainUtxos`
+
+### Removed
+
+- `ReadRequest::AnyChainUtxo` and `ReadResponse::AnyChainUtxo`, replaced by the `AnyChainUtxos`
+  forms, which take a list of outpoints and return a map of the ones that were found.
+
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with

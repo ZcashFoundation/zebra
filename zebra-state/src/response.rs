@@ -1,7 +1,7 @@
 //! State [`tower::Service`] response types.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -92,6 +92,12 @@ pub enum Response {
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
+
+    /// The response to an `AnyChainUtxos` request, from any non-finalized chains, finalized
+    /// chain, or pending unverified blocks.
+    ///
+    /// Outpoints that were not found are absent from the map.
+    AnyChainUtxos(HashMap<transparent::OutPoint, transparent::Utxo>),
 
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
@@ -447,12 +453,14 @@ pub enum ReadResponse {
     /// _best_ non-finalized chain, or the finalized chain.
     UnspentBestChainUtxo(Option<transparent::Utxo>),
 
-    /// The response to an `AnyChainUtxo` request, from verified blocks in
+    /// The response to an `AnyChainUtxos` request, from verified blocks in
     /// _any_ non-finalized chain, or the finalized chain.
     ///
+    /// Outpoints that were not found are absent from the map.
+    ///
     /// This response is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    AnyChainUtxo(Option<transparent::Utxo>),
+    /// the UTXOs remain unspent in the best chain.
+    AnyChainUtxos(HashMap<transparent::OutPoint, transparent::Utxo>),
 
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
@@ -599,8 +607,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
 
 
-            ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                                                  Manually unwrap the response, and handle pending UTXOs."),
+            ReadResponse::AnyChainUtxos(_) => Err("ReadService does not track pending UTXOs. \
+                                                   Manually unwrap the response, and handle pending UTXOs."),
 
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),

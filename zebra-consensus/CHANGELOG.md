@@ -31,7 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
-  
+
+### Changed
+
+- Block transaction verification now looks up spent outpoints in batches, sending
+  `zebra_state::Request::AnyChainUtxos` for up to 64 outpoints at a time instead of one
+  `zebra_state::Request::AwaitUtxo` per input, and falling back to `AwaitUtxo` for outpoints
+  that have not reached the state yet. Embedders that answer state requests with their own
+  service need to handle the new request.
+
 ## [14.0.1] - 2026-07-27
 
 ### Changed
