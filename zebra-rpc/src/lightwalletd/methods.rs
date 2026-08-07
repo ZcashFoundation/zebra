@@ -36,6 +36,12 @@ const RESPONSE_BUFFER_SIZE: usize = 64;
 /// request can start.
 const MAX_REQUEST_ADDRESSES: usize = 10_000;
 
+/// The maximum number of `exclude` entries a `GetMempoolTx` client can send.
+///
+/// Every entry is matched against every mempool transaction, so an unbounded list
+/// lets one request occupy a runtime thread for an arbitrary time.
+const MAX_EXCLUDE_ENTRIES: usize = 1_000;
+
 /// How long to wait for a backpressured send to a response stream before treating
 /// the consumer as hung and dropping the stream.
 ///
@@ -269,6 +275,13 @@ where
         request: Request<Exclude>,
     ) -> Result<Response<Self::GetMempoolTxStream>, Status> {
         let exclude = request.into_inner().txid;
+
+        if exclude.len() > MAX_EXCLUDE_ENTRIES {
+            return Err(Status::invalid_argument(format!(
+                "too many exclude entries: the limit is {MAX_EXCLUDE_ENTRIES}"
+            )));
+        }
+
         let transactions = mempool_transactions(self.mempool.clone()).await?;
 
         let txids: Vec<transaction::Hash> =
@@ -883,8 +896,9 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
 
     for suffix in exclude {
         // An empty entry doesn't identify a transaction, and would otherwise
-        // exclude the only transaction in a single-transaction mempool.
-        if suffix.is_empty() {
+        // exclude the only transaction in a single-transaction mempool. An entry
+        // longer than a transaction ID can never match one.
+        if suffix.is_empty() || suffix.len() > 32 {
             continue;
         }
 
