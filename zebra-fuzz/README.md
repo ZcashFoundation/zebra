@@ -79,6 +79,20 @@ semver guarantee.
 Only panics, aborts, and broken invariants are bugs. Parser errors on malformed
 input are expected and are not failures.
 
+### Known limitation: P2P frame size
+
+`p2p_message_parse`, `p2p_deep_fuzz` and `addr_message_fuzz` build their codecs
+with `Codec::builder()`, which starts at `MAX_HANDSHAKE_BODY_LEN` (1 KiB) — the
+pre-handshake limit. Zebra raises a codec to `MAX_PROTOCOL_MESSAGE_LEN` (2 MiB)
+only after a peer handshake completes. These targets therefore exercise the
+pre-handshake framing rules, and a frame declaring a longer body is rejected at
+the header before its body is ever parsed.
+
+Covering the post-handshake limit as well means fuzzing both codec states rather
+than swapping one for the other, since the 1 KiB check is itself a rule worth
+testing. That is a change to how these targets consume their input, so it is
+left as follow-up work rather than folded in here.
+
 ## Seed corpora
 
 Each target ships a seed corpus as `seeds/<target>_seed_corpus.zip`, which
