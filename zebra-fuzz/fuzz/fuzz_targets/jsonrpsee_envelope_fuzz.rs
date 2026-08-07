@@ -552,6 +552,12 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
         }
     };
     let take_i32_le = |off: usize| take_u32_le(off) as i32;
+    // JSON string literal, quotes included, for fuzz-controlled text.
+    // Stripping `"` is not enough: a backslash, newline or control byte in
+    // the payload makes the envelope invalid JSON, so the request dies in
+    // the envelope decoder and the method's parameter parsing — the part
+    // this target exists to reach — never runs.
+    let json_str = |s: &str| serde_json::Value::String(s.to_owned()).to_string();
     // Hex string from bytes (truncated). The leading byte sets the length
     // class so the fuzzer can target both 32-byte (hash-shaped) and
     // tx-byte-shaped payloads.
@@ -594,14 +600,13 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
                 0 => hex_class(0, &payload[1.min(payload.len())..]),
                 1 => format!("{}", take_u32_le(1) % 4_000_000),
                 _ => String::from_utf8_lossy(&payload[1.min(payload.len())..32.min(payload.len())])
-                    .into_owned()
-                    .replace('"', ""),
+                    .into_owned(),
             };
             let verb = (take_u8(0) >> 2) & 0x7;
             if method == "getblockheader" {
-                format!(r#"["{}",{}]"#, s, verb % 2 == 1)
+                format!(r#"[{},{}]"#, json_str(&s), verb % 2 == 1)
             } else {
-                format!(r#"["{}",{}]"#, s, verb)
+                format!(r#"[{},{}]"#, json_str(&s), verb)
             }
         }
         "getrawtransaction" => {
@@ -620,42 +625,37 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
         }
         "validateaddress" | "z_validateaddress" | "z_listunifiedreceivers" => {
             // [addr_string]
-            let s = String::from_utf8_lossy(&payload[..payload.len().min(96)])
-                .into_owned()
-                .replace('"', "");
-            format!(r#"["{}"]"#, s)
+            let s = String::from_utf8_lossy(&payload[..payload.len().min(96)]).into_owned();
+            format!(r#"[{}]"#, json_str(&s))
         }
         "getaddressbalance" => {
             // The DTO is two-form via `from = "DGetAddressBalanceRequest"` —
             // either {"addresses":[...]} or {"address":"..."} (singular).
             // We feed the {"addresses":[...]} form so the longer parse path
             // runs.
-            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)])
-                .into_owned()
-                .replace('"', "");
-            format!(r#"[{{"addresses":["{}"]}}]"#, addr1)
+            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)]).into_owned();
+            format!(r#"[{{"addresses":[{}]}}]"#, json_str(&addr1))
         }
         "getaddresstxids" => {
             // {"addresses":[...], "start":N, "end":N}
-            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)])
-                .into_owned()
-                .replace('"', "");
+            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)]).into_owned();
             let start = take_u32_le(50.min(payload.len()));
             let end = take_u32_le(54.min(payload.len()));
             format!(
-                r#"[{{"addresses":["{}"],"start":{},"end":{}}}]"#,
-                addr1, start, end
+                r#"[{{"addresses":[{}],"start":{},"end":{}}}]"#,
+                json_str(&addr1),
+                start,
+                end
             )
         }
         "getaddressutxos" => {
             // {"addresses":[...], "chainInfo":bool}
-            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)])
-                .into_owned()
-                .replace('"', "");
+            let addr1 = String::from_utf8_lossy(&payload[..payload.len().min(48)]).into_owned();
             let ci = take_u8(0) & 0x1 == 1;
             format!(
-                r#"[{{"addresses":["{}"],"chainInfo":{}}}]"#,
-                addr1, ci
+                r#"[{{"addresses":[{}],"chainInfo":{}}}]"#,
+                json_str(&addr1),
+                ci
             )
         }
         "z_getsubtreesbyindex" => {

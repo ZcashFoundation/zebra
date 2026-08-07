@@ -49,29 +49,36 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return,
     };
 
-    // Re-encode the accepted transaction. A serialize error on a value that
-    // just decoded is unusual but not the primary oracle; nothing to assert.
-    let serialized = match tx.zcash_serialize_to_vec() {
-        Ok(bytes) => bytes,
-        Err(_) => return,
-    };
+    // Re-encode the accepted transaction. `ZcashSerialize` documents that
+    // serialization "MUST be infallible up to errors in the underlying writer",
+    // and the writer here is a `Vec`, so this can only fail if an implementation
+    // contradicts that contract. Unwrapping rather than returning keeps the
+    // round-trip checks below reachable in every case where they apply.
+    let serialized = tx
+        .zcash_serialize_to_vec()
+        .expect("ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail");
 
-    // Decode the re-encoded bytes and encode once more. The two encodings must
-    // match byte-for-byte (idempotent canonical form) and the two decoded
-    // values must be structurally equal (serialize is invertible over every
-    // field, the Ironwood shielded data included).
-    if let Ok(tx2) = Transaction::zcash_deserialize(Cursor::new(&serialized)) {
-        let serialized2 = match tx2.zcash_serialize_to_vec() {
-            Ok(bytes) => bytes,
-            Err(_) => return,
-        };
-        assert_eq!(
-            serialized, serialized2,
-            "round-trip re-encode mismatch — canonical-encoding disagreement (consensus-split vector)"
-        );
-        assert_eq!(
-            tx, tx2,
-            "round-trip structural mismatch — deserialize is not the inverse of serialize"
-        );
-    }
+    // Decode the re-encoded bytes. Unlike the two serialize steps, this one can
+    // genuinely fail, and a failure is the finding: it means the serializer
+    // emitted bytes that its own deserializer rejects. Skipping it — as an
+    // `if let Ok(..)` would — discards both assertions below in precisely the
+    // case they exist to catch.
+    let tx2 = Transaction::zcash_deserialize(Cursor::new(&serialized)).expect(
+        "round-trip decode failure — serialize emitted bytes its own deserializer rejects",
+    );
+
+    // The two encodings must match byte-for-byte (idempotent canonical form) and
+    // the two decoded values must be structurally equal (serialize is invertible
+    // over every field, the Ironwood shielded data included).
+    let serialized2 = tx2.zcash_serialize_to_vec().expect(
+        "ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail",
+    );
+    assert_eq!(
+        serialized, serialized2,
+        "round-trip re-encode mismatch — canonical-encoding disagreement (consensus-split vector)"
+    );
+    assert_eq!(
+        tx, tx2,
+        "round-trip structural mismatch — deserialize is not the inverse of serialize"
+    );
 });

@@ -334,40 +334,91 @@ fuzz_target!(|data: &[u8]| {
     // Layer 3.6: Header boundary fuzz on parsed messages
     //
     // For each message we encoded above, surgically corrupt the length
-    // field and feed it back through a fresh decoder. The codec must
-    // reject without panicking. This exercises `MAX_PROTOCOL_MESSAGE_LEN`
-    // guard + `verify_checksum` paths that otherwise need exotic seeds.
+    // field and feed it back through a fresh decoder. Each corruption has
+    // a stated verdict that is asserted below. This exercises the
+    // `MAX_PROTOCOL_MESSAGE_LEN` guard + `verify_checksum` paths that
+    // otherwise need exotic seeds.
+    //
+    // The decode calls run inside `catch_unwind` because a panic in the
+    // codec is the primary finding for this target. The verdicts are
+    // computed there but asserted *outside* the guard, so the oracle does
+    // not depend on unwind behaviour.
     // ═══════════════════════════════════════════════════════════════════
     for msg in &messages {
-        let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            let mut codec_enc = Codec::builder().for_network(&Network::Mainnet).finish();
+        let verdicts = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            // A fresh codec is capped at `MAX_HANDSHAKE_BODY_LEN` (1 KiB), the
+            // pre-handshake limit; `reconfigure_full_body_len` raises it to
+            // `MAX_PROTOCOL_MESSAGE_LEN`, which is what a codec carries once a
+            // peer handshake has completed. The oversize probe below has to run
+            // against that limit: at the handshake cap it would be rejected by
+            // the 1 KiB check and never reach the guard it names.
+            let full_len_codec = || {
+                let mut codec = Codec::builder().for_network(&Network::Mainnet).finish();
+                codec.reconfigure_full_body_len();
+                codec
+            };
+            let mut codec_enc = full_len_codec();
             let mut out = BytesMut::new();
             if codec_enc.encode(msg.clone(), &mut out).is_err() || out.len() < 24 {
-                return;
+                return None;
             }
+            // Reduce a decode result to the only distinction the oracles
+            // make: `Some(command)` means the codec accepted a message.
+            let accepted = |r: Result<Option<Message>, _>| match r {
+                Ok(Some(m)) => Some(m.command()),
+                _ => None,
+            };
             // Corruption variant 1: length field set to MAX+1 (oversize).
             let mut corrupted_oversize = out.clone();
             let oversize = (zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN as u32) + 1;
             corrupted_oversize[16..20].copy_from_slice(&oversize.to_le_bytes());
-            let mut codec_d1 = Codec::builder().for_network(&Network::Mainnet).finish();
-            let _ = codec_d1.decode(&mut corrupted_oversize);
+            let mut codec_d1 = full_len_codec();
+            let oversize_rejected = codec_d1.decode(&mut corrupted_oversize).is_err();
             // Corruption variant 2: checksum byte flipped.
             let mut corrupted_cksum = out.clone();
             corrupted_cksum[20] ^= 0xff;
-            let mut codec_d2 = Codec::builder().for_network(&Network::Mainnet).finish();
-            let _ = codec_d2.decode(&mut corrupted_cksum);
-            // Corruption variant 3: command field zeroed.
+            let mut codec_d2 = full_len_codec();
+            let checksum_rejected = codec_d2.decode(&mut corrupted_cksum).is_err();
+            // Corruption variant 3: command field zeroed. An unknown command
+            // is dropped with `Ok(None)` deliberately — connections are
+            // unauthenticated, so a peer must not be able to force an error
+            // by sending junk. The invariant here is therefore
+            // non-acceptance, not `Err`.
             let mut corrupted_cmd = out.clone();
             for b in &mut corrupted_cmd[4..16] {
                 *b = 0;
             }
-            let mut codec_d3 = Codec::builder().for_network(&Network::Mainnet).finish();
-            let _ = codec_d3.decode(&mut corrupted_cmd);
-            // Corruption variant 4: truncate to header-only.
-            let mut codec_d4 = Codec::builder().for_network(&Network::Mainnet).finish();
+            let mut codec_d3 = full_len_codec();
+            let zero_command_accepted = accepted(codec_d3.decode(&mut corrupted_cmd));
+            // Corruption variant 4: truncate to header-only. No verdict: a
+            // frame whose body is empty is already complete at 24 bytes, so
+            // `Ok(Some(_))` is the correct outcome for `verack`, `getaddr`
+            // and the other bodyless messages.
+            let mut codec_d4 = full_len_codec();
             let mut header_only: BytesMut = out[..24].into();
             let _ = codec_d4.decode(&mut header_only);
+
+            Some((oversize_rejected, checksum_rejected, zero_command_accepted))
         }));
+
+        if let Ok(Some((oversize_rejected, checksum_rejected, zero_command_accepted))) = verdicts {
+            assert!(
+                oversize_rejected,
+                "body_len of MAX_PROTOCOL_MESSAGE_LEN + 1 was not rejected, frame built from {}",
+                msg.command(),
+            );
+            assert!(
+                checksum_rejected,
+                "corrupted checksum was not rejected, frame built from {}",
+                msg.command(),
+            );
+            assert!(
+                zero_command_accepted.is_none(),
+                "all-zero command decoded as {:?}, frame built from {}",
+                zero_command_accepted,
+                msg.command(),
+            );
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

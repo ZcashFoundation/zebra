@@ -13,8 +13,7 @@
 //! set to `P2SH | CHECKLOCKTIMEVERIFY` (`zebra-script/src/lib.rs:161-
 //! 162`) — that is the production policy. The libzcash_script /
 //! zcash_script library underneath, however, supports the full BIP-62/
-//! BIP-66 flag bitfield (`zcash_script::interpreter::Flags`,
-//! `zcash_script-0.4.4/src/interpreter.rs:130-184`). The C++
+//! BIP-66 flag bitfield (`zcash_script::interpreter::Flags`). The C++
 //! interpreter dispatches on every bit of that field; an attacker who
 //! gets one un-fuzzed bit combination to panic / SIGSEGV / loop is a
 //! Critical-Core DoS regression on any future Zcash NU that activates
@@ -53,9 +52,9 @@
 //!   1. `CxxInterpreter::verify_callback` — primary FFI panic hunt;
 //!      SIGSEGV / SIGABRT / SIGFPE / unbounded loop in the C library
 //!      surfaces as a libfuzzer crash artifact.
-//!   2. `RustInterpreter::verify_callback` (pure Rust, no FFI) — same
-//!      input through the differential Rust port; a panic here is a
-//!      Rust-side regression and is `catch_unwind`-able.
+//!   2. `RustInterpreter::verify_callback` (pure Rust, no FFI) — the
+//!      same input through the Rust port; a panic here is a Rust-side
+//!      regression.
 //!   3. **Monotonicity probe** — adding a strict flag (StrictEnc, LowS,
 //!      NullDummy, SigPushOnly, MinimalData, CleanStack,
 //!      DiscourageUpgradableNOPs) MUST NOT turn an `Err(_)` result
@@ -64,6 +63,14 @@
 //!      and asserting the strict run did not become *more* permissive.
 //!      A violation here is a candidate finding for a flag-handling
 //!      regression in either the C or Rust interpreter.
+//!
+//! Observers 1 and 2 are *not* a differential oracle: the two results
+//! are never compared, because the C++ side is driven by the sighash
+//! callback while the Rust side uses `NullSignatureChecker`. Under
+//! those semantics a divergence would not mean a bug, so comparing
+//! them would only produce noise. Making this target differential
+//! requires giving both sides the same checker first; that is a change
+//! of scope, not a missing assertion.
 //!
 //! ───────────────────────────────────────────────────────────────────
 //! Compile (debug build):
@@ -211,16 +218,20 @@ fuzz_target!(|data: &[u8]| {
     let rust_result = panic::catch_unwind(AssertUnwindSafe(|| {
         use zcash_script::interpreter::NullSignatureChecker;
         // NullSignatureChecker::check_sig / check_lock_time always
-        // return false (zcash_script-0.4.4/src/interpreter.rs:202-220)
-        // — exactly the behaviour we want (sentinel sighash, no real
-        // key material).
+        // return false — exactly the behaviour we want (sentinel
+        // sighash, no real key material).
         let interp = RustInterpreter::new(NullSignatureChecker());
         interp.verify_callback(&raw, flags)
     }));
 
-    // Both panic-caught above; libfuzzer already records SIGSEGV /
-    // SIGABRT escapes from inside the C call. We discard the values —
-    // their presence is not a bug; only a panic / crash is.
+    // The two verdicts are deliberately not compared. The C++ side runs
+    // with the sighash callback and the Rust side with
+    // `NullSignatureChecker`, so any `CHECK*SIG` script diverges by
+    // construction and a comparison would report noise rather than bugs.
+    // For these two observers the oracle is reaching the code at all:
+    // a crash inside the C library, or a panic in the Rust port, is the
+    // finding. See the module docs for what making this differential
+    // would take.
     let _ = (cxx_result, rust_result);
 
     // ───────────────────────────────────────────────────────────────────
@@ -247,7 +258,11 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
 
-    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+    // The two runs happen inside `catch_unwind` because a crash in the C
+    // interpreter is a finding in its own right. The verdict is returned
+    // and asserted below, outside the guard, so the oracle does not depend
+    // on unwind behaviour.
+    let violated = panic::catch_unwind(AssertUnwindSafe(|| {
         let cxx = CxxInterpreter {
             sighash: sighash_cb,
             lock_time: 0,
@@ -256,17 +271,18 @@ fuzz_target!(|data: &[u8]| {
         let base = cxx.verify_callback(&raw, base_flags);
         let strict_run = cxx.verify_callback(&raw, strict_flags);
 
-        // Monotonicity: if base failed (Err or Ok(false)), the strict
-        // run cannot become Ok(true). A violation = candidate finding;
-        // we deliberately do NOT panic — libfuzzer coverage is the
-        // signal, and a panic would mask the real crash classes (FFI
-        // SIGSEGV etc.) in the same artifact.
+        // Monotonicity: if base failed (Err or Ok(false)), the strict run
+        // cannot become Ok(true). Strict flags are reject-only, so this
+        // direction is a real flag-handling bug, not a policy question.
         let base_failed = !matches!(&base, Ok(true));
         let strict_succeeded = matches!(&strict_run, Ok(true));
-        if base_failed && strict_succeeded {
-            // Observability marker: the branch existing in the binary
-            // gives libfuzzer a coverage edge to chase. We do not abort.
-            std::hint::black_box(&strict);
-        }
+        base_failed && strict_succeeded
     }));
+
+    if let Ok(true) = violated {
+        panic!(
+            "monotonicity violated: adding the strict flag {strict:?} to {base_flags:?} turned a \
+             script that failed verification into one that passes"
+        );
+    }
 });
