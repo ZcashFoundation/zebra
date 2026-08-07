@@ -24,9 +24,9 @@
 //!
 //! This harness goes one layer below `zebra_script::is_valid` and calls
 //! `libzcash_script::CxxInterpreter::verify_callback(&script, flags)`
-//! directly with attacker-controlled `flags` bits. We do **not** patch
-//! zebra src/; the flag-control surface is reached purely through the
-//! upstream crates' public API.
+//! directly with attacker-controlled `flags` bits. The flag-control surface is
+//! reached entirely through public APIs; this target needs no `fuzzing`
+//! feature.
 //!
 //! ───────────────────────────────────────────────────────────────────
 //! Input format

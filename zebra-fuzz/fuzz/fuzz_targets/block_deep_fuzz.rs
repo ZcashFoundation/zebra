@@ -38,9 +38,9 @@ const NU_FORK_HEIGHTS: &[(u32, &str)] = &[
     (2_726_400, "Nu6"),
     (3_146_400, "Nu6_1"),
     (3_364_600, "Nu6_2"),
-    // NU6.3 "Ironwood" — activated by v6.0.0, Mainnet height 3,428,143.
-    // Added in the v6.0.0 rebase so the consensus-check dispatch is exercised
-    // at the Ironwood height (v6 tx format / Ironwood shielded pool surface).
+    // NU6.3 "Ironwood" — Mainnet activation height 3,428,143. Included so the
+    // consensus-check dispatch is exercised at the Ironwood height (v6 tx
+    // format / Ironwood shielded pool surface).
     (3_428_143, "Nu6_3"),
 ];
 
@@ -168,10 +168,9 @@ fuzz_target!(|data: &[u8]| {
     if !has_transparent_inputs {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let utxos: HashMap<transparent::OutPoint, transparent::Utxo> = HashMap::new();
-            // v6.0.0 API drift: the second arg changed from `Option<..>` to a
-            // required `DeferredPoolBalanceChange`. Zero means "no deferred
-            // change" — semantically identical to the old `None`, and exactly
-            // how upstream's own vector test drives it
+            // The second argument is a required `DeferredPoolBalanceChange`.
+            // Zero means "no deferred change", which is exactly how the
+            // repository's own vector test drives it
             // (zebra-chain/src/block/tests/vectors.rs).
             let _ = block.chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero());
         }));

@@ -791,9 +791,9 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
             // the raw fuzzed string, so the SocketAddr parser sees
             // every kind of malformed input. Today there is only one
             // AddNodeCommand variant (`Add`) so the second argument
-            // is fixed; a future enum widening will pick this up
-            // automatically through `derive(Arbitrary)` once we add
-            // arbitrary support to the enum upstream.
+            // is fixed; a future enum widening would be picked up
+            // automatically through `derive(Arbitrary)` if the enum gained an
+            // `Arbitrary` impl.
             if let Ok(parsed) = addr_str.parse::<PeerSocketAddr>() {
                 let _ = AssertUnwindSafe(rpc.add_node(parsed, AddNodeCommand::Add))
                     .catch_unwind()
