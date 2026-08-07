@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   misbehaviour updates into the address book. This was previously an unnamed literal in
   `init_with_block_gossip_peer_ips()`; the value is unchanged outside this crate's tests
   ([#11129](https://github.com/ZcashFoundation/zebra/pull/11129)).
+- A `fuzzing` feature, off by default, which makes the `protocol` module public for
+  the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies
+  and leaves default and release builds unchanged
+  ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
 
 ### Changed
 

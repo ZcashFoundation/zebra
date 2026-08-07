@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
+- A `fuzzing` feature, off by default, which makes the `block` module public for
+  the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies
+  and leaves default and release builds unchanged
+  ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
   
 ## [14.0.1] - 2026-07-27
 
