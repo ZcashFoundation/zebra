@@ -339,6 +339,10 @@ location it prints (currently <https://zcashd.valargroup.dev/>).
 zcashd still performs its own full validation of every block Zebra relays —
 the sidecar removes zcashd's _network exposure_, not its consensus checks.
 
+Moving a live node — an existing datadir with a wallet your integration
+depends on — has prerequisites and failure modes of its own. See
+[Migrating an Existing zcashd Node](zcashd-compat-migration.md).
+
 ## Configuration reference
 
 ```toml
