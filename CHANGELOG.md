@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
+  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
+  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
+  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
+  changelog for the underlying API split
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
+  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
+  object is only present on Mainnet, where end of support is enforced
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+
 ### Added
 
 - Zebra now tracks the NU7 Tachyon pool: each block's proof stamps advance the pool's
@@ -19,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
   as labels.
+- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
+  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
+  object is only present on Mainnet, where end of support is enforced
+  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
 
 ### Changed
 
@@ -28,14 +45,34 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   the librustzcash NU7 items compile without setting `RUSTFLAGS`. Environments or CI
   jobs that set `RUSTFLAGS` themselves must include `--cfg zcash_unstable="nu7"`,
   because the environment variable replaces the config file's rustflags.
+- Chain synchronization now downloads a peer's only unknown block hash from a short
+  `FindBlocks` response, allowing nodes near the chain tip to continue advancing
+  ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
 
 ### Fixed
 
+- `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
+  specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
+  affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
+
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
   ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+- Banning a misbehaving peer now removes every address book entry for that IP, and a banned IP is
+  never selected as a reconnection candidate. Previously an entry on a different port could survive
+  the ban and occupy the first candidate slot until the node restarted
+  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+
+### Security
+
+- Inbound connections are canonicalized when they are accepted, so an IPv4 peer that connects to a
+  dual-stack listener as an IPv4-mapped IPv6 address (`::ffff:A.B.C.D`) is keyed on its canonical
+  IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
+  peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
+  twice towards the per-IP inbound connection limit
+  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

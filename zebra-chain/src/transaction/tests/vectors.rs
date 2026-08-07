@@ -262,7 +262,7 @@ fn deserialize_large_transaction() {
 /// An empty transaction v5, with no Orchard, Sapling, or Transparent data
 ///
 /// empty transaction are invalid, but Zebra only checks this rule in
-/// zebra_consensus::transaction::Verifier
+/// zebra_consensus::transaction::check::has_inputs_and_outputs
 #[test]
 fn empty_v5_round_trip() {
     let _init_guard = zebra_test::init();
@@ -286,7 +286,7 @@ fn empty_v5_round_trip() {
 /// An empty transaction v4, with no Sapling, Sprout, or Transparent data
 ///
 /// empty transaction are invalid, but Zebra only checks this rule in
-/// zebra_consensus::transaction::Verifier
+/// zebra_consensus::transaction::check::has_inputs_and_outputs
 #[test]
 fn empty_v4_round_trip() {
     let _init_guard = zebra_test::init();

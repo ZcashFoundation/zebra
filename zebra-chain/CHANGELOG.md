@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([tachyon-zcash/zebra#63](https://github.com/tachyon-zcash/zebra/pull/63))
 - `Transaction::tachyon_tachygrams` and `Block::tachyon_transactions_count`
 
+### Fixed
+
+- Comments in `zebra-chain/src/transaction/tests/vectors.rs`
+
 ## [11.3.0] - 2026-07-27
 
 ### Added

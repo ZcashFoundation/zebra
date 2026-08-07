@@ -5,10 +5,7 @@
 //
 // TODO: split fixed test vectors into a `vectors` module?
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
@@ -45,7 +42,7 @@ use zebra_test::mock_service::MockService;
 
 use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
 
-use super::{check, Request, Verifier};
+use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerifier};
 
 #[cfg(test)]
 mod prop;
@@ -484,7 +481,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
 
     for net in Network::iter() {
-        let verifier = Verifier::new_for_tests(&net, state.clone());
+        let verifier = MempoolTxVerifier::new_for_tests(&net, state.clone());
 
         let (height, tx) = transactions_from_blocks(net.block_iter())
             .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
@@ -504,7 +501,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .map(|responder| responder.respond(zebra_state::Response::UnspentBestChainUtxo(None)));
 
-        let verifier_req = verifier.oneshot(Request::Mempool {
+        let verifier_req = verifier.oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         });
@@ -518,7 +515,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
 #[tokio::test]
 async fn mempool_request_with_present_input_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -570,7 +567,7 @@ async fn mempool_request_with_present_input_is_accepted() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -585,7 +582,7 @@ async fn mempool_request_with_present_input_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_invalid_lock_time_is_rejected() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -647,7 +644,7 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -664,7 +661,7 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
 #[tokio::test]
 async fn mempool_request_with_unlocked_lock_time_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -716,7 +713,7 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -731,7 +728,7 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -786,7 +783,7 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -801,7 +798,7 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_past_lock_time_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -861,7 +858,7 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -878,7 +875,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    let verifier = MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
     mempool_setup_tx
         .send(mempool.clone())
         .ok()
@@ -954,7 +951,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -965,13 +962,10 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
         "expected successful verification, got: {verifier_response:?}"
     );
 
-    let crate::transaction::Response::Mempool {
+    let crate::transaction::MempoolResponse {
         transaction: _,
         spent_mempool_outpoints,
-    } = verifier_response.expect("already checked that response is ok")
-    else {
-        panic!("unexpected response variant from transaction verifier for Mempool request")
-    };
+    } = verifier_response.expect("already checked that response is ok");
 
     assert_eq!(
         spent_mempool_outpoints,
@@ -989,13 +983,21 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
+/// Confirms block verification always queries the state service fresh, even
+/// when the same transaction was already verified and cached by the mempool
+/// verifier. `BlockTxVerifier` has no dependency on any mempool service, so
+/// this is now also enforced structurally; this test additionally checks the
+/// runtime behavior when both verifiers share a state backend.
 #[tokio::test(flavor = "multi_thread")]
-async fn dont_skip_verification_of_block_transactions_in_mempool() {
+async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
-    let verifier = Buffer::new(verifier, 1);
+    let mempool_verifier = Buffer::new(
+        MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx),
+        1,
+    );
+    let block_verifier = Buffer::new(BlockTxVerifier::new(&Network::Mainnet, state.clone()), 1);
 
     mempool_setup_tx
         .send(mempool.clone())
@@ -1077,9 +1079,9 @@ async fn dont_skip_verification_of_block_transactions_in_mempool() {
     // Briefly yield and sleep so the spawned task can first expect an await output request.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let verifier_response = verifier
+    let verifier_response = mempool_verifier
         .clone()
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.clone().into(),
             height,
         })
@@ -1090,13 +1092,10 @@ async fn dont_skip_verification_of_block_transactions_in_mempool() {
         "expected successful verification, got: {verifier_response:?}"
     );
 
-    let crate::transaction::Response::Mempool {
+    let crate::transaction::MempoolResponse {
         transaction: _,
         spent_mempool_outpoints,
-    } = verifier_response.expect("already checked that response is ok")
-    else {
-        panic!("unexpected response variant from transaction verifier for Mempool request")
-    };
+    } = verifier_response.expect("already checked that response is ok");
 
     assert_eq!(
         spent_mempool_outpoints,
@@ -1104,17 +1103,19 @@ async fn dont_skip_verification_of_block_transactions_in_mempool() {
         "spent_mempool_outpoints in tx verifier response should match input_outpoint"
     );
 
-    let make_request = |known_outpoint_hashes| Request::Block {
+    let make_request = || BlockRequest {
         transaction_hash: tx_hash,
-        transaction: Arc::new(tx),
-        known_outpoint_hashes,
+        transaction: Arc::new(tx.clone()),
         known_utxos: Arc::new(HashMap::new()),
         height,
         time: Utc::now(),
     };
 
-    // Both block requests go through full verification (no mempool bypass), so each
-    // calls AwaitUtxo on the state service.
+    // The mempool has already verified this transaction, and it is now submitted twice as a block
+    // request. Each request runs full block verification independently, which for this transaction
+    // means fetching the spent UTXO from the state service, so two AwaitUtxo responses are queued
+    // below. Reuse of the mempool's result — or of the first block request's result — is prevented
+    // structurally: BlockTxVerifier holds no mempool handle and caches nothing across requests.
     let utxo_clone = utxo.clone();
     tokio::spawn(async move {
         state
@@ -1133,23 +1134,17 @@ async fn dont_skip_verification_of_block_transactions_in_mempool() {
     // Briefly yield and sleep so the spawned task can first expect the requests.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let crate::transaction::Response::Block { .. } = verifier
+    let crate::transaction::BlockResponse { .. } = block_verifier
         .clone()
-        .oneshot(make_request.clone()(Arc::new([input_outpoint.hash].into())))
+        .oneshot(make_request())
         .await
-        .expect("should succeed after calling state service")
-    else {
-        panic!("unexpected response variant from transaction verifier for Block request")
-    };
+        .expect("should succeed after calling state service");
 
-    let crate::transaction::Response::Block { .. } = verifier
+    let crate::transaction::BlockResponse { .. } = block_verifier
         .clone()
-        .oneshot(make_request.clone()(Arc::new(HashSet::new())))
+        .oneshot(make_request())
         .await
-        .expect("should succeed after calling state service")
-    else {
-        panic!("unexpected response variant from transaction verifier for Block request")
-    };
+        .expect("should succeed after calling state service");
 
     tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
     // polled before AwaitOutput request and after a mempool transaction with transparent outputs
@@ -1168,7 +1163,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
     let _init_guard = zebra_test::init();
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1251,7 +1246,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -1280,7 +1275,7 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
         .into(),
     );
     let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
-    let verifier = Verifier::new_for_tests(&network, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
 
     let height = NetworkUpgrade::Nu6
         .activation_height(&network)
@@ -1358,7 +1353,7 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
     });
 
     verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -1373,7 +1368,7 @@ async fn state_error_converted_correctly() {
     use zebra_state::DuplicateNullifierError;
 
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1430,7 +1425,7 @@ async fn state_error_converted_correctly() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -1508,7 +1503,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
     let sapling = NetworkUpgrade::Sapling;
 
     for net in Network::iter() {
-        let verifier = Verifier::new_for_tests(
+        let verifier = BlockTxVerifier::new(
             &net,
             service_fn(|_| async { unreachable!("Service should not be called") }),
         );
@@ -1517,11 +1512,10 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 
         assert_eq!(
             verifier
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     height: sapling.activation_height(&net).expect("height"),
                     time: DateTime::<Utc>::MAX_UTC,
                 })
@@ -1543,18 +1537,17 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         assert!(tx_height >= NetworkUpgrade::Nu5.activation_height(&net).expect("height"));
 
-        let verif_res = Verifier::new_for_tests(&net, state)
-            .oneshot(Request::Block {
+        let verif_res = BlockTxVerifier::new(&net, state)
+            .oneshot(BlockRequest {
                 transaction_hash: tx.hash(),
                 transaction: Arc::new(tx),
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: tx_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
             .await;
 
-        assert_eq!(verif_res.expect("success").tx_id(), expected);
+        assert_eq!(verif_res.expect("success").tx_id, expected);
     }
 }
 
@@ -1595,21 +1588,20 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction_hash
     );
 }
@@ -1620,7 +1612,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 async fn v4_transaction_with_last_valid_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1644,18 +1636,17 @@ async fn v4_transaction_with_last_valid_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction.unmined_id()
     );
 }
@@ -1669,7 +1660,7 @@ async fn v4_transaction_with_last_valid_expiry_height() {
 async fn v4_coinbase_transaction_with_low_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1691,18 +1682,17 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction.unmined_id()
     );
 }
@@ -1712,7 +1702,7 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
 async fn v4_transaction_with_too_low_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state_service);
 
     let block_height = NetworkUpgrade::Canopy
         .activation_height(&Network::Mainnet)
@@ -1740,11 +1730,10 @@ async fn v4_transaction_with_too_low_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1766,7 +1755,7 @@ async fn v4_transaction_with_too_low_expiry_height() {
 async fn v4_transaction_with_exceeding_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state_service);
 
     let block_height = block::Height::MAX;
 
@@ -1792,11 +1781,10 @@ async fn v4_transaction_with_exceeding_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1819,7 +1807,7 @@ async fn v4_transaction_with_exceeding_expiry_height() {
 async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state_service);
 
     // Use an arbitrary pre-NU5 block height.
     // It can't be NU5-onward because the expiry height limit is not enforced
@@ -1847,11 +1835,10 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1897,21 +1884,20 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction_hash
     );
 }
@@ -1954,14 +1940,13 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2011,14 +1996,13 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2081,14 +2065,13 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         let result = verifier
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2156,14 +2139,13 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         let result = verifier
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2217,21 +2199,20 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction_hash
     );
 }
@@ -2243,7 +2224,7 @@ async fn v5_transaction_with_last_valid_expiry_height() {
     let network = Network::new_default_testnet();
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&network)
@@ -2268,18 +2249,17 @@ async fn v5_transaction_with_last_valid_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction.unmined_id()
     );
 }
@@ -2291,7 +2271,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let network = Network::new_default_testnet();
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
     let verifier = Buffer::new(verifier, 10);
 
     let block_height = NetworkUpgrade::Nu5
@@ -2315,18 +2295,17 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     let result = verifier
         .clone()
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction.unmined_id()
     );
 
@@ -2338,11 +2317,10 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     let result = verifier
         .clone()
-        .oneshot(Request::Block {
-            transaction_hash: transaction.hash(),
+        .oneshot(BlockRequest {
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2369,11 +2347,10 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     let result = verifier
         .clone()
-        .oneshot(Request::Block {
-            transaction_hash: transaction.hash(),
+        .oneshot(BlockRequest {
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2409,20 +2386,17 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     let verification_result = verifier
         .clone()
-        .oneshot(Request::Block {
-            transaction_hash: transaction.hash(),
+        .oneshot(BlockRequest {
+            transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        verification_result
-            .expect("successful verification")
-            .tx_id(),
+        verification_result.expect("successful verification").tx_id,
         new_transaction.unmined_id()
     );
 }
@@ -2434,7 +2408,7 @@ async fn v5_transaction_with_too_low_expiry_height() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&network)
@@ -2462,11 +2436,10 @@ async fn v5_transaction_with_too_low_expiry_height() {
     };
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2512,12 +2485,11 @@ async fn v5_transaction_with_exceeding_expiry_height() {
 
     let transaction_hash = transaction.hash();
 
-    let verification_result = Verifier::new_for_tests(&Network::Mainnet, state)
-        .oneshot(Request::Block {
+    let verification_result = BlockTxVerifier::new(&Network::Mainnet, state)
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: height_max,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2566,21 +2538,20 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        result.expect("unexpected error response").tx_id,
         transaction_hash
     );
 }
@@ -2625,14 +2596,13 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
 
     let result = verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2677,12 +2647,11 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
         let state = service_fn(|_| async { unreachable!("State service should not be called") });
 
-        let verification_result = Verifier::new_for_tests(&network, state)
-            .oneshot(Request::Block {
+        let verification_result = BlockTxVerifier::new(&network, state)
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2719,22 +2688,21 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
             .await;
 
         assert_eq!(
-            result.expect("unexpected error response").tx_id(),
+            result.expect("unexpected error response").tx_id,
             expected_hash
         );
     })
@@ -2797,7 +2765,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     // Initialize the verifier
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called.") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = BlockTxVerifier::new(&network, state_service);
     let verifier = Buffer::new(verifier, 10);
 
     // Test the transaction verifier.
@@ -2811,11 +2779,10 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     let result = loop {
         let result = verifier
             .clone()
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction: transaction.clone(),
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2855,16 +2822,15 @@ fn v4_with_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = timeout(
             test_timeout(),
-            verifier.oneshot(Request::Block {
+            verifier.oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             }),
@@ -2873,7 +2839,7 @@ fn v4_with_sapling_spends() {
         .expect("timeout expired");
 
         assert_eq!(
-            result.expect("unexpected error response").tx_id(),
+            result.expect("unexpected error response").tx_id,
             expected_hash
         );
     });
@@ -2902,15 +2868,14 @@ fn v4_with_duplicate_sapling_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2948,22 +2913,21 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Initialize the verifier
         let state_service =
             service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+        let verifier = BlockTxVerifier::new(&network, state_service);
 
         // Test the transaction verifier
         let result = verifier
-            .oneshot(Request::Block {
+            .oneshot(BlockRequest {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
             .await;
 
         assert_eq!(
-            result.expect("unexpected error response").tx_id(),
+            result.expect("unexpected error response").tx_id,
             expected_hash
         );
     })
@@ -2987,7 +2951,7 @@ async fn v5_with_sapling_spends() {
         let expected_hash = tx.unmined_id();
         let height = tx.expiry_height().expect("expiry height");
 
-        let verifier = Verifier::new_for_tests(
+        let verifier = BlockTxVerifier::new(
             &net,
             service_fn(|_| async { unreachable!("State service should not be called") }),
         );
@@ -2995,11 +2959,10 @@ async fn v5_with_sapling_spends() {
         assert_eq!(
             timeout(
                 test_timeout(),
-                verifier.oneshot(Request::Block {
+                verifier.oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
@@ -3007,7 +2970,7 @@ async fn v5_with_sapling_spends() {
             .await
             .expect("timeout expired")
             .expect("unexpected error response")
-            .tx_id(),
+            .tx_id,
             expected_hash
         );
     }
@@ -3029,18 +2992,17 @@ async fn v5_with_duplicate_sapling_spends() {
         // Duplicate one of the spends
         let duplicate_nullifier = duplicate_sapling_spend(&mut tx);
 
-        let verifier = Verifier::new_for_tests(
+        let verifier = BlockTxVerifier::new(
             &net,
             service_fn(|_| async { unreachable!("State service should not be called") }),
         );
 
         assert_eq!(
             verifier
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
@@ -3087,18 +3049,17 @@ async fn v5_with_duplicate_orchard_action() {
         orchard_shielded_data.actions = AtLeastOne::from_vec(actions_vec)
             .expect("pushing one element never breaks at least one constraints");
 
-        let verifier = Verifier::new_for_tests(
+        let verifier = BlockTxVerifier::new(
             &net,
             service_fn(|_| async { unreachable!("State service should not be called") }),
         );
 
         assert_eq!(
             verifier
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
@@ -3205,43 +3166,43 @@ async fn orchard_disabling_soft_fork_rejects_orchard_actions_in_blocks_and_mempo
         "soft fork must be active at the transaction's height",
     );
 
-    let expected = Err(TransactionError::Other(
-        "transaction has Orchard actions (temporarily disabled)".into(),
-    ));
+    let expected_err =
+        TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into());
 
     // The soft-fork check runs before any state-service query, so the state
     // service must never be called.
-    let block_response = Verifier::new_for_tests(
+    let block_response = BlockTxVerifier::new(
         &network,
         service_fn(|_| async { unreachable!("state service should not be called") }),
     )
-    .oneshot(Request::Block {
+    .oneshot(BlockRequest {
         transaction_hash: tx.hash(),
         transaction: Arc::new(tx.clone()),
         known_utxos: Arc::new(HashMap::new()),
-        known_outpoint_hashes: Arc::new(HashSet::new()),
         height,
         time: DateTime::<Utc>::MAX_UTC,
     })
     .await;
 
     assert_eq!(
-        block_response, expected,
+        block_response,
+        Err(expected_err.clone()),
         "block verification must reject a transaction with Orchard actions after the soft fork",
     );
 
-    let mempool_response = Verifier::new_for_tests(
+    let mempool_response = MempoolTxVerifier::new_for_tests(
         &network,
         service_fn(|_| async { unreachable!("state service should not be called") }),
     )
-    .oneshot(Request::Mempool {
+    .oneshot(MempoolRequest {
         transaction: tx.into(),
         height,
     })
     .await;
 
     assert_eq!(
-        mempool_response, expected,
+        mempool_response,
+        Err(expected_err),
         "mempool verification must reject a transaction with Orchard actions after the soft fork",
     );
 }
@@ -3299,7 +3260,7 @@ async fn orchard_disabling_soft_fork_accepts_non_orchard_transactions() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
-    let verifier = Verifier::new_for_tests(&network, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
 
     tokio::spawn(async move {
         state
@@ -3325,7 +3286,7 @@ async fn orchard_disabling_soft_fork_accepts_non_orchard_transactions() {
     });
 
     let response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: transaction.into(),
             height: transaction_block_height,
         })
@@ -3383,7 +3344,7 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
     // a block is the nullifier and anchor check.
     let mut state: MockService<zebra_state::Request, zebra_state::Response, _, _> =
         MockService::build().for_prop_tests();
-    let accept_verifier = Verifier::new_for_tests(&accepting_network, state.clone());
+    let accept_verifier = BlockTxVerifier::new(&accepting_network, state.clone());
 
     tokio::spawn(async move {
         state
@@ -3399,11 +3360,10 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
     });
 
     let accept_response = accept_verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: tx.hash(),
             transaction: Arc::new(tx.clone()),
             known_utxos: Arc::new(HashMap::new()),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
             height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -3421,15 +3381,14 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
         .to_network()
         .expect("failed to build configured network");
 
-    let reject_response = Verifier::new_for_tests(
+    let reject_response = BlockTxVerifier::new(
         &rejecting_network,
         service_fn(|_| async { unreachable!("state service should not be called") }),
     )
-    .oneshot(Request::Block {
+    .oneshot(BlockRequest {
         transaction_hash: tx.hash(),
         transaction: Arc::new(tx),
         known_utxos: Arc::new(HashMap::new()),
-        known_outpoint_hashes: Arc::new(HashSet::new()),
         height,
         time: DateTime::<Utc>::MAX_UTC,
     })
@@ -3477,7 +3436,11 @@ async fn v5_consensus_branch_ids() {
     };
 
     for network in Network::iter() {
-        let verifier = Buffer::new(Verifier::new_for_tests(&network, state.clone()), 10);
+        let block_verifier = Buffer::new(BlockTxVerifier::new(&network, state.clone()), 10);
+        let mempool_verifier = Buffer::new(
+            MempoolTxVerifier::new_for_tests(&network, state.clone()),
+            10,
+        );
 
         while let Some(next_nu) = network_upgrade.next_upgrade() {
             // Check an outdated network upgrade.
@@ -3488,22 +3451,21 @@ async fn v5_consensus_branch_ids() {
                 continue;
             };
 
-            let block_req = verifier
+            let block_req = block_verifier
                 .clone()
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is outdated for this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
-            let mempool_req = verifier
+            let mempool_req = mempool_verifier
                 .clone()
-                .oneshot(Request::Mempool {
+                .oneshot(MempoolRequest {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is outdated for this height.
                     height,
@@ -3518,28 +3480,27 @@ async fn v5_consensus_branch_ids() {
             // Check the currently supported network upgrade.
             let height = network_upgrade.activation_height(&network).expect("height");
 
-            let block_req = verifier
+            let block_req = block_verifier
                 .clone()
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
-                .map_ok(|rsp| rsp.tx_id())
+                .map_ok(|rsp| rsp.tx_id)
                 .map_err(|e| format!("{e}"));
 
-            let mempool_req = verifier
+            let mempool_req = mempool_verifier
                 .clone()
-                .oneshot(Request::Mempool {
+                .oneshot(MempoolRequest {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is supported by this height.
                     height,
                 })
-                .map_ok(|rsp| rsp.tx_id())
+                .map_ok(|rsp| rsp.transaction.transaction.id)
                 .map_err(|e| format!("{e}"));
 
             let state_req = async {
@@ -3577,22 +3538,21 @@ async fn v5_consensus_branch_ids() {
 
             let height = network_upgrade.activation_height(&network).expect("height");
 
-            let block_req = verifier
+            let block_req = block_verifier
                 .clone()
-                .oneshot(Request::Block {
+                .oneshot(BlockRequest {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
-                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is not supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
-            let mempool_req = verifier
+            let mempool_req = mempool_verifier
                 .clone()
-                .oneshot(Request::Mempool {
+                .oneshot(MempoolRequest {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is not supported by this height.
                     height,
@@ -4125,7 +4085,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
 #[tokio::test]
 async fn mempool_zip317_error() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
         .activation_height(&Network::Mainnet)
@@ -4172,7 +4132,7 @@ async fn mempool_zip317_error() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -4189,7 +4149,7 @@ async fn mempool_zip317_error() {
 #[tokio::test]
 async fn mempool_zip317_ok() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Nu5
         .activation_height(&Network::Mainnet)
@@ -4244,7 +4204,7 @@ async fn mempool_zip317_ok() {
     });
 
     let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        .oneshot(MempoolRequest {
             transaction: tx.into(),
             height,
         })
@@ -4258,29 +4218,29 @@ async fn mempool_zip317_ok() {
 
 /// Test for CVE-2026-34377 https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh
 ///
-/// Ensure a block with a transaction with garbage Orchard proofs is rejected, even if the mempool has a valid version of the same transaction.
+/// Ensure a block transaction with garbage Orchard proofs is rejected. Corrupting only the
+/// authorizing data leaves the txid unchanged (ZIP-244), so a valid and a garbage version of the
+/// same transaction share a mined id. The original bug let a mempool-cached result for that id
+/// stand in for verification of the block transaction.
+///
+/// [`BlockTxVerifier`] has no mempool handle, so it cannot consult mempool state at all. That
+/// makes the bypass structurally impossible rather than merely untaken, which is why this test
+/// only needs to check that the garbage proofs are rejected on their own merits.
 #[tokio::test(flavor = "multi_thread")]
 async fn block_with_garbage_orchard_proofs_is_rejected() {
-    use zebra_chain::{primitives::Halo2Proof, transaction::VerifiedUnminedTx};
+    use zebra_chain::primitives::Halo2Proof;
 
     let _init_guard = zebra_test::init();
 
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    let verifier = BlockTxVerifier::new(&Network::Mainnet, state.clone());
     let verifier = Buffer::new(verifier, 1);
-
-    mempool_setup_tx
-        .send(mempool.clone())
-        .ok()
-        .expect("send should succeed");
 
     let height = NetworkUpgrade::Nu6
         .activation_height(&Network::Mainnet)
         .expect("Nu6 activation height is specified");
     let fund_height = (height - 1).expect("too small");
-    let (input, output, known_utxos) = mock_transparent_transfer(
+    let (input, output, _known_utxos) = mock_transparent_transfer(
         fund_height,
         true,
         0,
@@ -4299,10 +4259,6 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
     insert_fake_orchard_shielded_data(&mut tx);
 
     let tx_hash = tx.hash();
-    let input_outpoint = match tx.inputs()[0] {
-        transparent::Input::PrevOut { outpoint, .. } => outpoint,
-        transparent::Input::Coinbase { .. } => panic!("not coinbase"),
-    };
 
     // corrupt only auth data, txid stays the same (ZIP-244)
     let mut garbage_tx = tx.clone();
@@ -4314,41 +4270,12 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
     }
     assert_eq!(tx.hash(), garbage_tx.hash());
 
-    // simulate valid version in mempool
-    let spent_output = known_utxos
-        .get(&input_outpoint)
-        .unwrap()
-        .utxo
-        .output
-        .clone();
-    let verified_tx = VerifiedUnminedTx::new(
-        tx.clone().into(),
-        Amount::try_from(10000).unwrap(),
-        0,
-        0,
-        Arc::new(vec![spent_output]),
-    )
-    .unwrap();
-
-    let mut mc = mempool.clone();
-    tokio::spawn(async move {
-        mc.expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
-            .await
-            .unwrap()
-            .respond(mempool::Response::TransactionWithDeps {
-                transaction: verified_tx,
-                dependencies: [input_outpoint.hash].into(),
-            });
-    });
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     // submit garbage version as block tx, must be rejected
     let resp = verifier
         .clone()
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: tx_hash,
             transaction: Arc::new(garbage_tx),
-            known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),
             known_utxos: Arc::new(HashMap::new()),
             height,
             time: Utc::now(),
@@ -4360,27 +4287,21 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
 
 /// Regression test for the mempool-cache expiry bypass vulnerability.
 ///
-/// A non-coinbase transaction with `nExpiryHeight = H+1` that was cached in the
-/// mempool as valid at height `H+1` can be presented inside a block at height
-/// `H+2`.  The block transaction verifier must re-run the expiry check even
-/// when it hits the mempool cache fast path in `find_verified_unmined_tx`;
-/// skipping that check lets Zebra accept a block that honest nodes reject,
-/// causing a consensus split.
+/// A non-coinbase transaction with `nExpiryHeight = H+1` can be admitted to the mempool while
+/// the best tip is still `H`, then presented inside a candidate block at height `H+2`, where it
+/// has expired. Block transaction verification must reject it.
 ///
-/// # Attack window
+/// The original bug was a fast path that returned a mempool-cached verification result for a
+/// transaction's mined id before re-running the expiry check, so the block passed semantic
+/// verification with an expired transaction inside — a consensus split, since honest nodes
+/// reject that block. The window existed because the mempool is active whenever Zebra is close
+/// to the tip (not only exactly at it), and the download pipeline verifies blocks up to
+/// `tip + full_verify_concurrency_limit` ahead of it.
 ///
-/// The attack is possible because:
-/// * The mempool is active while Zebra is "close to tip" (not only at exact tip).
-/// * The download/verification pipeline accepts blocks up to
-///   `tip + full_verify_concurrency_limit` ahead of the current tip.
-/// * `find_verified_unmined_tx` returns the cached result before the normal
-///   expiry validation.
-///
-/// Concretely: while Zebra's best tip is still `H`, the mempool can already
-/// hold a `VerifiedUnminedTx` for a transaction with `nExpiryHeight = H+1`.
-/// If the verifier is simultaneously asked to semantically verify a candidate
-/// block at `H+2` that contains the same transaction, the cache hit fires and
-/// the block passes semantic verification with an expired transaction inside.
+/// That fast path no longer exists, and [`BlockTxVerifier`] holds no mempool handle, so the
+/// bypass can no longer be reconstructed from a block request. What remains testable, and what
+/// this test pins, is the rule the bypass evaded: block verification rejects a transaction whose
+/// `nExpiryHeight` is below the block height.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() {
     let _init_guard = zebra_test::init();
@@ -4419,34 +4340,21 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     };
 
     let tx_hash = tx.hash();
-    let input_outpoint = match tx.inputs()[0] {
-        transparent::Input::PrevOut { outpoint, .. } => outpoint,
-        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
-    };
 
-    let mempool: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
-    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
-    let verifier = Verifier::new(&network, state.clone(), mempool_setup_rx);
+    let verifier = BlockTxVerifier::new(&network, state.clone());
     let verifier = Buffer::new(verifier, 1);
 
-    mempool_setup_tx
-        .send(mempool.clone())
-        .ok()
-        .expect("send should succeed");
-
-    // Submit the same transaction as a Block request at expired_block_height
-    // (H+2).  The known_outpoint_hashes set satisfies the dependency check
-    // inside find_verified_unmined_tx so the cache hit fires immediately.
+    // Submit the transaction as a block request at expired_block_height (H+2).
     //
     // The verifier must return Err(TransactionError::ExpiredTransaction)
-    // because H+2 > nExpiryHeight.
+    // because H+2 > nExpiryHeight. The expiry check runs before any state
+    // query, so the mock state service is never called.
     let result = timeout(
         test_timeout(),
-        verifier.clone().oneshot(Request::Block {
+        verifier.clone().oneshot(BlockRequest {
             transaction_hash: tx_hash,
             transaction: Arc::new(tx.clone()),
-            known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),
             known_utxos: Arc::new(HashMap::new()),
             height: expired_block_height,
             time: Utc::now(),
@@ -4457,8 +4365,8 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
 
     // Buffer boxes the service error, so downcast to check the specific variant.
     let err = result.expect_err(
-        "expected block verification to fail for a transaction with \
-         expired nExpiryHeight mined via the mempool cache path",
+        "expected block verification to fail for a transaction whose \
+         nExpiryHeight is below the block height",
     );
     let tx_err = err
         .downcast::<TransactionError>()
@@ -4466,7 +4374,7 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     assert!(
         matches!(*tx_err, TransactionError::ExpiredTransaction { .. }),
         "expected ExpiredTransaction error for block at height {expired_block_height:?} \
-         with nExpiryHeight {mempool_height:?} via mempool cache; \
+         with nExpiryHeight {mempool_height:?}; \
          got: {tx_err:?}"
     );
 }

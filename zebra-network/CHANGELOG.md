@@ -14,11 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Connection-attempt, terminal-outcome, and remote-version metrics with bounded network,
   direction, address-family, lifecycle-stage, outcome, and implementation labels.
+- `constants::MISBEHAVIOR_FLUSH_INTERVAL`, the interval between flushes of batched peer
+  misbehaviour updates into the address book. This was previously an unnamed literal in
+  `init_with_block_gossip_peer_ips()`; the value is unchanged outside this crate's tests
+  ([#11129](https://github.com/ZcashFoundation/zebra/pull/11129)).
 
 ### Changed
 
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so multiple
   network instances in one process do not overwrite each other's values.
+- `AddressBook::update()` logs a change rejected for a banned peer IP at `debug` instead of `warn`,
+  since remote peers control how often it fires
+  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+
+### Fixed
+
+- Banning a peer IP now removes every address book entry for that IP, and `reconnection_peers()`
+  never returns an address whose IP is banned. Previously an entry for the banned IP on another
+  port could survive the ban and stay at the front of the reconnection order for the lifetime of
+  the process ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+
+### Security
+
+- Inbound connections are canonicalized at the accept boundary, so an IPv4 peer that connects to a
+  dual-stack listener as an IPv4-mapped IPv6 address (`::ffff:A.B.C.D`) is keyed on its canonical
+  IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
+  peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
+  twice towards the per-IP inbound connection limit
+  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
 
 ## [11.0.0] - 2026-07-27
 

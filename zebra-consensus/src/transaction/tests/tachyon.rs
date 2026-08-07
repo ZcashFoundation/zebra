@@ -22,7 +22,7 @@ use zcash_tachyon::{
 
 use crate::{
     error::TransactionError,
-    transaction::{Request, Response, Verifier},
+    transaction::{BlockRequest, BlockResponse, BlockTxVerifier},
 };
 
 /// A regtest network with NU7 scheduled, and NU7's activation height.
@@ -155,17 +155,16 @@ async fn verify_block_transaction(
     network: &Network,
     height: Height,
     tx: Transaction,
-) -> Result<Response, TransactionError> {
+) -> Result<BlockResponse, TransactionError> {
     // No transparent inputs anywhere in these tests, so the verifier never calls the state.
     let state: MockService<zebra_state::Request, zebra_state::Response, PanicAssertion> =
         MockService::build().for_unit_tests();
-    let verifier = Verifier::new_for_tests(network, state);
+    let verifier = BlockTxVerifier::new(network, state);
 
     verifier
-        .oneshot(Request::Block {
+        .oneshot(BlockRequest {
             transaction_hash: tx.hash(),
             transaction: Arc::new(tx),
-            known_outpoint_hashes: Arc::new(Default::default()),
             known_utxos: Arc::new(HashMap::new()),
             height,
             time: Utc::now(),

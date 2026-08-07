@@ -73,6 +73,10 @@ jobs:
           toolchain: 1.97.0
           cache-key: unit-tests-1.97.0-default-release-binaries
           cache-on-failure: true
+          # Restore on every ref, but only write from main. This is the longest
+          # job in CI, so it is the one that suffers most when PR-scoped caches
+          # evict main's copy. See "Rust build caching" in README.md.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-nextest
