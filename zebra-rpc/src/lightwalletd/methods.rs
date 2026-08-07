@@ -315,7 +315,7 @@ where
             let transactions = match mempool_transactions(mempool.clone()).await {
                 Ok(transactions) => transactions,
                 Err(status) => {
-                    let _ = response_sender.send(Err(status)).await;
+                    let _ = send_bounded(&response_sender, Err(status)).await;
                     return;
                 }
             };
@@ -442,9 +442,11 @@ where
                 let root_hash = match hex::decode(&subtree.root) {
                     Ok(root_hash) => root_hash,
                     Err(_) => {
-                        let _ = response_sender
-                            .send(Err(Status::internal("invalid subtree root hex")))
-                            .await;
+                        let _ = send_bounded(
+                            &response_sender,
+                            Err(Status::internal("invalid subtree root hex")),
+                        )
+                        .await;
                         return;
                     }
                 };
@@ -456,18 +458,22 @@ where
                 {
                     Ok(ReadResponse::BlockHash(Some(hash))) => hash,
                     Ok(ReadResponse::BlockHash(None)) => {
-                        let _ = response_sender
-                            .send(Err(Status::not_found("completing block not found")))
-                            .await;
+                        let _ = send_bounded(
+                            &response_sender,
+                            Err(Status::not_found("completing block not found")),
+                        )
+                        .await;
                         return;
                     }
                     Ok(_) => unreachable!("unexpected response type from ReadStateService"),
                     Err(error) => {
-                        let _ = response_sender
-                            .send(Err(Status::unavailable(format!(
+                        let _ = send_bounded(
+                            &response_sender,
+                            Err(Status::unavailable(format!(
                                 "failed to read completing block hash: {error}"
-                            ))))
-                            .await;
+                            ))),
+                        )
+                        .await;
                         return;
                     }
                 };
@@ -478,7 +484,7 @@ where
                     completing_block_height: subtree.end_height.0.into(),
                 };
 
-                if response_sender.send(Ok(subtree_root)).await.is_err() {
+                if !send_bounded(&response_sender, Ok(subtree_root)).await {
                     return;
                 }
             }
@@ -674,7 +680,7 @@ fn block_range_stream<ReadStateService: ReadState>(
             let response = compact_block(read_state.clone(), hash_or_height, nullifiers_only).await;
             let is_err = response.is_err();
 
-            if response_sender.send(response).await.is_err() || is_err {
+            if !send_bounded(&response_sender, response).await || is_err {
                 return;
             }
         }
@@ -736,7 +742,7 @@ where
             };
             let is_err = response.is_err();
 
-            if response_sender.send(response).await.is_err() || is_err {
+            if !send_bounded(&response_sender, response).await || is_err {
                 return;
             }
         }
@@ -876,6 +882,22 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
     excluded
 }
 
+/// Sends `item` to a response stream, returning false if the client disconnected or
+/// stopped reading.
+///
+/// The send is bounded by [`STREAM_SEND_TIMEOUT`] so a client that holds its
+/// connection open without consuming the stream can't park the producer task, and
+/// its buffered responses, for the lifetime of the process.
+async fn send_bounded<T>(
+    response_sender: &tokio::sync::mpsc::Sender<Result<T, Status>>,
+    item: Result<T, Status>,
+) -> bool {
+    matches!(
+        tokio::time::timeout(STREAM_SEND_TIMEOUT, response_sender.send(item)).await,
+        Ok(Ok(()))
+    )
+}
+
 /// Sends a mempool transaction to a raw transaction stream, returning false if the
 /// client disconnected or hung, or the transaction could not be serialized.
 async fn send_raw_mempool_tx(
@@ -883,9 +905,11 @@ async fn send_raw_mempool_tx(
     tx: &transaction::UnminedTx,
 ) -> bool {
     let Ok(data) = tx.transaction.zcash_serialize_to_vec() else {
-        let _ = response_sender
-            .send(Err(Status::internal("failed to serialize transaction")))
-            .await;
+        let _ = send_bounded(
+            response_sender,
+            Err(Status::internal("failed to serialize transaction")),
+        )
+        .await;
         return false;
     };
 
@@ -893,14 +917,7 @@ async fn send_raw_mempool_tx(
     // says `GetMempoolStream` sends the latest block height instead, but that
     // documentation is wrong and lightwalletd always sends 0:
     // <https://github.com/zcash/librustzcash/issues/1484>
-    let send = response_sender.send(Ok(RawTransaction { data, height: 0 }));
-
-    // The send is bounded so a hung consumer can't block this task across block
-    // boundaries, which would prevent the stream from closing on a new block.
-    matches!(
-        tokio::time::timeout(STREAM_SEND_TIMEOUT, send).await,
-        Ok(Ok(()))
-    )
+    send_bounded(response_sender, Ok(RawTransaction { data, height: 0 })).await
 }
 
 /// Converts a [`GetTreestateResponse`] into a lightwalletd [`TreeState`].
