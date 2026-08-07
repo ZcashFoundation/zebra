@@ -16,17 +16,17 @@ ADR [0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md) records
 
 ## Update mechanics
 
-Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones). A workflow_dispatch is a single job (user picks the zone). Every job runs the same flow for its zonal MIG:
+The event-driven workflow builds an image with its trigger-specific inputs, then passes the complete immutable GAR `repository@sha256:...` identity to the reusable deployment workflow. Release automation can call that same deployment boundary with an image prepared earlier. Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 zones), while a workflow_dispatch runs one job for the selected zone. Every job runs the same flow for its zonal MIG:
 
 1. Build a new instance template with the commit's container image.
 2. Ensure the zonal stateful disk exists. On first deploy, create it from the latest matching cache image. On subsequent deploys, attach the existing disk.
 3. If the zonal MIG exists, run `rolling-action start-update --max-unavailable=1`. True per-zone rolling: this zone's MIG replaces its instance while the other two zones keep serving. The stateful disk persists across the replace.
 4. If the zonal MIG does not exist, create it with `--size=1` and apply the stateful policy.
-5. Assign the static IP (push and release only; workflow_dispatch uses ephemeral). Zone-to-IP mapping is deterministic: zone `b` → primary, zone `c` → secondary, zone `d` → tertiary.
+5. Assign the static IP in `stage` and `prod`; dev deployments use ephemeral IPs. Zone-to-IP mapping is deterministic: zone `b` → primary, zone `c` → secondary, zone `d` → tertiary.
 
 Cache images come from `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first.
 
-Deploy success has two channels: `deploy-nodes` reports infrastructure, `verify-nodes` reports application health. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-channels) for details.
+Each `deploy-nodes` cell holds its per-MIG concurrency lock through template rollout and optional application-health verification. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-stages) for details.
 
 ## Triggers
 

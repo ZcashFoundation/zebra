@@ -150,6 +150,7 @@ jobs:
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
+      source_sha: ${{ github.sha }}
       environment: ${{ needs.determine-environment.outputs.environment }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}

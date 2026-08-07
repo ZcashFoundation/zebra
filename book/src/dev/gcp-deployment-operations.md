@@ -14,12 +14,14 @@ For production, set `P=zfnd-prod-zebra` instead.
 
 Zonal MIGs use `--zone` (not `--region`). One MIG per zone per network. MIG names end with the zone letter (`-b`, `-c`, `-d`).
 
-## Deploy success has two channels
+## Deploy success has two stages
 
-The workflow reports two independent signals:
+Each `deploy-nodes` matrix cell reports two sequential signals:
 
-- `deploy-nodes` (and `failure-issue` with label `S-ci-fail-release-auto-issue`) reports **infrastructure**: template, zonal MIG, stateful disk, and static IP landed. Usually green within 3-5 minutes per matrix cell; a failure means the deploy itself broke.
-- `verify-nodes` (and `verify-failure-issue` with label `S-ci-fail-verify-auto-issue`) reports **application**: the zonal MIG reached HEALTHY. Up to 90 minutes; a failure means the node took longer than that to establish peers and catch up to chain tip. The MIG itself is fine; on-call action is usually "wait, or investigate why sync is slow".
+- **Template rollout** waits up to 10 minutes for the requested template to reach the zonal MIG. A failure means the deployment infrastructure did not converge.
+- **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. A failure means the node took longer than that to establish peers and catch up to chain tip; on-call action is usually "wait, or investigate why sync is slow".
+
+The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `S-ci-fail-release-auto-issue`.
 
 ## Quick reference
 
@@ -242,7 +244,7 @@ Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-The workflow assigns them via per-instance configs for push and release deploys; workflow_dispatch deploys use ephemeral IPs. Reserve new ones manually with `gcloud compute addresses create` before adding capacity.
+The workflow assigns them via per-instance configs in `stage` and `prod`; dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that selects `prod` updates the stable production MIG and reserved IP for its selected network and zone. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
 
 **Cache images** are produced by `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
 

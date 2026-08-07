@@ -58,7 +58,7 @@ Operating a multi-instance regional MIG also coupled deploy-landed to node-healt
 - Good, because the MIG is the instance: 1:1:1:1 between MIG, instance, stateful disk, static IP. No "regional disks with the same name across zones" ambiguity.
 - Good, because `--max-unavailable=1` is natively valid (single-instance MIG). Updates are true per-zone rolling: one zonal MIG replaces its instance while the sister zonal MIGs keep serving.
 - Good, because per-zone failures are isolated: one zone's warmup slowness doesn't block the others, and the matrix's `fail-fast: false` gives six independent (network, zone) status cells on the GitHub UI.
-- Good, because deploy-landed (`--version-target-reached`) and node-healthy (`--stable` in a separate `verify-nodes` job) are already distinct signals with distinct failure labels.
+- Good, because deploy-landed (`--version-target-reached`) and node-healthy (`--stable`) are distinct steps, while the per-cell deployment lock covers both.
 - Good, because `find-cached-disks` runs per-network (one lookup per network, image seeds all three zones).
 - Neutral, because the resource count grows from 2 MIGs to 6 per environment. Fewer resources per MIG (1 instance, 1 disk, 1 IP each) keeps each MIG's blast radius tiny.
 - Bad, because migrating from regional-stateful to zonal is a one-shot operator-driven migration per environment.
@@ -84,17 +84,17 @@ One MIG per matrix cell. Names encode every identity axis:
 - Every trigger runs per-cell: `rolling-action start-update` on an existing zonal MIG with `--max-unavailable=1 --max-surge=0 --replacement-method=recreate`. True per-zone rolling.
 - Fresh MIG creation pre-creates the zonal disk from the network-scoped cache image, then the template attaches it via `--disk=name=…` (not `--create-disk`). This decouples "disk populated from image" from "MIG attaches disk" and handles both fresh deploys and manual pre-seeding identically.
 - The MIG's health check (`/healthy`, `--initial-delay=3600`) governs autohealing tolerance.
-- Deploy-landed waits `--version-target-reached --timeout=600` (template rollout done). Verify-nodes waits `--stable --timeout=5400` (peer mesh + warmup complete). Distinct failure labels: `S-ci-fail-release-auto-issue` for infrastructure, `S-ci-fail-verify-auto-issue` for slow warmup.
+- Deploy-landed waits `--version-target-reached --timeout=600` (template rollout done). When verification is enabled, the same locked job then waits `--stable --timeout=5400` (peer mesh + warmup complete). Keeping both steps under the per-cell deployment lock prevents a later run from replacing the template during health verification.
 
 ### Static IPs
 
-Deterministic zone-to-IP mapping for push and release:
+Deterministic zone-to-IP mapping for `stage` and `prod`:
 
 - `us-east1-b` → `zebra-${network}` (primary)
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-Workflow_dispatch deploys use ephemeral IPs (PR smoke tests don't need stable external addresses).
+Dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that explicitly selects `prod` updates the stable production MIG and reserved IP for its selected network and zone.
 
 ### Labels
 
