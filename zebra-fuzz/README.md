@@ -33,7 +33,7 @@ Two properties of this layout are deliberate:
   relative paths (`../../zebra-chain`, …). Flattening the directory breaks those
   paths.
 - **`fuzz/Cargo.toml` declares its own `[workspace]`.** The fuzz crate is
-  therefore *not* a member of the Zebra workspace, and is not built by
+  therefore _not_ a member of the Zebra workspace, and is not built by
   `cargo build`, `cargo test`, or `cargo clippy` at the repository root. It is
   also absent from the per-crate CI matrix, which is derived from `cargo tree`.
 
@@ -135,7 +135,7 @@ consequences are worth knowing about.
 
 ### A stale lockfile fails in a confusing place
 
-Cargo updates only the packages it *must* update; it does not upgrade a
+Cargo updates only the packages it _must_ update; it does not upgrade a
 dependency that already satisfies its version requirement. A transitive
 dependency can therefore stay pinned at an old patch release while the Zebra
 workspace moves on, and the resulting build failure surfaces inside a crate that
