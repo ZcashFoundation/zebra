@@ -1101,6 +1101,7 @@ async fn block_verification_does_not_use_mempool_verified_state() {
     );
 
     let make_request = || BlockRequest {
+        crypto_already_verified: false,
         transaction_hash: tx_hash,
         transaction: Arc::new(tx.clone()),
         known_utxos: Arc::new(HashMap::new()),
@@ -1510,6 +1511,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
         assert_eq!(
             verifier
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -1536,6 +1538,7 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
 
         let verif_res = BlockTxVerifier::new(&net, state)
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: tx.hash(),
                 transaction: Arc::new(tx),
                 known_utxos: Arc::new(HashMap::new()),
@@ -1589,6 +1592,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -1634,6 +1638,7 @@ async fn v4_transaction_with_last_valid_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -1680,6 +1685,7 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -1728,6 +1734,7 @@ async fn v4_transaction_with_too_low_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -1779,6 +1786,7 @@ async fn v4_transaction_with_exceeding_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -1833,6 +1841,7 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -1885,6 +1894,7 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
@@ -1941,6 +1951,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -1956,6 +1967,157 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
                 .to_string()
         ))
     );
+}
+
+/// Test that `crypto_already_verified` skips transparent script verification.
+///
+/// This is the same transaction as
+/// [`v4_transaction_with_transparent_transfer_is_rejected_by_the_script`], which fails script
+/// verification. Setting the flag must make it pass, proving the skip actually elides the
+/// cryptographic checks rather than silently doing nothing.
+#[tokio::test]
+async fn crypto_already_verified_skips_script_verification() {
+    let network = Network::Mainnet;
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(&network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Create a fake transparent transfer whose script does not succeed.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        false,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
+
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = BlockTxVerifier::new(&network, state_service);
+
+    let result = verifier
+        .oneshot(BlockRequest {
+            crypto_already_verified: true,
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(transaction),
+            known_utxos: Arc::new(known_utxos),
+            height: transaction_block_height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "the invalid script should not have been verified: {result:?}"
+    );
+}
+
+/// Test that `crypto_already_verified` still applies the consensus rules that depend on the
+/// verification context.
+///
+/// Skipping these would reintroduce the class of bug this flag's callers exist to detect: at
+/// NU6 activation, transactions with stale consensus branch IDs entered the mempool and made
+/// block templates unmineable. See <https://github.com/ZcashFoundation/zebra/issues/9301>.
+#[tokio::test]
+async fn crypto_already_verified_still_checks_consensus_rules() {
+    let network = Network::Mainnet;
+
+    let nu5_activation_height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 activation height is specified");
+
+    let transaction_block_height =
+        (nu5_activation_height + 10).expect("transaction block height is too large");
+
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    // Both transactions below use a script that *would* verify, so the only thing that can
+    // reject them is a consensus rule.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(1).expect("invalid value"),
+    );
+
+    // A transaction committing to the wrong network upgrade, which is the NU6 failure mode.
+    let wrong_branch_id_tx = Transaction::V5 {
+        inputs: vec![input.clone()],
+        outputs: vec![output.clone()],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Canopy,
+    };
+
+    // A transaction that expired before the block it is being verified for.
+    let expiry_height =
+        (transaction_block_height - 1).expect("expiry height is not too small for the test");
+    let expired_tx = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade: NetworkUpgrade::Nu5,
+    };
+
+    let expected_errors = [
+        TransactionError::WrongConsensusBranchId,
+        TransactionError::ExpiredTransaction {
+            expiry_height,
+            block_height: transaction_block_height,
+            transaction_hash: expired_tx.hash(),
+        },
+    ];
+
+    for (transaction, expected_error) in [wrong_branch_id_tx, expired_tx]
+        .into_iter()
+        .zip(expected_errors)
+    {
+        // The rule must be applied whether or not the cryptographic checks are skipped.
+        for crypto_already_verified in [false, true] {
+            let state_service =
+                service_fn(|_| async { unreachable!("State service should not be called") });
+            let verifier = BlockTxVerifier::new(&network, state_service);
+
+            let result = verifier
+                .oneshot(BlockRequest {
+                    crypto_already_verified,
+                    transaction_hash: transaction.hash(),
+                    transaction: Arc::new(transaction.clone()),
+                    known_utxos: Arc::new(known_utxos.clone()),
+                    height: transaction_block_height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await;
+
+            assert_eq!(
+                result,
+                Err(expected_error.clone()),
+                "consensus rule must be applied with crypto_already_verified = \
+                 {crypto_already_verified}"
+            );
+        }
+    }
 }
 
 /// Test if V4 transaction with an internal double spend of transparent funds is rejected.
@@ -1997,6 +2159,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -2066,6 +2229,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let result = verifier
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
@@ -2140,6 +2304,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let result = verifier
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
@@ -2200,6 +2365,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -2247,6 +2413,7 @@ async fn v5_transaction_with_last_valid_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -2293,6 +2460,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -2315,6 +2483,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -2345,6 +2514,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -2384,6 +2554,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let verification_result = verifier
         .clone()
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: new_transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -2434,6 +2605,7 @@ async fn v5_transaction_with_too_low_expiry_height() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -2484,6 +2656,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
 
     let verification_result = BlockTxVerifier::new(&Network::Mainnet, state)
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
@@ -2539,6 +2712,7 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -2597,6 +2771,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let result = verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
@@ -2646,6 +2821,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
         let verification_result = BlockTxVerifier::new(&network, state)
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
@@ -2690,6 +2866,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2777,6 +2954,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
         let result = verifier
             .clone()
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction: transaction.clone(),
                 known_utxos: Arc::new(HashMap::new()),
@@ -2825,6 +3003,7 @@ fn v4_with_sapling_spends() {
         let result = timeout(
             test_timeout(),
             verifier.oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2870,6 +3049,7 @@ fn v4_with_duplicate_sapling_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2915,6 +3095,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(BlockRequest {
+                crypto_already_verified: false,
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2957,6 +3138,7 @@ async fn v5_with_sapling_spends() {
             timeout(
                 test_timeout(),
                 verifier.oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -2997,6 +3179,7 @@ async fn v5_with_duplicate_sapling_spends() {
         assert_eq!(
             verifier
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -3054,6 +3237,7 @@ async fn v5_with_duplicate_orchard_action() {
         assert_eq!(
             verifier
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -3173,6 +3357,7 @@ async fn orchard_disabling_soft_fork_rejects_orchard_actions_in_blocks_and_mempo
         service_fn(|_| async { unreachable!("state service should not be called") }),
     )
     .oneshot(BlockRequest {
+        crypto_already_verified: false,
         transaction_hash: tx.hash(),
         transaction: Arc::new(tx.clone()),
         known_utxos: Arc::new(HashMap::new()),
@@ -3358,6 +3543,7 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
 
     let accept_response = accept_verifier
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: tx.hash(),
             transaction: Arc::new(tx.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -3383,6 +3569,7 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
         service_fn(|_| async { unreachable!("state service should not be called") }),
     )
     .oneshot(BlockRequest {
+        crypto_already_verified: false,
         transaction_hash: tx.hash(),
         transaction: Arc::new(tx),
         known_utxos: Arc::new(HashMap::new()),
@@ -3451,6 +3638,7 @@ async fn v5_consensus_branch_ids() {
             let block_req = block_verifier
                 .clone()
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
@@ -3480,6 +3668,7 @@ async fn v5_consensus_branch_ids() {
             let block_req = block_verifier
                 .clone()
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
@@ -3538,6 +3727,7 @@ async fn v5_consensus_branch_ids() {
             let block_req = block_verifier
                 .clone()
                 .oneshot(BlockRequest {
+                    crypto_already_verified: false,
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
@@ -4271,6 +4461,7 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
     let resp = verifier
         .clone()
         .oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: tx_hash,
             transaction: Arc::new(garbage_tx),
             known_utxos: Arc::new(HashMap::new()),
@@ -4350,6 +4541,7 @@ async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() 
     let result = timeout(
         test_timeout(),
         verifier.clone().oneshot(BlockRequest {
+            crypto_already_verified: false,
             transaction_hash: tx_hash,
             transaction: Arc::new(tx.clone()),
             known_utxos: Arc::new(HashMap::new()),

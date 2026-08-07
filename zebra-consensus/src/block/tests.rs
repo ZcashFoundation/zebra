@@ -869,3 +869,110 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
     assert!(err.is_duplicate_request());
     assert_eq!(err.misbehavior_score(), 0);
 }
+
+/// Test that the block verifier only marks transactions as already cryptographically
+/// verified when the request says so, and only the ones the request names.
+///
+/// # Correctness
+///
+/// Getting this wrong in the permissive direction would skip script, proof and signature
+/// verification for arbitrary blocks, including blocks received from the network. The
+/// per-transaction flag is only sound for [`Request::CheckOwnProposal`]; see its docs.
+#[tokio::test]
+async fn crypto_already_verified_is_only_set_for_own_proposals() {
+    use std::{
+        collections::HashSet,
+        sync::{Arc as StdArc, Mutex},
+    };
+
+    use tower::service_fn;
+    use zebra_chain::transaction::UnminedTxId;
+
+    let network = Network::Mainnet;
+
+    // The block needs more than a coinbase transaction, so that the test can distinguish
+    // "the flag is threaded through" from "the flag is set for every transaction".
+    let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS
+        .values()
+        .map(|bytes| Block::zcash_deserialize(&bytes[..]).expect("block vector should deserialize"))
+        .find(|block| block.transactions.len() > 1)
+        .expect("at least one mainnet block vector has more than a coinbase transaction")
+        .into();
+
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    // Mark a single non-coinbase transaction as already verified, so the test distinguishes
+    // "the flag is threaded through" from "the flag is set for everything".
+    let already_verified_hash = transaction_hashes[1];
+
+    for (request, expect_flag_for_already_verified_hash) in [
+        (
+            Request::CheckOwnProposal {
+                block: block.clone(),
+                already_verified: Arc::new(HashSet::from([already_verified_hash])),
+            },
+            true,
+        ),
+        (Request::CheckProposal(block.clone()), false),
+        (Request::Commit(block.clone()), false),
+    ] {
+        // Records the flag each transaction was verified with.
+        let seen: StdArc<Mutex<Vec<(zebra_chain::transaction::Hash, bool)>>> =
+            StdArc::new(Mutex::new(Vec::new()));
+
+        let transaction_verifier = {
+            let seen = seen.clone();
+            service_fn(move |req: tx::BlockRequest| {
+                seen.lock()
+                    .expect("test mutex is not poisoned")
+                    .push((req.transaction_hash, req.crypto_already_verified));
+
+                async move {
+                    Ok::<_, BoxError>(tx::BlockResponse {
+                        tx_id: UnminedTxId::Legacy(req.transaction_hash),
+                        miner_fee: None,
+                        sigops: 0,
+                    })
+                }
+            })
+        };
+
+        let state_service = service_fn(|req: zs::Request| async move {
+            match req {
+                zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
+                // The verification this test inspects happens before any other state request,
+                // so the request is expected to fail after the transaction verifier has run.
+                _ => Err("test state service does not serve this request".into()),
+            }
+        });
+
+        let verifier = SemanticBlockVerifier::new(&network, state_service, transaction_verifier);
+
+        // The overall result is irrelevant: this test only inspects what the block verifier
+        // asked the transaction verifier to do.
+        let _ = Buffer::new(verifier, 1).oneshot(request.clone()).await;
+
+        let seen = seen.lock().expect("test mutex is not poisoned").clone();
+
+        assert_eq!(
+            seen.len(),
+            transaction_hashes.len(),
+            "every transaction should have been sent to the transaction verifier"
+        );
+
+        for (hash, crypto_already_verified) in seen {
+            let expected = hash == already_verified_hash && expect_flag_for_already_verified_hash;
+
+            assert_eq!(
+                crypto_already_verified,
+                expected,
+                "wrong crypto_already_verified for {hash:?} in a {} request",
+                if request.is_proposal() {
+                    "proposal"
+                } else {
+                    "commit"
+                }
+            );
+        }
+    }
+}

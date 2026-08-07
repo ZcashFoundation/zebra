@@ -938,6 +938,16 @@ impl Service<Request> for Mempool {
                     async move { Ok(response) }.boxed()
                 }
 
+                Request::RejectFailedBlockProposals(ref tx_hashes) => {
+                    trace!(?req, "got mempool request");
+
+                    let removed = storage.reject_failed_block_proposals(tx_hashes);
+
+                    trace!(?req, ?removed, "answered mempool request");
+
+                    async move { Ok(Response::RejectedFailedBlockProposals(removed)) }.boxed()
+                }
+
                 Request::RejectedTransactionIds(ref ids) => {
                     trace!(?req, "got mempool request");
 
@@ -1110,6 +1120,11 @@ impl Service<Request> for Mempool {
 
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
+                    }
+
+                    // A disabled mempool holds no transactions, so there is nothing to remove.
+                    Request::RejectFailedBlockProposals(_) => {
+                        Response::RejectedFailedBlockProposals(Default::default())
                     }
 
                     // Don't queue mempool candidates, because there is no queue.
