@@ -67,9 +67,8 @@ fuzz_target!(|data: &[u8]| {
                 continue;
             }
             // Note: AddrV2 lands as `Message::Addr` in the current codec
-            // (see message.rs); if a separate variant is introduced
-            // upstream this target should be updated. For now we only
-            // need to match on Addr.
+            // (see message.rs); if a separate variant is added, this target
+            // should be updated. For now we only need to match on Addr.
             Ok(Some(_)) => {
                 // Not an addr-bearing message — skip and keep reading
                 // because a single byte stream can contain multiple

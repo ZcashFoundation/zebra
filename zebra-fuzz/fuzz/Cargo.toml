@@ -10,14 +10,15 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
-# Trimmed fuzz manifest against upstream Zebra v6.2.1 (NU6.3 "Ironwood").
-# Dependencies are the union of crates imported by the fuzz targets,
-# with external versions pinned to the v6.2.1 workspace.
+# The dependency set is the union of the crates imported by the fuzz targets.
+# External versions track the workspace at the repository root: this crate is a
+# separate cargo workspace, so a version that drifts from the root manifest can
+# put two copies of a crate in the graph and break trait resolution.
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 
-# zebra path crates (resolve to the v6.0.0 tree)
+# zebra crates, by path into this repository
 zebra-chain = { path = "../../zebra-chain", features = ["proptest-impl"] }
 zebra-network = { path = "../../zebra-network", features = ["fuzzing"] }
 zebra-consensus = { path = "../../zebra-consensus", features = ["fuzzing"] }
@@ -35,11 +36,10 @@ serde_json = "1.0.140"
 
 # structure-aware oracle support
 proptest = "1.6"
-# address_fuzz third oracle. Must track zebra-chain's workspace pin (0.13.0):
-# if the fuzz crate pins an older minor, two zcash_address versions coexist in
-# the dependency graph and the TryFromAddress / From<transparent::Address>
-# impls (defined by zebra-chain against 0.13) stop resolving against 0.12
-# values. Bumped 0.12 -> 0.13.0 for the v6.0.0 rebase.
+# address_fuzz third oracle. Must track zebra-chain's workspace pin: if this
+# crate pins an older minor, two zcash_address versions coexist in the
+# dependency graph and the TryFromAddress / From<transparent::Address> impls
+# (defined by zebra-chain against its own pin) stop resolving.
 zcash_address = "0.13.0"
 # note_commitment_tree_fuzz tree types
 halo2 = { package = "halo2_proofs", version = "0.3.2" }
