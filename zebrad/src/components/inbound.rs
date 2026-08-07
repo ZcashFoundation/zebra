@@ -510,7 +510,10 @@ impl Service<zn::Request> for Inbound {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
-                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
+                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes {
+                        hashes,
+                        feedback: None,
+                    },
                     _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
                 })
                     .boxed()
