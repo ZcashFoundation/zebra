@@ -7,6 +7,8 @@
 # Source of constants:
 #   zebra-chain/src/parameters/transaction.rs
 #   zebra-chain/src/parameters/network_upgrade.rs
+#   zebra-chain/src/parameters/constants.rs
+#   zebra-chain/src/transaction/lock_time.rs
 
 # === Version headers (version | (overwintered_flag << 31)), 4 bytes LE ===
 # V1–V2 must have overwintered=0; V3–V6 must have overwintered=1.
@@ -30,8 +32,8 @@ vgid_overwinter="\x70\x82\xC4\x03"
 vgid_sapling="\x85\x20\x2F\x89"
 # TX_V5_VERSION_GROUP_ID = 0x26A7270A
 vgid_v5="\x0A\x27\xA7\x26"
-# TX_V6_VERSION_GROUP_ID = 0xFFFFFFFF (placeholder until librustzcash sets final value)
-vgid_v6="\xFF\xFF\xFF\xFF"
+# TX_V6_VERSION_GROUP_ID = 0xD884B698
+vgid_v6="\x98\xB6\x84\xD8"
 # Obviously wrong VGID (tests error path)
 vgid_zero="\x00\x00\x00\x00"
 
@@ -45,7 +47,12 @@ branch_canopy="\xA6\x75\xFF\xE9"
 branch_nu5="\xB4\xD0\xD6\xC2"
 branch_nu6="\x55\x10\xE7\xC8"
 branch_nu6_1="\xF0\x4D\xEC\x4D"
-branch_nu7_placeholder="\xFF\xFF\xFF\xFF"
+branch_nu6_2="\x30\xF3\x37\x54"
+# NU6.3 (Ironwood) = 0x37A5165B
+branch_nu6_3="\x5B\x16\xA5\x37"
+# NU7 has no final branch id yet. 0xFFFFFFFE is the placeholder in
+# CONSENSUS_BRANCH_IDS, gated behind `cfg(any(test, feature = "zebra-test"))`.
+branch_nu7_placeholder="\xFE\xFF\xFF\xFF"
 
 # === compact_size prefix + boundary values ===
 # 0xFD + u16 (3 bytes total)
@@ -61,8 +68,10 @@ cs_ff_just_over_u32="\xFF\x00\x00\x00\x00\x01\x00\x00\x00"
 cs_ff_max_u64="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
 
 # === nExpiryHeight (V3+), 4 bytes LE ===
-# NU5 activation height on mainnet: 1,687,104 (0x19BA80)
-expiry_nu5_activation="\x80\xBA\x19\x00"
+# NU5 activation height on mainnet: 1,687,104 (0x0019BE40)
+expiry_nu5_activation="\x40\xBE\x19\x00"
+# NU6.3 (Ironwood) activation height on mainnet: 3,428,143 (0x0034512F)
+expiry_nu6_3_activation="\x2F\x51\x34\x00"
 expiry_pre_expiry_zero="\x00\x00\x00\x00"
 expiry_u32_max="\xFF\xFF\xFF\xFF"
 
@@ -79,10 +88,10 @@ proof_all_zeros_prefix="\x00\x00\x00\x00\x00\x00\x00\x00"
 proof_all_ones_prefix="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
 
 # === Locktime markers (4 bytes LE) ===
-# LOCKTIME_THRESHOLD = 500_000_000 (value under = block height, value over = unix time)
+# LockTime::MIN_TIMESTAMP = 500_000_000 (value under = block height, value over = unix time)
 locktime_zero="\x00\x00\x00\x00"
-locktime_threshold_lt="\xFF\xC9\x9A\x1D"
-locktime_threshold_gte="\x00\xCA\x9A\x1D"
+locktime_threshold_lt="\xFF\x64\xCD\x1D"
+locktime_threshold_gte="\x00\x65\xCD\x1D"
 locktime_max="\xFF\xFF\xFF\xFF"
 
 # === Orchard flags byte (V5+) ===
