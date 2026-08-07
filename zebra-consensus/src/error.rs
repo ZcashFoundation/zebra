@@ -547,7 +547,11 @@ impl BlockError {
             | NoTransactions
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
-            | TooManyTransparentSignatureOperations { .. } => 100,
+            | TooManyTransparentSignatureOperations { .. }
+            // A block with duplicate transaction hashes is unambiguously invalid, and honest
+            // nodes never produce one: it is the CVE-2012-2459 Merkle-malleability case,
+            // checked in `block::check::merkle_root_validity()`.
+            | DuplicateTransaction => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             _other => 0,
         }

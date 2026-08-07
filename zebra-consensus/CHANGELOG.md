@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
   
+### Security
+
+- `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so
+  `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity
+  violations. The score reported by `router::RouterError`, `VerifyBlockError`, and
+  `VerifyCheckpointError` for this error changes from 0 to 100
+  ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))
+
 ## [14.0.1] - 2026-07-27
 
 ### Changed

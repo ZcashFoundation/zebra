@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
   ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+- Score misbehavior for peers that advertise a block containing duplicate transactions, matching
+  the treatment of the other definitive block-validity violations
+  ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
