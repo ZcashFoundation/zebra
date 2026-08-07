@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `ReadRequest`, which is not `#[non_exhaustive]`, gains three variants
+  (`AnyChainSaplingTree`, `AnyChainOrchardTree`, and `AnyChainIronwoodTree`).
+  Consumers that match on `ReadRequest` exhaustively must handle the new variants.
+
+### Added
+
+- New `ReadRequest::AnyChainSaplingTree`, `ReadRequest::AnyChainOrchardTree`, and
+  `ReadRequest::AnyChainIronwoodTree` read requests that resolve a Sapling, Orchard,
+  or Ironwood note commitment treestate by block hash against any non-finalized
+  chain, symmetric to `ReadRequest::AnyChainBlock`.
+
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
