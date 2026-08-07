@@ -32,6 +32,9 @@ progress-bar = [
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
+# Exposes `block` (equihash + block::check) to fuzz harnesses; private in normal builds.
+fuzzing = []
+
 [dependencies]
 blake2b_simd = { workspace = true }
 bellman = { workspace = true }

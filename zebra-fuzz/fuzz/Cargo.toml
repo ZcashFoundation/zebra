@@ -1,0 +1,148 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "zebra-fuzz-targets"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Trimmed fuzz manifest against upstream Zebra v6.2.1 (NU6.3 "Ironwood").
+# Dependencies are the union of crates imported by the fuzz targets,
+# with external versions pinned to the v6.2.1 workspace.
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+# zebra path crates (resolve to the v6.0.0 tree)
+zebra-chain = { path = "../../zebra-chain", features = ["proptest-impl"] }
+zebra-network = { path = "../../zebra-network", features = ["fuzzing"] }
+zebra-consensus = { path = "../../zebra-consensus", features = ["fuzzing"] }
+zebra-rpc = { path = "../../zebra-rpc" }
+zebra-state = { path = "../../zebra-state", features = ["proptest-impl"] }
+zebra-node-services = { path = "../../zebra-node-services" }
+zebra-script = { path = "../../zebra-script" }
+
+# rpc_handler_fuzz / jsonrpsee_envelope_fuzz async harness deps
+tokio = { version = "1.44", features = ["rt", "sync", "macros", "time"] }
+tower = { version = "0.4.13", features = ["buffer", "util"] }
+futures = "0.3.31"
+jsonrpsee = { version = "0.24.8", features = ["server"] }
+serde_json = "1.0.140"
+
+# structure-aware oracle support
+proptest = "1.6"
+# address_fuzz third oracle. Must track zebra-chain's workspace pin (0.13.0):
+# if the fuzz crate pins an older minor, two zcash_address versions coexist in
+# the dependency graph and the TryFromAddress / From<transparent::Address>
+# impls (defined by zebra-chain against 0.13) stop resolving against 0.12
+# values. Bumped 0.12 -> 0.13.0 for the v6.0.0 rebase.
+zcash_address = "0.13.0"
+# note_commitment_tree_fuzz tree types
+halo2 = { package = "halo2_proofs", version = "0.3.2" }
+sapling-crypto = "0.7"
+# rpc_handler_fuzz / jsonrpsee_envelope_fuzz timestamp handling
+chrono = { version = "0.4.40", default-features = false }
+# equihash_fuzz multi-param oracle
+equihash = "0.3"
+# script_flag_matrix_fuzz: below-zebra-script FFI flag matrix
+libzcash_script = "0.1"
+zcash_script = { version = "0.4.5", features = ["signature-validation"] }
+hex = "0.4.3"
+# p2p_*/addr_message_fuzz: wire Codec Decoder/Encoder traits + BytesMut buffer
+bytes = "1.10"
+tokio-util = { version = "0.7.14", features = ["codec"] }
+
+[[bin]]
+name = "rpc_handler_fuzz"
+path = "fuzz_targets/rpc_handler_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jsonrpsee_envelope_fuzz"
+path = "fuzz_targets/jsonrpsee_envelope_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "script_verify_fuzz"
+path = "fuzz_targets/script_verify_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "script_flag_matrix_fuzz"
+path = "fuzz_targets/script_flag_matrix_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "address_fuzz"
+path = "fuzz_targets/address_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "note_commitment_tree_fuzz"
+path = "fuzz_targets/note_commitment_tree_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "equihash_fuzz"
+path = "fuzz_targets/equihash_fuzz.rs"
+test = false
+doc = false
+
+# Block- and P2P-codec targets carried over from Milestone 1.
+[[bin]]
+name = "block_deserialize"
+path = "fuzz_targets/block_deserialize.rs"
+doc = false
+
+[[bin]]
+name = "block_deep_fuzz"
+path = "fuzz_targets/block_deep_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "p2p_message_parse"
+path = "fuzz_targets/p2p_message_parse.rs"
+doc = false
+
+[[bin]]
+name = "p2p_deep_fuzz"
+path = "fuzz_targets/p2p_deep_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "addr_message_fuzz"
+path = "fuzz_targets/addr_message_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "v6_transaction_fuzz"
+path = "fuzz_targets/v6_transaction_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "v6_transaction_semantic_fuzz"
+path = "fuzz_targets/v6_transaction_semantic_fuzz.rs"
+doc = false
+
+[[bin]]
+name = "ironwood_value_balance_codec_fuzz"
+path = "fuzz_targets/ironwood_value_balance_codec_fuzz.rs"
+doc = false
+
+# Helper binary (NOT a fuzz target): emits structural-diversity v6/Ironwood seeds.
+# Build with plain `cargo build --release --bin generate_v6_seeds`, then run
+# `generate_v6_seeds <dir>` and drop the output into the v6_transaction_fuzz and
+# v6_transaction_semantic_fuzz corpus dirs.
+[[bin]]
+name = "generate_v6_seeds"
+path = "seed_gen.rs"
+doc = false

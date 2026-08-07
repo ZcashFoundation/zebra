@@ -1,0 +1,103 @@
+# libFuzzer dictionary — Zcash transaction parsing tokens
+# Reference: docs/2026-04-14/tx-deserialization-coverage-analysis.md §7.1 P4
+# Generated: 2026-04-14
+#
+# All multi-byte integers are little-endian (Zcash wire format).
+# Source of constants:
+#   zebra-chain/src/parameters/transaction.rs
+#   zebra-chain/src/parameters/network_upgrade.rs
+
+# === Version headers (version | (overwintered_flag << 31)), 4 bytes LE ===
+# V1–V2 must have overwintered=0; V3–V6 must have overwintered=1.
+# Seeding both correct and inverted forms so libFuzzer can mutate toward edges.
+version_v1_plain="\x01\x00\x00\x00"
+version_v2_plain="\x02\x00\x00\x00"
+version_v3_overwintered="\x03\x00\x00\x80"
+version_v4_overwintered="\x04\x00\x00\x80"
+version_v5_overwintered="\x05\x00\x00\x80"
+version_v6_overwintered="\x06\x00\x00\x80"
+# Invalid combinations (exercise the fallback arm in serialize.rs:1051)
+version_v1_overwintered_bad="\x01\x00\x00\x80"
+version_v3_plain_bad="\x03\x00\x00\x00"
+version_v0_reserved="\x00\x00\x00\x00"
+version_v7_future="\x07\x00\x00\x80"
+
+# === Version group IDs (nVersionGroupId), 4 bytes LE ===
+# OVERWINTER_VERSION_GROUP_ID = 0x03C48270
+vgid_overwinter="\x70\x82\xC4\x03"
+# SAPLING_VERSION_GROUP_ID = 0x892F2085
+vgid_sapling="\x85\x20\x2F\x89"
+# TX_V5_VERSION_GROUP_ID = 0x26A7270A
+vgid_v5="\x0A\x27\xA7\x26"
+# TX_V6_VERSION_GROUP_ID = 0xFFFFFFFF (placeholder until librustzcash sets final value)
+vgid_v6="\xFF\xFF\xFF\xFF"
+# Obviously wrong VGID (tests error path)
+vgid_zero="\x00\x00\x00\x00"
+
+# === Consensus branch IDs (nConsensusBranchId, V5+), 4 bytes LE ===
+# From CONSENSUS_BRANCH_IDS[]
+branch_overwinter="\x19\x1B\xA8\x5B"
+branch_sapling="\xBB\x09\xB8\x76"
+branch_blossom="\x60\x0E\xB4\x2B"
+branch_heartwood="\x0B\x23\xB9\xF5"
+branch_canopy="\xA6\x75\xFF\xE9"
+branch_nu5="\xB4\xD0\xD6\xC2"
+branch_nu6="\x55\x10\xE7\xC8"
+branch_nu6_1="\xF0\x4D\xEC\x4D"
+branch_nu7_placeholder="\xFF\xFF\xFF\xFF"
+
+# === compact_size prefix + boundary values ===
+# 0xFD + u16 (3 bytes total)
+cs_fd_min="\xFD\xFD\x00"
+cs_fd_near_u16="\xFD\xFC\xFF"
+cs_fd_max_u16="\xFD\xFF\xFF"
+# 0xFE + u32 (5 bytes total)
+cs_fe_just_over_u16="\xFE\x00\x00\x01\x00"
+cs_fe_sign_boundary="\xFE\x00\x00\x00\x80"
+cs_fe_max_u32="\xFE\xFF\xFF\xFF\xFF"
+# 0xFF + u64 (9 bytes total)
+cs_ff_just_over_u32="\xFF\x00\x00\x00\x00\x01\x00\x00\x00"
+cs_ff_max_u64="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
+
+# === nExpiryHeight (V3+), 4 bytes LE ===
+# NU5 activation height on mainnet: 1,687,104 (0x19BA80)
+expiry_nu5_activation="\x80\xBA\x19\x00"
+expiry_pre_expiry_zero="\x00\x00\x00\x00"
+expiry_u32_max="\xFF\xFF\xFF\xFF"
+
+# === valueBalance (V4+ Sapling), 8 bytes LE i64 ===
+value_balance_zero="\x00\x00\x00\x00\x00\x00\x00\x00"
+value_balance_one="\x01\x00\x00\x00\x00\x00\x00\x00"
+# MAX_MONEY = 21,000,000 * COIN = 2,100,000,000,000,000
+value_balance_max_money="\x00\x40\x07\x5A\xF0\x75\x07\x00"
+value_balance_neg_one="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
+
+# === Sapling binding signatures / Groth16 proof sentinel bytes ===
+# 192-byte Groth16 proof — dict can't hold full proof, but common short prefixes help
+proof_all_zeros_prefix="\x00\x00\x00\x00\x00\x00\x00\x00"
+proof_all_ones_prefix="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
+
+# === Locktime markers (4 bytes LE) ===
+# LOCKTIME_THRESHOLD = 500_000_000 (value under = block height, value over = unix time)
+locktime_zero="\x00\x00\x00\x00"
+locktime_threshold_lt="\xFF\xC9\x9A\x1D"
+locktime_threshold_gte="\x00\xCA\x9A\x1D"
+locktime_max="\xFF\xFF\xFF\xFF"
+
+# === Orchard flags byte (V5+) ===
+# bit 0 = enableSpends, bit 1 = enableOutputs; only these two bits are valid
+orchard_flags_both="\x03"
+orchard_flags_spends_only="\x01"
+orchard_flags_outputs_only="\x02"
+orchard_flags_none="\x00"
+# Invalid — upper bits set (exercises Flags::zcash_deserialize error arm)
+orchard_flags_reserved="\x04"
+orchard_flags_all_bits="\xFF"
+
+# === Common transparent script opcodes (for Input/Output script_sig/script_pubkey) ===
+# OP_DUP OP_HASH160 <20> ... OP_EQUALVERIFY OP_CHECKSIG (P2PKH prefix)
+script_p2pkh_prefix="\x76\xA9\x14"
+# OP_HASH160 <20> ... OP_EQUAL (P2SH prefix)
+script_p2sh_prefix="\xA9\x14"
+script_op_0="\x00"
+script_op_return="\x6A"
