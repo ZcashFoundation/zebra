@@ -1,6 +1,6 @@
 //! A tonic gRPC server for the lightwalletd `CompactTxStreamer` client API.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use tokio::task::JoinHandle;
 use tonic::transport::{server::TcpIncoming, Server};
@@ -13,6 +13,18 @@ use crate::{
     lightwalletd::compact_tx_streamer_server::CompactTxStreamerServer,
     methods::RpcServer as RpcMethods, server::OPENED_RPC_ENDPOINT_MSG,
 };
+
+/// Maximum concurrent HTTP/2 streams per connection.
+///
+/// Must be set explicitly: tonic defaults it to `None`, which removes hyper's own
+/// 200-stream default rather than applying it. Matches the indexer server.
+const MAX_CONCURRENT_STREAMS: u32 = 20;
+
+/// Interval between HTTP/2 keepalive pings sent to detect dead connections.
+const HTTP2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Timeout for HTTP/2 keepalive pings before the connection is closed.
+const HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 type ServerTask = JoinHandle<Result<(), BoxError>>;
 
@@ -78,6 +90,9 @@ where
 
     let server_task: JoinHandle<Result<(), BoxError>> = tokio::spawn(async move {
         Server::builder()
+            .max_concurrent_streams(Some(MAX_CONCURRENT_STREAMS))
+            .http2_keepalive_interval(Some(HTTP2_KEEPALIVE_INTERVAL))
+            .http2_keepalive_timeout(Some(HTTP2_KEEPALIVE_TIMEOUT))
             .add_service(reflection_service)
             .add_service(CompactTxStreamerServer::new(lightwalletd_service))
             .serve_with_incoming(TcpIncoming::from(tcp_listener))
