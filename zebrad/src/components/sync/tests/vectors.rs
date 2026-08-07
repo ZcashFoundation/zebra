@@ -70,9 +70,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
 
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
-
     // Start the syncer
     let chain_sync_task_handle = tokio::spawn(chain_sync_future);
 
@@ -127,7 +124,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .respond(zn::Response::BlockHashes(vec![
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -213,7 +209,6 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             block2_hash, // tip (discarded - already fetched)
             block3_hash, // expected_next
             block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests
@@ -279,6 +274,303 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
+#[tokio::test]
+async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // ChainSync::request_genesis
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block0))
+        .await
+        .respond(block0_hash);
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    // ChainSync::obtain_tips
+
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![block1_hash]));
+
+    // Find the first unknown hash in this peer response.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    for _ in 1..sync::FANOUT {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    // Recheck every hash in the merged download set.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
+/// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
+#[tokio::test]
+async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block2_hash = block2.hash();
+
+    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
+    let block3_hash = block3.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // ChainSync::request_genesis
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block0))
+        .await
+        .respond(block0_hash);
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    // ChainSync::obtain_tips
+
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![block1_hash, block2_hash]));
+
+    // Find the first unknown hash in this peer response.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    for _ in 1..sync::FANOUT {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    // Recheck every hash in the merged download set.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    state_service
+        .expect_request(zs::Request::KnownBlock(block2_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
+
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
+        [(block1_hash, block1), (block2_hash, block2)]
+            .iter()
+            .cloned()
+            .collect();
+
+    for _ in 1..=2 {
+        block_verifier_router
+            .expect_request_that(|req| {
+                matches!(req, zebra_consensus::Request::Commit(_))
+                    && remaining_blocks.remove(&req.block().hash()).is_some()
+            })
+            .await
+            .respond_with(|req| req.block().hash());
+    }
+    assert!(
+        remaining_blocks.is_empty(),
+        "expected obtain tips to verify blocks 1 and 2; remaining blocks: {:?}",
+        remaining_blocks.keys().collect::<Vec<_>>(),
+    );
+
+    block_verifier_router.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    // ChainSync::extend_tips
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block1_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // expected overlap
+            block3_hash, // singleton unknown hash
+        ]));
+
+    for _ in 1..sync::FANOUT {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block1_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
+    }
+
+    block_verifier_router.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block3.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block3))
+        .await
+        .respond(block3_hash);
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips,
 /// with duplicate block hashes.
 ///
@@ -311,9 +603,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
-
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
 
     // Start the syncer
     let chain_sync_task_handle = tokio::spawn(chain_sync_future);
@@ -371,7 +660,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block1_hash,
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -459,7 +747,6 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block4_hash,
             block3_hash,
             block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests
@@ -607,9 +894,6 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
     let block2_hash = block2.hash();
 
-    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
-    let block3_hash = block3.hash();
-
     // Also get a block that is a long way away from genesis
     let block982k: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -670,7 +954,6 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             block982k_hash,
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 982k)
@@ -780,9 +1063,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES.zcash_deserialize_into()?;
     let block4_hash = block4.hash();
 
-    let block5: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_5_BYTES.zcash_deserialize_into()?;
-    let block5_hash = block5.hash();
-
     // Also get a block that is a long way away from genesis
     let block982k: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -842,7 +1122,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .respond(zn::Response::BlockHashes(vec![
             block1_hash, // tip
             block2_hash, // expected_next
-            block3_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // State is checked for the first unknown block (block 1)
@@ -929,7 +1208,6 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             block3_hash, // expected_next
             block4_hash,
             block982k_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
         ]));
 
     // Clear remaining block locator requests

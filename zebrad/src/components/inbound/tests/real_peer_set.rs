@@ -620,7 +620,12 @@ async fn setup(
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
     MockService<zebra_consensus::Request, block::Hash, PanicAssertion, RouterError>,
-    MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
+    MockService<
+        transaction::MempoolRequest,
+        transaction::MempoolResponse,
+        PanicAssertion,
+        TransactionError,
+    >,
     // real tasks
     JoinHandle<Result<(), BlockGossipError>>,
     JoinHandle<Result<(), BoxError>>,
@@ -700,6 +705,7 @@ async fn setup(
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_subscriber) = Mempool::new(
+        &network,
         &mempool_config,
         peer_set.clone(),
         state_service.clone(),

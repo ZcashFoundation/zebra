@@ -201,6 +201,162 @@ fn coinbase_cache_reuses_built_coinbase() {
     assert!(cache.get(height, fee).is_none(), "a cleared cache misses");
 }
 
+/// Verifies the fix for #10907: the multi-entry coinbase cache retains both the zero-fee fake
+/// coinbase (used for ZIP-317 weight sizing) and the real-fee coinbase simultaneously, so
+/// `getblocktemplate` doesn't rebuild shielded proofs on every short-poll.
+#[test]
+fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
+    use super::CoinbaseCache;
+
+    let height = Height(1_000_000);
+    let zero_fee = Amount::zero();
+    let real_fee: Amount<zebra_chain::amount::NonNegative> =
+        Amount::try_from(10_000).expect("valid amount");
+
+    let cache = CoinbaseCache::default();
+
+    // Simulate what getblocktemplate does: store a fake coinbase at zero fee (ZIP-317 sizing),
+    // then store the real coinbase at the actual fee.
+    let fake_coinbase = TransactionTemplate::new_coinbase(
+        &Network::Mainnet,
+        height,
+        &MinerParams::from(
+            Address::decode(
+                &Network::Mainnet,
+                default_miner_address(
+                    zebra_chain::parameters::NetworkKind::Mainnet,
+                    &MinerAddressType::Sapling,
+                ),
+            )
+            .unwrap(),
+        ),
+        zero_fee,
+    )
+    .unwrap();
+
+    let real_coinbase = TransactionTemplate::new_coinbase(
+        &Network::Mainnet,
+        height,
+        &MinerParams::from(
+            Address::decode(
+                &Network::Mainnet,
+                default_miner_address(
+                    zebra_chain::parameters::NetworkKind::Mainnet,
+                    &MinerAddressType::Sapling,
+                ),
+            )
+            .unwrap(),
+        ),
+        real_fee,
+    )
+    .unwrap();
+
+    cache.store(height, zero_fee, fake_coinbase.clone());
+    cache.store(height, real_fee, real_coinbase.clone());
+
+    // Both entries coexist — the zero-fee sizing coinbase survives the real-fee store.
+    assert_eq!(
+        cache.get(height, zero_fee),
+        Some(fake_coinbase),
+        "zero-fee fake coinbase should still be cached after storing real-fee coinbase"
+    );
+    assert_eq!(
+        cache.get(height, real_fee),
+        Some(real_coinbase),
+        "real-fee coinbase should be cached"
+    );
+
+    // Height transition: storing at a new height evicts the stale entries.
+    let next_height = Height(height.0 + 1);
+    let next_coinbase = TransactionTemplate::new_coinbase(
+        &Network::Mainnet,
+        next_height,
+        &MinerParams::from(
+            Address::decode(
+                &Network::Mainnet,
+                default_miner_address(
+                    zebra_chain::parameters::NetworkKind::Mainnet,
+                    &MinerAddressType::Sapling,
+                ),
+            )
+            .unwrap(),
+        ),
+        zero_fee,
+    )
+    .unwrap();
+
+    cache.store(next_height, zero_fee, next_coinbase.clone());
+    assert_eq!(
+        cache.get(next_height, zero_fee),
+        Some(next_coinbase),
+        "new-height entry should be cached"
+    );
+    assert!(
+        cache.get(height, zero_fee).is_none(),
+        "old-height entry should be evicted"
+    );
+}
+
+/// Verifies that fee churn beyond the cache cap (4 entries) evicts stale nonzero-fee entries
+/// while preserving the zero-fee sizing coinbase. Without this, the cap would clear the
+/// entire map — including the zero-fee entry — recreating the original #10907 churn.
+#[test]
+fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
+    use super::CoinbaseCache;
+
+    let height = Height(2_000_000);
+    let zero_fee = Amount::zero();
+    let cache = CoinbaseCache::default();
+
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &Network::Mainnet,
+            default_miner_address(
+                zebra_chain::parameters::NetworkKind::Mainnet,
+                &MinerAddressType::Sapling,
+            ),
+        )
+        .unwrap(),
+    );
+
+    let make_coinbase = |fee: Amount<zebra_chain::amount::NonNegative>| {
+        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, fee).unwrap()
+    };
+
+    // Store the zero-fee sizing coinbase first.
+    let fake_coinbase = make_coinbase(zero_fee);
+    cache.store(height, zero_fee, fake_coinbase.clone());
+
+    // Fill to capacity with distinct fee values (simulating mempool fee churn).
+    for i in 1..=5u64 {
+        let fee = Amount::try_from(i * 1_000).expect("valid amount");
+        cache.store(height, fee, make_coinbase(fee));
+    }
+
+    // The zero-fee entry must survive eviction at capacity.
+    assert_eq!(
+        cache.get(height, zero_fee),
+        Some(fake_coinbase.clone()),
+        "zero-fee sizing coinbase must survive fee churn at capacity"
+    );
+
+    // Updating an existing key at capacity should not trigger eviction.
+    let fee_1k: Amount<zebra_chain::amount::NonNegative> =
+        Amount::try_from(1_000).expect("valid amount");
+    let updated_coinbase = make_coinbase(fee_1k);
+    cache.store(height, fee_1k, updated_coinbase.clone());
+    assert_eq!(
+        cache.get(height, fee_1k),
+        Some(updated_coinbase),
+        "updating an existing key should replace in place"
+    );
+    assert_eq!(
+        cache.get(height, zero_fee),
+        Some(fake_coinbase),
+        "zero-fee entry must still be present after in-place update"
+    );
+}
+
 /// From NU6.3 onward, a shielded coinbase paid to a Unified miner address with an Orchard
 /// receiver routes newly minted value into the Ironwood pool, not the Orchard pool, and remains
 /// recoverable with the consensus-required all-zero outgoing viewing key.

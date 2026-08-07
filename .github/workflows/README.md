@@ -31,6 +31,8 @@ graph TB
   %% Reusable build
   subgraph Build
     BuildDocker[zfnd-build-docker-image.yml]
+    PrepareBinaries[zfnd-release-binaries.yml]
+    AttachBinaries[zfnd-attach-release-binaries.yml]
   end
 
   %% Release automation
@@ -46,6 +48,7 @@ graph TB
     Coverage[coverage.yml]
     DockerCfg[test-docker.yml]
     CrateBuild[test-crates.yml]
+    PRGate[pr-gate.yml]
     Docs[book.yml]
     Security[zizmor.yml]
   end
@@ -60,14 +63,16 @@ graph TB
   end
 
   %% Trigger wiring
-  PR --> Unit & Lint & DockerCfg & CrateBuild & IT & Security
-  Push --> Unit & Lint & Coverage & Docs & Security & ReleaseWorkflow
+  PR --> Unit & Lint & DockerCfg & CrateBuild & PRGate & IT & Security
+  Push --> Unit & Lint & Coverage & PRGate & Docs & Security & ReleaseWorkflow
   ReleaseWorkflow --> ReleaseEvent
   ReleaseEvent --> ReleaseBinaries & DeployNodes
   Schedule --> IT
   Manual --> IT & DeployNodes & Cleanup
 
   %% Build dependency
+  ReleaseBinaries --> BuildDocker & PrepareBinaries
+  PrepareBinaries --> AttachBinaries
   BuildDocker --> IT
   IT --> FindDisks --> Deploy
 
@@ -75,9 +80,9 @@ graph TB
   classDef primary fill:#2374ab,stroke:#2374ab,color:white
   classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
   classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
-  class BuildDocker primary
+  class BuildDocker,PrepareBinaries,AttachBinaries primary
   class ReleaseWorkflow,ReleaseBinaries primary
-  class Unit,Lint,Coverage,DockerCfg,CrateBuild,Docs,Security secondary
+  class Unit,Lint,Coverage,DockerCfg,CrateBuild,PRGate,Docs,Security secondary
   class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
   class PR,Push,ReleaseEvent,Schedule,Manual trigger
 ```
@@ -137,7 +142,40 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 
 **Note**: Self-hosted Runners are just used to keep the logs running in the GitHub Actions UI for over 6 hours, the Integration Tests are not run in the Self-hosted Runner itself, but in the deployed VMs in GCP through GitHub Actions.
 
-### 5. Queue Management
+### 5. Rust build caching
+
+Rust jobs cache `~/.cargo` and dependency artifacts in `target/` through
+[`actions-rust-lang/setup-rust-toolchain`](https://github.com/actions-rust-lang/setup-rust-toolchain),
+which wraps [`Swatinem/rust-cache`](https://github.com/Swatinem/rust-cache). Caching is on by
+default, so a job opts _out_ with `cache: false` rather than opting in.
+
+GitHub gives each repository 10 GB of cache storage by default; administrators can configure a
+higher paid limit. Least-recently-used entries are evicted when the configured limit is exceeded.
+Caches are also branch-scoped: a branch can read its own caches and the default branch's,
+caches written by PRs can never be read by anyone else, but they still evict main's caches, which
+are the only ones every PR does restore from.
+
+Three rules keep the quota usable:
+
+1. **Only main writes.** The main building jobs set
+   `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing. (There are some minor exceptions to this rule.)
+2. **Wide matrices share one key.** The `test-crates.yml` matrices use
+   `cache-shared-key` and seed the shared cache from a single build (`zebrad`
+   which has the widest dependency closure; `zebra-rpc` for the MSRV build since
+   it does not build `zebrad` and `zebra-rpc` is second widest option).
+3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
+   crate-matrix generator in `test-crates.yml` set `cache: false`.
+
+To inspect the current state:
+
+```bash
+gh api repos/ZcashFoundation/zebra/actions/cache/usage
+gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
+  --jq '[.actions_caches[] | {ref, mb: (.size_in_bytes/1048576|round)}]
+        | group_by(.ref)[] | "\(.[0].ref) n=\(length) \(map(.mb)|add)MB"'
+```
+
+### 6. Queue Management
 
 [Mergify](https://mergify.com)
 
@@ -155,15 +193,18 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates/updates release-plz Release PRs, then publishes crates, tags, and one app-authored `zebrad` GitHub Release after a Release PR merge
-- **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
+- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
+- **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+- **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
+- **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
 - **Deploy integration tests** (`zfnd-deploy-integration-tests-gcp.yml`): Orchestrates GCP VMs and test runs
 - **Deploy nodes** (`zfnd-deploy-nodes-gcp.yml`): Provision long-lived nodes

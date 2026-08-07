@@ -12,6 +12,10 @@ updates:
       timezone: America/New_York
     # Limit dependabot to 1 PR per reviewer
     open-pull-requests-limit: 6
+    # Lockfile-only updates do not release packages, so keep them outside release-plz's release types.
+    commit-message:
+      prefix: "chore"
+      include: "scope"
     labels:
       - 'C-exclude-from-changelog'
       - 'A-rust'
@@ -47,6 +51,10 @@ updates:
       day: wednesday
       timezone: America/New_York
     open-pull-requests-limit: 4
+    # Workflow dependency updates are CI maintenance, not package releases.
+    commit-message:
+      prefix: "ci"
+      include: "scope"
     labels:
       - 'C-exclude-from-changelog'
       - 'A-devops'

@@ -116,6 +116,189 @@ async fn rpc_getinfo() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Without a configured end of support height, `end_of_service` is not present.
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+
+    let end_of_support_height = 3_546_440;
+    let rpc = rpc.with_end_of_support_height(Some(Height(end_of_support_height)));
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, end_of_support_height);
+    // This node has no tip, so the estimate counts the blocks remaining after the highest
+    // compiled-in checkpoint, not after genesis.
+    let checkpoint_height = Mainnet.checkpoint_list().max_height();
+    let remaining_blocks = i64::from(end_of_support_height - checkpoint_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+    assert!(end_of_service.estimated_time > Utc::now().timestamp());
+    assert!(end_of_service.estimated_time <= Utc::now().timestamp() + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    let tip_height = Height(3_000_000);
+    latest_chain_tip_sender.send_best_tip_height(tip_height);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let end_of_support_height = Height(3_546_440);
+    let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
+
+    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
+    // and the estimate is reported 24 hours early.
+    let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
+    let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
+
+    let before = Utc::now().timestamp();
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+    let after = Utc::now().timestamp();
+
+    assert_eq!(end_of_service.block_height, end_of_support_height.0);
+    assert!(end_of_service.estimated_time >= before + expected_offset);
+    assert!(end_of_service.estimated_time <= after + expected_offset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_omits_end_of_service_off_mainnet() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Network::new_default_testnet(),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Even if an end of support height is configured, `end_of_service` is only reported on
+    // Mainnet, matching zcashd and the RPC documentation.
+    let rpc = rpc.with_end_of_support_height(Some(Height(100)));
+    let deprecation_info = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed");
+    assert_eq!(deprecation_info.end_of_service, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdeprecationinfo_estimated_time_is_never_negative() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // A tip so far past the end of support height that an unclamped estimate would be negative.
+    let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
+    latest_chain_tip_sender.send_best_tip_height(Height::MAX);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let rpc = rpc.with_end_of_support_height(Some(Height(1)));
+
+    let end_of_service = rpc
+        .get_deprecation_info()
+        .await
+        .expect("getdeprecationinfo should succeed")
+        .end_of_service
+        .expect("end_of_service should be present when an end of support height is set");
+
+    assert_eq!(end_of_service.block_height, 1);
+    // The estimate is clamped to zero instead of going negative.
+    assert_eq!(end_of_service.estimated_time, 0);
+}
+
 // Helper function that returns the nonce, final sapling root and
 // block commitments of a given Block.
 async fn get_block_data(
@@ -857,6 +1040,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let block_hash = block.hash();
     let block_header = block.header.clone();
     let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
 
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -897,7 +1081,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
             next_block_hash: None,
         });
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::SaplingTree(_)))
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
         .await
         .respond(ReadResponse::SaplingTree(Some(Default::default())));
     read_state
@@ -907,30 +1091,49 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
 
     // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockAndSize(_)))
+        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
         .await
         .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::OrchardTree(_)))
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
         .await
         .respond(ReadResponse::OrchardTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::IronwoodTree(_)))
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
         .await
         .respond(ReadResponse::IronwoodTree(Some(Default::default())));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(None));
     read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::BlockInfo(_)))
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
         .await
         .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
 
-    block_future
+    let block_response = block_future
         .await
         .expect("task should not panic")
         .expect("getblock should succeed for side-chain blocks");
+
+    let GetBlockResponse::Object(obj) = block_response else {
+        panic!("expected verbosity-2 getblock to return an object");
+    };
+
+    assert_eq!(
+        obj.confirmations, -1,
+        "side-chain confirmations should be -1"
+    );
+
+    // Each transaction object must be labeled as side-chain (height=-1,
+    // confirmations=0) rather than panicking on the u32 cast.
+    for actual_tx in &obj.tx {
+        let GetBlockTransaction::Object(tx_obj) = actual_tx else {
+            panic!("verbosity-2 returns transaction objects");
+        };
+        assert_eq!(tx_obj.height, Some(-1));
+        assert_eq!(tx_obj.confirmations, Some(0));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3291,4 +3494,119 @@ async fn rpc_gettxout() {
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
     assert!(rpc_tx_queue_task_result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_get_standard_fee() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (tip, _tip_sender) = MockChainTip::new();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let response = rpc
+        .get_standard_fee()
+        .await
+        .expect("get_standard_fee should succeed");
+
+    // Static v0 placeholder: the ZIP-317 marginal fee and version 0.
+    assert_eq!(response.standard_fee(), 5000);
+    assert_eq!(response.version(), 0);
+}
+
+/// `getblocksubsidy` must report the funding stream metadata era of the height's active upgrade,
+/// on both sides of the NU6 boundary.
+///
+/// An exact `== Nu6` comparison falls back to pre-NU6 metadata on NU6.1 and later, which became
+/// the default Mainnet behaviour at the NU6.3 activation height. The NU5 row pins the other side
+/// of the boundary, so the check cannot be widened past NU6 either.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // The label that `FundingStreamReceiver::MajorGrants` carries in each era.
+    const PRE_NU6_MAJOR_GRANTS: &str = "Major Grants";
+    const POST_NU6_MAJOR_GRANTS: &str = "Zcash Community Grants NU6";
+
+    for (upgrade, expected_recipient) in [
+        (NetworkUpgrade::Nu5, PRE_NU6_MAJOR_GRANTS),
+        (NetworkUpgrade::Nu6, POST_NU6_MAJOR_GRANTS),
+        (NetworkUpgrade::Nu6_1, POST_NU6_MAJOR_GRANTS),
+        (NetworkUpgrade::Nu6_2, POST_NU6_MAJOR_GRANTS),
+        (NetworkUpgrade::Nu6_3, POST_NU6_MAJOR_GRANTS),
+    ] {
+        let Some(height) = upgrade.activation_height(&Mainnet) else {
+            continue;
+        };
+
+        let response = rpc
+            .get_block_subsidy(Some(height.0))
+            .await
+            .expect("getblocksubsidy should succeed at an activated upgrade height");
+
+        // Match on either label, so a response with no major grants stream fails loudly instead
+        // of letting the assertion below pass vacuously.
+        let major_grants = response
+            .funding_streams()
+            .iter()
+            .find(|stream| {
+                stream.recipient() == PRE_NU6_MAJOR_GRANTS
+                    || stream.recipient() == POST_NU6_MAJOR_GRANTS
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "{upgrade:?} at height {height:?} must return a major grants funding stream, \
+                     otherwise this test cannot detect the metadata era; got: {:?}",
+                    response.funding_streams()
+                )
+            });
+
+        assert_eq!(
+            major_grants.recipient(),
+            expected_recipient,
+            "{upgrade:?} at height {height:?} must use the {expected_recipient:?} label"
+        );
+    }
 }

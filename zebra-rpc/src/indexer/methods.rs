@@ -20,13 +20,13 @@ use super::{
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
 
-/// How long to wait for a backpressured send to the non-finalized stream before treating the
-/// consumer as hung and dropping the subscription.
+/// How long to wait for a backpressured send before treating the consumer as hung and dropping
+/// the subscription.
 ///
-/// The non-finalized stream applies backpressure (rather than dropping blocks) so a slow consumer
-/// doesn't miss blocks, but without a bound a consumer whose connection is half-open (dead TCP not
-/// yet detected) would block the listener task indefinitely.
-const NON_FINALIZED_SEND_TIMEOUT: Duration = Duration::from_secs(60);
+/// All three indexer streams apply backpressure so a slow consumer doesn't miss notifications,
+/// but without a bound a consumer whose connection is half-open (dead TCP not yet detected) would
+/// block the listener task indefinitely.
+const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -58,17 +58,21 @@ where
                     continue;
                 };
 
-                match response_sender.try_send(Ok(BlockHashAndHeight::new(tip_hash, tip_height))) {
-                    Ok(()) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                let send = response_sender.send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)));
+                match tokio::time::timeout(SEND_TIMEOUT, send).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
                         span.in_scope(|| {
                             tracing::info!("client disconnected, dropping chain_tip_change task");
                         });
                         return;
                     }
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    Err(_) => {
                         span.in_scope(|| {
-                            tracing::warn!("slow consumer, dropping chain_tip_change stream");
+                            tracing::warn!(
+                                "slow consumer, dropping chain_tip_change stream after \
+                                 send timed out"
+                            );
                         });
                         return;
                     }
@@ -126,16 +130,27 @@ where
                 }
             };
 
-            // Notify the client of new blocks until the channel is closed.
-            //
-            // Unlike the other streams, this uses `send().await` to apply backpressure to the
-            // non-finalized state listener rather than dropping blocks for a slow consumer. A send
-            // error means the client disconnected; a send that doesn't complete within
-            // `NON_FINALIZED_SEND_TIMEOUT` means the consumer is hung. In both cases the task ends
-            // rather than blocking forever.
-            while let Some((hash, block)) = non_finalized_state_change.recv().await {
+            loop {
+                // A full listener buffer means the state-side task is blocked sending into it,
+                // so it may already have missed non-finalized state updates. The stream can no
+                // longer guarantee completeness, so drop the subscription instead of silently
+                // missing blocks.
+                if non_finalized_state_change.capacity() == 0 {
+                    span.in_scope(|| {
+                        tracing::warn!(
+                            "slow consumer, dropping non_finalized_state_change stream after \
+                             buffer filled"
+                        );
+                    });
+                    return;
+                }
+
+                let Some((hash, block)) = non_finalized_state_change.recv().await else {
+                    break;
+                };
+
                 let send = response_sender.send(Ok(BlockAndHash::new(hash, block)));
-                match tokio::time::timeout(NON_FINALIZED_SEND_TIMEOUT, send).await {
+                match tokio::time::timeout(SEND_TIMEOUT, send).await {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => {
                         span.in_scope(|| {
@@ -201,17 +216,21 @@ where
                             .unwrap_or_default(),
                     });
 
-                    match response_sender.try_send(msg) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    let send = response_sender.send(msg);
+                    match tokio::time::timeout(SEND_TIMEOUT, send).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => {
                             span.in_scope(|| {
                                 tracing::info!("client disconnected, dropping mempool_change task");
                             });
                             return;
                         }
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        Err(_) => {
                             span.in_scope(|| {
-                                tracing::warn!("slow consumer, dropping mempool_change stream");
+                                tracing::warn!(
+                                    "slow consumer, dropping mempool_change stream after \
+                                     send timed out"
+                                );
                             });
                             return;
                         }

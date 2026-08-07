@@ -136,6 +136,14 @@ jobs:
   # the trigger. Downstream jobs read `set-matrix` outputs so the event →
   # environment mapping is computed once.
   set-matrix:
+    # Deployment image tests run on source PRs, not temporary Mergify queue candidates.
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.user.login != 'mergify[bot]' ||
+        github.event.pull_request.head.repo.full_name != github.repository ||
+        !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+      }}
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.set-matrix.outputs.networks }}
@@ -266,6 +274,7 @@ jobs:
         (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
       }}
     with:
+      source_sha: ${{ github.sha }}
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
@@ -569,8 +578,32 @@ jobs:
             *) echo "::error::unsupported event"; exit 1 ;;
           esac
           MIG_NAME="zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+          {
+            echo "MIG_NAME=${MIG_NAME}"
+            echo "ZONE=${ZONE}"
+          } >> "$GITHUB_ENV"
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
             --stable --zone="${ZONE}" --timeout=5400
+
+      # Surface the failing instance's health state and container logs.
+      - name: Diagnose verify failure
+        if: failure()
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+        run: |
+          gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" \
+            --format='table(instance.basename(),instanceStatus,currentAction,instanceHealth[0].detailedHealthState,lastAttempt.errors.errors[0].message)' || true
+          INSTANCE=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" --format='value(instance.basename())' | head -1 || true)
+          if [ -z "${INSTANCE}" ]; then
+            echo "MIG ${MIG_NAME} has no instance"
+            exit 0
+          fi
+          INSTANCE_ID=$(gcloud compute instances describe "${INSTANCE}" \
+            --zone="${ZONE}" --format='value(id)' || true)
+          gcloud logging read "logName=\"projects/${GCP_PROJECT}/logs/cos_containers\" AND resource.labels.instance_id=\"${INSTANCE_ID}\"" \
+            --freshness=2h --limit=50 --format='value(jsonPayload.message)' | tac || true
 
   deploy-nodes-success:
     name: Deploy nodes success

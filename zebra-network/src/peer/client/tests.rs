@@ -24,8 +24,8 @@ use zebra_chain::block::Height;
 use crate::{
     constants,
     peer::{
-        error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo,
-        ErrorSlot,
+        error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectedAddr,
+        ConnectionInfo, ErrorSlot,
     },
     peer_set::InventoryChange,
     protocol::{
@@ -58,6 +58,7 @@ impl ClientTestHarness {
             version: None,
             connection_task: None,
             heartbeat_task: None,
+            connected_addr: None,
         }
     }
 
@@ -251,6 +252,7 @@ pub struct ClientTestHarnessBuilder<C = future::Ready<()>, H = future::Ready<()>
     connection_task: Option<C>,
     heartbeat_task: Option<H>,
     version: Option<Version>,
+    connected_addr: Option<ConnectedAddr>,
 }
 
 impl<C, H> ClientTestHarnessBuilder<C, H>
@@ -264,6 +266,12 @@ where
         self
     }
 
+    /// Configure the mocked connection address metadata for the peer.
+    pub fn with_connected_addr(mut self, connected_addr: ConnectedAddr) -> Self {
+        self.connected_addr = Some(connected_addr);
+        self
+    }
+
     /// Configure the mock connection task future to use.
     pub fn with_connection_task<NewC>(
         self,
@@ -273,6 +281,7 @@ where
             connection_task: Some(connection_task),
             heartbeat_task: self.heartbeat_task,
             version: self.version,
+            connected_addr: self.connected_addr,
         }
     }
 
@@ -285,6 +294,7 @@ where
             connection_task: self.connection_task,
             heartbeat_task: Some(heartbeat_task),
             version: self.version,
+            connected_addr: self.connected_addr,
         }
     }
 
@@ -324,7 +334,7 @@ where
         };
 
         let connection_info = Arc::new(ConnectionInfo {
-            connected_addr: crate::peer::ConnectedAddr::Isolated,
+            connected_addr: self.connected_addr.unwrap_or(ConnectedAddr::Isolated),
             remote,
             negotiated_version,
         });

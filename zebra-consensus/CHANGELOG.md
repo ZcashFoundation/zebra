@@ -5,6 +5,99 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Split the unified transaction verifier API into separate
+  `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  services with dedicated request/response types.
+- Removed the unified verifier API:
+  - `transaction::Verifier`
+  - `transaction::Request`
+  - `transaction::Response`
+- `transaction::BlockRequest::transaction_hash` must now be the hash of the request's
+  `transaction`. It is used to build `BlockResponse::tx_id` instead of re-hashing the
+  transaction, so a mismatched value yields a response identifying a different transaction.
+  A debug assertion checks this in test and debug builds.
+- The second value returned by `router::init` and `router::init_test` is now a
+  `transaction::MempoolTxVerifier` service and can no longer verify block
+  transactions. Callers verifying transactions as part of block verification
+  should construct a `transaction::BlockTxVerifier` directly.
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
+### Added
+
+- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
+- `transaction::BlockRequest`, `transaction::BlockResponse`,
+  `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
+  
+## [14.0.1] - 2026-07-27
+
+### Changed
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.30, `zcash_keys` to 0.16, and
+  `zcash_transparent` to 0.10
+  ([#11111](https://github.com/ZcashFoundation/zebra/pull/11111)).
+- `zebra-chain` dependency bumped to `11.3.0`.
+- `zebra-node-services` dependency bumped to `9.1.2`.
+- `zebra-script` dependency bumped to `10.1.2`.
+- `zebra-state` dependency bumped to `12.0.1`.
+
+## [14.0.0] - 2026-07-24
+
+### Changed
+
+- Requires `zebra-state` 12.0.0, whose types appear in this crate's public API
+  (`error::BlockError`, `error::TransactionError`, and the state service bounds on
+  `router::init` and the verifiers).
+
+## [13.0.0] - 2026-07-22
+
+### Added
+
+- `error::TransactionError`:
+  - `Halo2VerificationFailed`
+  - `SaplingVerificationFailed`
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.1`.
+
+### Removed
+
+- `transaction::Verifier::check_maturity_height` is now private
+  ([#10843](https://github.com/ZcashFoundation/zebra/pull/10843)).
+
+### Security
+
+- Check the ZIP-317 mempool rules before verifying a transaction's shielded proofs, so an
+  underpaying transaction is rejected before the expensive cryptographic checks run
+  ([#11053](https://github.com/ZcashFoundation/zebra/pull/11053)).
+- Score failed shielded proof and signature verifications, and non-canonical Orchard and
+  Ironwood proof sizes, as mempool misbehaviour, so a peer sending invalid shielded transactions
+  is disconnected instead of repeatedly forcing their verification
+  ([#11054](https://github.com/ZcashFoundation/zebra/pull/11054)).
+
+## [12.0.1] - 2026-07-17
+
+### Changed
+
+- `zebra-state` dependency bumped to `11.1.0`.
+
+## [12.0.0] - 2026-07-17
+
+### Changed
+
+- Requires `zebra-state` 11.0.0. `zebra-state` types (`error::ValidateContextError`,
+  `request::Request`, `response::{Response, KnownBlock}`) appear in this crate's public API,
+  so `zebra-state`'s major bump is breaking here too.
+- `tower-batch-control` dependency bumped to `1.1.1`.
+- `tower-fallback` dependency bumped to `0.2.43`.
+- `zebra-chain` dependency bumped to `11.2.0`.
+- `zebra-node-services` dependency bumped to `9.1.1`.
+- `zebra-script` dependency bumped to `10.1.1`.
+
 ## [11.0.0] - 2026-07-10
 
 ### Added

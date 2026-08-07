@@ -432,6 +432,10 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
+            // A successfully committed block supersedes any contextual error
+            // recorded for a different block body with the same header hash.
+            parent_error_map.shift_remove(&child_hash);
+
             // Committing blocks to the finalized state keeps the same chain,
             // so we can update the chain seen by the rest of the application now.
             //

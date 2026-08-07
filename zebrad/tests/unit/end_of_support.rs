@@ -9,16 +9,13 @@ use zebra_chain::{
 };
 use zebra_test::{args, prelude::*};
 use zebrad::components::sync::end_of_support::{
-    self, EOS_PANIC_AFTER, EOS_WARN_AFTER, ESTIMATED_RELEASE_HEIGHT,
+    self, EOS_PANIC_AFTER, EOS_WARN_AFTER, ESTIMATED_BLOCKS_PER_DAY, ESTIMATED_RELEASE_HEIGHT,
 };
 
 use crate::common::{
     config::{default_test_config, testdir},
     launch::ZebradTestDirExt,
 };
-
-// Estimated blocks per day with the current 75 seconds block spacing.
-const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
 
 /// Check that the end of support code is called at least once.
 #[test]
@@ -94,6 +91,26 @@ fn end_of_support_function() {
     ));
 
     // Panic is tested in `end_of_support_panic`
+}
+
+/// Test that the end of support height is reported on Mainnet and not on test networks.
+#[test]
+fn end_of_support_height_per_network() {
+    // The reported height is the last supported height: `check()` runs at it without panicking
+    // and halts one block after it (covered by `end_of_support_panic`).
+    let last_supported_height =
+        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY));
+    assert_eq!(
+        end_of_support::end_of_support_height(&Network::Mainnet),
+        Some(last_supported_height)
+    );
+    end_of_support::check(last_supported_height, &Network::Mainnet);
+
+    // End of support is not enforced on test networks, so no height is reported.
+    assert_eq!(
+        end_of_support::end_of_support_height(&Network::new_default_testnet()),
+        None
+    );
 }
 
 /// Test that we are never in end of support warning or panic.

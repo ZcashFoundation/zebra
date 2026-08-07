@@ -25,6 +25,10 @@ filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
+[[profile.ci.overrides]]
+filter = 'test(/^integration::sync::/)'
+test-group = 'serial-live-mainnet'
+
 # These tests sync mainnet to genesis from live peers; they normally finish in
 # ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
 # retry instead of hanging near the old 30m hard limit, where they flaked.
@@ -52,6 +56,30 @@ slow-timeout = { period = "30m", terminate-after = 2 }
 
 [test-groups]
 serial-state = { max-threads = 1 }
+# Live Mainnet tests compete for the same limited set of usable peers when they
+# connect concurrently from one public IP.
+serial-live-mainnet = { max-threads = 1 }
+# zcashd-compat integration tests each spawn a zebrad + zcashd on
+# bind-probed-then-released ports, so they must never run concurrently, even
+# under a parallel profile invoked with --run-ignored=all.
+serial-zcashd-compat = { max-threads = 1 }
+
+# Force tests that start fresh live Mainnet nodes to run serially in local
+# parallel test runs. The CI overrides above assign the same test group while
+# preserving their profile-specific retries and timeouts.
+[[profile.default.overrides]]
+filter = 'test(/^integration::sync::/)'
+test-group = 'serial-live-mainnet'
+
+# Force zcashd-compat integration tests serial in every profile, so a parallel
+# --run-ignored=all run cannot collide on their released RPC/P2P ports.
+[[profile.default.overrides]]
+filter = 'test(~integration::zcashd_compat::)'
+test-group = 'serial-zcashd-compat'
+
+[[profile.ci.overrides]]
+filter = 'test(~integration::zcashd_compat::)'
+test-group = 'serial-zcashd-compat'
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test
@@ -103,3 +131,29 @@ slow-timeout = { period = "90m", terminate-after = 1 }
 
 [profile.check-no-git-dependencies]
 default-filter = 'test(=unit::end_of_support::check_no_git_dependencies)'
+
+# --- zcashd-compat Profiles ---
+
+[profile.zcashd-compat-integration]
+# Run zcashd-compat tests one at a time to avoid port conflicts and resource exhaustion.
+test-threads = 1
+slow-timeout = { period = "15m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'
+
+[profile.zcashd-compat-soak]
+# Long-running local soak for the reorg churn stress test.
+test-threads = 1
+slow-timeout = { period = "4h", terminate-after = 1 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(=integration::zcashd_compat::zcashd_compat_reorg_churn)'
+
+[profile.zcashd-compat-external]
+# External mode: connect to pre-running mainnet/testnet zebrad + zcashd.
+# Set TEST_ZCASHD_COMPAT_NETWORK, TEST_ZEBRAD_RPC_ADDR,
+# TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
+# No block mining — 5 minutes per test is sufficient.
+test-threads = 1
+slow-timeout = { period = "5m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'

@@ -50,7 +50,7 @@ use crate::{
     serialization::ZcashSerialize,
     sprout,
     transparent::{
-        self, outputs_from_utxos,
+        self,
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::{ValueBalance, ValueBalanceError},
@@ -1562,7 +1562,16 @@ impl Transaction {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+        let outputs = self
+            .spent_outpoints()
+            .filter_map(|outpoint| {
+                utxos
+                    .get(&outpoint)
+                    .map(|utxo| (outpoint, utxo.output.clone()))
+            })
+            .collect();
+
+        self.value_balance_from_outputs(&outputs)
     }
 
     /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
@@ -1694,6 +1703,29 @@ impl Transaction {
     pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
         self.orchard_shielded_data_mut()
             .map(|shielded_data| &mut shielded_data.value_balance)
+    }
+
+    /// Modify the `value_balance` field from the `ironwood::ShieldedData` in this transaction,
+    /// regardless of version.
+    ///
+    /// See `ironwood_value_balance` for details.
+    pub fn ironwood_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
+        match self {
+            Transaction::V6 {
+                ironwood_shielded_data: Some(ironwood_shielded_data),
+                ..
+            } => Some(&mut ironwood_shielded_data.data_mut().value_balance),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. }
+            | Transaction::V6 {
+                ironwood_shielded_data: None,
+                ..
+            } => None,
+        }
     }
 
     /// Modify the `value_balance` field from the `sapling::ShieldedData` in this transaction,

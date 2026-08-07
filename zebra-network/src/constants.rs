@@ -310,7 +310,13 @@ pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 ///
 /// This limit makes sure that Zebra does not reveal its entire address book
 /// in a single `Peers` response.
-pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
+///
+/// This is temporarily set to 2 (up from 4) to speed up peer discovery, so
+/// nodes can recover more quickly from network fragmentation. This reveals
+/// more of the address book to each requester, see #11103 for the tradeoff
+/// discussion and the follow-up conditions for reverting or replacing this
+/// value.
+pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 
 /// The maximum number of addresses Zebra will keep in its address book.
 ///
@@ -318,8 +324,11 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 4;
 /// - revealing the whole address book in a few requests,
 /// - sending the maximum number of peer addresses, and
 /// - making sure the limit code actually gets run.
-pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize =
-    MAX_ADDRS_IN_MESSAGE * (ADDR_RESPONSE_LIMIT_DENOMINATOR + 1);
+///
+/// This value is deliberately pinned rather than derived from
+/// [`ADDR_RESPONSE_LIMIT_DENOMINATOR`], so the temporary denominator change
+/// above does not shrink the address book (see #11103).
+pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
@@ -391,6 +400,20 @@ pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// The maximum number of peer misbehavior incidents before a peer is
 /// disconnected and banned.
 pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
+
+/// The interval between flushes of batched peer misbehaviour updates into the address book.
+///
+/// Misbehaviour updates are batched so peers can't keep the address book mutex locked by
+/// repeatedly sending invalid blocks or transactions.
+#[cfg(not(test))]
+pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The interval between flushes of batched peer misbehaviour updates into the address book.
+///
+/// Tests use a much shorter interval, so that tests which wait for a misbehaviour update to
+/// turn into a ban don't have to wait for a production flush cycle.
+#[cfg(test)]
+pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;

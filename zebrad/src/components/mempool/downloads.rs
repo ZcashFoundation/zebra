@@ -47,6 +47,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::Height,
+    parameters::NetworkUpgrade,
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -139,6 +140,10 @@ pub enum TransactionDownloadVerifyError {
     Invalid {
         error: zebra_consensus::error::TransactionError,
         advertiser_addr: Option<PeerSocketAddr>,
+        /// The transaction's consensus branch upgrade, if its version contains one.
+        transaction_upgrade: Option<NetworkUpgrade>,
+        /// The candidate block height used for mempool consensus verification.
+        verification_height: Height,
     },
 }
 
@@ -149,7 +154,10 @@ pub struct Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -210,7 +218,10 @@ impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -286,7 +297,10 @@ impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -376,6 +390,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+        let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
 
@@ -431,21 +446,20 @@ where
                         "mempool.pushed.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    (tx, None)
+                    (tx, pushed_advertiser_addr)
                 }
             };
 
             trace!(?txid, "got tx");
 
+            let transaction_upgrade = tx.transaction.network_upgrade();
             let result = verifier
-                .oneshot(tx::Request::Mempool {
+                .oneshot(tx::MempoolRequest {
                     transaction: tx.clone(),
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
-                        panic!("unexpected non-mempool response to mempool request")
-                    };
+                    let tx::MempoolResponse { transaction, spent_mempool_outpoints } = rsp;
 
                     (transaction, spent_mempool_outpoints, tip_height)
                 })
@@ -454,7 +468,12 @@ where
             // Hide the transaction data to avoid filling the logs
             trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
-            result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )
+            result.map_err(|error| TransactionDownloadVerifyError::Invalid {
+                error: error.into(),
+                advertiser_addr,
+                transaction_upgrade,
+                verification_height: next_height,
+            })
         }
         .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(
@@ -634,7 +653,10 @@ impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<tx::MempoolRequest, Response = tx::MempoolResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,

@@ -160,14 +160,10 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        let transaction = responder
-            .request()
-            .clone()
-            .mempool_transaction()
-            .expect("unexpected non-mempool request");
+        let transaction = responder.request().clone().transaction;
 
         // Set a dummy fee and sigops.
-        responder.respond(transaction::Response::from(
+        responder.respond(transaction::MempoolResponse::from(
             VerifiedUnminedTx::new(
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
@@ -382,14 +378,10 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             });
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        let transaction = responder
-            .request()
-            .clone()
-            .mempool_transaction()
-            .expect("unexpected non-mempool request");
+        let transaction = responder.request().clone().transaction;
 
         // Set a dummy fee and sigops.
-        responder.respond(transaction::Response::from(
+        responder.respond(transaction::MempoolResponse::from(
             VerifiedUnminedTx::new(
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
@@ -486,15 +478,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        tx1_id = responder.request().tx_id();
-        let transaction = responder
-            .request()
-            .clone()
-            .mempool_transaction()
-            .expect("unexpected non-mempool request");
+        tx1_id = responder.request().transaction.id;
+        let transaction = responder.request().clone().transaction;
 
         // Set a dummy fee and sigops.
-        responder.respond(transaction::Response::from(
+        responder.respond(transaction::MempoolResponse::from(
             VerifiedUnminedTx::new(
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
@@ -628,15 +616,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     ));
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        tx2_id = responder.request().tx_id();
-        let transaction = responder
-            .request()
-            .clone()
-            .mempool_transaction()
-            .expect("unexpected non-mempool request");
+        tx2_id = responder.request().transaction.id;
+        let transaction = responder.request().clone().transaction;
 
         // Set a dummy fee and sigops.
-        responder.respond(transaction::Response::from(
+        responder.respond(transaction::MempoolResponse::from(
             VerifiedUnminedTx::new(
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
@@ -995,7 +979,12 @@ async fn setup(
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Vec<Arc<Block>>,
     Vec<VerifiedUnminedTx>,
-    MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
+    MockService<
+        transaction::MempoolRequest,
+        transaction::MempoolResponse,
+        PanicAssertion,
+        TransactionError,
+    >,
     MockService<Request, Response, PanicAssertion>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     ChainTipChange,
@@ -1093,6 +1082,7 @@ async fn setup(
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mut mempool_service, transaction_subscriber) = Mempool::new(
+        &network,
         &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),

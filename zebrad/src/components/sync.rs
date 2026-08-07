@@ -805,33 +805,7 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    // zcashd sometimes appends an unrelated hash at the start
-                    // or end of its response.
-                    //
-                    // We can't discard the first hash, because it might be a
-                    // block we want to download. So we just accept any
-                    // out-of-order first hashes.
-
-                    // We use the last hash for the tip, and we want to avoid bad
-                    // tips from zcashd's quirk of appending an unrelated hash.
-                    // So we discard the last hash on mainnet/testnet.
-                    // (We don't need to worry about missed downloads, because we
-                    // will pick them up again in ExtendTips.)
-                    //
-                    // In regtest we only connect to Zebra nodes, not zcashd,
-                    // so we trust all hashes in the response and keep them all.
-                    // This is necessary when there are only a small number of
-                    // blocks to sync (e.g. 2 new blocks), where stripping the
-                    // last hash leaves only 1 unknown hash and rchunks_exact(2)
-                    // would discard the entire response.
-                    let hashes = if self.is_regtest {
-                        hashes.as_slice()
-                    } else {
-                        match hashes.as_slice() {
-                            [] => continue,
-                            [rest @ .., _last] => rest,
-                        }
-                    };
+                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
@@ -854,29 +828,31 @@ where
 
                     trace!(?unknown_hashes);
 
-                    let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                        CheckedTip {
+                    if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                        let new_tip = CheckedTip {
                             tip: end[0],
                             expected_next: end[1],
+                        };
+
+                        // Make sure we get the same tips, regardless of the
+                        // order of peer responses
+                        if !download_set.contains(&new_tip.expected_next) {
+                            debug!(
+                                ?new_tip,
+                                "adding new prospective tip, and removing existing tips in the \
+                                new block hash list",
+                            );
+                            self.prospective_tips
+                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                            self.prospective_tips.insert(new_tip);
+                        } else {
+                            debug!(
+                                ?new_tip,
+                                "discarding prospective tip: already in download set"
+                            );
                         }
                     } else {
-                        debug!("discarding response that extends only one block");
-                        continue;
-                    };
-
-                    // Make sure we get the same tips, regardless of the
-                    // order of peer responses
-                    if !download_set.contains(&new_tip.expected_next) {
-                        debug!(?new_tip,
-                                        "adding new prospective tip, and removing existing tips in the new block hash list");
-                        self.prospective_tips
-                            .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                        self.prospective_tips.insert(new_tip);
-                    } else {
-                        debug!(
-                            ?new_tip,
-                            "discarding prospective tip: already in download set"
-                        );
+                        debug!("downloading response that extends only one block");
                     }
 
                     // security: the first response determines our download order
@@ -958,9 +934,9 @@ where
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
-                        // zcashd sometimes appends an unrelated hash at the
-                        // start or end of its response. Check the first hash
-                        // against the previous response, and discard mismatches.
+                        // Legacy zcashd nodes could prepend an unrelated hash
+                        // to their response. Check the first hash against the
+                        // previous response, and discard mismatches.
                         let unknown_hashes = match hashes.as_slice() {
                             [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
@@ -995,40 +971,38 @@ where
                             }
                         };
 
-                        // We use the last hash for the tip, and we want to avoid
-                        // bad tips. So we discard the last hash. (We don't need
-                        // to worry about missed downloads, because we will pick
-                        // them up again in the next ExtendTips.)
-                        let unknown_hashes = match unknown_hashes {
-                            [] => continue,
-                            [rest @ .., _last] => rest,
-                        };
-
-                        let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                            CheckedTip {
-                                tip: end[0],
-                                expected_next: end[1],
-                            }
-                        } else {
-                            debug!("discarding response that extends only one block");
+                        if unknown_hashes.is_empty() {
+                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
                             continue;
-                        };
+                        }
 
                         trace!(?unknown_hashes);
 
-                        // Make sure we get the same tips, regardless of the
-                        // order of peer responses
-                        if !download_set.contains(&new_tip.expected_next) {
-                            debug!(?new_tip,
-                                            "adding new prospective tip, and removing any existing tips in the new block hash list");
-                            self.prospective_tips
-                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                            self.prospective_tips.insert(new_tip);
+                        if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                            let new_tip = CheckedTip {
+                                tip: end[0],
+                                expected_next: end[1],
+                            };
+
+                            // Make sure we get the same tips, regardless of the
+                            // order of peer responses
+                            if !download_set.contains(&new_tip.expected_next) {
+                                debug!(
+                                    ?new_tip,
+                                    "adding new prospective tip, and removing any existing tips \
+                                    in the new block hash list",
+                                );
+                                self.prospective_tips
+                                    .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                                self.prospective_tips.insert(new_tip);
+                            } else {
+                                debug!(
+                                    ?new_tip,
+                                    "discarding prospective tip: already in download set"
+                                );
+                            }
                         } else {
-                            debug!(
-                                ?new_tip,
-                                "discarding prospective tip: already in download set"
-                            );
+                            debug!("downloading response that extends only one block");
                         }
 
                         // security: the first response determines our download order

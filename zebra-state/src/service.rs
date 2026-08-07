@@ -352,12 +352,22 @@ impl StateService {
         // aren't blocks in the restored non-finalized state that are above the max checkpoint height,
         // otherwise, unless checkpoint sync is disabled in the zebra-consensus configuration,
         // Zebra will be unable to commit checkpoint verified blocks, and its chain sync will stall.
-        let is_finalized_tip_past_max_checkpoint = if let Some(tip) = &finalized_tip {
-            tip.coinbase_height().expect("valid block must have height") >= max_checkpoint_height
-        } else {
-            false
-        };
+        let finalized_tip_height = finalized_tip
+            .as_ref()
+            .map(|tip| tip.coinbase_height().expect("valid block must have height"));
+        let is_finalized_tip_past_max_checkpoint =
+            finalized_tip_height.is_some_and(|tip_height| tip_height >= max_checkpoint_height);
         let backup_dir_path = config.non_finalized_state_backup_dir(network);
+
+        if backup_dir_path.is_some() && !is_finalized_tip_past_max_checkpoint {
+            tracing::info!(
+                ?finalized_tip_height,
+                ?max_checkpoint_height,
+                "not restoring the non-finalized state backup, because the finalized tip is absent \
+                 or below the max checkpoint height: Zebra will re-download and re-verify the \
+                 blocks above its finalized tip"
+            );
+        }
         let skip_backup_task = config.debug_skip_non_finalized_state_backup_task;
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
             NonFinalizedState::new(network)
@@ -1174,6 +1184,8 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
+                self.drain_non_finalized_rejected_hashes();
+
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
@@ -1230,6 +1242,9 @@ impl Service<Request> for StateService {
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
+
+                self.drain_non_finalized_rejected_hashes();
+
                 let sent_hash_response = self.known_sent_hash(&hash);
                 let read_service = self.read_service.clone();
 

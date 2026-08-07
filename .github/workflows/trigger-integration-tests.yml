@@ -38,7 +38,21 @@ jobs:
     # Fork PRs do not receive repository secrets on pull_request events.
     # Skip the job on fork PRs; maintainers can still run it manually via
     # workflow_dispatch with the PR number as input.
-    if: ${{ (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) || (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'workflow_dispatch' }}
+    # Mergify queue candidates reuse the source PR's integration result.
+    if: >-
+      ${{
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.user.login != 'mergify[bot]' ||
+          github.event.pull_request.head.repo.full_name != github.repository ||
+          !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+        ) &&
+        (
+          (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
+          (github.event_name == 'push' && github.ref_name == 'main') ||
+          github.event_name == 'workflow_dispatch'
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       # Needed to post a sticky comment on the PR when triggered manually.
@@ -87,11 +101,16 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SHA: ${{ steps.pr.outputs.sha || github.event.pull_request.head.sha || github.sha }}
           TEST_SHA: ${{ steps.pr.outputs.test_sha || steps.test-branch.outputs.test_sha }}
+          # Stable per-source key so the integration repo can cancel a superseded
+          # run: the PR number for pull requests and manual dispatches, otherwise
+          # the branch name (e.g. `main`).
+          SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && format('pr-{0}', inputs.pr_number) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name) }}
         run: >
           gh api repos/zcash/integration-tests/dispatches
           --field event_type="zebra-interop-request"
           --field client_payload[sha]="${SHA}"
           --field client_payload[test_sha]="${TEST_SHA}"
+          --field client_payload[source_ref]="${SOURCE_REF}"
 
       - name: Post sticky comment on PR (manual dispatch only)
         if: github.event_name == 'workflow_dispatch'

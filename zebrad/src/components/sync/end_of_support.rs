@@ -7,13 +7,19 @@ use color_eyre::Report;
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_408_000;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_425_000;
+
+/// The estimated number of blocks per day, with the post-Blossom 75-second target spacing.
+///
+/// All Zebra releases ship after Blossom, so this matches the spacing `check()` sees at any
+/// reachable tip height.
+pub const ESTIMATED_BLOCKS_PER_DAY: u32 = 24 * 60 * 60 / POST_BLOSSOM_POW_TARGET_SPACING;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
@@ -61,22 +67,30 @@ pub async fn start(
     }
 }
 
+/// Returns the estimated last supported height for this release, or `None` on networks where
+/// end of support is not enforced.
+///
+/// The node runs up to and including this height, and halts with an end of support panic when
+/// the tip goes past it. This matches zcashd, where `end_of_service.block_height` is also the
+/// threshold rather than the first halted block.
+pub fn end_of_support_height(network: &Network) -> Option<Height> {
+    if network != &Network::Mainnet {
+        return None;
+    }
+
+    Some(Height(
+        ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY),
+    ))
+}
+
 /// Check if the current release is too old and panic if so.
-pub fn check(tip_height: Height, network: &Network) {
+pub fn check(tip_height: Height, _network: &Network) {
     info!("Checking if Zebra release is inside support range ...");
 
-    // Get the current block spacing
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
-
-    // Get the number of blocks per day
-    let estimated_blocks_per_day =
-        u32::try_from(chrono::Duration::days(1).num_seconds() / target_block_spacing.num_seconds())
-            .expect("number is always small enough to fit");
-
     let panic_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * estimated_blocks_per_day));
+        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY));
     let warn_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * estimated_blocks_per_day));
+        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * ESTIMATED_BLOCKS_PER_DAY));
 
     if tip_height > panic_height {
         panic!(

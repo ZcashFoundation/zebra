@@ -20,7 +20,7 @@ mod tests;
 /// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
 //
 // TODO: allow Amount<NonNegative> in constants
-const MARGINAL_FEE: u64 = 5_000;
+pub const MARGINAL_FEE: u64 = 5_000;
 
 /// The number of grace logical actions allowed by the ZIP-317 fee calculation.
 const GRACE_ACTIONS: u32 = 2;
