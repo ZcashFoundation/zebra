@@ -1,6 +1,6 @@
 //! Fixed test vectors for RPC methods.
 
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tower::buffer::Buffer;
@@ -2376,6 +2376,9 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let mock_block_verifier_router: MockService<_, _, _, BoxError> =
+        MockService::build().for_unit_tests();
+
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
@@ -2417,7 +2420,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
+        mock_block_verifier_router.clone(),
         mock_sync_status.clone(),
         mock_tip,
         MockAddressBookPeers::default(),
@@ -2459,11 +2462,27 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         }
     };
 
+    // Zebra checks the template it built before returning it, so the block verifier must
+    // answer that check. See <https://github.com/ZcashFoundation/zebra/issues/9301>.
+    let make_mock_block_verifier_request_handler = || {
+        let mut mock_block_verifier_router = mock_block_verifier_router.clone();
+
+        async move {
+            mock_block_verifier_router
+                .expect_request_that(|req| {
+                    matches!(req, zebra_consensus::Request::CheckOwnProposal { .. })
+                })
+                .await
+                .respond_with(|req| req.block().hash());
+        }
+    };
+
     let get_block_template_fut = rpc.get_block_template(None);
     let (get_block_template, ..) = tokio::join!(
         get_block_template_fut,
         make_mock_mempool_request_handler(vec![], fake_tip_hash),
         make_mock_read_state_request_handler(),
+        make_mock_block_verifier_request_handler(),
     );
 
     let GetBlockTemplateResponse::TemplateMode(get_block_template) =
@@ -2655,6 +2674,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         rpc.get_block_template(None),
         make_mock_mempool_request_handler(vec![verified_unmined_tx], next_fake_tip_hash),
         make_mock_read_state_request_handler(),
+        make_mock_block_verifier_request_handler(),
     );
 
     let GetBlockTemplateResponse::TemplateMode(get_block_template) =
@@ -3609,4 +3629,205 @@ async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
             "{upgrade:?} at height {height:?} must use the {expected_recipient:?} label"
         );
     }
+}
+
+/// Tests that `getblocktemplate` drops a transaction that makes its template unmineable, and
+/// asks the mempool to remove it.
+///
+/// # Correctness
+///
+/// Zebra's mempool rules and block rules are applied by different code, so a transaction can
+/// pass mempool verification and still be rejected inside a block. Handing a miner a template
+/// containing such a transaction means every block they mine from it is refused by the node
+/// that produced it, stalling block production for the pool. See
+/// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+#[tokio::test(flavor = "multi_thread")]
+async fn getblocktemplate_drops_unmineable_transactions() {
+    let _init_guard = zebra_test::init();
+
+    let net = Network::Mainnet;
+    let addr = ZcashAddress::from_transparent_p2pkh(
+        NetworkType::from(NetworkKind::from(&net)),
+        [0x7e; 20],
+    );
+
+    // This test drives two rounds of template building, each of which builds a coinbase and
+    // verifies a proposal, so the mocks need longer than the default delay to stay reliable
+    // when the test suite runs in parallel.
+    let mock_delay = Duration::from_secs(30);
+    let mempool: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(mock_delay)
+        .for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(mock_delay)
+        .for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(mock_delay)
+        .for_unit_tests();
+    let mock_block_verifier_router: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(mock_delay)
+        .for_unit_tests();
+
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let mining_conf = crate::config::mining::Config {
+        miner_address: Some(addr),
+        extra_coinbase_data: None,
+        miner_memo: None,
+        internal_miner: true,
+    };
+
+    let fake_tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("nu5 activation height");
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+    let fake_min_time = DateTime32::from(1654008606);
+    let fake_cur_time = DateTime32::from(1654008617);
+    let fake_max_time = DateTime32::from(1654008728);
+    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
+
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        net.clone(),
+        mining_conf,
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        state.clone(),
+        Buffer::new(read_state.clone(), 1),
+        mock_block_verifier_router.clone(),
+        mock_sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // A transaction the mempool accepted, which block verification will reject.
+    let unmineable_tx = zebra_chain::block::Block::zcash_deserialize(
+        &zebra_test::vectors::BLOCK_MAINNET_982681_BYTES[..],
+    )
+    .expect("block test vector should deserialize")
+    .transactions[1]
+        .clone();
+    let unmineable_tx_hash = unmineable_tx.hash();
+    let unmineable_tx = UnminedTx::from(unmineable_tx);
+    let conventional_actions = zip317::conventional_actions(&unmineable_tx.transaction);
+    let unmineable_tx = VerifiedUnminedTx {
+        transaction: unmineable_tx,
+        miner_fee: 0.try_into().expect("valid fee"),
+        legacy_sigop_count: 0,
+        p2sh_sigop_count: 0,
+        conventional_actions,
+        unpaid_actions: 0,
+        fee_weight_ratio: 1.0,
+        time: None,
+        height: None,
+        spent_outputs: std::sync::Arc::new(vec![]),
+    };
+
+    // The state and mempool are asked for the same data on each attempt.
+    let read_state_handler = || {
+        let mut read_state = read_state.clone();
+        async move {
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: fake_max_time,
+                    chain_history_root: fake_history_tree(&Mainnet).hash(),
+                }));
+        }
+    };
+
+    let mempool_handler = {
+        let mut mempool = mempool.clone();
+        let unmineable_tx = unmineable_tx.clone();
+
+        async move {
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions {
+                    transactions: vec![unmineable_tx],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: fake_tip_hash,
+                });
+
+            // The unmineable transaction must be removed from the mempool, or it would break
+            // the next template too.
+            let removal = mempool
+                .expect_request(mempool::Request::RejectFailedBlockProposals(
+                    [unmineable_tx_hash].into(),
+                ))
+                .await;
+            removal.respond(mempool::Response::RejectedFailedBlockProposals(
+                [unmineable_tx_hash].into(),
+            ));
+        }
+    };
+
+    // The first proposal contains the bad transaction and is rejected, naming it. The rebuilt
+    // proposal no longer contains it and verifies.
+    let block_verifier_handler = {
+        let mut mock_block_verifier_router = mock_block_verifier_router.clone();
+
+        async move {
+            mock_block_verifier_router
+                .expect_request_that(|req| {
+                    matches!(req, zebra_consensus::Request::CheckOwnProposal { .. })
+                })
+                .await
+                .respond_error(BoxError::from(zebra_consensus::RouterError::Block {
+                    source: Box::new(zebra_consensus::VerifyBlockError::Transaction {
+                        transaction_hash: unmineable_tx_hash,
+                        source: zebra_consensus::error::TransactionError::WrongConsensusBranchId,
+                    }),
+                }));
+
+            mock_block_verifier_router
+                .expect_request_that(|req| {
+                    matches!(req, zebra_consensus::Request::CheckOwnProposal { .. })
+                })
+                .await
+                .respond_with(|req| req.block().hash());
+        }
+    };
+
+    let (get_block_template, ..) = tokio::join!(
+        rpc.get_block_template(None),
+        mempool_handler,
+        read_state_handler(),
+        block_verifier_handler,
+    );
+
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("getblocktemplate without parameters should return the TemplateMode variant")
+    };
+
+    assert!(
+        get_block_template.transactions.is_empty(),
+        "a transaction that makes the template unmineable must not be handed to miners, \
+         but the template contained {:?}",
+        get_block_template
+            .transactions
+            .iter()
+            .map(|tx| tx.hash)
+            .collect::<Vec<_>>()
+    );
 }

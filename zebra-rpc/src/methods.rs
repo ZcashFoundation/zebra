@@ -2418,8 +2418,10 @@ where
         parameters: Option<GetBlockTemplateParameters>,
     ) -> Result<GetBlockTemplateResponse> {
         use types::get_block_template::{
-            check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
-            validate_block_proposal, zip317::select_mempool_transactions,
+            check_own_block_template, check_parameters, check_synced_to_tip, fetch_chain_info,
+            fetch_mempool_transactions, validate_block_proposal,
+            zip317::select_mempool_transactions, TemplateSelfCheck,
+            MAX_TEMPLATE_SELF_CHECK_ATTEMPTS,
         };
 
         // Clone Services
@@ -2702,26 +2704,99 @@ where
 
         let height = chain_info.tip_height.next().map_misc_error()?;
 
-        // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
-        let mempool_txs = select_mempool_transactions(
-            &self.network,
-            height,
-            miner_params,
-            mempool_txs,
-            mempool_tx_deps,
-            Some(&coinbase_cache),
-        );
 
-        tracing::debug!(
-            selected_mempool_tx_hashes = ?mempool_txs
+        // Transactions dropped because a block containing them did not verify. They are also
+        // removed from the mempool, but the response to that request may not have been applied
+        // by the time the template is rebuilt, so they are excluded here as well.
+        let mut dropped_txs: HashSet<transaction::Hash> = HashSet::new();
+
+        // Zebra hands miners a template only after checking that it would accept a block built
+        // from it. Its mempool rules and block rules are applied by different code, so a
+        // transaction can pass one and fail the other; without this check such a transaction
+        // reaches a template and every block mined from it is refused by the node that
+        // produced it, stalling block production.
+        // See <https://github.com/ZcashFoundation/zebra/issues/9301>.
+        for _attempt in 0..MAX_TEMPLATE_SELF_CHECK_ATTEMPTS {
+            let candidate_txs: Vec<_> = mempool_txs
                 .iter()
-                .map(|#[cfg(not(test))] tx, #[cfg(test)] (_, tx)| tx.transaction.id.mined_id())
-                .collect::<Vec<_>>(),
-            "selected transactions for the template from the mempool"
-        );
+                .filter(|tx| !dropped_txs.contains(&tx.transaction.id.mined_id()))
+                .cloned()
+                .collect();
 
-        // - After this point, the template only depends on the previously fetched data.
+            // Randomly select some mempool transactions.
+            let selected_txs = select_mempool_transactions(
+                &self.network,
+                height,
+                miner_params,
+                candidate_txs,
+                mempool_tx_deps.clone(),
+                Some(&coinbase_cache),
+            );
+
+            tracing::debug!(
+                selected_mempool_tx_hashes = ?selected_txs
+                    .iter()
+                    .map(|#[cfg(not(test))] tx, #[cfg(test)] (_, tx)| tx.transaction.id.mined_id())
+                    .collect::<Vec<_>>(),
+                "selected transactions for the template from the mempool"
+            );
+
+            // - After this point, the template only depends on the previously fetched data.
+
+            let template = BlockTemplateResponse::new_internal(
+                &self.network,
+                None,
+                Some(self.gbt.coinbase_cache()),
+                miner_params,
+                &chain_info,
+                server_long_poll_id,
+                selected_txs,
+                submit_old,
+            );
+
+            match check_own_block_template(
+                self.gbt.block_verifier_router(),
+                &template,
+                &self.network,
+            )
+            .await
+            {
+                TemplateSelfCheck::Valid => return Ok(template.into()),
+
+                TemplateSelfCheck::InvalidTransactions(invalid_txs) => {
+                    // Leaving these in the mempool would break the next template too.
+                    let _ = mempool
+                        .clone()
+                        .oneshot(mempool::Request::RejectFailedBlockProposals(
+                            invalid_txs.clone(),
+                        ))
+                        .await
+                        .map_err(|error| {
+                            tracing::warn!(
+                                ?error,
+                                "could not remove unmineable transactions from the mempool"
+                            )
+                        });
+
+                    dropped_txs.extend(invalid_txs);
+                }
+
+                TemplateSelfCheck::Unusable(error) => {
+                    tracing::error!(
+                        ?error,
+                        "Zebra built a block template it would not accept, and could not tell                          which transactions are at fault, so it is returning a template with no                          mempool transactions. This is a bug in Zebra: please report it at                          https://github.com/ZcashFoundation/zebra/issues"
+                    );
+
+                    break;
+                }
+            }
+        }
+
+        // Zebra could not build a mineable template containing mempool transactions. A template
+        // with only the coinbase transaction is always valid, so miners can keep extending the
+        // chain while the problem is investigated. They lose this block's transaction fees.
+        metrics::counter!("rpc.getblocktemplate.coinbase_only_fallback.total").increment(1);
 
         Ok(BlockTemplateResponse::new_internal(
             &self.network,
@@ -2730,7 +2805,7 @@ where
             miner_params,
             &chain_info,
             server_long_poll_id,
-            mempool_txs,
+            Vec::new(),
             submit_old,
         )
         .into())

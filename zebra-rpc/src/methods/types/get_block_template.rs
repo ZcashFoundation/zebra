@@ -22,6 +22,14 @@ use rand::{rngs::OsRng, RngCore};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
+
+use std::collections::HashSet;
+
+use zebra_chain::transaction;
+use zebra_consensus::RouterError;
+use zebra_node_services::BoxError;
+
+use self::proposal::proposal_block_from_template;
 use zcash_protocol::memo::MemoBytes;
 
 use zcash_script::{opcode::PushValue, pv::push_value};
@@ -967,4 +975,106 @@ where
 
     // Check that the mempool and state were in sync when we made the requests
     Ok((last_seen_tip_hash == chain_tip_hash).then_some((transactions, transaction_dependencies)))
+}
+
+/// The number of times `getblocktemplate` rebuilds a template after dropping transactions that
+/// made it unmineable.
+///
+/// Each attempt costs a block proposal verification, so this is small. Reaching the limit means
+/// Zebra could not produce a mineable template containing any mempool transactions, and it falls
+/// back to a coinbase-only template.
+pub const MAX_TEMPLATE_SELF_CHECK_ATTEMPTS: usize = 3;
+
+/// The result of checking a block template Zebra built against its own block verifier.
+#[derive(Debug)]
+pub enum TemplateSelfCheck {
+    /// A block built from this template verifies, so a miner can use it.
+    Valid,
+
+    /// These transactions made the template unmineable and must be dropped from it.
+    InvalidTransactions(HashSet<transaction::Hash>),
+
+    /// The template is unmineable, but Zebra could not tell which transactions are at fault,
+    /// or could not complete the check at all.
+    Unusable(BoxError),
+}
+
+/// Checks that a block built from `template` would pass Zebra's own block verification.
+///
+/// # Correctness
+///
+/// Zebra's mempool rules and block rules are applied by different code paths, so a transaction
+/// can pass mempool verification and still be rejected in a block. Such a transaction is
+/// selected into a template, and then every block a pool mines from that template is refused by
+/// the very node that produced it, stalling block production. Checking the template Zebra is
+/// about to hand out is what stops that from reaching miners. See
+/// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+///
+/// The template's transactions all come from this node's mempool, which already verified their
+/// scripts, proofs and signatures, so this skips repeating that cryptography. Every consensus
+/// rule that depends on the block context still runs, which is the point of the check. The
+/// coinbase transaction was just built and has never been verified, so it is checked in full.
+pub async fn check_own_block_template<BlockVerifierRouter>(
+    mut block_verifier_router: BlockVerifierRouter,
+    template: &BlockTemplateResponse,
+    net: &Network,
+) -> TemplateSelfCheck
+where
+    BlockVerifierRouter: BlockVerifierService,
+{
+    let block = match proposal_block_from_template(template, None, net) {
+        Ok(block) => block,
+        // Zebra built a template it cannot even serialize into a block, which is a bug in
+        // Zebra rather than a problem with any particular transaction.
+        Err(error) => return TemplateSelfCheck::Unusable(error.into()),
+    };
+
+    let already_verified: HashSet<_> = template.transactions.iter().map(|tx| tx.hash).collect();
+
+    let response = block_verifier_router
+        .ready()
+        .await
+        .map_err(TemplateSelfCheck::Unusable);
+
+    let response = match response {
+        Ok(verifier) => {
+            verifier
+                .call(zebra_consensus::Request::CheckOwnProposal {
+                    block: Arc::new(block),
+                    already_verified: Arc::new(already_verified),
+                })
+                .await
+        }
+        Err(unusable) => return unusable,
+    };
+
+    let error = match response {
+        Ok(_hash) => return TemplateSelfCheck::Valid,
+        Err(error) => error,
+    };
+
+    // Only a failure that names a transaction can be fixed by dropping transactions. Anything
+    // else — a whole-block rule, a contextual failure, or an unavailable verifier — leaves
+    // Zebra unable to say which transactions are at fault.
+    match error.downcast::<RouterError>().map(|error| *error) {
+        Ok(RouterError::Block { source }) => match *source {
+            zebra_consensus::VerifyBlockError::Transaction {
+                transaction_hash,
+                source,
+            } => {
+                tracing::error!(
+                    ?transaction_hash,
+                    ?source,
+                    "a mempool transaction did not verify inside a block Zebra built, so it was \
+                     dropped from the block template. This is a bug in Zebra: please report it \
+                     at https://github.com/ZcashFoundation/zebra/issues"
+                );
+
+                TemplateSelfCheck::InvalidTransactions([transaction_hash].into())
+            }
+            source => TemplateSelfCheck::Unusable(source.into()),
+        },
+        Ok(error) => TemplateSelfCheck::Unusable(error.into()),
+        Err(error) => TemplateSelfCheck::Unusable(error),
+    }
 }

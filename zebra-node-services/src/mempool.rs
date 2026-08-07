@@ -125,6 +125,21 @@ pub enum Request {
 
     /// Check whether a transparent output is spent in the mempool.
     UnspentOutput(transparent::OutPoint),
+
+    /// Remove the transactions with these mined IDs, because a block containing them failed
+    /// verification, and reject them until the chain tip changes.
+    ///
+    /// Transactions that depend on them are removed too, since they cannot be mined without
+    /// them.
+    ///
+    /// # Correctness
+    ///
+    /// This is only for transactions that Zebra selected into one of its own block templates
+    /// and then found it would refuse to mine. Such a transaction makes every block built from
+    /// that template unmineable, so leaving it in the mempool would keep breaking templates.
+    /// It means Zebra's mempool and block rules disagree, which is a bug in Zebra. See
+    /// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+    RejectFailedBlockProposals(HashSet<transaction::Hash>),
 }
 
 /// A response to a mempool service request.
@@ -182,6 +197,10 @@ pub enum Response {
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,
+
+    /// Confirms that the transactions which failed block proposal verification have been
+    /// removed, and returns the mined IDs that were actually removed, including any dependents.
+    RejectedFailedBlockProposals(HashSet<transaction::Hash>),
 
     /// Summary statistics for the mempool: count, total size, memory usage, and regtest info.
     QueueStats {

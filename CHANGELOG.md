@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks.
+- `getblocktemplate` now verifies the block template it built before returning it, and drops any
+  transaction that would make a block from that template invalid. Zebra applies its mempool rules
+  and its block rules in different code, so a transaction could pass the first and fail the
+  second; a template containing such a transaction makes every block a pool mines from it be
+  refused by the node that produced it, stalling block production. Dropped transactions are
+  removed from the mempool and logged as an error, because this means Zebra's own rules disagree.
+  If Zebra cannot produce a mineable template containing any mempool transactions, it returns a
+  template with only the coinbase transaction so the chain keeps advancing, at the cost of that
+  block's transaction fees. The check reuses the mempool's verification results instead of
+  re-checking scripts, proofs and signatures, and only runs on nodes with mining configured
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
 
 ### Fixed
 

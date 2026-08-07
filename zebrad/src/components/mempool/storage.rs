@@ -86,6 +86,12 @@ pub enum SameEffectsTipRejectionError {
         another transaction in the mempool"
     )]
     MissingOutput,
+
+    #[error(
+        "transaction rejected because a block containing it failed verification, so it would \
+        make Zebra's block templates unmineable"
+    )]
+    FailedBlockProposal,
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
@@ -675,6 +681,34 @@ impl Storage {
     /// Returns a reference to the [`TransactionDependencies`] in the verified set.
     pub fn transaction_dependencies(&self) -> &TransactionDependencies {
         self.verified.transaction_dependencies()
+    }
+
+    /// Removes the transactions with these mined IDs because a block containing them failed
+    /// verification, and rejects them until the chain tip changes.
+    ///
+    /// Transactions that depend on them are removed as well, since they cannot be mined
+    /// without them.
+    ///
+    /// Returns the mined IDs of every transaction that was removed.
+    pub fn reject_failed_block_proposals(
+        &mut self,
+        tx_hashes: &HashSet<transaction::Hash>,
+    ) -> HashSet<transaction::Hash> {
+        let removed = self
+            .verified
+            .remove_all_that(|tx| tx_hashes.contains(&tx.transaction.id.mined_id()));
+
+        for removed_id in &removed {
+            // Tip-scoped, because the rules a block must satisfy depend on the chain tip: a
+            // transaction that cannot be mined onto this tip may be fine on the next one.
+            // `clear_tip_rejections()` clears these when the tip changes.
+            self.reject(
+                *removed_id,
+                SameEffectsTipRejectionError::FailedBlockProposal.into(),
+            );
+        }
+
+        removed.iter().map(|id| id.mined_id()).collect()
     }
 
     /// Returns a [`transparent::Output`] created by a mempool transaction for the provided

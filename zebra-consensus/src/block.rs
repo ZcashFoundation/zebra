@@ -25,7 +25,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
-    transparent,
+    transaction, transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -82,8 +82,17 @@ pub enum VerifyBlockError {
     // TODO: make this into a concrete type (see #5732)
     ValidateProposal(#[source] BoxError),
 
-    #[error("invalid transaction: {0}")]
-    Transaction(#[from] TransactionError),
+    #[error("invalid transaction {transaction_hash:?}: {source}")]
+    Transaction {
+        /// The mined ID of the transaction that failed verification.
+        ///
+        /// Callers verifying a block they built themselves use this to find which transaction
+        /// to drop, instead of having to narrow it down by re-verifying subsets. See
+        /// <https://github.com/ZcashFoundation/zebra/issues/9301>.
+        transaction_hash: transaction::Hash,
+        /// Why the transaction is invalid.
+        source: TransactionError,
+    },
 
     #[error("invalid block subsidy: {0}")]
     Subsidy(#[from] SubsidyError),
@@ -111,7 +120,7 @@ impl VerifyBlockError {
         match self {
             Block { source } => source.misbehavior_score(),
             Equihash { .. } | Subsidy(_) => 100,
-            Transaction(err) => err.mempool_misbehavior_score(),
+            Transaction { source, .. } => source.mempool_misbehavior_score(),
             Commit(err) => err.misbehavior_score(),
             _other => 0,
         }
@@ -280,7 +289,12 @@ where
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
-            tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
+            tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height).map_err(
+                |source| VerifyBlockError::Transaction {
+                    transaction_hash: coinbase_tx.hash(),
+                    source,
+                },
+            )?;
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
@@ -303,8 +317,15 @@ where
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,
+                        // Only ever true for `Request::CheckOwnProposal`, whose docs explain
+                        // when skipping cryptographic verification is sound.
+                        crypto_already_verified: request.crypto_already_verified(&transaction_hash),
                     });
-                async_checks.push(rsp);
+
+                // `FuturesUnordered` loses the order the requests were made in, so carry the
+                // hash through to identify which transaction a failure belongs to.
+                async_checks
+                    .push(async move { rsp.await.map_err(|error| (transaction_hash, error)) });
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
@@ -317,9 +338,11 @@ where
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
-                    .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
+                let response =
+                    result.map_err(|(transaction_hash, error)| VerifyBlockError::Transaction {
+                        transaction_hash,
+                        source: error.into(),
+                    })?;
 
                 sigops += response.sigops;
 

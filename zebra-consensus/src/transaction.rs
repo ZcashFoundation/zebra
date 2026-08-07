@@ -181,6 +181,21 @@ pub struct BlockRequest {
     pub height: block::Height,
     /// The time that the block was mined.
     pub time: DateTime<Utc>,
+    /// Skip the cryptographic verification of this transaction: transparent script
+    /// verification, shielded proof verification, and signature verification.
+    ///
+    /// # Correctness
+    ///
+    /// Only set this for a transaction that this node has already cryptographically
+    /// verified, which in practice means a transaction from this node's own mempool that is
+    /// being re-checked as part of a block proposal this node assembled. Cryptographic
+    /// validity does not depend on the verification context, so those checks would only
+    /// repeat work already done. All the consensus rules that *do* depend on the context
+    /// still run.
+    ///
+    /// Setting this for any other transaction lets an invalid transaction verify
+    /// successfully. See [`crate::Request::CheckOwnProposal`].
+    pub crypto_already_verified: bool,
 }
 
 /// A request to verify a transaction as part of the mempool.
@@ -299,6 +314,7 @@ where
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
+        let crypto_already_verified = req.crypto_already_verified;
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
 
@@ -333,7 +349,12 @@ where
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            // Select version-specific async verification pipeline
+            // Select version-specific async verification pipeline.
+            //
+            // This is called even when the cryptographic checks are skipped: building the
+            // pipeline applies the synchronous consensus rules for the transaction's version,
+            // such as `verify_v5_transaction_network_upgrade()`. Only awaiting the pipeline
+            // runs the cryptography.
             let async_checks = dispatch_version_verification(
                 tx.as_ref(),
                 nu,
@@ -341,11 +362,19 @@ where
                 cached_ffi_transaction.clone()
             )?;
 
-            tracing::trace!(?tx_id, "awaiting async checks...");
+            if crypto_already_verified {
+                // This node has already verified this transaction's scripts, proofs and
+                // signatures, and cryptographic validity does not depend on whether a
+                // transaction is verified for the mempool or for a block. See the
+                // `BlockRequest::crypto_already_verified` docs for when this is sound.
+                tracing::trace!(?tx_id, "skipping already-performed async checks");
+            } else {
+                tracing::trace!(?tx_id, "awaiting async checks...");
 
-            async_checks.check().await?;
+                async_checks.check().await?;
 
-            tracing::trace!(?tx_id, "finished async checks");
+                tracing::trace!(?tx_id, "finished async checks");
+            }
 
             let miner_fee = if tx.is_coinbase() {
                 None

@@ -25,12 +25,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transactions. Callers verifying transactions as part of block verification
   should construct a `transaction::BlockTxVerifier` directly.
   ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- `transaction::BlockRequest` has a new required `crypto_already_verified` field. Existing
+  callers should set it to `false`, which preserves current behaviour.
+- `VerifyBlockError::Transaction` is now a struct variant carrying the `transaction_hash` of the
+  transaction that failed, alongside the `source` error, and no longer implements `From`. A
+  caller verifying a block it built itself uses the hash to find which transaction to drop,
+  instead of narrowing it down by re-verifying subsets
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+- `Request` has a new `CheckOwnProposal` variant, so exhaustive matches on it need updating
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
 
 ### Added
 
 - `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
   `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
+- `Request::CheckOwnProposal`, which verifies a block proposal while skipping the
+  cryptographic verification (scripts, proofs and signatures) of the transactions it names.
+  It is only sound for a proposal a node assembled from its own mempool, using transactions
+  that same node already verified; every context-dependent consensus rule still runs. This
+  lets a node check that its own block templates are actually mineable without verifying
+  every transaction's cryptography twice
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+- `Request::crypto_already_verified()`, and the corresponding
+  `transaction::BlockRequest::crypto_already_verified` field. Setting the field for a
+  transaction the node did not itself verify is unsound; see its documentation.
 
 ### Changed
 

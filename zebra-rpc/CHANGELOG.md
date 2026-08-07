@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `check_own_block_template()`, `TemplateSelfCheck` and `MAX_TEMPLATE_SELF_CHECK_ATTEMPTS`, used
+  by `getblocktemplate` to verify the template it built before returning it
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+
 ### Breaking Changes
 
 - The `Rpc` trait has a new required `get_deprecation_info` method. Downstream implementers of

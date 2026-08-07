@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mempool::Request::RejectFailedBlockProposals` and
+  `mempool::Response::RejectedFailedBlockProposals`, which remove transactions that made one of
+  Zebra's own block templates unmineable, and reject them until the chain tip changes
+  ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+
 ## [9.1.2] - 2026-07-27
 
 ### Changed
