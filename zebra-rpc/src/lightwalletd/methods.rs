@@ -154,7 +154,7 @@ where
             Ok(ReadResponse::AnyChainTransaction(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
-                return Err(Status::unavailable(format!(
+                return Err(Status::internal(format!(
                     "failed to read transaction: {error}"
                 )));
             }
@@ -167,7 +167,7 @@ where
                 [hash].into_iter().collect(),
             ))
             .await
-            .map_err(|error| Status::unavailable(format!("failed to query mempool: {error}")))?;
+            .map_err(|error| Status::internal(format!("failed to query mempool: {error}")))?;
 
         let mempool_tx = match mempool_response {
             mempool::Response::Transactions(transactions) => transactions.into_iter().next(),
@@ -486,7 +486,7 @@ where
                     Err(error) => {
                         let _ = send_bounded(
                             &response_sender,
-                            Err(Status::unavailable(format!(
+                            Err(Status::internal(format!(
                                 "failed to read completing block hash: {error}"
                             ))),
                         )
@@ -609,9 +609,7 @@ async fn compact_block<ReadStateService: ReadState>(
         Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
-            return Err(Status::unavailable(format!(
-                "failed to read block: {error}"
-            )));
+            return Err(Status::internal(format!("failed to read block: {error}")));
         }
     };
 
@@ -640,7 +638,7 @@ async fn compact_block<ReadStateService: ReadState>(
         }
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
-            return Err(Status::unavailable(format!(
+            return Err(Status::internal(format!(
                 "failed to read sapling tree: {error}"
             )));
         }
@@ -655,7 +653,7 @@ async fn compact_block<ReadStateService: ReadState>(
         }
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
-            return Err(Status::unavailable(format!(
+            return Err(Status::internal(format!(
                 "failed to read orchard tree: {error}"
             )));
         }
@@ -760,7 +758,7 @@ where
             range_height(range.end)?,
         ))
         .await
-        .map_err(rpc_error_to_status)?;
+        .map_err(rpc_arg_error_to_status)?;
 
     let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
     let response_stream = ReceiverStream::new(response_receiver);
@@ -800,7 +798,7 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
         }),
         Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => Err(Status::unavailable(format!(
+        Err(error) => Err(Status::internal(format!(
             "failed to read transaction: {error}"
         ))),
     }
@@ -833,7 +831,7 @@ async fn address_balance<Rpc: RpcMethods>(
     let balance = rpc
         .get_address_balance(GetAddressBalanceRequest::new(addresses))
         .await
-        .map_err(rpc_error_to_status)?;
+        .map_err(rpc_arg_error_to_status)?;
 
     Ok(Balance {
         // Cast is safe: the total ZEC supply in zatoshis fits in an `i64`.
@@ -852,7 +850,7 @@ async fn address_utxos<Rpc: RpcMethods>(
     let response = rpc
         .get_address_utxos(GetAddressUtxosRequest::new(args.addresses, false))
         .await
-        .map_err(rpc_error_to_status)?;
+        .map_err(rpc_arg_error_to_status)?;
 
     let GetAddressUtxosResponse::Utxos(utxos) = response else {
         unreachable!("chain info is never requested");
@@ -923,7 +921,7 @@ async fn mempool_transactions<Mempool: MempoolService>(
     let response = mempool
         .oneshot(mempool::Request::FullTransactions)
         .await
-        .map_err(|error| Status::unavailable(format!("failed to query mempool: {error}")))?;
+        .map_err(|error| Status::internal(format!("failed to query mempool: {error}")))?;
 
     match response {
         mempool::Response::FullTransactions { transactions, .. } => {
@@ -1017,12 +1015,27 @@ fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> Tre
     }
 }
 
-/// Converts a JSON-RPC method error into a gRPC status.
+/// Converts a JSON-RPC method error into a gRPC status, for a lookup of something the
+/// client asked for by identifier.
 fn rpc_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
     // Missing blocks, transactions, and invalid addresses or keys are reported with
     // zcashd's `INVALID_ADDRESS_OR_KEY` (-5) and `INVALID_PARAMETER` (-8) error codes.
     match error.code() {
         -5 | -8 => Status::not_found(error.message().to_string()),
+        _ => Status::internal(error.message().to_string()),
+    }
+}
+
+/// Converts a JSON-RPC method error into a gRPC status, for a call whose arguments the
+/// client supplied and Zebra has not already validated.
+///
+/// zcashd reuses the same error codes for "no such thing" and "that argument is not
+/// valid", so only the caller knows which it meant. Reporting a malformed address as
+/// `NOT_FOUND`, or a bad range as `INTERNAL`, blames the server for the client's input.
+fn rpc_arg_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
+    // -5 `INVALID_ADDRESS_OR_KEY`, -8 `INVALID_PARAMETER`, -32602 `InvalidParams`.
+    match error.code() {
+        -5 | -8 | -32602 => Status::invalid_argument(error.message().to_string()),
         _ => Status::internal(error.message().to_string()),
     }
 }
