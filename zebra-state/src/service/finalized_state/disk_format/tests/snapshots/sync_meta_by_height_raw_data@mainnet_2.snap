@@ -5,14 +5,14 @@ expression: cf_data
 [
   KV(
     k: "000000",
-    v: "9c0600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    v: "9c0600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0100000000000000",
   ),
   KV(
     k: "000001",
-    v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0300000000000000",
   ),
   KV(
     k: "000002",
-    v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0500000000000000",
   ),
 ]

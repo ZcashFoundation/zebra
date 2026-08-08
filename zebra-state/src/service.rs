@@ -1439,6 +1439,31 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_info(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            // Used by the v2 network protocol's get-hashes serving path.
+            ReadRequest::SyncHashes {
+                start_height,
+                stride,
+                count,
+            } => Ok(ReadResponse::SyncHashes(read::sync_hashes(
+                state.latest_best_chain(),
+                &state.db,
+                start_height,
+                stride,
+                count,
+            ))),
+
+            // Used by the v2 network protocol's get-tree-roots serving path.
+            ReadRequest::TreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => Ok(ReadResponse::TreeRoots(read::tree_roots(
+                &state.db,
+                start_height,
+                final_hash,
+                count,
+            ))),
+
             // Used by the StateService.
             ReadRequest::Depth(hash) => Ok(ReadResponse::Depth(read::depth(
                 state.latest_best_chain(),

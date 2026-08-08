@@ -24,6 +24,7 @@ use crate::service::finalized_state::ZebraDb;
 
 pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
+pub(crate) mod add_sync_metadata;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
@@ -110,7 +111,8 @@ fn format_upgrades(
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
         // major-version upgrade that is restorable from the previous major database format version.
         Box::new(add_ironwood_tree::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        Box::new(add_sync_metadata::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 7])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

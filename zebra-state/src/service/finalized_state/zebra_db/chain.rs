@@ -25,7 +25,10 @@ use crate::{
     request::FinalizedBlock,
     service::finalized_state::{
         disk_db::DiskWriteBatch,
-        disk_format::{chain::HistoryTreeParts, RawBytes},
+        disk_format::{
+            chain::{HistoryTreeParts, SyncMetadata},
+            RawBytes,
+        },
         zebra_db::{metrics::value_pool_metrics, ZebraDb},
         TypedColumnFamily,
     },
@@ -67,11 +70,22 @@ pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNeg
 /// This constant should be used so the compiler can detect typos.
 pub const BLOCK_INFO: &str = "block_info";
 
+/// The name of the synchronization metadata column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const SYNC_META: &str = "sync_meta_by_height";
+
 /// The type for reading value pools from the database.
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
 pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
+
+/// The type for reading per-block synchronization metadata from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type SyncMetaCf<'cf> = TypedColumnFamily<'cf, Height, SyncMetadata>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -105,6 +119,12 @@ impl ZebraDb {
     /// Returns a typed handle to the block data column family.
     pub(crate) fn block_info_cf(&self) -> BlockInfoCf<'_> {
         BlockInfoCf::new(&self.db, BLOCK_INFO)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a typed handle to the synchronization metadata column family.
+    pub(crate) fn sync_meta_cf(&self) -> SyncMetaCf<'_> {
+        SyncMetaCf::new(&self.db, SYNC_META)
             .expect("column family was created when database was created")
     }
 
@@ -187,6 +207,20 @@ impl ZebraDb {
         let block_info_cf = self.block_info_cf();
 
         block_info_cf.zs_get(&height)
+    }
+
+    /// Returns the stored synchronization metadata for the block at `height`.
+    pub fn sync_metadata(&self, height: Height) -> Option<SyncMetadata> {
+        self.sync_meta_cf().zs_get(&height)
+    }
+
+    /// Returns the stored synchronization metadata for the blocks in `range`,
+    /// keyed by height.
+    pub fn sync_metadata_map(
+        &self,
+        range: std::ops::RangeInclusive<Height>,
+    ) -> HashMap<Height, SyncMetadata> {
+        self.sync_meta_cf().zs_forward_range_iter(range).collect()
     }
 }
 
@@ -295,6 +329,32 @@ impl DiskWriteBatch {
         let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
             &finalized.height,
             &BlockInfo::new(new_value_pool, block_size as u32),
+        );
+
+        // Genesis seeds the cumulative transparent output count from zero.
+        //
+        // While the format upgrade is still backfilling a pre-existing
+        // database, the parent record can be missing here. Skipping the
+        // write keeps the column family contiguous from genesis: the
+        // backfill runs to the live tip and fills this height in, and the
+        // upgrade only completes once the tip has a record, so a tail
+        // skipped during the backfill's final moments is written when the
+        // upgrade re-runs at the next startup.
+        let prev_cumulative_transparent_outputs = match finalized.height.previous() {
+            Ok(prev_height) => match db.sync_metadata(prev_height) {
+                Some(metadata) => metadata.cumulative_transparent_outputs,
+                None => return Ok(()),
+            },
+            Err(_genesis_has_no_previous) => 0,
+        };
+
+        let _ = db.sync_meta_cf().with_batch_for_writing(self).zs_insert(
+            &finalized.height,
+            &SyncMetadata::for_block(
+                &finalized.block,
+                block_size,
+                prev_cumulative_transparent_outputs,
+            ),
         );
 
         Ok(())

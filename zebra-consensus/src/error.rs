@@ -383,7 +383,32 @@ impl From<BoxError> for TransactionError {
 impl TransactionError {
     /// Returns a suggested misbehaviour score increment for a certain error when
     /// verifying a mempool transaction.
+    ///
+    /// Rejections that depend on the receiver's chain tip must not be penalized
+    /// for mempool transactions: relay and trickling delays make races between
+    /// honest peers possible, so a peer whose tip differs by a block can relay
+    /// a transaction that is valid for it but not yet (or no longer) for this
+    /// node. In a block, the same rules are provable, because the block fixes
+    /// the height and time they are evaluated at; those failures are scored by
+    /// [`block_misbehavior_score`](Self::block_misbehavior_score).
     pub fn mempool_misbehavior_score(&self) -> u32 {
+        use TransactionError::*;
+
+        match self {
+            // The spent coinbase output's maturity and a lock time are
+            // evaluated against this node's chain tip and its median-seen
+            // time, which an honest peer's view can differ from.
+            ImmatureTransparentCoinbaseSpend { .. }
+            | LockedUntilAfterBlockHeight(_)
+            | LockedUntilAfterBlockTime(_) => 0,
+
+            other => other.block_misbehavior_score(),
+        }
+    }
+
+    /// Returns a suggested misbehaviour score increment for a certain error when
+    /// verifying a transaction in a block.
+    pub fn block_misbehavior_score(&self) -> u32 {
         use TransactionError::*;
 
         // TODO: Adjust these values based on zcashd (#9258).
@@ -548,7 +573,7 @@ impl BlockError {
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
             | TooManyTransparentSignatureOperations { .. } => 100,
-            Transaction(err) => err.mempool_misbehavior_score(),
+            Transaction(err) => err.block_misbehavior_score(),
             _other => 0,
         }
     }

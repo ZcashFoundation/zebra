@@ -452,6 +452,7 @@ impl StartCmd {
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state: state.clone(),
+            read_state: read_only_state_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
         };

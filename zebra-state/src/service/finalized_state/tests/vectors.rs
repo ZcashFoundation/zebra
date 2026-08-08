@@ -622,3 +622,61 @@ fn orchard_checks(
         "(de)serialization should not modify subtree value"
     );
 }
+
+/// Committing consecutive blocks stores cumulative transparent output counts
+/// that grow by exactly each block's transparent output count, starting from
+/// the genesis block's outputs.
+#[test]
+fn sync_metadata_cumulative_transparent_outputs_accumulate() {
+    use std::sync::Arc;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+
+    use crate::{service::finalized_state::FinalizedState, Config};
+
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let mut state = FinalizedState::new(
+            &Config::ephemeral(),
+            &network,
+            #[cfg(feature = "elasticsearch")]
+            false,
+        )
+        .expect("opening an ephemeral database should succeed");
+
+        let blocks = network.blockchain_map();
+        let mut expected_cumulative: u64 = 0;
+
+        for height in 0..=2 {
+            let block: Arc<Block> = blocks
+                .get(&height)
+                .expect("block height has test data")
+                .zcash_deserialize_into()
+                .expect("test data deserializes");
+
+            let block_output_count: u64 = block
+                .transactions
+                .iter()
+                // The cast is a lossless widening: output counts are far below u64.
+                .map(|tx| tx.outputs().len() as u64)
+                .sum();
+            assert!(block_output_count > 0, "coinbase always creates outputs");
+
+            state
+                .commit_finalized_direct(block.into(), None, "cumulative output count test")
+                .expect("test block is valid");
+
+            let metadata = state
+                .db
+                .sync_metadata(Height(height))
+                .expect("metadata is written when the block is committed");
+
+            expected_cumulative += block_output_count;
+            assert_eq!(
+                metadata.cumulative_transparent_outputs, expected_cumulative,
+                "cumulative count grows by the block's output count at height {height} on {network}",
+            );
+        }
+    }
+}

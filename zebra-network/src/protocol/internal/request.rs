@@ -217,6 +217,79 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+
+    /// Request a contiguous chain of up to `count` blocks ending at
+    /// `final_hash`, using the v2 protocol's `get-block-range` request.
+    ///
+    /// Every block is verified on arrival by hashing alone: the first
+    /// delivered block must hash to `final_hash`, each subsequent block
+    /// must be the parent of the previous one, and each block's
+    /// transactions must match its header's merkle root, so a requester
+    /// with a trusted anchor accepts no unverified bytes. The response may
+    /// be truncated (a prefix of the range); the requester resumes from the
+    /// last delivered block's parent hash. Legacy connections have no
+    /// equivalent request, and answer with no blocks.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Blocks`](super::Response::Blocks), in descending
+    /// height order starting at `final_hash`, or with a single missing
+    /// entry when the peer does not have the anchor block.
+    BlockRange {
+        /// The hash of the highest block in the requested range.
+        final_hash: block::Hash,
+
+        /// The maximum number of blocks requested.
+        count: u64,
+
+        /// The maximum total serialized size of the delivered blocks, in
+        /// bytes. The first block is delivered regardless of this bound.
+        max_bytes: u64,
+    },
+
+    /// Request best-chain block hashes and aggregated synchronization
+    /// metadata at a height stride, serving the v2 protocol's `get-hashes`
+    /// requests.
+    ///
+    /// This request is only sent to the local inbound service; it is never
+    /// routed to a remote peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::SyncHashes`](super::Response::SyncHashes).
+    SyncHashes {
+        /// The height of the first requested entry.
+        start_height: u32,
+
+        /// The spacing between requested heights; never 0.
+        stride: u32,
+
+        /// The maximum number of entries requested.
+        count: u32,
+    },
+
+    /// Request per-block note commitment tree roots and counts for a height
+    /// range anchored at `final_hash`, serving the v2 protocol's
+    /// `get-tree-roots` requests.
+    ///
+    /// This request is only sent to the local inbound service; it is never
+    /// routed to a remote peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::TreeRoots`](super::Response::TreeRoots).
+    TreeRoots {
+        /// The height of the first requested entry.
+        start_height: u32,
+
+        /// The hash of the block at the highest requested height,
+        /// `start_height + count − 1`, anchoring the request to a specific
+        /// chain.
+        final_hash: block::Hash,
+
+        /// The number of entries requested.
+        count: u32,
+    },
 }
 
 impl fmt::Display for Request {
@@ -249,6 +322,9 @@ impl fmt::Display for Request {
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::BlockRange { count, .. } => format!("BlockRange({count})"),
+            Request::SyncHashes { count, .. } => format!("SyncHashes({count})"),
+            Request::TreeRoots { count, .. } => format!("TreeRoots({count})"),
         })
     }
 }
@@ -271,6 +347,9 @@ impl Request {
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::BlockRange { .. } => "BlockRange",
+            Request::SyncHashes { .. } => "SyncHashes",
+            Request::TreeRoots { .. } => "TreeRoots",
         }
     }
 

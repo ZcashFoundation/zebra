@@ -102,6 +102,31 @@ fn history_tree_parts_reads_legacy_entry_width_with_non_eof_misparse() {
     assert_eq!(parts.as_bytes(), HistoryTreeParts::from(legacy).as_bytes());
 }
 
+/// A synchronization metadata record round-trips through its 64-byte disk
+/// format, and reading tolerates unknown trailing bytes.
+#[test]
+fn sync_metadata_round_trips_with_cumulative_output_count() {
+    let metadata = SyncMetadata {
+        size: 0x0102_0304,
+        tx_count: 5,
+        note_count: 6,
+        sapling_tx_count: 7,
+        orchard_tx_count: 8,
+        ironwood_tx_count: 9,
+        auth_data_root: [0xAA; 32],
+        cumulative_transparent_outputs: 0x1122_3344_5566_7788,
+    };
+
+    let bytes = metadata.as_bytes();
+    assert_eq!(bytes.len(), 64, "records are 64 bytes");
+    assert_eq!(SyncMetadata::from_bytes(&bytes), metadata);
+
+    // Unknown appended fields are ignored when reading.
+    let mut extended = bytes.clone();
+    extended.extend_from_slice(&[0xFF; 8]);
+    assert_eq!(SyncMetadata::from_bytes(&extended), metadata);
+}
+
 /// Data written at the current entry width round-trips without hitting the legacy fallback.
 #[test]
 fn history_tree_parts_round_trips_current_width() {

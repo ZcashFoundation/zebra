@@ -27,7 +27,8 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
 };
 use zebra_db::{
-    chain::BLOCK_INFO,
+    chain::{BLOCK_INFO, SYNC_META},
+    known_hash::KNOWN_HASH_CHUNK,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
@@ -42,7 +43,7 @@ use crate::{
 pub mod column_family;
 
 mod disk_db;
-mod disk_format;
+pub(crate) mod disk_format;
 mod zebra_db;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -109,6 +110,10 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
+    // Synchronization metadata served by the v2 network protocol
+    SYNC_META,
+    // Verified known-hash chunk bytes for the known-hash sync engine
+    KNOWN_HASH_CHUNK,
 ];
 
 /// The finalized part of the chain state, stored in the db.

@@ -1129,6 +1129,44 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockInfo(None)`](ReadResponse::BlockInfo) otherwise.
     BlockInfo(HashOrHeight),
 
+    /// Looks up best-chain block hashes and aggregated synchronization
+    /// metadata at a height stride, serving the v2 network protocol's
+    /// `get-hashes` requests.
+    ///
+    /// Entry `k` describes the block at height `start_height + k × stride`,
+    /// and aggregates the metadata of the blocks in its span (the blocks
+    /// above the previous entry's height, up to its own). Entries stop at
+    /// the reorg safety margin below the best chain tip, and truncation is
+    /// always a prefix.
+    ///
+    /// Returns [`ReadResponse::SyncHashes`].
+    SyncHashes {
+        /// The height of the first requested entry.
+        start_height: u32,
+        /// The spacing between requested heights; must not be 0.
+        stride: u32,
+        /// The maximum number of entries requested.
+        count: u32,
+    },
+
+    /// Looks up per-block note commitment tree roots and counts for a
+    /// height range of the chain identified by `final_hash`, serving the v2
+    /// network protocol's `get-tree-roots` requests.
+    ///
+    /// Returns [`ReadResponse::TreeRoots`]: `None` if the best chain does
+    /// not contain the block with hash `final_hash` at height
+    /// `start_height + count − 1`, or the metadata index is incomplete —
+    /// the request must then be refused rather than answered with entries
+    /// for different blocks.
+    TreeRoots {
+        /// The height of the first requested entry.
+        start_height: u32,
+        /// The hash of the block at the highest requested height.
+        final_hash: block::Hash,
+        /// The number of entries requested.
+        count: u32,
+    },
+
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
     /// Returns
@@ -1502,6 +1540,8 @@ impl ReadRequest {
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
+            ReadRequest::SyncHashes { .. } => "sync_hashes",
+            ReadRequest::TreeRoots { .. } => "tree_roots",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",

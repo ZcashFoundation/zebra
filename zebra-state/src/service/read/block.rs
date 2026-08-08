@@ -17,7 +17,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, SyncHashEntry, TreeRootsEntry},
     block_info::BlockInfo,
     serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
@@ -26,6 +26,7 @@ use zebra_chain::{
 
 use crate::{
     response::{AnyTx, MinedTx},
+    service::finalized_state::disk_format::chain::BLOCK_SIZE_VALUE_UNIT,
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
@@ -369,4 +370,172 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().block_info(hash_or_height))
         .or_else(|| db.block_info(hash_or_height))
+}
+
+/// Returns best-chain block hashes and aggregated span metadata at a height
+/// stride, for the v2 network protocol's `get-hashes` requests.
+///
+/// Entries stop at [`MAX_BLOCK_REORG_HEIGHT`] blocks below the best chain
+/// tip, so every served height is finalized, and truncation is always a
+/// prefix. Entries also stop where the synchronization metadata backfill
+/// has not yet reached.
+///
+/// [`MAX_BLOCK_REORG_HEIGHT`]: crate::constants::MAX_BLOCK_REORG_HEIGHT
+pub fn sync_hashes<C: AsRef<Chain>>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    start_height: u32,
+    stride: u32,
+    count: u32,
+) -> Vec<SyncHashEntry> {
+    let best_tip = chain
+        .map(|chain| chain.as_ref().non_finalized_tip_height())
+        .or_else(|| db.finalized_tip_height());
+    let Some(best_tip) = best_tip else {
+        return Vec::new();
+    };
+    let max_served_height = u64::from(
+        best_tip
+            .0
+            .saturating_sub(crate::constants::MAX_BLOCK_REORG_HEIGHT),
+    );
+
+    // The requested entries' spans are contiguous, so the whole request is
+    // one range of the metadata index: read it once, rather than once per
+    // entry.
+    //
+    // The widening makes the height arithmetic infallible; served heights
+    // fit `u32` because the tip height does.
+    let last_height =
+        u64::from(start_height) + u64::from(count.saturating_sub(1)) * u64::from(stride);
+    let last_height = last_height.min(max_served_height);
+    if u64::from(start_height) > last_height {
+        return Vec::new();
+    }
+    let lowest_span_height = start_height.saturating_sub(stride.saturating_sub(1));
+    let metadata = db.sync_metadata_map(Height(lowest_span_height)..=Height(last_height as u32));
+
+    let mut entries = Vec::new();
+    for k in 0..u64::from(count) {
+        let height = u64::from(start_height) + k * u64::from(stride);
+        if height > max_served_height {
+            break;
+        }
+        let height = Height(height as u32);
+
+        let Some(hash) = db.hash(height) else {
+            break;
+        };
+
+        // The entry's span: the blocks above the previous entry's height,
+        // up to its own, bounded below by the genesis height.
+        let span_low = height.0.saturating_sub(stride.saturating_sub(1));
+
+        let mut entry = SyncHashEntry {
+            hash,
+            span_size: 0,
+            span_txs: 0,
+            span_notes: 0,
+        };
+        let mut backfilled = true;
+        for span_height in span_low..=height.0 {
+            let Some(meta) = metadata.get(&Height(span_height)) else {
+                // The backfill has not reached this span yet; truncate.
+                backfilled = false;
+                break;
+            };
+
+            // The size value is the network protocol's quantization of the
+            // block's serialized size: a 1-byte quantity whose product with
+            // the unit bounds the block's size from above.
+            let size_value = u64::from(meta.size)
+                .div_ceil(BLOCK_SIZE_VALUE_UNIT)
+                .clamp(1, 255);
+            entry.span_size += size_value;
+            entry.span_txs += u64::from(meta.tx_count);
+            entry.span_notes += u64::from(meta.note_count);
+        }
+        if !backfilled {
+            break;
+        }
+
+        entries.push(entry);
+    }
+
+    entries
+}
+
+/// Returns per-block note commitment tree roots, ZIP 221 per-pool
+/// transaction counts, and ZIP 244 authorizing data commitments for the
+/// blocks at `start_height..start_height + count`, for the v2 network
+/// protocol's `get-tree-roots` requests.
+///
+/// Returns `None` — the request must be refused — when the best chain does
+/// not contain the block with hash `final_hash` at the highest requested
+/// height, or the synchronization metadata index does not cover the range.
+pub fn tree_roots(
+    db: &ZebraDb,
+    start_height: u32,
+    final_hash: block::Hash,
+    count: u32,
+) -> Option<Vec<TreeRootsEntry>> {
+    use zebra_chain::parameters::NetworkUpgrade;
+
+    if count == 0 {
+        return None;
+    }
+    let final_height = u64::from(start_height) + u64::from(count) - 1;
+    let final_height = Height(u32::try_from(final_height).ok()?);
+
+    // The anchor identifies the chain: entries are only served when the
+    // best (finalized) chain contains the anchor block at the final height,
+    // so an honest responder never serves entries for different blocks.
+    if db.height(final_hash) != Some(final_height) {
+        return None;
+    }
+
+    let network = db.network();
+    let activation = |upgrade: NetworkUpgrade| upgrade.activation_height(&network);
+    let sapling_activation = activation(NetworkUpgrade::Sapling);
+    let orchard_activation = activation(NetworkUpgrade::Nu5);
+    let ironwood_activation = activation(NetworkUpgrade::Nu6_3);
+    let is_active = |activation: Option<Height>, height: Height| {
+        activation.is_some_and(|activation| height >= activation)
+    };
+
+    let mut entries = Vec::with_capacity(count as usize);
+    for height in start_height..=final_height.0 {
+        let height = Height(height);
+        let meta = db.sync_metadata(height)?;
+
+        // For a pool that is not active at this height, the root is 32 zero
+        // bytes; sync metadata provides the matching zero counts.
+        let sapling_root: [u8; 32] = if is_active(sapling_activation, height) {
+            db.sapling_tree_by_height(&height)?.root().into()
+        } else {
+            [0; 32]
+        };
+        let orchard_root: [u8; 32] = if is_active(orchard_activation, height) {
+            db.orchard_tree_by_height(&height)?.root().into()
+        } else {
+            [0; 32]
+        };
+        let ironwood_root: [u8; 32] = if is_active(ironwood_activation, height) {
+            db.ironwood_tree_by_height(&height)?.root().into()
+        } else {
+            [0; 32]
+        };
+
+        entries.push(TreeRootsEntry {
+            sapling_root,
+            orchard_root,
+            ironwood_root,
+            sapling_txs: u64::from(meta.sapling_tx_count),
+            orchard_txs: u64::from(meta.orchard_tx_count),
+            ironwood_txs: u64::from(meta.ironwood_tx_count),
+            auth_data_root: meta.auth_data_root,
+        });
+    }
+
+    Some(entries)
 }
