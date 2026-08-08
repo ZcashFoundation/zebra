@@ -3,9 +3,56 @@
 //! These types can be used to count any kind of active resource.
 //! But they are currently used to track the number of open connections.
 
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use tokio::sync::mpsc;
+
+/// A counter of the slots of a bounded resource that are currently held.
+///
+/// Slots are claimed with [`claim`](Self::claim) or
+/// [`try_claim`](Self::try_claim), and released when the returned
+/// [`SlotGuard`] is dropped, on every exit path.
+#[derive(Clone, Debug, Default)]
+pub struct SlotCounter(Arc<AtomicUsize>);
+
+impl SlotCounter {
+    /// Returns the number of slots currently held.
+    pub fn count(&self) -> usize {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Claims a slot unconditionally.
+    pub fn claim(&self) -> SlotGuard {
+        self.0.fetch_add(1, Ordering::AcqRel);
+        SlotGuard(self.0.clone())
+    }
+
+    /// Claims a slot, unless `limit` slots are already held.
+    pub fn try_claim(&self, limit: usize) -> Option<SlotGuard> {
+        self.0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                (held < limit).then_some(held + 1)
+            })
+            .ok()
+            .map(|_| SlotGuard(self.0.clone()))
+    }
+}
+
+/// A claimed slot of a [`SlotCounter`], released when it is dropped.
+#[derive(Debug)]
+pub struct SlotGuard(Arc<AtomicUsize>);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// A signal sent by a [`Connection`][1] when it opens or closes.
 ///

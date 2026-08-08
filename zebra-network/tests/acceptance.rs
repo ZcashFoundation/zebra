@@ -10,7 +10,7 @@ use chrono::Utc;
 use zebra_chain::block::Height;
 use zebra_network::{
     types::{AddrInVersion, Nonce, PeerServices},
-    ConnectedAddr, ConnectionInfo, PeerSocketAddr, Version, VersionMessage,
+    ConnectedAddr, ConnectionInfo, PeerSocketAddr, RemoteHandshake, Version, VersionMessage,
 };
 
 /// Test that the types used in [`ConnectionInfo`] are public,
@@ -39,7 +39,7 @@ fn connection_info_types_are_public() {
 
     let _connection_info = Arc::new(ConnectionInfo {
         connected_addr,
-        remote,
+        remote: RemoteHandshake::Version(remote),
         negotiated_version,
     });
 }

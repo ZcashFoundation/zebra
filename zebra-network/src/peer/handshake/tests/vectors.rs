@@ -171,7 +171,7 @@ async fn inbound_direct_accepts_non_serving_peer() {
         negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     let connection_info = result.expect("inbound handshake with a non-serving peer succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    assert_eq!(connection_info.remote.services(), PeerServices::empty());
 }
 
 /// Isolated handshakes must accept peers that don't advertise `NODE_NETWORK`.
@@ -199,7 +199,7 @@ async fn outbound_direct_accepts_non_serving_peer_at_tip() {
 
     let connection_info =
         result.expect("outbound handshake with a non-serving peer at the network tip succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    assert_eq!(connection_info.remote.services(), PeerServices::empty());
 }
 
 /// Outbound handshakes must accept peers that advertise `NODE_NETWORK`.
@@ -213,7 +213,10 @@ async fn outbound_direct_accepts_serving_peer() {
             .await;
 
     let connection_info = result.expect("outbound handshake with a serving peer succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
+    assert_eq!(
+        connection_info.remote.services(),
+        PeerServices::NODE_NETWORK
+    );
 }
 
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the

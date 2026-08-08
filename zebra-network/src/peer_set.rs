@@ -11,7 +11,9 @@ pub(crate) use candidate_set::{
     NextPeerService,
 };
 pub(crate) use inventory_registry::InventoryChange;
-pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker, SharedConnectionCounter};
+pub(crate) use limit::{
+    ActiveConnectionCounter, ConnectionTracker, SharedConnectionCounter, SlotCounter, SlotGuard,
+};
 
 use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;

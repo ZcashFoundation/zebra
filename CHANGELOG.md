@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Implementation of the draft version 2 Zcash P2P network protocol
+  ([zcash/zips#1344](https://github.com/zcash/zips/pull/1344)): a QUIC transport with
+  per-network ALPN identifiers, a stream-typed request/announcement layer, a single
+  `init`-record handshake, addrv2-only address relay, compact block relay, mempool
+  subscriptions, and serving-side synchronization primitives. Disabled by default:
+  enable the listener with `network.v2_listen`, and dial v2 peers with
+  `network.initial_v2_peers`. Version 2 peers join the peer set alongside legacy peers.
 - The state database format is bumped to 28.1.0 for a per-block synchronization
   metadata index, which serves the version 2 `get-hashes` and `get-tree-roots`
   requests. Existing databases backfill the index on the next start, which reads

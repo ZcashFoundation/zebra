@@ -53,7 +53,8 @@ use crate::{
 
 use Network::*;
 
-/// Returns the inbound connection counter for the listener under test.
+/// Returns the inbound connection counter the listener under test shares with
+/// the v2 transport in production.
 fn test_inbound_counter(config: &Config) -> SharedConnectionCounter {
     SharedConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
@@ -2677,4 +2678,215 @@ where
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)
+}
+
+/// Test that the experimental v2 (QUIC) listener accepts connections, and
+/// serves requests from the inbound service through a v2 request stream.
+#[tokio::test]
+async fn v2_listener_accepts_connections_and_serves_requests() {
+    use crate::{
+        peer::{
+            v2::{V2HandshakeRequest, V2Handshaker},
+            MinimumPeerVersion,
+        },
+        peer_set::ActiveConnectionCounter,
+        protocol::{external::types::PeerServices, v2::quic},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listen_addr = SocketAddr::new(
+        "127.0.0.1".parse().unwrap(),
+        zebra_test::net::random_known_port(),
+    );
+    let network = Network::Mainnet;
+
+    let config = Config {
+        listen_addr,
+        network: network.clone(),
+
+        // Stop Zebra making outbound connections.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+
+        v2_listen: true,
+
+        ..Config::default()
+    };
+
+    let inbound_service = service_fn(|request| async move {
+        match request {
+            Request::FindHeaders { .. } => Ok(Response::BlockHeaders(Vec::new())),
+            _ => Ok(Response::Nil),
+        }
+    });
+
+    let (_peer_service, _peer_book_reader, _misbehavior_tx, _peer_book_handle) = init(
+        config.clone(),
+        inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    )
+    .await;
+
+    // Connect a raw v2 client stack to the node's QUIC listener.
+    let client_inbound = service_fn(|_request| async { Ok(Response::Nil) });
+    let mut client_handshaker = V2Handshaker::new(
+        Config {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            ..config
+        },
+        "Test v2 client".to_string(),
+        PeerServices::NODE_NETWORK,
+        true,
+        client_inbound,
+        crate::peer_book::ChangeSender::new(tokio::sync::mpsc::channel(10).0),
+        tokio::sync::mpsc::channel(10).0,
+        tokio::sync::broadcast::channel(10).0,
+        MinimumPeerVersion::new(NoChainTip, &network),
+        "127.0.0.1:0".parse().unwrap(),
+    );
+
+    let client_endpoint = quic::new_endpoint("127.0.0.1:0".parse().unwrap(), &network)
+        .expect("endpoint creation succeeds");
+    let connection = tokio::time::timeout(
+        Duration::from_secs(10),
+        quic::connect(&client_endpoint, listen_addr, &network),
+    )
+    .await
+    .expect("connection completes in time")
+    .expect("connection to the v2 listener succeeds");
+
+    let mut counter = ActiveConnectionCounter::new_counter();
+    let mut client = client_handshaker
+        .ready()
+        .await
+        .expect("handshaker is ready")
+        .call(V2HandshakeRequest {
+            connection,
+            connected_addr: ConnectedAddr::new_outbound_direct(listen_addr.into()),
+            connection_tracker: counter.track_connection(),
+        })
+        .await
+        .expect("v2 handshake with the listener succeeds");
+
+    // The node's inbound service answers a v2 get-headers request stream.
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .ready()
+            .await
+            .expect("client is ready")
+            .call(Request::FindHeaders {
+                known_blocks: Vec::new(),
+                stop: None,
+            }),
+    )
+    .await
+    .expect("response arrives in time")
+    .expect("request succeeds");
+
+    assert!(
+        matches!(response, Response::BlockHeaders(ref headers) if headers.is_empty()),
+        "expected an empty BlockHeaders response, got: {response:?}",
+    );
+}
+
+/// Test that the experimental v2 (QUIC) listener refuses connections from
+/// banned peers, like the legacy listener.
+#[tokio::test]
+async fn v2_listener_rejects_banned_peers() {
+    use crate::{
+        peer::{v2::V2Handshaker, MinimumPeerVersion},
+        peer_set::initialize::v2_transport::run_v2_endpoint,
+        protocol::{external::types::PeerServices, v2::quic},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let banned_ip: IpAddr = "127.0.0.1".parse().unwrap();
+    let listen_addr = SocketAddr::new(banned_ip, zebra_test::net::random_known_port());
+    let network = Network::Mainnet;
+
+    let config = Config {
+        listen_addr,
+        network: network.clone(),
+
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+
+        v2_listen: true,
+
+        ..Config::default()
+    };
+
+    // Ban the address the test client connects from.
+    let (_bans_tx, bans_rx) = tokio::sync::watch::channel(
+        [(crate::peer_book::BanKey::from(banned_ip), Instant::now())]
+            .into_iter()
+            .collect::<IndexMap<_, _>>()
+            .into(),
+    );
+
+    let unreachable_inbound = service_fn(|_request| async {
+        unreachable!("banned peers never reach the inbound service");
+    });
+    let handshaker = V2Handshaker::new(
+        config.clone(),
+        "Test user agent".to_string(),
+        PeerServices::NODE_NETWORK,
+        true,
+        unreachable_inbound,
+        crate::peer_book::ChangeSender::new(tokio::sync::mpsc::channel(10).0),
+        tokio::sync::mpsc::channel(10).0,
+        tokio::sync::broadcast::channel(10).0,
+        MinimumPeerVersion::new(NoChainTip, &network),
+        "127.0.0.1:0".parse().unwrap(),
+    );
+
+    let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(2);
+
+    let endpoint = crate::peer_set::initialize::v2_transport::new_v2_endpoint(&config, listen_addr)
+        .expect("endpoint opens");
+    let v2_fut = run_v2_endpoint(
+        config.clone(),
+        endpoint,
+        handshaker,
+        peerset_tx,
+        bans_rx,
+        test_inbound_counter(&config),
+    );
+    let v2_task_handle = tokio::spawn(v2_fut);
+
+    let client_endpoint = quic::new_endpoint("127.0.0.1:0".parse().unwrap(), &network)
+        .expect("endpoint creation succeeds");
+    let connect_result = tokio::time::timeout(
+        Duration::from_secs(10),
+        quic::connect(&client_endpoint, listen_addr, &network),
+    )
+    .await
+    .expect("the listener answers in time");
+
+    assert!(
+        connect_result.is_err(),
+        "a banned peer's v2 connection must be refused, got: {connect_result:?}",
+    );
+
+    // The banned peer must not reach the peer set.
+    assert!(
+        peerset_rx.try_recv().is_err(),
+        "a banned peer must not be added to the peer set",
+    );
+
+    v2_task_handle.abort();
 }

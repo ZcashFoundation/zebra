@@ -326,15 +326,15 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     rpc_client_1.submit_block(genesis_block.clone()).await?;
     rpc_client_2.submit_block(genesis_block).await?;
 
-    // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
+    // Mine blocks with invalid PoW in the zebrad instance where PoW is
+    // disabled, one at a time. Node 2 only downloads gossiped blocks within
+    // its verification lookahead of its own tip — which stays at genesis —
+    // so the invalid blocks must arrive near-tip for its inbound service to
+    // download, verify, and penalize their announcer. (The syncer assigns
+    // no penalties for blocks it requested itself: an *announced* block
+    // that provably fails proof of work is the penalizable case.)
     tracing::info!("committed genesis block, mining blocks with invalid PoW");
     tokio::time::sleep(Duration::from_secs(2)).await;
-
-    rpc_client_1.call("generate", "[500]").await?;
-
-    tracing::info!("wait for misbehavior messages to flush into address updater channel");
-
-    tokio::time::sleep(Duration::from_secs(30)).await;
 
     tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
 

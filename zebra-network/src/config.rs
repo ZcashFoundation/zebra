@@ -193,6 +193,20 @@ pub struct Config {
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
     /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
+
+    /// Listen for version 2 protocol (QUIC) peer connections on the UDP
+    /// port of `listen_addr`, alongside the legacy TCP listener.
+    ///
+    /// The version 2 protocol is specified by a draft ZIP, and is disabled
+    /// by default until the ZIP is assigned a network upgrade.
+    pub v2_listen: bool,
+
+    /// A list of peer addresses to connect to over the version 2 protocol
+    /// (QUIC) transport at startup, in `address:port` format.
+    ///
+    /// Version 2 peers are used alongside legacy peers; this list is empty by
+    /// default.
+    pub initial_v2_peers: IndexSet<String>,
 }
 
 impl Config {
@@ -271,6 +285,20 @@ impl Config {
 
             dns_peers.into_iter().chain(disk_peers).collect()
         }
+    }
+
+    /// Resolves the configured initial version 2 protocol peers into IP
+    /// addresses.
+    ///
+    /// Unlike [`initial_peers`](Self::initial_peers), version 2 peers have no
+    /// peer cache on disk, and an empty list is normal when only version 2
+    /// listening is enabled.
+    pub(crate) async fn initial_v2_peers(&self) -> HashSet<PeerSocketAddr> {
+        if self.initial_v2_peers.is_empty() {
+            return HashSet::new();
+        }
+
+        Config::resolve_peers(&self.initial_v2_peers.iter().cloned().collect()).await
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
@@ -585,6 +613,8 @@ impl Default for Config {
             // so that idle peers don't use too many connection slots.
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
+            v2_listen: false,
+            initial_v2_peers: IndexSet::new(),
         }
     }
 }
@@ -656,6 +686,10 @@ struct DConfig {
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
     crawl_new_peer_interval: Duration,
     max_connections_per_ip: Option<usize>,
+    #[serde(default)]
+    v2_listen: bool,
+    #[serde(default)]
+    initial_v2_peers: IndexSet<String>,
 }
 
 impl Default for DConfig {
@@ -672,6 +706,8 @@ impl Default for DConfig {
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
             max_connections_per_ip: Some(config.max_connections_per_ip),
+            v2_listen: config.v2_listen,
+            initial_v2_peers: config.initial_v2_peers,
         }
     }
 }
@@ -730,6 +766,8 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            v2_listen,
+            initial_v2_peers,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -764,6 +802,8 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip: Some(max_connections_per_ip),
+            v2_listen,
+            initial_v2_peers,
         }
     }
 }
@@ -784,6 +824,8 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            v2_listen,
+            initial_v2_peers,
         } = DConfig::deserialize(deserializer)?;
 
         let network = match (dnetwork, testnet_parameters) {
@@ -859,6 +901,8 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            v2_listen,
+            initial_v2_peers,
         })
     }
 }

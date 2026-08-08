@@ -74,10 +74,12 @@ initial_testnet_peers = [
     "seeder.testnet.zec.rocks:18233",
     "testnet.seeder.zfnd.org:18233",
 ]
+initial_v2_peers = []
 listen_addr = "[::]:8233"
 max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 25
+v2_listen = false
 
 [notify]
 
