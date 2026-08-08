@@ -2,7 +2,7 @@
 
 use tower::{service_fn, ServiceExt};
 
-use crate::{address_book_updater, peer_set::ActiveConnectionCounter};
+use crate::peer_set::ActiveConnectionCounter;
 
 use super::super::*;
 
@@ -92,7 +92,7 @@ async fn negotiate_with_remote_services(
             &mut local_conn,
             &connected_addr,
             config,
-            Arc::new(futures::lock::Mutex::new(IndexSet::new())),
+            HandshakeNonces::default(),
             "/test-local/".to_string(),
             PeerServices::NODE_NETWORK,
             false,
@@ -230,7 +230,7 @@ async fn rejected_non_serving_peer_is_not_recorded_with_services() {
         ..Config::default()
     };
 
-    let (address_book_tx, mut address_book_rx) = address_book_updater::change_channel(10);
+    let (address_book_tx, mut address_book_rx) = tokio::sync::mpsc::channel(10);
 
     let handshake = Handshake::builder()
         .with_config(config)
@@ -239,7 +239,7 @@ async fn rejected_non_serving_peer_is_not_recorded_with_services() {
         }))
         .with_user_agent("/test-local/".to_string())
         .with_latest_chain_tip(NoChainTip)
-        .with_address_book_updater(address_book_tx)
+        .with_address_book_updater(crate::peer_book::ChangeSender::new(address_book_tx))
         .finish()
         .expect("provided mandatory builder parameters");
 

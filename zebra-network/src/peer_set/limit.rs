@@ -153,6 +153,47 @@ impl Drop for ActiveConnectionCounter {
     }
 }
 
+/// An [`ActiveConnectionCounter`] shared by the tasks that open connections
+/// of the same kind.
+///
+/// The legacy and version 2 transports accept and dial connections from
+/// separate tasks, but their connections share one limit, so they must share
+/// one counter: separate counters would let each transport fill the limit on
+/// its own, doubling the connections an operator configured.
+#[derive(Clone, Debug)]
+pub struct SharedConnectionCounter(Arc<std::sync::Mutex<ActiveConnectionCounter>>);
+
+impl SharedConnectionCounter {
+    /// Create and return a new shared connection counter with `limit` and
+    /// `label`. The caller must check and enforce limits using
+    /// [`update_count()`](Self::update_count).
+    pub fn new_counter_with<S: ToString>(limit: usize, label: S) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(
+            ActiveConnectionCounter::new_counter_with(limit, label),
+        )))
+    }
+
+    /// Check for closed connection notifications, and return the current connection count.
+    pub fn update_count(&self) -> usize {
+        self.lock().update_count()
+    }
+
+    /// Create and return a new [`ConnectionTracker`], and add 1 to this counter.
+    ///
+    /// When the returned tracker is dropped, this counter will be notified, and decreased by 1.
+    pub fn track_connection(&self) -> ConnectionTracker {
+        self.lock().track_connection()
+    }
+
+    /// Locks the counter.
+    ///
+    /// The lock is only held for the duration of a counter update, and is
+    /// never held across an await point.
+    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveConnectionCounter> {
+        self.0.lock().expect("mutex is not poisoned")
+    }
+}
+
 /// A per-connection tracker.
 ///
 /// [`ActiveConnectionCounter`] creates a tracker instance for each active connection.

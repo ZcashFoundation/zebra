@@ -15,7 +15,6 @@
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -46,13 +45,21 @@ use crate::{
             DiscoveredPeer,
         },
         set::MorePeers,
-        ActiveConnectionCounter, ConnectionTracker,
+        ActiveConnectionCounter, ConnectionTracker, SharedConnectionCounter,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
+
+/// Returns the inbound connection counter for the listener under test.
+fn test_inbound_counter(config: &Config) -> SharedConnectionCounter {
+    SharedConnectionCounter::new_counter_with(
+        config.peerset_inbound_connection_limit(),
+        "Inbound Connections",
+    )
+}
 
 /// The amount of time to run the crawler, before testing what it has done.
 ///
@@ -227,13 +234,13 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
+    let (address_book, _peer_book_handle, _change_sender) =
         init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
-        address_book.lock().unwrap().peers().count(),
+        address_book.address_metrics().num_addresses,
         0,
         "expected no peers in Mainnet address book, but got: {:?}",
-        address_book.lock().unwrap().address_metrics(Utc::now())
+        address_book.address_metrics()
     );
 }
 
@@ -249,7 +256,7 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(
+    let (address_book, _peer_book_handle, _change_sender) = init_with_peer_limit(
         0,
         unreachable_inbound_service,
         Network::new_default_testnet(),
@@ -259,10 +266,10 @@ async fn peer_limit_zero_testnet() {
     .await;
 
     assert_eq!(
-        address_book.lock().unwrap().peers().count(),
+        address_book.address_metrics().num_addresses,
         0,
         "expected no peers in Testnet address book, but got: {:?}",
-        address_book.lock().unwrap().address_metrics(Utc::now())
+        address_book.address_metrics()
     );
 }
 
@@ -375,16 +382,13 @@ async fn written_peer_cache_can_be_read_manually() {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
         ..Config::default()
     };
-    let address_book =
+    let (address_book, _peer_book_handle, _change_sender) =
         init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
     // Let the peer cache updater run for a while.
     tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
 
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
+    let approximate_peer_count = address_book.address_metrics().num_addresses;
     if approximate_peer_count > 0 {
         let cached_peers = config
             .load_peer_cache()
@@ -418,7 +422,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
         ..Config::default()
     };
-    let _address_book =
+    let (_address_book, _peer_book_handle, _change_sender) =
         init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
     // Let the peer cache updater run for a while.
@@ -434,17 +438,14 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         // Make sure our only peers are coming from the disk cache
         config.initial_mainnet_peers = Default::default();
 
-        let address_book =
+        let (address_book, _peer_book_handle, _change_sender) =
             init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
 
         // Let the peer cache reader run and fill the address book.
         tokio::time::sleep(CRAWLER_TEST_DURATION).await;
 
         // We should have loaded at least one peer from the cache
-        let approximate_cached_peer_count = address_book
-            .lock()
-            .expect("previous thread panicked while holding address book lock")
-            .len();
+        let approximate_cached_peer_count = address_book.address_metrics().num_addresses;
         assert!(
             approximate_cached_peer_count > 0,
             "unexpected empty address book using cache from previous instance: {:?}",
@@ -796,19 +797,19 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
 
     let outbound_limit = config.peerset_outbound_connection_limit();
 
-    let (
-        address_book,
-        _bans_receiver,
-        address_book_updater,
-        address_book_service,
-        _address_metrics,
-        _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    let crate::address_book_updater::PeerBookHandles {
+        bans_receiver: _bans_receiver,
+        change_sender: address_book_updater,
+        address_metrics: _address_metrics,
+        actor_task: _address_book_updater_guard,
+        handle: peer_book_handle,
+        reader: _peer_book_reader,
+    } = AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Add enough candidates for the initial fill and the replacement dials.
     let candidate_count = outbound_limit * 2 + 1;
     for address_number in 0..candidate_count {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let addr = SocketAddr::new(Ipv4Addr::new(127, address_number as _, 1, 1).into(), 1);
         let addr = MetaAddr::new_gossiped_meta_addr(
             addr.into(),
             PeerServices::NODE_NETWORK,
@@ -817,10 +818,10 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         .new_gossiped_change()
         .expect("created MetaAddr contains enough information to represent a gossiped address");
 
-        address_book
-            .lock()
-            .expect("panic in previous thread while accessing the address book")
-            .update(addr);
+        address_book_updater
+            .send(addr)
+            .await
+            .expect("the peer book actor is running");
     }
 
     // A peer set whose crawl responses never contain any addresses,
@@ -860,8 +861,9 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
     let (demand_tx, demand_rx) = mpsc::channel::<MorePeers>(candidate_count);
 
     let (next_peer_service, crawl_service) =
-        crawler_services(address_book_service.clone(), empty_peer_set);
-    let active_outbound_connections = ActiveConnectionCounter::new_counter();
+        crawler_services(peer_book_handle.clone(), empty_peer_set);
+    let active_outbound_connections =
+        SharedConnectionCounter::new_counter_with(usize::MAX, "Outbound Connections");
 
     let crawl_task_handle = tokio::spawn(crawl_and_dial(
         config.clone(),
@@ -869,7 +871,7 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         demand_rx,
         next_peer_service,
         crawl_service,
-        address_book_service,
+        peer_book_handle.clone(),
         success_stay_open_outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -1176,6 +1178,7 @@ async fn listener_reserves_one_zcashd_compat_inbound_slot() {
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(inbound_limit * 2);
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
@@ -1184,6 +1187,7 @@ async fn listener_reserves_one_zcashd_compat_inbound_slot() {
         peerset_tx,
         bans_rx,
         vec![IpAddr::V6(zcashd_compat_ip.to_ipv6_mapped())],
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1268,6 +1272,7 @@ async fn listener_zcashd_compat_reconnect_bypasses_recent_ip_limit() {
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(2);
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1276,6 +1281,7 @@ async fn listener_zcashd_compat_reconnect_bypasses_recent_ip_limit() {
         peerset_tx,
         bans_rx,
         vec![zcashd_compat_ip.into()],
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1324,12 +1330,16 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
 
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
     let (bans_tx, bans_rx) = tokio::sync::watch::channel(
-        [(zcashd_compat_ip.into(), std::time::Instant::now())]
-            .into_iter()
-            .collect::<IndexMap<_, _>>()
-            .into(),
+        [(
+            crate::peer_book::BanKey::from(IpAddr::from(zcashd_compat_ip)),
+            std::time::Instant::now(),
+        )]
+        .into_iter()
+        .collect::<IndexMap<_, _>>()
+        .into(),
     );
 
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1338,6 +1348,7 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
         peerset_tx,
         bans_rx,
         vec![zcashd_compat_ip.into()],
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1417,6 +1428,7 @@ async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(2);
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1425,6 +1437,7 @@ async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
         peerset_tx,
         bans_rx,
         Vec::new(),
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1498,12 +1511,16 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
     // The ban is stored in the canonical IPv4 form, like `MetaAddr::new_misbehavior`
     // stores it.
     let (bans_tx, bans_rx) = tokio::sync::watch::channel(
-        [(banned_ip.into(), std::time::Instant::now())]
-            .into_iter()
-            .collect::<IndexMap<IpAddr, Instant>>()
-            .into(),
+        [(
+            crate::peer_book::BanKey::from(IpAddr::from(banned_ip)),
+            std::time::Instant::now(),
+        )]
+        .into_iter()
+        .collect::<IndexMap<_, _>>()
+        .into(),
     );
 
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1512,6 +1529,7 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
         peerset_tx,
         bans_rx,
         Vec::new(),
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1569,7 +1587,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
         ..Config::default()
     };
 
-    let (mut peer_set, address_book, misbehavior_tx) = init(
+    let (mut peer_set, peer_book_reader, misbehavior_tx, _peer_book_handle) = init(
         config,
         peers_inbound_service,
         NoChainTip,
@@ -1577,7 +1595,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
     )
     .await;
 
-    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+    let listen_addr = peer_book_reader.local_listener_socket_addr();
     let peer_ip = Ipv4Addr::LOCALHOST;
 
     // Connect over IPv4, so the listener accepts `::ffff:127.0.0.1`.
@@ -1627,7 +1645,10 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
     let ban_deadline = Instant::now() + MISBEHAVIOR_FLUSH_TIMEOUT;
     let banned_ip: IpAddr = peer_ip.into();
     loop {
-        if address_book.lock().unwrap().bans().contains_key(&banned_ip) {
+        if peer_book_reader
+            .bans()
+            .contains_key(&crate::peer_book::BanKey::from(banned_ip))
+        {
             break;
         }
 
@@ -1943,7 +1964,7 @@ async fn self_connections_should_fail() {
         ..Config::default()
     };
 
-    let address_book = init_with_peer_limit(
+    let (address_book, peer_book_handle, change_sender) = init_with_peer_limit(
         TEST_PEERSET_INITIAL_TARGET_SIZE,
         unreachable_inbound_service,
         Mainnet,
@@ -1953,29 +1974,48 @@ async fn self_connections_should_fail() {
     .await;
 
     // Insert our own address into the address book, and make sure it works
-    let (real_self_listener, updated_addr) = {
-        let mut unlocked_address_book = address_book
-            .lock()
-            .expect("unexpected panic in address book");
+    let real_self_listener =
+        MetaAddr::new_local_listener_change(address_book.local_listener_socket_addr())
+            .local_listener_into_new_meta_addr(Utc::now().try_into().expect("in range"));
 
-        let real_self_listener = unlocked_address_book.local_listener_meta_addr(Utc::now());
+    // Set a fake listener on the book to get past the check for adding our
+    // own address. The change below travels the same channel, so it is
+    // applied after the override.
+    let mut handle = peer_book_handle.clone();
+    let response = handle
+        .ready()
+        .await
+        .expect("the peer book actor is running")
+        .call(crate::peer_book::PeerBookRequest::TestSetLocalListener(
+            "192.168.0.0:1".parse().unwrap(),
+        ))
+        .await
+        .expect("the peer book actor answers");
+    assert!(matches!(response, crate::peer_book::PeerBookResponse::Done));
 
-        // Set a fake listener to get past the check for adding our own address
-        unlocked_address_book.set_local_listener("192.168.0.0:1".parse().unwrap());
-
-        let updated_addr = unlocked_address_book.update(
+    change_sender
+        .send(
             real_self_listener
                 .clone()
                 .new_gossiped_change()
                 .expect("change is valid"),
-        );
-
-        std::mem::drop(unlocked_address_book);
-
-        (real_self_listener, updated_addr)
-    };
+        )
+        .await
+        .expect("the peer book actor is running");
 
     // Make sure we modified the address book correctly
+    let response = handle
+        .ready()
+        .await
+        .expect("the peer book actor is running")
+        .call(crate::peer_book::PeerBookRequest::TestPeerEntry(
+            real_self_listener.addr(),
+        ))
+        .await
+        .expect("the peer book actor answers");
+    let crate::peer_book::PeerBookResponse::PeerEntry(updated_addr) = response else {
+        panic!("expected a PeerEntry response");
+    };
     let updated_addr =
         updated_addr.expect("inserting our own address into the address book failed");
     assert_eq!(
@@ -1998,19 +2038,20 @@ async fn self_connections_should_fail() {
     tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
 
     // Check that the self-connection failed
-    let self_connection_status = {
-        let mut unlocked_address_book = address_book
-            .lock()
-            .expect("unexpected panic in address book");
-
-        let self_connection_status = unlocked_address_book
-            .get(real_self_listener.addr())
-            .expect("unexpected dropped listener address in address book");
-
-        std::mem::drop(unlocked_address_book);
-
-        self_connection_status
+    let response = handle
+        .ready()
+        .await
+        .expect("the peer book actor is running")
+        .call(crate::peer_book::PeerBookRequest::TestPeerEntry(
+            real_self_listener.addr(),
+        ))
+        .await
+        .expect("the peer book actor answers");
+    let crate::peer_book::PeerBookResponse::PeerEntry(self_connection_status) = response else {
+        panic!("expected a PeerEntry response");
     };
+    let self_connection_status =
+        self_connection_status.expect("unexpected dropped listener address in address book");
 
     // Make sure we fetched from the address book correctly
     assert_eq!(
@@ -2143,7 +2184,7 @@ async fn add_initial_peers_deadlock() {
     let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
         peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            SocketAddr::new(Ipv4Addr::new(127, address_number as _, 1, 1).into(), 1).to_string(),
         );
     }
 
@@ -2194,34 +2235,31 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, peer_book_reader, _, _peer_book_handle) = init(
         config,
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
     )
     .await;
-    let local_listener = address_book
-        .lock()
-        .unwrap()
-        .local_listener_meta_addr(Utc::now());
+    let local_listener = peer_book_reader.local_listener_socket_addr();
 
     if listen_addr.port() == 0 {
         assert_ne!(
-            local_listener.addr.port(),
+            local_listener.port(),
             0,
             "dynamic ports are replaced with OS-assigned ports"
         );
     } else {
         assert_eq!(
-            local_listener.addr.port(),
+            local_listener.port(),
             listen_addr.port(),
             "fixed ports are correctly propagated"
         );
     }
 
     assert_eq!(
-        local_listener.addr.ip(),
+        local_listener.ip(),
         listen_addr.ip(),
         "IP addresses are correctly propagated"
     );
@@ -2233,14 +2271,18 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the peer book reader for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
     force_listen_addr: impl Into<Option<SocketAddr>>,
     default_config: impl Into<Option<Config>>,
-) -> Arc<std::sync::Mutex<AddressBook>>
+) -> (
+    crate::peer_book::PeerBookReader,
+    crate::peer_book::PeerBookHandle,
+    crate::peer_book::ChangeSender,
+)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
@@ -2260,7 +2302,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, peer_book_reader, _, peer_book_handle) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2268,7 +2310,9 @@ where
     )
     .await;
 
-    address_book
+    let change_sender = peer_book_reader.change_sender().clone();
+
+    (peer_book_reader, peer_book_handle, change_sender)
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
@@ -2297,20 +2341,20 @@ where
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
 
-    let (
-        address_book,
-        _bans_receiver,
-        address_book_updater,
-        address_book_service,
-        _address_metrics,
-        _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    let crate::address_book_updater::PeerBookHandles {
+        bans_receiver: _bans_receiver,
+        change_sender: address_book_updater,
+        address_metrics,
+        actor_task: _address_book_updater_guard,
+        handle: peer_book_handle,
+        reader: _peer_book_reader,
+    } = AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let addr = SocketAddr::new(Ipv4Addr::new(127, address_number as _, 1, 1).into(), 1);
         let addr = MetaAddr::new_gossiped_meta_addr(
             addr.into(),
             PeerServices::NODE_NETWORK,
@@ -2321,10 +2365,10 @@ where
             .new_gossiped_change()
             .expect("created MetaAddr contains enough information to represent a gossiped address");
 
-        address_book
-            .lock()
-            .expect("panic in previous thread while accessing the address book")
-            .update(addr);
+        address_book_updater
+            .send(addr)
+            .await
+            .expect("the peer book actor is running");
     }
 
     // Create a fake peer set.
@@ -2348,11 +2392,12 @@ where
     let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(over_limit_peers);
 
     let (next_peer_service, crawl_service) =
-        crawler_services(address_book_service.clone(), nil_peer_set);
+        crawler_services(peer_book_handle.clone(), nil_peer_set);
 
     // In zebra_network::initialize() the counter would already have some initial peer connections,
     // but in this test we start with an empty counter.
-    let active_outbound_connections = ActiveConnectionCounter::new_counter();
+    let active_outbound_connections =
+        SharedConnectionCounter::new_counter_with(usize::MAX, "Outbound Connections");
 
     // Add fake demand over the limit.
     for _ in 0..over_limit_peers {
@@ -2366,7 +2411,7 @@ where
         demand_rx,
         next_peer_service,
         crawl_service,
-        address_book_service,
+        peer_book_handle.clone(),
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -2390,11 +2435,11 @@ where
 
     // Check the final address book contents.
     assert_eq!(
-        address_book.lock().unwrap().peers().count(),
+        address_metrics.borrow().num_addresses,
         over_limit_peers,
         "expected {} peers in Mainnet address book, but got: {:?}",
         over_limit_peers,
-        address_book.lock().unwrap().address_metrics(Utc::now())
+        *address_metrics.borrow()
     );
 
     (config, peerset_rx)
@@ -2495,6 +2540,7 @@ where
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
     // Start listening for connections.
+    let active_inbound_connections = test_inbound_counter(&config);
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
@@ -2503,6 +2549,7 @@ where
         peerset_tx.clone(),
         bans_rx,
         Vec::new(),
+        active_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -2568,7 +2615,7 @@ async fn spawn_add_initial_peers<C>(
     peer_count: usize,
     outbound_connector: C,
 ) -> (
-    JoinHandle<Result<ActiveConnectionCounter, BoxError>>,
+    JoinHandle<Result<(), BoxError>>,
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 )
@@ -2587,7 +2634,7 @@ where
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            SocketAddr::new(Ipv4Addr::new(127, address_number as _, 1, 1).into(), 1).to_string(),
         );
     }
 
@@ -2607,16 +2654,26 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(peer_count + 1);
 
-    let (
-        _address_book,
-        _bans_receiver,
-        address_book_updater,
-        _address_book_service,
-        _address_metrics,
-        address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    let crate::address_book_updater::PeerBookHandles {
+        bans_receiver: _bans_receiver,
+        change_sender: address_book_updater,
+        address_metrics: _address_metrics,
+        actor_task: address_book_updater_guard,
+        handle: _peer_book_handle,
+        reader: _peer_book_reader,
+    } = AddressBookUpdater::spawn(&config, unused_v4);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
+    let active_outbound_connections = SharedConnectionCounter::new_counter_with(
+        config.peerset_outbound_connection_limit(),
+        "Outbound Connections",
+    );
+    let add_fut = add_initial_peers(
+        config,
+        outbound_connector,
+        peerset_tx,
+        address_book_updater,
+        active_outbound_connections,
+    );
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)

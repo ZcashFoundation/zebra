@@ -35,12 +35,10 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    address_book_updater::{
-        AddressBookChangeSender, AddressBookService, AddressBookUpdater, MIN_CHANNEL_SIZE,
-    },
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     connection_metrics::{
         network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
-        record_inbound_connection_rejected, ConnectionDirection,
+        ConnectionDirection,
     },
     constants,
     meta_addr::MetaAddr,
@@ -48,18 +46,21 @@ use crate::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
+    peer_book::{ChangeSender, PeerBookHandle, PeerBookReader},
     peer_cache_updater::peer_cache_updater,
     peer_set::{
         crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
+        SharedConnectionCounter,
     },
-    protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    protocol::external::canonical_socket_addr,
+    BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
 mod tests;
 
+mod inbound_admission;
 mod recent_by_ip;
 
 /// A successful outbound peer connection attempt or inbound connection handshake.
@@ -111,8 +112,9 @@ pub async fn init<S, C>(
     user_agent: String,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
-    Arc<std::sync::Mutex<AddressBook>>,
+    PeerBookReader,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    PeerBookHandle,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -144,8 +146,9 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
     block_gossip_peer_ips: Vec<IpAddr>,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
-    Arc<std::sync::Mutex<AddressBook>>,
+    PeerBookReader,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    PeerBookHandle,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -154,14 +157,14 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (
-        address_book,
+    let crate::address_book_updater::PeerBookHandles {
         bans_receiver,
-        address_book_updater,
-        address_book_service,
+        change_sender: address_book_updater,
         address_metrics,
-        address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, listen_addr);
+        actor_task: address_book_updater_guard,
+        handle: peer_book_handle,
+        reader: peer_book_reader,
+    } = AddressBookUpdater::spawn(&config, listen_addr);
 
     let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
         // Leave enough room for a misbehaviour update on every peer connection
@@ -175,7 +178,7 @@ where
     tokio::spawn(
         async move {
             let mut misbehaviors: HashMap<PeerSocketAddr, u32> = HashMap::new();
-            // Batch misbehaviour updates so peers can't keep the address book mutex locked
+            // Batch misbehaviour updates so peers can't flood the peer book actor
             // by repeatedly sending invalid blocks or transactions.
             let mut flush_timer =
                 IntervalStream::new(tokio::time::interval(constants::MISBEHAVIOR_FLUSH_INTERVAL));
@@ -214,6 +217,9 @@ where
     // (The block syncer and mempool crawler handle bulk fetches of blocks and transactions.)
     let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
 
+    let advertised_services = crate::protocol::external::types::PeerServices::NODE_NETWORK;
+    let want_transactions = true;
+
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
     // self-connection attempts. Both are decorated with a tower TimeoutLayer to
@@ -221,16 +227,15 @@ where
     let (listen_handshaker, outbound_connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        use crate::protocol::external::types::PeerServices;
         let hs = peer::Handshake::builder()
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
-            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_advertised_services(advertised_services)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
-            .want_transactions(true)
+            .want_transactions(want_transactions)
             .finish()
             .expect("configured all required parameters");
         (
@@ -274,6 +279,15 @@ where
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
+    let active_inbound_connections = SharedConnectionCounter::new_counter_with(
+        config.peerset_inbound_connection_limit(),
+        "Inbound Connections",
+    );
+    let active_outbound_connections = SharedConnectionCounter::new_counter_with(
+        config.peerset_outbound_connection_limit(),
+        "Outbound Connections",
+    );
+
     // Connect peerset_tx to the 3 peer sources:
     //
     // 1. Incoming peer connections, via a listener.
@@ -283,8 +297,9 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
-        bans_receiver,
+        bans_receiver.clone(),
         block_gossip_peer_ips,
+        active_inbound_connections.clone(),
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -294,15 +309,16 @@ where
         outbound_connector.clone(),
         peerset_tx.clone(),
         address_book_updater.clone(),
+        active_outbound_connections.clone(),
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
     // 3. Outgoing peers we connect to in response to load.
     let (next_peer_service, mut crawl_service) =
-        crawler_services(address_book_service.clone(), peer_set.clone());
+        crawler_services(peer_book_handle.clone(), peer_set.clone());
 
     // Wait for the initial seed peer count
-    let mut active_outbound_connections = initial_peers_join
+    initial_peers_join
         .wait_for_panics()
         .await
         .expect("unexpected error connecting to initial peers");
@@ -337,7 +353,7 @@ where
         demand_rx,
         next_peer_service,
         crawl_service,
-        address_book_service.clone(),
+        peer_book_handle.clone(),
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -346,32 +362,38 @@ where
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
     // Start the peer disk cache updater
-    let peer_cache_updater_fut = peer_cache_updater(config, address_book_service);
+    let peer_cache_updater_fut = peer_cache_updater(config, peer_book_handle.clone());
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
 
-    handle_tx
-        .send(vec![
-            listen_guard,
-            crawl_guard,
-            address_book_updater_guard,
-            peer_cache_updater_guard,
-        ])
-        .unwrap();
+    let guards = vec![
+        listen_guard,
+        crawl_guard,
+        address_book_updater_guard,
+        peer_cache_updater_guard,
+    ];
+    handle_tx.send(guards).unwrap();
 
-    (peer_set, address_book, misbehavior_tx)
+    (peer_set, peer_book_reader, misbehavior_tx, peer_book_handle)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
 /// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
 /// Also sends every initial peer address to the `address_book_updater`.
-#[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
+#[instrument(skip(
+    config,
+    outbound_connector,
+    peerset_tx,
+    address_book_updater,
+    active_outbound_connections
+))]
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: AddressBookChangeSender,
-) -> Result<ActiveConnectionCounter, BoxError>
+    address_book_updater: ChangeSender,
+    active_outbound_connections: SharedConnectionCounter,
+) -> Result<(), BoxError>
 where
     S: Service<
             OutboundConnectorRequest,
@@ -386,11 +408,6 @@ where
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
-
-    let mut active_outbound_connections = ActiveConnectionCounter::new_counter_with(
-        config.peerset_outbound_connection_limit(),
-        "Outbound Connections",
-    );
 
     // TODO: update when we add Tor peers or other kinds of addresses.
     let ipv4_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv4()).count();
@@ -522,7 +539,7 @@ where
         "finished connecting to initial seed and disk cache peers"
     );
 
-    Ok(active_outbound_connections)
+    Ok(())
 }
 
 /// Limit the number of `initial_peers` addresses entries to the configured
@@ -534,7 +551,7 @@ where
 /// Also sends every initial peer to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
-    address_book_updater: AddressBookChangeSender,
+    address_book_updater: ChangeSender,
 ) -> HashSet<PeerSocketAddr> {
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
@@ -657,6 +674,7 @@ pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) 
 ///
 /// Limits the number of active inbound connections based on `config`,
 /// and waits `min_inbound_peer_connection_interval` between connections.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(config, listener, handshaker, peerset_tx), fields(listener_addr = ?listener.local_addr()))]
 async fn accept_inbound_connections<S>(
     config: Config,
@@ -664,8 +682,9 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
     zcashd_compat_peer_ips: Vec<IpAddr>,
+    active_inbound_connections: SharedConnectionCounter,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
@@ -675,10 +694,6 @@ where
     let mut recent_inbound_connections =
         recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
 
-    let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
-        config.peerset_inbound_connection_limit(),
-        "Inbound Connections",
-    );
     let zcashd_compat_peer_ips: HashSet<_> = zcashd_compat_peer_ips
         .into_iter()
         .map(|ip| canonical_socket_addr(SocketAddr::new(ip, 0)).ip())
@@ -720,30 +735,12 @@ where
         };
 
         if let Ok((tcp_stream, addr)) = inbound_result {
-            // # Security
-            //
-            // Canonicalize the accepted address before it is used as a key. On a
-            // dual-stack listener an IPv4 peer connects as IPv4-mapped IPv6, but
-            // bans and misbehaviour updates are keyed on the canonical IPv4 address.
-            // This address also becomes the peer set key and the per-IP limiter key
-            // below, so canonicalizing once here keeps all of them in the same form.
-            let addr: PeerSocketAddr = canonical_peer_addr(addr);
-            record_connection_attempt_started(&config.network, ConnectionDirection::Inbound, addr);
-
-            // # Security
-            //
-            // Check bans in both the raw and canonical representations: on a
-            // dual-stack listener, an IPv4 peer can connect as IPv4-mapped IPv6,
-            // and it must not dodge a ban stored for its IPv4 address and then
-            // be granted the zcashd-compat sidecar privileges below.
-            let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
-            let bans = bans_receiver.borrow().clone();
-            if bans.contains_key(&addr.ip()) || bans.contains_key(&canonical_ip) {
-                debug!(?addr, "banned inbound connection attempt");
-                record_inbound_connection_rejected(&config.network, addr, "banned");
+            let Some((addr, canonical_ip)) =
+                inbound_admission::screen_inbound_addr(&config.network, addr, &bans_receiver)
+            else {
                 std::mem::drop(tcp_stream);
                 continue;
-            }
+            };
 
             let active_public_inbound_connections = active_inbound_connections.update_count();
             let active_zcashd_compat_inbound_connections =
@@ -765,24 +762,35 @@ where
 
             let connection_tracker = if use_reserved_slot {
                 active_zcashd_compat_connections.track_connection()
-            } else if active_public_inbound_connections >= public_inbound_connection_limit
-                || active_total_inbound_connections >= config.peerset_inbound_connection_limit()
-                || recent_inbound_connections.is_past_limit_or_add(addr.ip())
-            {
-                // Too many open inbound connections or pending handshakes already.
-                // Close the connection.
-                record_inbound_connection_rejected(
+            } else {
+                // Reserved-slot connections also count towards the total
+                // inbound limit, so the public limit shrinks if the compat
+                // counter ever overshoots its reserved slots.
+                let public_limit = public_inbound_connection_limit.min(
+                    config
+                        .peerset_inbound_connection_limit()
+                        .saturating_sub(active_zcashd_compat_inbound_connections),
+                );
+
+                match inbound_admission::try_reserve_public_inbound_slot(
                     &config.network,
                     addr,
-                    "capacity_or_rate_limited",
-                );
-                std::mem::drop(tcp_stream);
-                // Allow invalid connections to be cleared quickly,
-                // but still put a limit on our CPU and network usage from failed connections.
-                tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
-                continue;
-            } else {
-                active_inbound_connections.track_connection()
+                    active_public_inbound_connections,
+                    public_limit,
+                    &active_inbound_connections,
+                    &mut recent_inbound_connections,
+                ) {
+                    Some(tracker) => tracker,
+                    None => {
+                        std::mem::drop(tcp_stream);
+                        // Allow invalid connections to be cleared quickly,
+                        // but still put a limit on our CPU and network usage
+                        // from failed connections.
+                        tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL)
+                            .await;
+                        continue;
+                    }
+                }
             };
             debug!(
                 inbound_connections = ?active_total_inbound_connections,
@@ -945,7 +953,7 @@ enum CrawlerAction {
         demand_rx,
         next_peer_service,
         crawl_service,
-        address_book_service,
+        peer_book_handle,
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -961,11 +969,11 @@ async fn crawl_and_dial<C, S>(
     mut demand_rx: futures::channel::mpsc::Receiver<MorePeers>,
     next_peer_service: NextPeerService,
     crawl_service: CrawlService<S>,
-    address_book_service: AddressBookService,
+    peer_book_handle: PeerBookHandle,
     outbound_connector: C,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    mut active_outbound_connections: ActiveConnectionCounter,
-    address_book_updater: AddressBookChangeSender,
+    active_outbound_connections: SharedConnectionCounter,
+    address_book_updater: ChangeSender,
 ) -> Result<(), BoxError>
 where
     C: Service<
@@ -1063,6 +1071,7 @@ where
                 let mut next_peer_service = next_peer_service.clone();
                 let crawl_service = crawl_service.clone();
                 let outbound_connector = outbound_connector.clone();
+                let active_outbound_connections = active_outbound_connections.clone();
                 let peerset_tx = peerset_tx.clone();
                 let address_book_updater = address_book_updater.clone();
                 let demand_tx = demand_tx.clone();
@@ -1120,7 +1129,7 @@ where
             }
             Ok(TimerCrawl { tick }) => {
                 let crawl_service = crawl_service.clone();
-                let address_book_service = address_book_service.clone();
+                let peer_book_handle = peer_book_handle.clone();
                 let crawl_demand_tx = demand_tx.clone();
                 let spare_capacity = config
                     .peerset_outbound_connection_limit()
@@ -1143,7 +1152,7 @@ where
                         // demand handler re-checks the connection limit before each
                         // handshake, so excess signals are dropped, and failed handshakes
                         // restore their demand signal.
-                        let ready_candidates = ready_peer_count(&address_book_service).await;
+                        let ready_candidates = ready_peer_count(&peer_book_handle).await;
                         let mut fill_demand_tx = crawl_demand_tx.clone();
                         for _ in 0..spare_capacity.min(ready_candidates) {
                             if fill_demand_tx.try_send(MorePeers).is_err() {
@@ -1257,7 +1266,7 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
     outbound_connections: usize,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: AddressBookChangeSender,
+    address_book_updater: ChangeSender,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
@@ -1339,7 +1348,7 @@ where
 
 /// Mark `addr` as a failed peer to `address_book_updater`.
 #[instrument(skip(address_book_updater))]
-async fn report_failed(address_book_updater: AddressBookChangeSender, addr: MetaAddr) {
+async fn report_failed(address_book_updater: ChangeSender, addr: MetaAddr) {
     // The connection info is the same as what's already in the address book.
     let addr = MetaAddr::new_errored(addr.addr, None);
 

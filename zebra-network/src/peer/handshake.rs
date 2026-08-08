@@ -35,13 +35,13 @@ use zebra_chain::{
 };
 
 use crate::{
-    address_book_updater::{self, AddressBookChangeSender},
     connection_metrics::RemoteVersionOutcomeGuard,
     constants,
     peer::{
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
         MinimumPeerVersion, PeerError,
     },
+    peer_book::ChangeSender,
     peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
         external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
@@ -74,10 +74,10 @@ where
     relay: bool,
 
     inbound_service: S,
-    address_book_updater: AddressBookChangeSender,
+    address_book_updater: ChangeSender,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
-    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
+    nonces: HandshakeNonces,
 
     parent_span: Span,
 }
@@ -120,6 +120,110 @@ where
             nonces: self.nonces.clone(),
             parent_span: self.parent_span.clone(),
         }
+    }
+}
+
+/// The nonces recently sent in this node's handshake messages, shared between
+/// a transport's concurrent handshakes for self-connection detection.
+///
+/// Each transport keeps its own set: a nonce is only ever echoed back on the
+/// protocol that sent it.
+#[derive(Clone, Debug, Default)]
+pub struct HandshakeNonces(Arc<futures::lock::Mutex<IndexSet<Nonce>>>);
+
+impl HandshakeNonces {
+    /// Inserts a newly generated local `nonce` into the set, bounding the
+    /// set's size to `limit`.
+    ///
+    /// Returns `false` if the nonce is already in the set: the handshake must
+    /// be abandoned, because a connection using the same nonce may be in
+    /// progress. Duplicate nonces are very rare, because they require a
+    /// 64-bit random number collision, and the nonce set is limited to a few
+    /// hundred entries.
+    ///
+    /// # Correctness
+    ///
+    /// It is ok to wait for the lock here, because handshakes have a short
+    /// timeout, and the async mutex will be released when the task times out.
+    ///
+    /// # Security
+    ///
+    /// The set bounds the amount of memory used for nonces, because nonces
+    /// stay in the set when a connection fails or times out between the nonce
+    /// being inserted and it being evicted.
+    ///
+    /// Zebra has strict connection limits, so `limit` is usually the
+    /// configured total connection limit. This is a tradeoff between:
+    /// - avoiding memory denial of service attacks which make large numbers of
+    ///   connections: for example, 100 failed inbound connections takes 1 second.
+    /// - memory usage: 16 bytes per [`Nonce`], 3.2 kB for 200 nonces
+    /// - collision probability: two hundred 64-bit nonces have a very low collision probability
+    ///   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
+    pub async fn register(&self, nonce: Nonce, limit: usize) -> bool {
+        let mut nonces = self.0.lock().await;
+
+        if !nonces.insert(nonce) {
+            return false;
+        }
+
+        while nonces.len() > limit {
+            nonces.shift_remove_index(0);
+        }
+
+        true
+    }
+
+    /// Returns true if `nonce` was recently sent in one of this node's own
+    /// handshake messages: the peer that echoed it is this node itself.
+    ///
+    /// # Correctness
+    ///
+    /// The caller must wait for the lock before continuing with the
+    /// connection, to avoid self-connection. If the connection times out, the
+    /// async lock will be released.
+    ///
+    /// # Security
+    ///
+    /// Nonces are never removed from the set when a handshake fails: peers
+    /// that observe this node's network traffic could maliciously fail
+    /// handshakes to evict nonces, and force it to make self-connections.
+    /// The set is bounded by [`register`](Self::register) instead.
+    pub async fn contains(&self, nonce: &Nonce) -> bool {
+        self.0.lock().await.contains(nonce)
+    }
+
+    /// Returns the number of nonces in the set.
+    #[cfg(test)]
+    pub async fn len(&self) -> usize {
+        self.0.lock().await.len()
+    }
+}
+
+/// Records a successful handshake: marks the connection open on its
+/// connection tracker, and updates the peer's address book entry from
+/// `AttemptPending` to `Responded` with its initial connection info.
+pub(crate) async fn report_handshake_success(
+    connection_tracker: &mut ConnectionTracker,
+    connected_addr: &ConnectedAddr,
+    remote_services: PeerServices,
+    remote_user_agent: String,
+    negotiated_version: Version,
+    address_book_updater: &ChangeSender,
+) {
+    connection_tracker.mark_open();
+
+    if let Some(book_addr) = connected_addr.get_address_book_addr() {
+        // the collector doesn't depend on network activity,
+        // so this await should not hang
+        let _ = address_book_updater
+            .send(MetaAddr::new_connected(
+                book_addr,
+                &remote_services,
+                connected_addr.is_inbound(),
+                remote_user_agent,
+                negotiated_version,
+            ))
+            .await;
     }
 }
 
@@ -406,7 +510,7 @@ where
     relay: Option<bool>,
 
     inbound_service: Option<S>,
-    address_book_updater: Option<AddressBookChangeSender>,
+    address_book_updater: Option<ChangeSender>,
     inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
 }
@@ -445,10 +549,7 @@ where
     ///
     /// This channel takes `MetaAddr`s, permanent addresses which can be used to
     /// make outbound connections to peers.
-    pub fn with_address_book_updater(
-        mut self,
-        address_book_updater: AddressBookChangeSender,
-    ) -> Self {
+    pub fn with_address_book_updater(mut self, address_book_updater: ChangeSender) -> Self {
         self.address_book_updater = Some(address_book_updater);
         self
     }
@@ -516,10 +617,10 @@ where
         let address_book_updater = self.address_book_updater.unwrap_or_else(|| {
             // No `AddressBookUpdater` for timestamp collection was passed, so create a stub
             // channel. Dropping the receiver means sends will fail, but we don't care.
-            let (tx, _rx) = address_book_updater::change_channel(1);
-            tx
+            let (tx, _rx) = tokio::sync::mpsc::channel(1);
+            ChangeSender::new(tx)
         });
-        let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
+        let nonces = HandshakeNonces::default();
         let user_agent = self.user_agent.unwrap_or_default();
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
@@ -577,7 +678,7 @@ pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
     config: Config,
-    nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
+    nonces: HandshakeNonces,
     user_agent: String,
     our_services: PeerServices,
     relay: bool,
@@ -591,41 +692,11 @@ where
 
     // Insert the nonce for this handshake into the shared nonce set.
     // Each connection has its own connection state, and handshakes execute concurrently.
-    //
-    // # Correctness
-    //
-    // It is ok to wait for the lock here, because handshakes have a short
-    // timeout, and the async mutex will be released when the task times
-    // out.
+    if !nonces
+        .register(local_nonce, config.peerset_total_connection_limit())
+        .await
     {
-        let mut locked_nonces = nonces.lock().await;
-
-        // Duplicate nonces are very rare, because they require a 64-bit random number collision,
-        // and the nonce set is limited to a few hundred entries.
-        let is_unique_nonce = locked_nonces.insert(local_nonce);
-        if !is_unique_nonce {
-            return Err(HandshakeError::LocalDuplicateNonce);
-        }
-
-        // # Security
-        //
-        // Limit the amount of memory used for nonces.
-        // Nonces can be left in the set if the connection fails or times out between
-        // the nonce being inserted, and it being removed.
-        //
-        // Zebra has strict connection limits, so we limit the number of nonces to
-        // the configured connection limit.
-        // This is a tradeoff between:
-        // - avoiding memory denial of service attacks which make large numbers of connections,
-        //   for example, 100 failed inbound connections takes 1 second.
-        // - memory usage: 16 bytes per `Nonce`, 3.2 kB for 200 nonces
-        // - collision probability: two hundred 64-bit nonces have a very low collision probability
-        //   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
-        while locked_nonces.len() > config.peerset_total_connection_limit() {
-            locked_nonces.shift_remove_index(0);
-        }
-
-        std::mem::drop(locked_nonces);
+        return Err(HandshakeError::LocalDuplicateNonce);
     }
 
     // Don't leak our exact clock skew to our peers. On the other hand,
@@ -740,18 +811,7 @@ where
     }
 
     // Check for nonce reuse, indicating self-connection
-    //
-    // # Correctness
-    //
-    // We must wait for the lock before we continue with the connection, to avoid
-    // self-connection. If the connection times out, the async lock will be
-    // released.
-    //
-    // # Security
-    //
-    // We don't remove the nonce here, because peers that observe our network traffic could
-    // maliciously remove nonces, and force us to make self-connections.
-    let nonce_reuse = nonces.lock().await.contains(&remote.nonce);
+    let nonce_reuse = nonces.contains(&remote.nonce).await;
     if nonce_reuse {
         info!(?connected_addr, "rejecting self-connection attempt");
         return Err(remote_version_outcome.record_error(HandshakeError::RemoteNonceReuse));
@@ -845,10 +905,10 @@ where
 
     debug!(
         remote_ip = ?their_addr,
-        ?connection_info.remote.version,
+        remote_version = ?connection_info.remote.version,
         ?negotiated_version,
         ?min_version,
-        ?connection_info.remote.user_agent,
+        user_agent = ?connection_info.remote.user_agent,
         "negotiated network protocol version with peer",
     );
 
@@ -859,7 +919,7 @@ where
         "remote_version" => connection_info.remote.version.to_string(),
         "negotiated_version" => negotiated_version.to_string(),
         "min_version" => min_version.to_string(),
-        "user_agent" => connection_info.remote.user_agent.clone(),
+        "user_agent" => connection_info.remote.user_agent.to_string(),
     )
     .increment(1);
 
@@ -1056,20 +1116,15 @@ where
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
             // send initial connection info, and update the active connection counter.
-            connection_tracker.mark_open();
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
-                // the collector doesn't depend on network activity,
-                // so this await should not hang
-                let _ = address_book_updater
-                    .send(MetaAddr::new_connected(
-                        book_addr,
-                        &remote_services,
-                        connected_addr.is_inbound(),
-                        connection_info.remote.user_agent.clone(),
-                        connection_info.negotiated_version,
-                    ))
-                    .await;
-            }
+            report_handshake_success(
+                &mut connection_tracker,
+                &connected_addr,
+                remote_services,
+                connection_info.remote.user_agent.to_string(),
+                connection_info.negotiated_version,
+                &address_book_updater,
+            )
+            .await;
 
             // Reconfigure the codec to use the negotiated version.
             //
@@ -1361,11 +1416,11 @@ pub(crate) async fn register_inventory_status(
 /// heartbeat_ts_collector.
 ///
 /// Returning from this function terminates the connection's heartbeat task.
-async fn send_periodic_heartbeats_with_shutdown_handle(
+pub(super) async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    heartbeat_ts_collector: AddressBookChangeSender,
+    heartbeat_ts_collector: ChangeSender,
 ) -> Result<(), BoxError> {
     use futures::future::Either;
 
@@ -1422,7 +1477,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    heartbeat_ts_collector: AddressBookChangeSender,
+    heartbeat_ts_collector: ChangeSender,
 ) -> Result<(), BoxError> {
     // Don't send the first heartbeat immediately - we've just completed the handshake!
     let mut interval = tokio::time::interval_at(
@@ -1521,7 +1576,7 @@ async fn send_one_heartbeat(
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout(
     fut: impl Future<Output = Result<Response, BoxError>>,
-    address_book_updater: &AddressBookChangeSender,
+    address_book_updater: &ChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<Option<Duration>, BoxError> {
     let response = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
@@ -1544,7 +1599,7 @@ async fn heartbeat_timeout(
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    address_book_updater: &AddressBookChangeSender,
+    address_book_updater: &ChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<T, E>
 where
@@ -1574,7 +1629,7 @@ where
 /// Mark `connected_addr` as shut down using `address_book_updater`.
 async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
-    address_book_updater: &AddressBookChangeSender,
+    address_book_updater: &ChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");

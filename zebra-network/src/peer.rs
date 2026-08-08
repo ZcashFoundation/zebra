@@ -8,7 +8,6 @@ mod handshake;
 mod load_tracked_client;
 mod minimum_peer_version;
 mod priority;
-
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(unused_imports)]
 pub use client::tests::ClientTestHarness;

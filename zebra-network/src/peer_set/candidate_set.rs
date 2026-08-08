@@ -108,8 +108,8 @@ use futures::FutureExt;
 use tower::{Service, ServiceExt};
 
 use crate::{
-    address_book_updater::{AddressBookRequest, AddressBookResponse, AddressBookService},
     constants,
+    peer_book::{PeerBookHandle, PeerBookRequest, PeerBookResponse},
     types::MetaAddr,
     BoxError, Request, Response,
 };
@@ -131,18 +131,18 @@ mod tests;
 /// Rate-limited so new outbound connections are started at least
 /// [`MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`][constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL]
 /// apart. The rate limit is only charged when a candidate is actually
-/// yielded: an empty address book returns `None` immediately.
+/// yielded: an empty peer book returns `None` immediately.
 ///
 /// Clones share the same rate limit.
-pub(crate) type NextPeerService = RateLimitOnYield<AddressBookService, AddressBookResponse>;
+pub(crate) type NextPeerService = RateLimitOnYield<PeerBookHandle, PeerBookResponse>;
 
 /// Builds the candidate selection services used by the crawler:
 /// a [`NextPeerService`] and a [`CrawlService`].
 ///
-/// Uses `address_book_service` to choose candidates and store crawled
+/// Uses `peer_book_handle` to choose candidates and store crawled
 /// addresses, and `peer_service` to crawl the network for more addresses.
 pub(crate) fn crawler_services<S>(
-    address_book_service: AddressBookService,
+    peer_book_handle: PeerBookHandle,
     peer_service: S,
 ) -> (NextPeerService, CrawlService<S>)
 where
@@ -150,12 +150,12 @@ where
     S::Future: Send + 'static,
 {
     let next_peer_service = RateLimitOnYield::new(
-        address_book_service.clone(),
+        peer_book_handle.clone(),
         constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
-        |response| matches!(response, AddressBookResponse::NextReconnectPeer(Some(_))),
+        |response| matches!(response, PeerBookResponse::Candidate(Some(_))),
     );
 
-    let crawl_service = CrawlFanout::service(peer_service, address_book_service);
+    let crawl_service = CrawlFanout::service(peer_service, peer_book_handle);
 
     (next_peer_service, crawl_service)
 }
@@ -168,6 +168,10 @@ where
 /// Skips peers that have recently been active, attempted, or failed.
 ///
 /// ## Correctness
+///
+/// The peer book actor picks the candidate and marks it as `AttemptPending`
+/// in the same actor turn, so a candidate is never selected twice, even if
+/// the returned future is dropped before it completes.
 ///
 /// `AttemptPending` peers will become [`Responded`] if they respond, or
 /// become `Failed` if they time out or provide a bad response.
@@ -187,24 +191,21 @@ where
 pub(crate) async fn next_reconnect_peer(
     next_peer_service: &mut NextPeerService,
 ) -> Option<MetaAddr> {
-    // Atomically choose the next peer and mark it as `AttemptPending`,
-    // in a single address book updater request.
-    //
     // Security: new outbound peer connections are rate-limited by the
     // [`RateLimitOnYield`] middleware, which only sleeps before yielding
     // an address: when there is no peer, `None` is returned immediately.
     let response = match next_peer_service.ready().await {
         Ok(next_peer_service) => {
             next_peer_service
-                .call(AddressBookRequest::NextReconnectPeer)
+                .call(PeerBookRequest::SelectCandidate)
                 .await
         }
         Err(error) => Err(error),
     };
 
     match response {
-        Ok(AddressBookResponse::NextReconnectPeer(next_peer)) => next_peer,
-        Ok(_) => unreachable!("NextReconnectPeer requests always return NextReconnectPeer"),
+        Ok(PeerBookResponse::Candidate(next_peer)) => next_peer,
+        Ok(_) => unreachable!("SelectCandidate requests always return Candidate"),
         Err(error) => {
             debug!(
                 ?error,
@@ -220,16 +221,16 @@ pub(crate) async fn next_reconnect_peer(
 ///
 /// The returned count is a snapshot: candidates can become ready or be
 /// attempted by other tasks immediately afterwards.
-pub(crate) async fn ready_peer_count(address_book_service: &AddressBookService) -> usize {
-    let response = address_book_service
+pub(crate) async fn ready_peer_count(peer_book_handle: &PeerBookHandle) -> usize {
+    let response = peer_book_handle
         .clone()
-        .oneshot(AddressBookRequest::ReadyPeerCount)
+        .oneshot(PeerBookRequest::ReadyCandidateCount)
         .boxed()
         .await;
 
     match response {
-        Ok(AddressBookResponse::ReadyPeerCount(ready_peer_count)) => ready_peer_count,
-        Ok(_) => unreachable!("ReadyPeerCount requests always return ReadyPeerCount"),
+        Ok(PeerBookResponse::ReadyCandidateCount(ready_peer_count)) => ready_peer_count,
+        Ok(_) => unreachable!("ReadyCandidateCount requests always return ReadyCandidateCount"),
         Err(error) => {
             debug!(
                 ?error,

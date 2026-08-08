@@ -13,7 +13,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{CONCURRENT_ADDRESS_CHANGE_PERIOD, MAX_PEER_ACTIVE_FOR_GOSSIP},
+    constants::MAX_PEER_ACTIVE_FOR_GOSSIP,
     meta_addr::MetaAddrChange,
     protocol::{external::canonical_peer_addr, types::PeerServices},
     PeerSocketAddr,
@@ -233,50 +233,8 @@ fn responded_long_ago_peer_is_not_gossipable() {
     assert!(!peer.is_active_for_gossip(chrono_now));
 }
 
-/// Test that a change that is delayed for a long time is not applied to the address state.
-#[test]
-fn long_delayed_change_is_not_applied() {
-    let _init_guard = zebra_test::init();
-
-    let instant_now = Instant::now();
-    let chrono_now = Utc::now();
-    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
-
-    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
-
-    // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, None)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
-        .expect("Failed to create MetaAddr for responded peer");
-
-    // Create an earlier change to Failed that has been delayed a long time.
-    // Failed typically comes after Responded, so it will pass the connection progress check.
-    //
-    // This is very unlikely in the May 2023 production code,
-    // but it can happen due to getting the time, then waiting for the address book mutex.
-
-    // Create some change times that are much earlier
-    let instant_early = instant_now - (CONCURRENT_ADDRESS_CHANGE_PERIOD * 3);
-    let chrono_early = chrono_now
-        - chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
-            .expect("constant is valid");
-
-    let change = MetaAddr::new_errored(address, PeerServices::NODE_NETWORK);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_early, chrono_early);
-
-    assert_eq!(
-        outcome, None,
-        "\n\
-         unexpected application of a much earlier change to a peer:\n\
-         change: {change:?}\n\
-         times: {instant_early:?} {chrono_early}\n\
-         peer: {peer:?}"
-    );
-}
-
-/// Test that a change that happens a long time after the previous change
-/// is applied to the address state, even if it is a revert.
+/// Test that a state revert applied after a response is applied: the peer
+/// book actor applies changes in order, so a later change always wins.
 #[test]
 fn later_revert_change_is_applied() {
     let _init_guard = zebra_test::init();
@@ -293,34 +251,28 @@ fn later_revert_change_is_applied() {
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
-    // Create an earlier change to AttemptPending that happens a long time later.
-    // AttemptPending typically comes before Responded, so it will fail the connection progress
-    // check, but that failure should be ignored because it is not concurrent.
+    // Apply a change to AttemptPending. AttemptPending typically comes
+    // before Responded in the connection state machine, but the actor only
+    // selects reconnection candidates that are past the liveness limit, and
+    // applies their attempt mark after every earlier change, so the revert
+    // is applied.
     //
     // This is a typical reconnect in production.
-
-    // Create some change times that are much later
-    let instant_late = instant_now + (CONCURRENT_ADDRESS_CHANGE_PERIOD * 3);
-    let chrono_late = chrono_now
-        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
-            .expect("constant is valid");
-
     let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_late, chrono_late);
+    let outcome = change.apply_to_meta_addr(peer.clone(), instant_now, chrono_now);
 
     assert!(
         outcome.is_some(),
         "\n\
-         unexpected skipped much later change to a peer:\n\
+         unexpected skipped later change to a peer:\n\
          change: {change:?}\n\
-         times: {instant_late:?} {chrono_late}\n\
          peer: {peer:?}"
     );
 }
 
-/// Test that a concurrent change which reverses the connection state is not applied.
+/// Test that a failure change after a response is applied.
 #[test]
-fn concurrent_state_revert_change_is_not_applied() {
+fn failure_after_response_is_applied() {
     let _init_guard = zebra_test::init();
 
     let instant_now = Instant::now();
@@ -335,103 +287,17 @@ fn concurrent_state_revert_change_is_not_applied() {
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
-    // Create a concurrent change to AttemptPending.
-    // AttemptPending typically comes before Responded, so it will fail the progress check.
-    //
-    // This is likely to happen in production, it just requires a short delay in the earlier change.
-
-    // Create some change times that are earlier but concurrent
-    let instant_early = instant_now - (CONCURRENT_ADDRESS_CHANGE_PERIOD / 2);
-    let chrono_early = chrono_now
-        - chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD / 2)
-            .expect("constant is valid");
-
-    let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_early, chrono_early);
-
-    assert_eq!(
-        outcome, None,
-        "\n\
-         unexpected application of an early concurrent change to a peer:\n\
-         change: {change:?}\n\
-         times: {instant_early:?} {chrono_early}\n\
-         peer: {peer:?}"
-    );
-
-    // Create some change times that are later but concurrent
-    let instant_late = instant_now + (CONCURRENT_ADDRESS_CHANGE_PERIOD / 2);
-    let chrono_late = chrono_now
-        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD / 2)
-            .expect("constant is valid");
-
-    let change = MetaAddr::new_reconnect(address);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_late, chrono_late);
-
-    assert_eq!(
-        outcome, None,
-        "\n\
-         unexpected application of a late concurrent change to a peer:\n\
-         change: {change:?}\n\
-         times: {instant_late:?} {chrono_late}\n\
-         peer: {peer:?}"
-    );
-}
-
-/// Test that a concurrent change which progresses the connection state is applied.
-#[test]
-fn concurrent_state_progress_change_is_applied() {
-    let _init_guard = zebra_test::init();
-
-    let instant_now = Instant::now();
-    let chrono_now = Utc::now();
-    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
-
-    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
-
-    // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address, None)
-        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
-        .expect("Failed to create MetaAddr for responded peer");
-
-    // Create a concurrent change to Failed.
-    // Failed typically comes after Responded, so it will pass the progress check.
+    // Apply a change to Failed after the response.
     //
     // This is a typical update in production.
-
-    // Create some change times that are earlier but concurrent
-    let instant_early = instant_now - (CONCURRENT_ADDRESS_CHANGE_PERIOD / 2);
-    let chrono_early = chrono_now
-        - chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD / 2)
-            .expect("constant is valid");
-
     let change = MetaAddr::new_errored(address, None);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_early, chrono_early);
+    let outcome = change.apply_to_meta_addr(peer.clone(), instant_now, chrono_now);
 
     assert!(
         outcome.is_some(),
         "\n\
-         unexpected skipped early concurrent change to a peer:\n\
+         unexpected skipped failure change to a peer:\n\
          change: {change:?}\n\
-         times: {instant_early:?} {chrono_early}\n\
-         peer: {peer:?}"
-    );
-
-    // Create some change times that are later but concurrent
-    let instant_late = instant_now + (CONCURRENT_ADDRESS_CHANGE_PERIOD / 2);
-    let chrono_late = chrono_now
-        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD / 2)
-            .expect("constant is valid");
-
-    let change = MetaAddr::new_errored(address, None);
-    let outcome = change.apply_to_meta_addr(peer.clone(), instant_late, chrono_late);
-
-    assert!(
-        outcome.is_some(),
-        "\n\
-         unexpected skipped late concurrent change to a peer:\n\
-         change: {change:?}\n\
-         times: {instant_late:?} {chrono_late}\n\
          peer: {peer:?}"
     );
 }

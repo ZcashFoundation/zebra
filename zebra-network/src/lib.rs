@@ -159,6 +159,7 @@ mod connection_metrics;
 mod isolated;
 mod meta_addr;
 mod peer;
+mod peer_book;
 mod peer_cache_updater;
 mod peer_set;
 mod policies;
@@ -193,6 +194,7 @@ pub use crate::{
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
+    peer_book::{PeerBookHandle, PeerBookReader, PeerBookRequest, PeerBookResponse},
     peer_set::{init, init_with_block_gossip_peer_ips},
     policies::RetryLimit,
     protocol::{

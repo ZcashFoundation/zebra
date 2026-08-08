@@ -116,24 +116,6 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// nodes, and on testnet.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The maximum time difference for two address book changes to be considered concurrent.
-///
-/// This prevents simultaneous or nearby important changes or connection progress
-/// being overridden by less important changes.
-///
-/// This timeout should be less than:
-/// - the [peer reconnection delay](MIN_PEER_RECONNECTION_DELAY), and
-/// - the [peer keepalive/heartbeat interval](HEARTBEAT_INTERVAL).
-///
-/// But more than:
-/// - the amount of time between connection events and address book updates,
-///   even under heavy load (in tests, we have observed delays up to 500ms),
-/// - the delay between an outbound connection failing,
-///   and [candidate selection](crate::peer_set::candidate_set) registering the failure, and
-/// - the delay between the application closing a connection,
-///   and any remaining positive changes from the peer.
-pub const CONCURRENT_ADDRESS_CHANGE_PERIOD: Duration = Duration::from_secs(5);
-
 /// We expect to receive a message from a live peer at least once in this time duration.
 ///
 /// This is the sum of:
@@ -417,6 +399,17 @@ pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;
+
+/// How long a misbehaving peer's ban lasts.
+///
+/// Bans are keyed by network address, and an address (or IPv6 /64 prefix)
+/// can be shared by many independent users - for example, behind
+/// carrier-grade NAT - so ban durations are bounded rather than ban scopes
+/// widened. Matches the `zcashd` default ban duration.
+///
+/// Misbehavior scores are also retained for about this long, so penalties
+/// that are detected after a peer disconnects still land on its address.
+pub const DEFAULT_BAN_DURATION: Duration = Duration::from_secs(24 * 60 * 60);
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,

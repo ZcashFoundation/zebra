@@ -133,6 +133,25 @@ pub enum PeerError {
     /// [1]: crate::protocol::internal::InventoryResponse::Missing
     #[error("All ready peers are registered as recently missing these items: {0:?}")]
     NotFoundRegistry(Vec<InventoryHash>),
+
+    /// The remote peer violated the version 2 protocol specification.
+    #[error("Version 2 protocol error: {0}")]
+    V2Protocol(String),
+
+    /// This node could not encode a version 2 request or response.
+    ///
+    /// The remote peer is not at fault, so the connection stays open.
+    #[error("Internal version 2 protocol error: {0}")]
+    V2Internal(String),
+
+    /// A request that is only answerable by the local inbound service was
+    /// routed to a peer connection.
+    ///
+    /// The remote peer is not at fault: this is a local wiring mistake, so
+    /// the connection stays open and the caller sees the error instead of a
+    /// fabricated response.
+    #[error("{0} is only answered by the local inbound service")]
+    LocalOnlyRequest(&'static str),
 }
 
 impl PeerError {
@@ -156,6 +175,9 @@ impl PeerError {
             PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
             PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
+            PeerError::V2Protocol(_) => "V2Protocol".into(),
+            PeerError::V2Internal(_) => "V2Internal".into(),
+            PeerError::LocalOnlyRequest(_) => "LocalOnlyRequest".into(),
         }
     }
 }

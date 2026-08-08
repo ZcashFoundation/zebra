@@ -384,7 +384,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) =
+        let (peer_set, peer_book_reader, misbehavior_sender, peer_book_handle) =
             zebra_network::init_with_block_gossip_peer_ips(
                 config.network.clone(),
                 inbound,
@@ -447,7 +447,7 @@ impl StartCmd {
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
-            address_book: address_book.clone(),
+            peer_book_handle,
             block_download_peer_set: peer_set.clone(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
@@ -477,7 +477,7 @@ impl StartCmd {
             block_verifier_router.clone(),
             sync_status.clone(),
             latest_chain_tip.clone(),
-            address_book.clone(),
+            peer_book_reader.clone(),
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
@@ -498,10 +498,7 @@ impl StartCmd {
         let (zcashd_compat_shutdown_tx, zcashd_compat_shutdown_rx) = watch::channel(false);
         let mut zcashd_compat_task_handle = if let Some(resolved_zcashd_path) = resolved_zcashd_path
         {
-            let local_listener = address_book
-                .lock()
-                .expect("unexpected panic in address book mutex guard")
-                .local_listener_socket_addr();
+            let local_listener = peer_book_reader.local_listener_socket_addr();
             let supervisor_config = zcashd_compat::SupervisorConfig::new(
                 &config.zcashd_compat,
                 resolved_zcashd_path,
@@ -611,7 +608,7 @@ impl StartCmd {
             config.network.network.clone(),
             chain_tip_metrics_receiver,
             sync_status.clone(),
-            address_book.clone(),
+            peer_book_reader.clone(),
         )
         .await;
 

@@ -210,7 +210,7 @@ where
     demand_signal: mpsc::Sender<MorePeers>,
 
     /// A watch channel receiver with a copy of banned IP addresses.
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
 
     /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
@@ -367,7 +367,7 @@ where
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<InventoryChange>,
-        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+        bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
@@ -588,7 +588,11 @@ where
                 Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
 
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self
+                        .bans_receiver
+                        .borrow()
+                        .contains_key(&crate::peer_book::BanKey::from(key.ip()))
+                    {
                         warn!(?key, "service is banned, dropping service");
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
@@ -669,7 +673,11 @@ where
             match peer_readiness {
                 // Still ready, add it back to the list.
                 Ok(()) => {
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self
+                        .bans_receiver
+                        .borrow()
+                        .contains_key(&crate::peer_book::BanKey::from(key.ip()))
+                    {
                         debug!(?key, "service ip is banned, dropping service");
                         std::mem::drop(svc);
                         continue;
@@ -906,7 +914,7 @@ where
     }
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
-    fn select_ready_p2c_peer(&self) -> Option<D::Key> {
+    fn select_p2c_peer(&self) -> Option<D::Key> {
         self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
     }
 
@@ -1035,7 +1043,7 @@ where
 
     /// Routes a request using P2C load-balancing.
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        if let Some(p2c_key) = self.select_ready_p2c_peer() {
+        if let Some(p2c_key) = self.select_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
 
             let mut svc = self
@@ -1274,7 +1282,8 @@ where
         // Like `broadcast_all_queued`, don't deliver to peers that were banned
         // while the request was queued.
         let bans = self.bans_receiver.borrow().clone();
-        remaining_sidecars.retain(|key| !bans.contains_key(&key.ip()));
+        remaining_sidecars
+            .retain(|key| !bans.contains_key(&crate::peer_book::BanKey::from(key.ip())));
 
         let ready_sidecars: Vec<D::Key> = remaining_sidecars
             .iter()
@@ -1356,7 +1365,8 @@ where
         };
 
         let bans = self.bans_receiver.borrow().clone();
-        remaining_peers.retain(|addr| !bans.contains_key(&addr.ip()));
+        remaining_peers
+            .retain(|addr| !bans.contains_key(&crate::peer_book::BanKey::from(addr.ip())));
 
         let Ok(reserved_send_slot) = sender.try_reserve() else {
             self.queued_broadcast_all = Some((req, sender, remaining_peers));

@@ -21,7 +21,7 @@ use crate::{
     constants::{MAX_ADDRS_IN_MESSAGE, PEER_ADDR_RESPONSE_LIMIT},
     meta_addr::MetaAddr,
     peer::{
-        connection::{Connection, Handler},
+        connection::{update_addr_cache, Connection},
         ClientRequest, ErrorSlot,
     },
     protocol::external::Message,
@@ -146,7 +146,7 @@ proptest! {
 
         let old_cached_addrs = cached_addrs.clone();
 
-        let response = Handler::update_addr_cache(&mut cached_addrs, &new_addrs, response_size);
+        let response = update_addr_cache(&mut cached_addrs, &new_addrs, response_size);
 
         prop_assert!(cached_addrs.len() <= MAX_ADDRS_IN_MESSAGE, "cache has a limited size");
         prop_assert!(response.len() <= response_size, "response has a limited size");
