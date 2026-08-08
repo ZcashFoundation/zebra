@@ -46,6 +46,25 @@ pub struct Config {
     /// anyone on the internet can query your node's state.
     pub indexer_listen_addr: Option<SocketAddr>,
 
+    /// IP address and port for the lightwalletd-compatible gRPC server.
+    ///
+    /// Note: The lightwalletd gRPC server is disabled by default.
+    /// To enable it, set a listen address in the config:
+    /// ```toml
+    /// [rpc]
+    /// lightwalletd_listen_addr = '127.0.0.1:9067'
+    /// ```
+    ///
+    /// This server implements the lightwalletd `CompactTxStreamer` service, so
+    /// Zcash light clients can connect directly to Zebra.
+    ///
+    /// # Security
+    ///
+    /// If you bind Zebra's lightwalletd gRPC port to a public IP address,
+    /// anyone on the internet can query your node's state and send
+    /// transactions via your node.
+    pub lightwalletd_listen_addr: Option<SocketAddr>,
+
     /// The number of threads used to process RPC requests and responses.
     ///
     /// This field is deprecated and could be removed in a future release.
@@ -80,6 +99,9 @@ impl Default for Config {
 
             // Disable indexer RPCs by default.
             indexer_listen_addr: None,
+
+            // Disable the lightwalletd gRPC server by default.
+            lightwalletd_listen_addr: None,
 
             // Use multiple threads, because we pause requests during getblocktemplate long polling
             parallel_cpu_threads: 0,

@@ -1,0 +1,245 @@
+// Copyright (c) 2019-2020 The Zcash developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://www.opensource.org/licenses/mit-license.php .
+
+syntax = "proto3";
+package cash.z.wallet.sdk.rpc;
+option go_package = "lightwalletd/walletrpc";
+option swift_prefix = "";
+import "compact_formats.proto";
+
+// A BlockID message contains identifiers to select a block: a height or a
+// hash. Specification by hash is not implemented, but may be in the future.
+message BlockID {
+     uint64 height = 1;
+     bytes hash = 2;
+}
+
+// BlockRange specifies a series of blocks from start to end inclusive.
+// Both BlockIDs must be heights; specification by hash is not yet supported.
+message BlockRange {
+    BlockID start = 1;
+    BlockID end = 2;
+}
+
+// A TxFilter contains the information needed to identify a particular
+// transaction: either a block and an index, or a direct transaction hash.
+// Currently, only specification by hash is supported.
+message TxFilter {
+     BlockID block = 1;     // block identifier, height or hash
+     uint64 index = 2;      // index within the block
+     bytes hash = 3;        // transaction ID (hash, txid)
+}
+
+// RawTransaction contains the complete transaction data. It also optionally includes
+// the block height in which the transaction was included, or, when returned
+// by GetMempoolStream(), the latest block height.
+//
+// FIXME: the documentation here about mempool status contradicts the documentation
+// for the `height` field. See https://github.com/zcash/librustzcash/issues/1484
+message RawTransaction {
+    // The serialized representation of the Zcash transaction.
+    bytes data = 1;
+    // The height at which the transaction is mined, or a sentinel value.
+    //
+    // Due to an error in the original protobuf definition, it is necessary to
+    // reinterpret the result of the `getrawtransaction` RPC call. Zcashd will
+    // return the int64 value `-1` for the height of transactions that appear
+    // in the block index, but which are not mined in the main chain. Here, the
+    // height field of `RawTransaction` was erroneously created as a `uint64`,
+    // and as such we must map the response from the zcashd RPC API to be
+    // representable within this space. Additionally, the `height` field will
+    // be absent for transactions in the mempool, resulting in the default
+    // value of `0` being set. Therefore, the meanings of the `height` field of
+    // the `RawTransaction` type are as follows:
+    //
+    // * height 0: the transaction is in the mempool
+    // * height 0xffffffffffffffff: the transaction has been mined on a fork that
+    //   is not currently the main chain
+    // * any other height: the transaction has been mined in the main chain at the
+    //   given height
+    uint64 height = 2;
+}
+
+// A SendResponse encodes an error code and a string. It is currently used
+// only by SendTransaction(). If error code is zero, the operation was
+// successful; if non-zero, it and the message specify the failure.
+message SendResponse {
+    int32 errorCode = 1;
+    string errorMessage = 2;
+}
+
+// Chainspec is a placeholder to allow specification of a particular chain fork.
+message ChainSpec {}
+
+// Empty is for gRPCs that take no arguments, currently only GetLightdInfo.
+message Empty {}
+
+// LightdInfo returns various information about this lightwalletd instance
+// and the state of the blockchain.
+message LightdInfo {
+    string version = 1;
+    string vendor = 2;
+    bool   taddrSupport = 3;            // true
+    string chainName = 4;               // either "main" or "test"
+    uint64 saplingActivationHeight = 5; // depends on mainnet or testnet
+    string consensusBranchId = 6;       // protocol identifier, see consensus/upgrades.cpp
+    uint64 blockHeight = 7;             // latest block on the best chain
+    string gitCommit = 8;
+    string branch = 9;
+    string buildDate = 10;
+    string buildUser = 11;
+    uint64 estimatedHeight = 12;        // less than tip height if zcashd is syncing
+    string zcashdBuild = 13;            // example: "v4.1.1-877212414"
+    string zcashdSubversion = 14;       // example: "/MagicBean:4.1.1/"
+    string donationAddress = 15;        // Zcash donation UA address
+}
+
+// TransparentAddressBlockFilter restricts the results to the given address
+// or block range.
+message TransparentAddressBlockFilter {
+    string address = 1;     // t-address
+    BlockRange range = 2;   // start, end heights
+}
+
+// Duration is currently used only for testing, so that the Ping rpc
+// can simulate a delay, to create many simultaneous connections. Units
+// are microseconds.
+message Duration {
+    int64 intervalUs = 1;
+}
+
+// PingResponse is used to indicate concurrency, how many Ping rpcs
+// are executing upon entry and upon exit (after the delay).
+// This rpc is used for testing only.
+message PingResponse {
+    int64 entry = 1;
+    int64 exit = 2;
+}
+
+message Address {
+    string address = 1;
+}
+message AddressList {
+    repeated string addresses = 1;
+}
+message Balance {
+    int64 valueZat = 1;
+}
+
+// The a shortened transaction ID is the prefix in big-endian (hex) format
+// (then converted to binary).
+message Exclude {
+    repeated bytes txid = 1;
+}
+
+// The TreeState is derived from the Zcash z_gettreestate rpc.
+message TreeState {
+    string network = 1;     // "main" or "test"
+    uint64 height = 2;      // block height
+    string hash = 3;        // block id
+    uint32 time = 4;        // Unix epoch time when the block was mined
+    string saplingTree = 5; // sapling commitment tree state
+    string orchardTree = 6; // orchard commitment tree state
+}
+
+enum ShieldedProtocol {
+    sapling = 0;
+    orchard = 1;
+}
+
+message GetSubtreeRootsArg {
+    uint32 startIndex = 1;                  // Index identifying where to start returning subtree roots
+    ShieldedProtocol shieldedProtocol = 2;  // Shielded protocol to return subtree roots for
+    uint32 maxEntries = 3;                  // Maximum number of entries to return, or 0 for all entries.
+}
+message SubtreeRoot {
+    bytes rootHash = 2;                     // The 32-byte Merkle root of the subtree.
+    bytes completingBlockHash = 3;          // The hash of the block that completed this subtree.
+    uint64 completingBlockHeight = 4;       // The height of the block that completed this subtree in the main chain.
+}
+
+// Results are sorted by height, which makes it easy to issue another
+// request that picks up from where the previous left off.
+message GetAddressUtxosArg {
+    repeated string addresses = 1;
+    uint64 startHeight = 2;
+    uint32 maxEntries = 3; // zero means unlimited
+}
+message GetAddressUtxosReply {
+    string address = 6;
+    bytes txid = 1;
+    int32 index = 2;
+    bytes script = 3;
+    int64 valueZat = 4;
+    uint64 height = 5;
+}
+message GetAddressUtxosReplyList {
+    repeated GetAddressUtxosReply addressUtxos = 1;
+}
+
+service CompactTxStreamer {
+    // Return the BlockID of the block at the tip of the best chain
+    rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
+    // Return the compact block corresponding to the given block identifier
+    rpc GetBlock(BlockID) returns (CompactBlock) {}
+    // Same as GetBlock except actions contain only nullifiers
+    rpc GetBlockNullifiers(BlockID) returns (CompactBlock) {}
+    // Return a list of consecutive compact blocks
+    rpc GetBlockRange(BlockRange) returns (stream CompactBlock) {}
+    // Same as GetBlockRange except actions contain only nullifiers
+    rpc GetBlockRangeNullifiers(BlockRange) returns (stream CompactBlock) {}
+
+    // Return the requested full (not compact) transaction (as from zcashd)
+    rpc GetTransaction(TxFilter) returns (RawTransaction) {}
+    // Submit the given transaction to the Zcash network
+    rpc SendTransaction(RawTransaction) returns (SendResponse) {}
+
+    // Return the transactions corresponding to the given t-address within the given block range
+    // NB - this method is misnamed, it returns transactions, not transaction IDs.
+    // NOTE: this method is deprecated, please use GetTaddressTransactions instead.
+    rpc GetTaddressTxids(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
+
+    // Return the transactions corresponding to the given t-address within the given block range
+    rpc GetTaddressTransactions(TransparentAddressBlockFilter) returns (stream RawTransaction) {}
+
+    rpc GetTaddressBalance(AddressList) returns (Balance) {}
+    rpc GetTaddressBalanceStream(stream Address) returns (Balance) {}
+
+    // Return the compact transactions currently in the mempool; the results
+    // can be a few seconds out of date. If the Exclude list is empty, return
+    // all transactions; otherwise return all *except* those in the Exclude list
+    // (if any); this allows the client to avoid receiving transactions that it
+    // already has (from an earlier call to this rpc). The transaction IDs in the
+    // Exclude list can be shortened to any number of bytes to make the request
+    // more bandwidth-efficient; if two or more transactions in the mempool
+    // match a shortened txid, they are all sent (none is excluded). Transactions
+    // in the exclude list that don't exist in the mempool are ignored.
+    //
+    // The a shortened transaction ID is the prefix in big-endian (hex) format
+    // (then converted to binary). See smoke-test.bash for examples.
+    rpc GetMempoolTx(Exclude) returns (stream CompactTx) {}
+
+    // Return a stream of current Mempool transactions. This will keep the output stream open while
+    // there are mempool transactions. It will close the returned stream when a new block is mined.
+    rpc GetMempoolStream(Empty) returns (stream RawTransaction) {}
+
+    // GetTreeState returns the note commitment tree state corresponding to the given block.
+    // See section 3.7 of the Zcash protocol specification. It returns several other useful
+    // values also (even though they can be obtained using GetBlock).
+    // The block can be specified by either height or hash.
+    rpc GetTreeState(BlockID) returns (TreeState) {}
+    rpc GetLatestTreeState(Empty) returns (TreeState) {}
+
+    // Returns a stream of information about roots of subtrees of the note commitment tree
+    // for the specified shielded protocol (Sapling or Orchard).
+    rpc GetSubtreeRoots(GetSubtreeRootsArg) returns (stream SubtreeRoot) {}
+
+    rpc GetAddressUtxos(GetAddressUtxosArg) returns (GetAddressUtxosReplyList) {}
+    rpc GetAddressUtxosStream(GetAddressUtxosArg) returns (stream GetAddressUtxosReply) {}
+
+    // Return information about this lightwalletd instance and the blockchain
+    rpc GetLightdInfo(Empty) returns (LightdInfo) {}
+    // Testing-only, requires lightwalletd --ping-very-insecure (do not enable in production)
+    rpc Ping(Duration) returns (PingResponse) {}
+}
