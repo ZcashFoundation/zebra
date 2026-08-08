@@ -1,0 +1,6 @@
+target/
+artifacts/
+coverage/
+*.profraw
+*.profdata
+corpus/
