@@ -11,7 +11,7 @@ use zebra_state::ReadState;
 
 use crate::{
     lightwalletd::compact_tx_streamer_server::CompactTxStreamerServer,
-    methods::RpcServer as RpcMethods, server::OPENED_RPC_ENDPOINT_MSG,
+    methods::RpcServer as RpcMethods, server::OPENED_LIGHTWALLETD_ENDPOINT_MSG,
 };
 
 /// Maximum concurrent HTTP/2 streams per connection.
@@ -86,7 +86,7 @@ where
     let tcp_listener = tokio::net::TcpListener::bind(listen_addr).await?;
 
     let listen_addr = tcp_listener.local_addr()?;
-    tracing::info!("{OPENED_RPC_ENDPOINT_MSG}{}", listen_addr);
+    tracing::info!("{OPENED_LIGHTWALLETD_ENDPOINT_MSG}{}", listen_addr);
 
     let server_task: JoinHandle<Result<(), BoxError>> = tokio::spawn(async move {
         Server::builder()
