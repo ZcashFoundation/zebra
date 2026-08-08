@@ -318,27 +318,18 @@ where
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
 
-        tokio::spawn(async move {
-            // The stream must only close when a block is added to the best chain
-            // after the stream starts, not when the current tip hasn't been seen.
-            latest_chain_tip.mark_best_tip_seen();
+        // The stream must only close when a block is added to the best chain after the
+        // stream starts. Mark the current tip here rather than in the spawned task: a
+        // block arriving before that task is first polled would otherwise be marked as
+        // seen, and the stream would stay open through a block change.
+        latest_chain_tip.mark_best_tip_seen();
 
+        tokio::spawn(async move {
             let mut sent_txids: HashSet<transaction::Hash> = HashSet::new();
 
             // Send the current mempool contents.
-            let transactions = match mempool_transactions(mempool.clone()).await {
-                Ok(transactions) => transactions,
-                Err(status) => {
-                    let _ = send_bounded(&response_sender, Err(status)).await;
-                    return;
-                }
-            };
-
-            for tx in transactions {
-                if !send_raw_mempool_tx(&response_sender, &tx).await {
-                    return;
-                }
-                sent_txids.insert(tx.id.mined_id());
+            if !send_unseen_mempool_txs(&mempool, &response_sender, &mut sent_txids).await {
+                return;
             }
 
             // Stream newly added transactions, and close the stream when a new block
@@ -349,10 +340,22 @@ where
                     change = mempool_change.recv() => {
                         let change = match change {
                             Ok(change) => change,
-                            // The receiver can keep receiving after missing some
-                            // changes; any missed transaction is skipped, like a
-                            // transaction added while a mempool query is in flight.
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            // Lagging means changes were dropped, so this stream would
+                            // silently omit the transactions they carried. Re-snapshot
+                            // the mempool and send whatever the client hasn't seen.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                if !send_unseen_mempool_txs(
+                                    &mempool,
+                                    &response_sender,
+                                    &mut sent_txids,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+
+                                continue;
+                            }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                         };
                         if !change.is_added() {
@@ -878,6 +881,39 @@ async fn address_utxos<Rpc: RpcMethods>(
             height: utxo.height().0.into(),
         })
         .collect())
+}
+
+/// Sends every mempool transaction that isn't already in `sent_txids`, adding the ones
+/// it sends, and returns false if the client went away or the mempool query failed.
+///
+/// Used for the initial snapshot, and again whenever the change subscription lags and
+/// the stream would otherwise silently omit the dropped transactions.
+async fn send_unseen_mempool_txs<Mempool: MempoolService>(
+    mempool: &Mempool,
+    response_sender: &tokio::sync::mpsc::Sender<Result<RawTransaction, Status>>,
+    sent_txids: &mut HashSet<transaction::Hash>,
+) -> bool {
+    let transactions = match mempool_transactions(mempool.clone()).await {
+        Ok(transactions) => transactions,
+        Err(status) => {
+            let _ = send_bounded(response_sender, Err(status)).await;
+            return false;
+        }
+    };
+
+    for tx in transactions {
+        if sent_txids.contains(&tx.id.mined_id()) {
+            continue;
+        }
+
+        if !send_raw_mempool_tx(response_sender, &tx).await {
+            return false;
+        }
+
+        sent_txids.insert(tx.id.mined_id());
+    }
+
+    true
 }
 
 /// Fetches all transactions currently in the mempool.

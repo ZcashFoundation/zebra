@@ -1,7 +1,8 @@
 //! Fixed test vectors for the lightwalletd gRPC server.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, BoxError};
 
@@ -16,7 +17,7 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
-use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
+use zebra_node_services::mempool::{self, MempoolChange, MempoolTxSubscriber};
 use zebra_state::{ReadRequest, ReadResponse};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
@@ -24,12 +25,15 @@ use zebra_test::{
 };
 
 use crate::{
-    lightwalletd::{self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId},
+    lightwalletd::{self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, Empty},
     methods::RpcImpl,
 };
 
 /// The mocked read state service the server is built on.
 type MockReadState = MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>;
+
+/// The mocked mempool service the server is built on.
+type MockMempool = MockService<mempool::Request, mempool::Response, PanicAssertion, BoxError>;
 
 /// A missing note commitment tree must not be served as an empty tree.
 ///
@@ -41,7 +45,7 @@ type MockReadState = MockService<ReadRequest, ReadResponse, PanicAssertion, BoxE
 async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let (_server_task, mut client, mut read_state, _chain_tip_sender, _mempool_change_sender) =
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
         start_server_and_get_client().await?;
 
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
@@ -93,11 +97,66 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
     Ok(())
 }
 
+/// A lagged mempool change subscription must not silently drop transactions.
+///
+/// The change channel is bounded, so a stream that falls behind loses changes and the
+/// transactions they carried. Skipping them would leave the client short with no way to
+/// notice, so the mempool is re-read instead.
+#[tokio::test]
+async fn mempool_stream_re_reads_the_mempool_after_lagging() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, _read_state, mut mempool, _chain_tip_sender, mempool_change) =
+        start_server_and_get_client().await?;
+
+    // Hold the stream open for the whole test, so the server keeps serving it.
+    let _stream_task = tokio::spawn(async move {
+        let response = client
+            .get_mempool_stream(tonic::Request::new(Empty {}))
+            .await
+            .expect("the mempool stream should open");
+
+        let mut stream = response.into_inner();
+        while stream.next().await.is_some() {}
+    });
+
+    // Hold the initial snapshot open, so the change subscription falls behind while the
+    // server is busy with it.
+    let initial_read = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
+        .await;
+
+    // The change channel holds one message, so this leaves the subscription lagging.
+    for _ in 0..3 {
+        let _ = mempool_change.send(MempoolChange::added(HashSet::new()));
+    }
+
+    initial_read.respond(empty_mempool_response());
+
+    // Lagging must trigger a second read of the mempool rather than being skipped.
+    mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
+        .await
+        .respond(empty_mempool_response());
+
+    Ok(())
+}
+
+/// Returns a mempool response with no transactions in it.
+fn empty_mempool_response() -> mempool::Response {
+    mempool::Response::FullTransactions {
+        transactions: Vec::new(),
+        transaction_dependencies: Default::default(),
+        last_seen_tip_hash: zebra_chain::block::Hash([0; 32]),
+    }
+}
+
 /// Starts the lightwalletd gRPC server against mocked services, and connects a client to it.
 async fn start_server_and_get_client() -> Result<(
     JoinHandle<Result<(), BoxError>>,
     CompactTxStreamerClient<tonic::transport::Channel>,
     MockReadState,
+    MockMempool,
     MockChainTipSender,
     broadcast::Sender<MempoolChange>,
 )> {
@@ -108,7 +167,9 @@ async fn start_server_and_get_client() -> Result<(
     let read_state: MockReadState = MockService::build()
         .with_max_request_delay(Duration::from_secs(2))
         .for_unit_tests();
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mempool: MockMempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (chain_tip, chain_tip_sender) = MockChainTip::new();
@@ -136,7 +197,7 @@ async fn start_server_and_get_client() -> Result<(
         listen_addr,
         rpc,
         read_state.clone(),
-        Buffer::new(mempool, 1),
+        Buffer::new(mempool.clone(), 1),
         chain_tip,
         MempoolTxSubscriber::new(mempool_change_sender.clone()),
         Mainnet,
@@ -166,6 +227,7 @@ async fn start_server_and_get_client() -> Result<(
         server_task,
         client,
         read_state,
+        mempool,
         chain_tip_sender,
         mempool_change_sender,
     ))
