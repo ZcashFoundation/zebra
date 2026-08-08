@@ -21,6 +21,8 @@ pub use codec::Codec;
 pub use inv::{InventoryHash, MAX_TX_INV_IN_SENT_MESSAGE};
 pub use message::{Message, VersionMessage};
 
+pub(crate) use codec::zcash_deserialize_user_agent;
+pub(crate) use inv::MAX_INV_IN_RECEIVED_MESSAGE;
 pub use types::{Nonce, Version};
 
 pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
