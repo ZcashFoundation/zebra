@@ -405,14 +405,16 @@ where
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<TreeState>, Status> {
-        let height = self
+        // Read the treestate by the tip's hash rather than its height, so a reorg
+        // between the two reads can't return the treestate of a different block.
+        let (_height, hash) = self
             .latest_chain_tip
-            .best_tip_height()
+            .best_tip_height_and_hash()
             .ok_or_else(|| Status::unavailable("no chain tip available yet"))?;
 
         let treestate = self
             .rpc
-            .z_get_treestate(height.0.to_string())
+            .z_get_treestate(hash.to_string())
             .await
             .map_err(rpc_error_to_status)?;
 
@@ -581,6 +583,13 @@ fn block_id_to_hash_or_height(block_id: BlockId) -> Result<HashOrHeight, Status>
         })?;
 
         Ok(HashOrHeight::Hash(block::Hash(hash)))
+    } else if block_id.height == 0 {
+        // Neither field is set. Reading that as a request for genesis, as lightwalletd
+        // does not, would answer an uninitialised request with a block that has no
+        // shielded data — so the client's scan "succeeds" and finds nothing.
+        Err(Status::invalid_argument(
+            "block id must specify a hash or a height",
+        ))
     } else {
         let height = u32::try_from(block_id.height)
             .ok()

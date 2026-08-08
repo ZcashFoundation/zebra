@@ -39,6 +39,15 @@ pub(crate) fn has_compact_data(tx: &Transaction) -> bool {
         || tx.orchard_actions().next().is_some()
 }
 
+/// Returns true if the transaction contains any nullifiers, so it belongs in a
+/// nullifiers-only [`CompactBlock`].
+///
+/// Outputs are omitted in that mode, so a transaction with only Sapling outputs would
+/// otherwise be included as a [`CompactTx`] carrying nothing but an index and a hash.
+pub(crate) fn has_nullifiers(tx: &Transaction) -> bool {
+    tx.sapling_nullifiers().next().is_some() || tx.orchard_actions().next().is_some()
+}
+
 impl CompactBlock {
     /// Builds a [`CompactBlock`] from a full block and the note commitment tree sizes
     /// at the end of that block.
@@ -58,7 +67,13 @@ impl CompactBlock {
             .transactions
             .iter()
             .enumerate()
-            .filter(|(_, tx)| has_compact_data(tx))
+            .filter(|(_, tx)| {
+                if nullifiers_only {
+                    has_nullifiers(tx)
+                } else {
+                    has_compact_data(tx)
+                }
+            })
             .map(|(index, tx)| {
                 CompactTx::from_transaction(index as u64, tx.hash(), tx, nullifiers_only)
             })
