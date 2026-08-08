@@ -241,7 +241,7 @@ async fn ban_removes_every_entry_for_the_banned_ip() {
         .await
         .expect("the actor is running");
     match response {
-        PeerBookResponse::Candidate(Some(peer)) => assert_eq!(
+        PeerBookResponse::Candidate(Some((peer, _transports))) => assert_eq!(
             peer.addr, unrelated_addr,
             "a banned IP must never be a reconnection candidate",
         ),

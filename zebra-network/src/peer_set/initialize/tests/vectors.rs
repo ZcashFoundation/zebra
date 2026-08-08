@@ -874,6 +874,8 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         crawl_service,
         peer_book_handle.clone(),
         success_stay_open_outbound_connector,
+        // The version 2 transport is disabled in this test.
+        None,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
@@ -2414,6 +2416,8 @@ where
         crawl_service,
         peer_book_handle.clone(),
         outbound_connector,
+        // The version 2 transport is disabled in this test.
+        None,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,

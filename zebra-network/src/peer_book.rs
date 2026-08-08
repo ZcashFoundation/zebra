@@ -20,6 +20,7 @@ mod handle;
 pub(crate) mod intake;
 pub(crate) mod misbehavior;
 mod reader;
+pub(crate) mod transports;
 
 #[cfg(test)]
 mod tests;

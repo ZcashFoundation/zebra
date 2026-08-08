@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
+## [Unreleased]
 
 ### Added
 
@@ -13,13 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   ([zcash/zips#1344](https://github.com/zcash/zips/pull/1344)): a QUIC transport with
   per-network ALPN identifiers, a stream-typed request/announcement layer, a single
   `init`-record handshake, addrv2-only address relay, compact block relay, mempool
-  subscriptions, and serving-side synchronization primitives. Disabled by default:
-  enable the listener with `network.v2_listen`, and dial v2 peers with
-  `network.initial_v2_peers`. Version 2 peers join the peer set alongside legacy peers.
+  subscriptions, and serving-side synchronization primitives backed by a new state
+  index. Disabled by default: enable the listener with `network.v2_listen`, and dial
+  v2 peers with `network.initial_v2_peers`. Version 2 peers join the peer set alongside
+  legacy peers, and the crawler dials whichever transport a peer accepts.
 - The state database format is bumped to 28.1.0 for a per-block synchronization
   metadata index, which serves the version 2 `get-hashes` and `get-tree-roots`
   requests. Existing databases backfill the index on the next start, which reads
   the chain once; the node stays usable while it runs.
+
+### Changed
+
+- The peer address book is now owned by a single peer book actor instead of being
+  shared behind a mutex ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+  Gossiped addresses are bucketed by a secret-keyed address group and rate-limited per
+  connection, and misbehaviour bans are keyed by IPv4 address or IPv6 /64 prefix and
+  expire after 24 hours.
+
+## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
+
+### Added
+
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
@@ -36,11 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Chain synchronization now downloads a peer's only unknown block hash from a short
   `FindBlocks` response, allowing nodes near the chain tip to continue advancing
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
-- The peer address book is now owned by a single peer book actor instead of being
-  shared behind a mutex ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
-  Gossiped addresses are bucketed by a secret-keyed address group and rate-limited per
-  connection, and misbehaviour bans are keyed by IPv4 address or IPv6 /64 prefix and
-  expire after 24 hours.
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks
   ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).

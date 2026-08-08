@@ -25,6 +25,7 @@ use crate::{
     peer_book::{
         handle::{Call, Message},
         misbehavior::{BanKey, MisbehaviorStore},
+        transports::TransportTable,
         PeerBookRequest, PeerBookResponse,
     },
     AddressBook, AddressBookPeers, BoxError,
@@ -68,6 +69,7 @@ pub(crate) fn spawn_actor(
 
         let mut misbehavior = MisbehaviorStore::default();
         let mut gossip_buckets = super::buckets::GossipBuckets::new();
+        let mut transports = super::transports::TransportTable::default();
         let mut get_addr_cache: Option<(Instant, Vec<MetaAddr>)> = None;
         let mut last_live_refresh = Instant::now();
         let mut live_changed = false;
@@ -94,6 +96,7 @@ pub(crate) fn spawn_actor(
 
                             address_book.remove_if_key_matches(|ip| BanKey::from(ip) == ban_key);
                             gossip_buckets.remove_if(|addr| BanKey::from(addr.ip()) == ban_key);
+                            transports.remove_if(|addr| BanKey::from(addr.ip()) == ban_key);
                             let _ = bans_sender.send(misbehavior.bans_snapshot());
 
                             continue;
@@ -129,10 +132,23 @@ pub(crate) fn spawn_actor(
                     live_changed = true;
                 }
 
+                Message::Transport {
+                    addr,
+                    transport,
+                    reachable,
+                } => {
+                    if reachable {
+                        transports.record_reachable(addr, transport);
+                    } else {
+                        transports.record_unreachable(addr, transport, Instant::now());
+                    }
+                }
+
                 Message::Call(Call { request, reply }) => {
                     let response = answer_call(
                         &mut address_book,
                         &mut misbehavior,
+                        &mut transports,
                         &mut get_addr_cache,
                         request,
                     );
@@ -218,6 +234,7 @@ const GET_ADDR_CACHE_JITTER: Duration = Duration::from_secs(6 * 60 * 60);
 fn answer_call(
     address_book: &mut AddressBook,
     misbehavior: &mut MisbehaviorStore,
+    transports: &mut TransportTable,
     get_addr_cache: &mut Option<(Instant, Vec<MetaAddr>)>,
     request: PeerBookRequest,
 ) -> PeerBookResponse {
@@ -249,12 +266,21 @@ fn answer_call(
         PeerBookRequest::SelectCandidate => {
             // The pick and the attempt mark happen in the same actor turn,
             // so concurrent selections cannot return the same peer.
+            let instant_now = Instant::now();
             let next_peer = address_book
-                .reconnection_peers(Instant::now(), Utc::now())
+                .reconnection_peers(instant_now, Utc::now())
                 .next();
 
-            let candidate =
-                next_peer.and_then(|peer| address_book.update(MetaAddr::new_reconnect(peer.addr)));
+            let candidate = next_peer
+                .and_then(|peer| address_book.update(MetaAddr::new_reconnect(peer.addr)))
+                .map(|marked| {
+                    // The dialer needs to know which transports this peer
+                    // accepts, so it can reach version 2 peers it learned
+                    // about over the legacy network.
+                    let transports = transports.dialable(&marked.addr, instant_now);
+
+                    (marked, transports)
+                });
 
             PeerBookResponse::Candidate(candidate)
         }

@@ -330,6 +330,20 @@ impl fmt::Display for Request {
 }
 
 impl Request {
+    /// Returns true if only version 2 peers can answer this request.
+    ///
+    /// Bulk block streaming is a version 2 request stream, with no legacy
+    /// equivalent: the legacy locator walk is used instead. The
+    /// synchronization primitives are answered by the local inbound
+    /// service, so the peer set treats them as unroutable rather than
+    /// sending them to a legacy peer that would refuse them.
+    pub fn requires_v2_peer(&self) -> bool {
+        matches!(
+            self,
+            Request::BlockRange { .. } | Request::SyncHashes { .. } | Request::TreeRoots { .. }
+        )
+    }
+
     /// Returns the Zebra internal request type as a string.
     pub fn command(&self) -> &'static str {
         match self {

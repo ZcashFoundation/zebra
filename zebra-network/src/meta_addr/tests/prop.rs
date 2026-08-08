@@ -357,7 +357,9 @@ proptest! {
             let mut attempt_count: usize = 0;
 
             for (i, change) in changes.into_iter().enumerate() {
-                while let Some(candidate_addr) = next_reconnect_peer(&mut next_peer_service).await {
+                while let Some((candidate_addr, _transports)) =
+                    next_reconnect_peer(&mut next_peer_service).await
+                {
                     prop_assert_eq!(candidate_addr.addr, addr.addr);
 
                     attempt_count += 1;

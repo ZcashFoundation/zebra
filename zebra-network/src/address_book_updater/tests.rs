@@ -129,7 +129,7 @@ async fn peer_book_actor_serves_all_request_variants() {
         .await
         .expect("actor should be running");
     match response {
-        PeerBookResponse::Candidate(Some(peer)) => {
+        PeerBookResponse::Candidate(Some((peer, _transports))) => {
             let gossiped: Vec<_> = (0..3).map(|number| gossiped_addr(number).into()).collect();
             assert!(
                 gossiped.contains(&peer.addr),
@@ -190,7 +190,7 @@ async fn concurrent_select_candidate_requests_return_distinct_peers() {
         .into_iter()
         .map(|response| {
             match response.expect("the peer book actor should serve concurrent requests") {
-                PeerBookResponse::Candidate(Some(peer)) => peer.addr,
+                PeerBookResponse::Candidate(Some((peer, _transports))) => peer.addr,
                 PeerBookResponse::Candidate(None) => {
                     panic!("every request should return a candidate peer")
                 }

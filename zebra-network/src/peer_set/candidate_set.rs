@@ -109,7 +109,7 @@ use tower::{Service, ServiceExt};
 
 use crate::{
     constants,
-    peer_book::{PeerBookHandle, PeerBookRequest, PeerBookResponse},
+    peer_book::{transports::AddrTransports, PeerBookHandle, PeerBookRequest, PeerBookResponse},
     types::MetaAddr,
     BoxError, Request, Response,
 };
@@ -187,14 +187,14 @@ where
 /// apart. If a peer was recently provided, then this future will sleep
 /// until the rate-limit has passed.
 ///
-/// The returned candidate records which transports the peer is known to
+/// The candidate is returned with the transports it is known to
 /// accept, so the dialer can reach version 2 peers over QUIC and
 /// everything else over TCP.
 ///
 /// [`Responded`]: crate::PeerAddrState::Responded
 pub(crate) async fn next_reconnect_peer(
     next_peer_service: &mut NextPeerService,
-) -> Option<MetaAddr> {
+) -> Option<(MetaAddr, AddrTransports)> {
     // Security: new outbound peer connections are rate-limited by the
     // [`RateLimitOnYield`] middleware, which only sleeps before yielding
     // an address: when there is no peer, `None` is returned immediately.

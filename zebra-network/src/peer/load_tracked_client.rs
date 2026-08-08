@@ -14,7 +14,7 @@ use tower::{
 
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
-    peer::{Client, ConnectedAddr, ConnectionInfo},
+    peer::{Client, ConnectedAddr, ConnectionInfo, RemoteHandshake},
     protocol::external::{canonical_socket_addr, types::Version},
 };
 
@@ -53,6 +53,14 @@ impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version()
+    }
+
+    /// Returns true if this peer speaks the version 2 protocol.
+    ///
+    /// The handshake record is the transport: legacy peers send a `version`
+    /// message, version 2 peers send an `init` record.
+    pub fn is_v2(&self) -> bool {
+        matches!(self.connection_info.remote, RemoteHandshake::Init(_))
     }
 
     /// Returns true if this peer connected directly to us from `ip`.

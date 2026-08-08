@@ -913,9 +913,19 @@ where
         }
     }
 
-    /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
-    fn select_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
+    /// Performs P2C over the ready peers that can answer the request.
+    ///
+    /// Returns `None` when no ready peer can, so the caller reports no ready
+    /// peers instead of spending the request on one that will refuse it.
+    fn select_ready_p2c_peer(&self, requires_v2: bool) -> Option<D::Key> {
+        let capable: HashSet<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_key, svc)| !requires_v2 || svc.is_v2())
+            .map(|(key, _svc)| *key)
+            .collect();
+
+        self.select_p2c_peer_from_list(&capable)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
@@ -1043,7 +1053,7 @@ where
 
     /// Routes a request using P2C load-balancing.
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        if let Some(p2c_key) = self.select_p2c_peer() {
+        if let Some(p2c_key) = self.select_ready_p2c_peer(req.requires_v2_peer()) {
             tracing::trace!(?p2c_key, "routing based on p2c");
 
             let mut svc = self
