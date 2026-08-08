@@ -622,8 +622,19 @@ async fn compact_block<ReadStateService: ReadState>(
 
     let (sapling_response, orchard_response) = futures::join!(sapling_request, orchard_request);
 
+    // # Correctness
+    //
+    // A missing tree is not an empty tree. The block was read successfully, so its
+    // trees exist unless the block left the best chain between the two reads. Serving
+    // a size of zero would tell the client that no notes exist as of this block, and
+    // corrupt every note position it derives from that.
     let sapling_tree_size = match sapling_response {
-        Ok(ReadResponse::SaplingTree(tree)) => tree.map(|tree| tree.count()).unwrap_or_default(),
+        Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
+        Ok(ReadResponse::SaplingTree(None)) => {
+            return Err(Status::aborted(
+                "sapling tree not found for this block, it may have been reorged",
+            ));
+        }
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
             return Err(Status::unavailable(format!(
@@ -633,7 +644,12 @@ async fn compact_block<ReadStateService: ReadState>(
     };
 
     let orchard_tree_size = match orchard_response {
-        Ok(ReadResponse::OrchardTree(tree)) => tree.map(|tree| tree.count()).unwrap_or_default(),
+        Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
+        Ok(ReadResponse::OrchardTree(None)) => {
+            return Err(Status::aborted(
+                "orchard tree not found for this block, it may have been reorged",
+            ));
+        }
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
             return Err(Status::unavailable(format!(

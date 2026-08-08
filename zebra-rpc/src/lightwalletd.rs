@@ -8,6 +8,9 @@
 
 use zebra_chain::{block, transaction, transaction::Transaction};
 
+#[cfg(test)]
+mod tests;
+
 pub mod methods;
 pub mod server;
 
