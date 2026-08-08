@@ -70,8 +70,8 @@ cs_ff_max_u64="\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
 # === nExpiryHeight (V3+), 4 bytes LE ===
 # NU5 activation height on mainnet: 1,687,104 (0x0019BE40)
 expiry_nu5_activation="\x40\xBE\x19\x00"
-# NU6.3 (Ironwood) activation height on mainnet: 3,428,143 (0x0034512F)
-expiry_nu6_3_activation="\x2F\x51\x34\x00"
+# NU6.3 (Ironwood) activation height on mainnet: 3,428,143 (0x00344F2F)
+expiry_nu6_3_activation="\x2F\x4F\x34\x00"
 expiry_pre_expiry_zero="\x00\x00\x00\x00"
 expiry_u32_max="\xFF\xFF\xFF\xFF"
 
