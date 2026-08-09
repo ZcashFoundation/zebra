@@ -8,8 +8,12 @@ use tonic::{Request, Response, Status, Streaming};
 use tower::util::ServiceExt;
 
 use zebra_chain::{
-    block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
-    subtree::NoteCommitmentSubtreeIndex, transaction,
+    block,
+    chain_tip::ChainTip,
+    parameters::Network,
+    serialization::{BytesInDisplayOrder, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transaction,
 };
 use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
@@ -499,7 +503,9 @@ where
 
                 let subtree_root = SubtreeRoot {
                     root_hash,
-                    completing_block_hash: completing_block_hash.0.to_vec(),
+                    // Display order, unlike the other hashes here: lightwalletd reverses
+                    // this one in `GetSubtreeRoots`.
+                    completing_block_hash: completing_block_hash.bytes_in_display_order().to_vec(),
                     completing_block_height: subtree.end_height.0.into(),
                 };
 
