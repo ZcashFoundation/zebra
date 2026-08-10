@@ -29,7 +29,7 @@ Per release, for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`:
 - `zebrad-<version>-<target>.tar.gz` (the binary plus `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`) and a `.tar.gz.sha256` sidecar.
 - One `SHA256SUMS` manifest covering both archives.
 - `SHA256SUMS.sigstore.json`: a Cosign keyless (Sigstore) signature over the manifest, with the Fulcio certificate identity pinned to the release workflow.
-- SLSA v1 build provenance per archive via `actions/attest-build-provenance`, stored in GitHub's attestation API and verified with `gh attestation verify --signer-workflow`.
+- SLSA v1 build provenance per archive via `actions/attest-build-provenance`, stored in GitHub's attestation API and verified against the expected signer workflow and release source ref.
 
 Six assets. Integrity and provenance for the whole release rest on one signed manifest plus one attestation per archive, not on per-file signatures. `cargo binstall zebrad` consumes these archives, giving a package-manager-style one-liner with no hosted repository to operate.
 
@@ -86,6 +86,7 @@ That augmentation has to be re-validated on every bump of those crates, and the 
 gh attestation verify <archive> \
   --repo ZcashFoundation/zebra \
   --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml \
+  --source-ref 'refs/tags/v<version>' \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 

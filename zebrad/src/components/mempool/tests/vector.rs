@@ -37,7 +37,8 @@ type MockPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;
 type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
-type MockTxVerifier = MockService<tx::Request, tx::Response, PanicAssertion, TransactionError>;
+type MockTxVerifier =
+    MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion, TransactionError>;
 
 /// A stale NU6.2 branch ID has no peer score at NU6.3 activation.
 #[test]
@@ -1252,14 +1253,10 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     tx_verifier
         .expect_request_that(|_| true)
         .map(|responder| {
-            let transaction = responder
-                .request()
-                .clone()
-                .mempool_transaction()
-                .expect("unexpected non-mempool request");
+            let transaction = responder.request().clone().transaction;
 
             // Set a dummy fee and sigops.
-            responder.respond(transaction::Response::from(
+            responder.respond(transaction::MempoolResponse::from(
                 VerifiedUnminedTx::new(
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
@@ -1318,14 +1315,10 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     tx_verifier
         .expect_request_that(|_| true)
         .map(|responder| {
-            let transaction = responder
-                .request()
-                .clone()
-                .mempool_transaction()
-                .expect("unexpected non-mempool request");
+            let transaction = responder.request().clone().transaction;
 
             // Set a dummy fee and sigops.
-            responder.respond(transaction::Response::from(
+            responder.respond(transaction::MempoolResponse::from(
                 VerifiedUnminedTx::new(
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
@@ -1413,7 +1406,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     let request = Request::Queue(vec![Gossip::Tx(unmined_tx)]);
     let queue_response_fut = mempool.ready().await.unwrap().call(request);
     let mock_verify_tx_fut = tx_verifier.expect_request_that(|_| true).map(|responder| {
-        responder.respond(transaction::Response::Mempool {
+        responder.respond(transaction::MempoolResponse {
             transaction: verified_unmined_tx,
             spent_mempool_outpoints: Vec::new(),
         });
