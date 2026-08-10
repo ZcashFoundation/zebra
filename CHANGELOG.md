@@ -44,8 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Fixed
 
 - `zebrad start` no longer crashes on startup when the non-finalized state backup directory path
-  exists as a regular file. Zebra now logs an actionable error and starts without the non-finalized
-  backup instead of aborting ([#10544](https://github.com/ZcashFoundation/zebra/issues/10544)).
+  exists as a regular file or as a directory Zebra cannot read. Zebra now logs an actionable error
+  and starts without the non-finalized backup instead of aborting
+  ([#10544](https://github.com/ZcashFoundation/zebra/issues/10544)).
 
 - `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
   specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
