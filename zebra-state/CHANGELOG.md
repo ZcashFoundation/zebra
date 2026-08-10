@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [13.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Requires `zebra-chain` 12.0.0 and `zebra-node-services` 10.0.0, whose types and service traits
+  appear in this crate's public API.
+
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
   `ephemeral = true`, even when the configured `cache_dir` is missing or unreadable. Previously the
   cache directory was checked first, so this configuration error surfaced as
-  `StateInitError::ReadOnlyCacheDirUnreadable`.
+  `StateInitError::ReadOnlyCacheDirUnreadable`
+  ([#11146](https://github.com/ZcashFoundation/zebra/pull/11146)).
 
 ## [12.0.1] - 2026-07-27
 
