@@ -1179,3 +1179,34 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for #10544: `with_backup` must not panic (which aborts under
+/// `panic = "abort"`) when the backup path already exists as a regular file; it
+/// should log an error and start without the non-finalized backup.
+#[tokio::test]
+async fn with_backup_starts_without_backup_when_path_is_a_file() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+
+    // Put a regular file where the backup directory is expected.
+    let temp = tempfile::tempdir().expect("can create temp dir");
+    let backup_path = temp.path().join("mainnet");
+    std::fs::write(&backup_path, b"not a directory").expect("can write file");
+
+    // Before the fix this panicked in `create_dir_all(...).expect(...)`, aborting
+    // the process under `panic = "abort"`. It must now return gracefully.
+    let (_state, _sender, _receiver) = NonFinalizedState::new(&network)
+        .with_backup(Some(backup_path.clone()), &finalized_state.db, false, true)
+        .await;
+
+    // The conflicting file is left untouched (not deleted).
+    assert!(backup_path.is_file());
+}
