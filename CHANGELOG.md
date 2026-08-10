@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
   ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+- The mempool per-peer inbound-download cap is now keyed on the peer's IP address instead of its
+  full socket address, so a single host can no longer exceed the cap by opening connections from
+  multiple source ports. This matches the inbound-block download cap
+  ([#10685](https://github.com/ZcashFoundation/zebra/issues/10685)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 
