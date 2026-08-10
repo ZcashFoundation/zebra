@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
   ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+- Invalid blocks received through inbound gossip now correctly increase the sending peer's
+  misbehavior score, so a peer serving a clearly-invalid block (for example, one with an invalid
+  difficulty) is penalised and eventually banned. Previously only the sync download path scored
+  these failures; the gossip path downcast the verification error to the wrong type and silently
+  skipped scoring ([#10616](https://github.com/ZcashFoundation/zebra/issues/10616)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

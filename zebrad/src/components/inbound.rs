@@ -79,6 +79,25 @@ type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
+
+/// Returns the peer misbehavior score for a completed inbound block download error.
+///
+/// The inbound block verifier is the consensus router, which returns
+/// [`RouterError`], so that downcast is tried first. The [`VerifyBlockError`]
+/// branch is a defensive fallback in case a verifier ever surfaces that error
+/// directly; it is not reached on the current router path. Downcasting only to
+/// `VerifyBlockError` (as before) missed router failures and silently skipped
+/// scoring gossiped invalid blocks, unlike the sync download path. Unrecognised
+/// errors score 0. See #10616.
+fn block_download_misbehavior_score(err: BoxError) -> u32 {
+    match err.downcast::<RouterError>() {
+        Ok(router_err) => router_err.misbehavior_score(),
+        Err(err) => match err.downcast::<VerifyBlockError>() {
+            Ok(block_err) => block_err.misbehavior_score(),
+            Err(_) => 0,
+        },
+    }
+}
 type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
@@ -335,13 +354,9 @@ impl Service<zn::Request> for Inbound {
                         continue;
                     };
 
-                    let Ok(err) = err.downcast::<VerifyBlockError>() else {
-                        continue;
-                    };
-
-                    if err.misbehavior_score() != 0 {
-                        let _ =
-                            misbehavior_sender.try_send((advertiser_addr, err.misbehavior_score()));
+                    let score = block_download_misbehavior_score(err);
+                    if score != 0 {
+                        let _ = misbehavior_sender.try_send((advertiser_addr, score));
                     }
                 }
 
