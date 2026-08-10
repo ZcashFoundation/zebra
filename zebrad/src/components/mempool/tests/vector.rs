@@ -2284,3 +2284,85 @@ async fn cancel_handles_drained_after_verification_timeout() {
         "regression GHSA-65jj-fmw8-468q: cancel_handles must be drained after timeout"
     );
 }
+
+/// Regression test for #10684: the mempool verification-timeout path must
+/// release the per-peer queue slot, not just remove the cancel handle.
+///
+/// Before the fix, a peer whose `MAX_INBOUND_CONCURRENCY_PER_PEER` transactions
+/// all hit the verification timeout kept its per-peer count pinned at the cap
+/// even though no tasks remained, so any further transaction from that source
+/// was rejected with `FullQueue`.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verification_timeout_releases_peer_slot() {
+    use std::net::SocketAddr;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::{
+        crawler::RATE_LIMIT_DELAY,
+        downloads::{
+            Downloads, MAX_INBOUND_CONCURRENCY_PER_PEER, TRANSACTION_DOWNLOAD_TIMEOUT,
+            TRANSACTION_VERIFY_TIMEOUT,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+
+    let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
+
+    let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
+
+    // Fill the per-peer slot with `MAX_INBOUND_CONCURRENCY_PER_PEER` peer-sourced
+    // transactions from a single source.
+    for i in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        let tx = iter.next().expect("enough vector txs").transaction;
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
+            .unwrap_or_else(|e| panic!("queue tx {i} failed: {e:?}"));
+    }
+
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY_PER_PEER);
+
+    // Advance past `RATE_LIMIT_DELAY` so every spawned task hits the verification
+    // timeout (the mocked services never make progress).
+    time::advance(RATE_LIMIT_DELAY + Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+
+    for _ in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        match downloads.as_mut().next().await {
+            Some(Err(_)) => {}
+            Some(Ok(_)) => panic!("expected a verification timeout error"),
+            None => panic!("Downloads stream ended before all tasks resolved"),
+        }
+    }
+
+    assert_eq!(downloads.in_flight(), 0, "pending should be drained");
+    assert_eq!(
+        downloads.transaction_requests().count(),
+        0,
+        "cancel_handles must be drained after timeout (GHSA-65jj)"
+    );
+
+    // The per-peer slots must have been released: a further transaction from the
+    // same source must queue successfully. Before the fix this returned
+    // `FullQueue` because the timeout path never released the slots.
+    let tx = iter.next().expect("enough vector txs").transaction;
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
+        .expect("a further transaction from the same source should queue after slots are freed");
+}

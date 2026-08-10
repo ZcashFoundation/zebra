@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- The mempool now releases a peer's per-peer download slot when a transaction verification times
+  out, instead of only on success or verifier error. Previously a peer whose transactions timed out
+  could pin its per-peer slots at the cap and be unable to queue any further transactions from that
+  address ([#10684](https://github.com/ZcashFoundation/zebra/issues/10684)).
+
 - `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
   specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
   affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
