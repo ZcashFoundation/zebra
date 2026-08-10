@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-08-10
+
 ### Breaking Changes
 
 - Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
