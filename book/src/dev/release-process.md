@@ -50,8 +50,6 @@ You can update to any version of Zebra, provided that the following criteria are
 - The version you want to update _to_ is supported.
 - The version you want to update _from_ is within one major version of the version you want to upgrade to.
 
-See [Keeping Up-to-Date](guide/updating "Updating your projects") for more information about updating your Zebra projects to the most recent version.
-
 <a id="previews"></a>
 
 ### Preview releases
