@@ -2366,3 +2366,61 @@ async fn verification_timeout_releases_peer_slot() {
         .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
         .expect("a further transaction from the same source should queue after slots are freed");
 }
+
+/// Regression test for #10685: the mempool per-peer download cap must be keyed
+/// on the peer's `IpAddr`, not the full `SocketAddr`.
+///
+/// The `source` is a transient `(IP, ephemeral port)`, so keying on the whole
+/// `SocketAddr` gave every connection from one host its own budget. Two sources
+/// with the same IP and different ports must share a single
+/// `MAX_INBOUND_CONCURRENCY_PER_PEER` bucket.
+#[tokio::test(flavor = "current_thread")]
+async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
+    use std::net::SocketAddr;
+
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::downloads::{
+        Downloads, MAX_INBOUND_CONCURRENCY_PER_PEER, TRANSACTION_DOWNLOAD_TIMEOUT,
+        TRANSACTION_VERIFY_TIMEOUT,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+
+    let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
+
+    // Fill the per-host budget from one `(IP, port)`.
+    let first: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
+    for i in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        let tx = iter.next().expect("enough vector txs").transaction;
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(Gossip::Tx(tx), Some(first), None)
+            .unwrap_or_else(|e| panic!("queue tx {i} failed: {e:?}"));
+    }
+
+    // A further transaction from the SAME IP but a DIFFERENT port must be
+    // rejected, because the cap is keyed on the host IP. Before the fix it
+    // landed in a separate `SocketAddr` bucket and was accepted.
+    let tx = iter.next().expect("enough vector txs").transaction;
+    let same_ip_other_port: SocketAddr = "127.0.0.1:9999".parse().expect("valid socket addr");
+    let result = downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(tx), Some(same_ip_other_port), None);
+    assert!(
+        matches!(result, Err(MempoolError::FullQueue)),
+        "a transaction from the same IP on a different port must share the per-peer bucket, got {result:?}"
+    );
+}

@@ -27,7 +27,7 @@
 //! [`Mempool::poll_ready`]: super::Mempool::poll_ready
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -206,12 +206,19 @@ where
         ),
     >,
 
-    /// The number of currently in-flight download tasks per advertising peer.
+    /// The number of currently in-flight download tasks per advertising host,
+    /// keyed on the peer's [`IpAddr`].
     ///
-    /// Invariant: a peer is present here iff some entry in [`Self::cancel_handles`]
-    /// has it as the third tuple element. Enforces
+    /// Keyed on the host IP rather than the full `SocketAddr` so that all
+    /// connections from one host share a single budget: the `source` is a
+    /// transient `(IP, ephemeral port)`, so per-`SocketAddr` keying would give
+    /// each connection its own bucket. This matches the inbound-block download
+    /// cap (`in_flight_ips`). See #10685.
+    ///
+    /// Invariant: an IP is present here with count `n` iff exactly `n` entries in
+    /// [`Self::cancel_handles`] have a source with that IP. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
-    pending_per_peer: HashMap<SocketAddr, usize>,
+    pending_per_peer: HashMap<IpAddr, usize>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -371,10 +378,10 @@ where
             return Err(MempoolError::FullQueue);
         }
 
-        // Per-peer cap: a single advertising peer cannot saturate the queue
-        // with attacker-supplied fake txids. See `GHSA-4fc2-h7jh-287c`.
+        // Per-peer cap: a single advertising host (keyed by IP) cannot saturate
+        // the queue with attacker-supplied fake txids. See `GHSA-4fc2-h7jh-287c`.
         if let Some(source) = source {
-            let count = self.pending_per_peer.get(&source).copied().unwrap_or(0);
+            let count = self.pending_per_peer.get(&source.ip()).copied().unwrap_or(0);
             if count >= MAX_INBOUND_CONCURRENCY_PER_PEER {
                 debug!(
                     ?txid,
@@ -550,7 +557,7 @@ where
         if let Some(source) = source {
             // The per-peer cap check above ensures this can't exceed
             // `MAX_INBOUND_CONCURRENCY_PER_PEER`.
-            *self.pending_per_peer.entry(source).or_insert(0) += 1;
+            *self.pending_per_peer.entry(source.ip()).or_insert(0) += 1;
         }
 
         debug!(
@@ -604,13 +611,14 @@ where
         metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
     }
 
-    /// Decrement the per-peer pending count for `source`, removing the entry
+    /// Decrement the per-host pending count for `source`'s IP, removing the entry
     /// when it reaches zero.
-    fn release_peer_slot(pending_per_peer: &mut HashMap<SocketAddr, usize>, source: SocketAddr) {
-        if let Some(count) = pending_per_peer.get_mut(&source) {
+    fn release_peer_slot(pending_per_peer: &mut HashMap<IpAddr, usize>, source: SocketAddr) {
+        let ip = source.ip();
+        if let Some(count) = pending_per_peer.get_mut(&ip) {
             *count = count.saturating_sub(1);
             if *count == 0 {
-                pending_per_peer.remove(&source);
+                pending_per_peer.remove(&ip);
             }
         }
     }
