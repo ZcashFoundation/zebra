@@ -7,18 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-### Breaking Changes
+### Security
 
-- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
-  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
-  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
-  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
-  changelog for the underlying API split
-  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
-- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
-  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
-  object is only present on Mainnet, where end of support is enforced
-  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+- Score misbehavior for peers that advertise a block containing duplicate transactions, matching
+  the treatment of the other definitive block-validity violations
+  ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
+
+## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
 ### Added
 
@@ -27,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
-  as labels.
+  as labels ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 - New `getdeprecationinfo` RPC returning the block height and estimated time at which this
   release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
   object is only present on Mainnet, where end of support is enforced
@@ -39,13 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `FindBlocks` response, allowing nodes near the chain tip to continue advancing
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
-  and Testnet values no longer overwrite each other in processes that run both networks.
+  and Testnet values no longer overwrite each other in processes that run both networks
+  ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 
 ### Fixed
 
+- `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
+  specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
+  affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
-  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817)).
+- Banning a misbehaving peer now removes every address book entry for that IP, and a banned IP is
+  never selected as a reconnection candidate. Previously an entry on a different port could survive
+  the ban and occupy the first candidate slot until the node restarted
+  ([#11173](https://github.com/ZcashFoundation/zebra/pull/11173)).
 
 ### Security
 
@@ -54,10 +57,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
-  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
-- Score misbehavior for peers that advertise a block containing duplicate transactions, matching
-  the treatment of the other definitive block-validity violations
-  ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))
+  ([#11129](https://github.com/ZcashFoundation/zebra/pull/11129)).
+- Prevent a peer from delaying tip discovery by answering a block download with a canonical header
+  and a rewritten coinbase height. Zebra now re-requests the hash immediately instead of waiting for
+  a later sync round to rediscover it, and scores the peer when a parent block Zebra already holds
+  proves the claimed height wrong
+  ([GHSA-g95h-hw6g-pvgv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g95h-hw6g-pvgv)).
+  Thanks to @zakura-security for reporting the issue.
+- Blocks above the sync lookahead height limit no longer score the peer that served
+  them, since that request is routed to an unrelated honest peer — scoring it let a
+  malicious `FindBlocks` responder get honest peers banned during initial block
+  download
+  ([GHSA-qhr3-cvch-5fh2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qhr3-cvch-5fh2)).
+- Peers that gossip consensus-invalid blocks are scored for misbehavior again. The inbound
+  download cleanup only recognized `VerifyBlockError`, but the gossiped block verifier is a
+  `BlockVerifierRouter`, which returns `RouterError`, so no score was ever applied and such
+  peers were never banned
+  ([GHSA-8hh2-hrf2-cqf4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8hh2-hrf2-cqf4)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

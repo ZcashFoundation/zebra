@@ -414,6 +414,7 @@ impl StartCmd {
             peer_set.clone(),
             block_verifier_router.clone(),
             state.clone(),
+            read_only_state_service.clone(),
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );

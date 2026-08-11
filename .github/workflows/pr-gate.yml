@@ -137,6 +137,9 @@ jobs:
           feature-group: default-features
           baseline-rev: ${{ steps.baseline.outputs.rev }}
 
+  # This checks for changelog entries depending on the type of the PR (per title).
+  # An entry is required for a crate if any file in the crate changed.
+  # If the title indicates a breaking change, the changelog must also have a `### Breaking Changes` section.
   changelog-gate:
     needs: changes
     if: >-
@@ -192,6 +195,8 @@ jobs:
             exit 1
           fi
           echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+      # Checks if the changelogs have entries for the versions being released
+      # (used in the in the release PR).
       - name: Validate release changelogs
         id: changelogs
         continue-on-error: true
@@ -219,7 +224,7 @@ jobs:
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
-        uses: ZcashFoundation/cargo-release@34a37595755444456ce0e2d2b1258d9a29c14fac
+        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e # v0.1.0
         with:
           phase: check
           base-sha: ${{ steps.release-target.outputs.base_sha }}
@@ -284,4 +289,7 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          # Leave it for the PR author and reviewer to decide if the changelog
+          # entries are good enough.
+          allowed-failures: changelog-gate
           allowed-skips: semver-checks, changelog-gate, release-readiness

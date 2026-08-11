@@ -7,19 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so
+  `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity
+  violations. The score reported by `router::RouterError`, `VerifyBlockError`, and
+  `VerifyCheckpointError` for this error changes from 0 to 100
+  ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
+
+## [15.0.0] - 2026-08-10
+
 ### Breaking Changes
 
 - Split the unified transaction verifier API into separate
   `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
-  services with dedicated request/response types.
-- Removed the unified verifier API:
+  services with dedicated request/response types
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- Removed the unified verifier API ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)):
   - `transaction::Verifier`
   - `transaction::Request`
   - `transaction::Response`
 - `transaction::BlockRequest::transaction_hash` must now be the hash of the request's
   `transaction`. It is used to build `BlockResponse::tx_id` instead of re-hashing the
   transaction, so a mismatched value yields a response identifying a different transaction.
-  A debug assertion checks this in test and debug builds.
+  A debug assertion checks this in test and debug builds
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - The second value returned by `router::init` and `router::init_test` is now a
   `transaction::MempoolTxVerifier` service and can no longer verify block
   transactions. Callers verifying transactions as part of block verification
@@ -28,17 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`.
+- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 - `transaction::BlockRequest`, `transaction::BlockResponse`,
-  `transaction::MempoolRequest`, and `transaction::MempoolResponse`.
-  
-### Security
-
-- `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so
-  `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity
-  violations. The score reported by `router::RouterError`, `VerifyBlockError`, and
-  `VerifyCheckpointError` for this error changes from 0 to 100
-  ([#10688](https://github.com/ZcashFoundation/zebra/issues/10688))
+  `transaction::MempoolRequest`, and `transaction::MempoolResponse`
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
 
 ## [14.0.1] - 2026-07-27
 
