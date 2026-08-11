@@ -956,7 +956,7 @@ pub enum Request {
     /// Its purpose is to allow asynchronous script verification or to wait until
     /// the UTXO arrives in the state before validating dependent transactions.
     ///
-    /// Returns [`Response::Utxo`] with the UTXO, or an [`AwaitUtxoError`][0] if
+    /// Returns [`Response::Utxo`] with the UTXO, or an [`AwaitUtxoError`] if
     /// the state stopped responding before the UTXO arrived.
     ///
     /// # Correctness
@@ -966,8 +966,6 @@ pub enum Request {
     /// documentation for details.
     ///
     /// Outdated requests are pruned on a regular basis.
-    ///
-    /// [0]: (crate::error::AwaitUtxoError)
     AwaitUtxo(transparent::OutPoint),
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
