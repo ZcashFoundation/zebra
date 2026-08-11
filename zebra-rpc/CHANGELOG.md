@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The JSON-RPC version compatibility middleware no longer copies the request body an extra time when
+  building the rewritten request; the buffer is reclaimed in place when uniquely owned
+  ([#10574](https://github.com/ZcashFoundation/zebra/issues/10574)).
+
 ## [16.0.0] - 2026-08-10
 
 ### Breaking Changes
