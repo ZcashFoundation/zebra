@@ -371,7 +371,9 @@ fn invalidating_non_finalized_root_does_not_panic() {
 /// parent previously panicked. The second invalidation produced a shortened
 /// parent chain whose tip hash matched an existing entry, and `BTreeSet::insert`
 /// reached `Chain::cmp`'s `unreachable!()`. After the fix, `Chain::cmp` returns
-/// `Equal` for matching tip hashes, so the duplicate insert is a no-op and the
+/// `Equal` for matching tip hashes (same-tip chains share the stored tip block,
+/// including its receipt sequence), and `insert_with` skips inserting a chain
+/// whose tip is already tracked, so the duplicate insert is a no-op and the
 /// pre-existing parent chain is retained.
 #[test]
 fn invalidating_same_height_fork_tips_is_idempotent() {
@@ -1178,4 +1180,127 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
     assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
 
     Ok(())
+}
+
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/11240>.
+///
+/// Sibling blocks always have equal work on Zcash (`nBits` is fully determined by their
+/// ancestors), and the spec breaks equal-work ties by preferring the block received first.
+/// The old `Chain::cmp` compared tip hashes instead, so whichever sibling's hash sorted
+/// higher displaced an already-adopted tip, regardless of arrival order.
+///
+/// Commits two equal-work siblings in both arrival orders and checks that the
+/// first-received sibling stays best both times; one of the two orders fails under hash
+/// tie-breaking by construction. Then extends the losing sibling and checks that strictly
+/// more cumulative work still overrides receipt order.
+#[test]
+fn equal_work_ties_prefer_first_seen() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    // Same parent and work, different commitment bytes: the siblings tie on cumulative
+    // work with distinct hashes.
+    let sibling_a = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x01; 32]);
+    let sibling_b = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x02; 32]);
+    assert_ne!(
+        sibling_a.hash(),
+        sibling_b.hash(),
+        "siblings must have distinct hashes"
+    );
+
+    for (first, second) in [(&sibling_a, &sibling_b), (&sibling_b, &sibling_a)] {
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+        state.commit_block((*first).clone().prepare(), &finalized_state)?;
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            first.hash(),
+            "the first sibling is adopted as the best tip"
+        );
+
+        state.commit_block((*second).clone().prepare(), &finalized_state)?;
+        assert_eq!(2, state.chain_set.len(), "both sibling chains are tracked");
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            first.hash(),
+            "a later equal-work sibling must not displace the adopted tip"
+        );
+
+        // Strictly more cumulative work still overrides receipt order.
+        let second_child = second.make_fake_child().set_work(10);
+        state.commit_block(second_child.clone().prepare(), &finalized_state)?;
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            second_child.hash(),
+            "more cumulative work must override receipt order"
+        );
+    }
+
+    Ok(())
+}
+
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/11240>.
+///
+/// Receipt order must survive invalidate/reconsider: `reconsider_block` replays the
+/// stored blocks, so a reconsidered block keeps its original receipt sequence and
+/// resumes winning the equal-work tie it won on first receipt.
+#[test]
+fn reconsidered_block_keeps_original_receipt_order() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let sibling_a = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x01; 32]);
+    let sibling_b = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x02; 32]);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state
+        .commit_new_chain(block1.prepare(), &finalized_state)
+        .expect("fake root block should commit");
+    state
+        .commit_block(sibling_a.clone().prepare(), &finalized_state)
+        .expect("first sibling should commit");
+    state
+        .commit_block(sibling_b.clone().prepare(), &finalized_state)
+        .expect("second sibling should commit");
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        sibling_a.hash(),
+        "the first-received sibling starts as the best tip"
+    );
+
+    state
+        .invalidate_block(sibling_a.hash())
+        .expect("invalidating the first sibling should succeed");
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        sibling_b.hash(),
+        "the remaining sibling is best while the first is invalidated"
+    );
+
+    state
+        .reconsider_block(sibling_a.hash(), &finalized_state.db)
+        .expect("reconsidering the first sibling should succeed");
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        sibling_a.hash(),
+        "the reconsidered sibling keeps its original receipt sequence and wins the tie again"
+    );
 }

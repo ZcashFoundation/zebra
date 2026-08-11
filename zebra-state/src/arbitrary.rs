@@ -114,6 +114,7 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
+            receipt_sequence: 0,
         }
     }
 }
