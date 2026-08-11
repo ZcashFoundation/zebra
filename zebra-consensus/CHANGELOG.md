@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The batch signature verifiers (`redjubjub`, `ed25519`, `halo2`, `redpallas`) now block until
+  verification completes when flushed on drop, using `rayon::scope` instead of `rayon::spawn_fifo`.
+  Previously `flush_blocking` returned before the spawned work ran, so pending batched verification
+  could be abandoned on shutdown; this was latent because the process exits before the abandonment
+  is observable ([#10598](https://github.com/ZcashFoundation/zebra/issues/10598)).
+
 ## [15.0.0] - 2026-08-10
 
 ### Breaking Changes
