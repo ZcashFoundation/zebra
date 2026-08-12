@@ -1,6 +1,9 @@
 //! Implements `CompactTxStreamer` methods on the `LightwalletdRPC` type.
 
-use std::{collections::HashSet, pin::Pin};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+};
 
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -42,9 +45,10 @@ const MAX_REQUEST_ADDRESSES: usize = 10_000;
 
 /// The maximum number of `exclude` entries a `GetMempoolTx` client can send.
 ///
-/// Every entry is matched against every mempool transaction, so an unbounded list
-/// lets one request occupy a runtime thread for an arbitrary time.
-const MAX_EXCLUDE_ENTRIES: usize = 1_000;
+/// Matches `lightwalletd`. The list is only useful up to the size of the mempool,
+/// which holds at most `tx_cost_limit / MEMPOOL_TRANSACTION_COST_THRESHOLD`
+/// transactions (8,000 by default).
+const MAX_EXCLUDE_ENTRIES: usize = 20_000;
 
 /// The maximum size of a raw transaction submitted by a client.
 ///
@@ -1000,7 +1004,10 @@ async fn mempool_transactions<Mempool: MempoolService>(
 /// If an entry matches more than one transaction, none of the matching transactions
 /// are excluded, following the lightwalletd specification.
 fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<transaction::Hash> {
-    let mut excluded = HashSet::new();
+    // Bucket the suffixes by length, so each transaction ID costs one lookup per
+    // length in use, rather than a scan per exclude entry.
+    let mut buckets: HashMap<usize, HashMap<&[u8], (usize, Option<transaction::Hash>)>> =
+        HashMap::new();
 
     for suffix in exclude {
         // An empty entry doesn't identify a transaction, and would otherwise
@@ -1010,14 +1017,28 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
             continue;
         }
 
-        let mut matches = txids.iter().filter(|txid| txid.0.ends_with(suffix));
+        buckets
+            .entry(suffix.len())
+            .or_default()
+            .entry(suffix.as_slice())
+            .or_insert((0, None));
+    }
 
-        if let (Some(txid), None) = (matches.next(), matches.next()) {
-            excluded.insert(*txid);
+    for txid in txids {
+        for (suffix_len, entries) in buckets.iter_mut() {
+            if let Some((matches, first_match)) = entries.get_mut(&txid.0[32 - suffix_len..]) {
+                *matches += 1;
+                first_match.get_or_insert(*txid);
+            }
         }
     }
 
-    excluded
+    // An entry that matches more than one transaction doesn't identify one.
+    buckets
+        .values()
+        .flat_map(|entries| entries.values())
+        .filter_map(|&(matches, first_match)| (matches == 1).then_some(first_match).flatten())
+        .collect()
 }
 
 /// Sends `item` to a response stream, returning false if the client disconnected or
