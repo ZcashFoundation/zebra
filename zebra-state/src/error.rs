@@ -241,7 +241,7 @@ pub enum ReconsiderError {
 }
 
 /// An error describing why an `AwaitUtxo` request failed.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AwaitUtxoError {
     /// The state stopped responding, for example because it was dropped
@@ -250,13 +250,12 @@ pub enum AwaitUtxoError {
     Cancelled,
 
     /// An internal channel error occurred while waiting for the UTXO.
-    ///
-    /// This variant is currently unreachable because `PendingUtxos::respond()`
-    /// removes the sender from the map before sending, so each receiver can
-    /// receive at most one message. It is retained in case future changes make
-    /// `RecvError::Lagged` reachable.
     #[error("internal channel error while waiting for the UTXO: receiver lagged by {0}")]
     Lagged(u64),
+
+    /// The `ReadStateService` returned an error while looking up the UTXO.
+    #[error("the read state service returned an error: {0}")]
+    ReadStateFailed(BoxError),
 }
 
 impl From<RecvError> for AwaitUtxoError {

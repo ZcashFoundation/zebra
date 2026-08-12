@@ -56,8 +56,9 @@ use crate::{
         read::find,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, StateInitError,
+    AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
+    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    StateInitError,
 };
 
 pub mod block_iter;
@@ -1214,7 +1215,10 @@ impl Service<Request> for StateService {
                 async move {
                     let req = ReadRequest::AnyChainUtxo(outpoint);
 
-                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = read_service
+                        .oneshot(req)
+                        .await
+                        .map_err(AwaitUtxoError::ReadStateFailed)?;
 
                     // Optional TODO:
                     //  - make pending_utxos.respond() async using a channel,
