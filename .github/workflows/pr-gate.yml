@@ -290,6 +290,8 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           # Leave it for the PR author and reviewer to decide if the changelog
-          # entries are good enough.
+          # entries are good enough. `allowed-failures` also tolerates a skip, and
+          # must not be combined with `allowed-skips`: alls-green requires every
+          # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
           allowed-failures: changelog-gate
-          allowed-skips: semver-checks, changelog-gate, release-readiness
+          allowed-skips: semver-checks, release-readiness
