@@ -13,7 +13,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{BytesInDisplayOrder, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
-    transaction,
+    transaction, transparent,
 };
 use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
@@ -45,6 +45,11 @@ const MAX_REQUEST_ADDRESSES: usize = 10_000;
 /// Every entry is matched against every mempool transaction, so an unbounded list
 /// lets one request occupy a runtime thread for an arbitrary time.
 const MAX_EXCLUDE_ENTRIES: usize = 1_000;
+
+/// The maximum size of a raw transaction submitted by a client.
+///
+/// A transaction larger than a block can never be mined.
+const MAX_RAW_TRANSACTION_BYTES: usize = block::MAX_BLOCK_BYTES as usize;
 
 /// How long to wait for a backpressured send to a response stream before treating
 /// the consumer as hung and dropping the stream.
@@ -200,7 +205,17 @@ where
         &self,
         request: Request<RawTransaction>,
     ) -> Result<Response<SendResponse>, Status> {
-        let transaction_hex = hex::encode(request.into_inner().data);
+        let data = request.into_inner().data;
+
+        // Reject before hex-encoding doubles it: a transaction larger than a block
+        // can never be mined.
+        if data.len() > MAX_RAW_TRANSACTION_BYTES {
+            return Err(Status::invalid_argument(format!(
+                "transaction too large: the limit is {MAX_RAW_TRANSACTION_BYTES} bytes"
+            )));
+        }
+
+        let transaction_hex = hex::encode(data);
 
         // Like lightwalletd, submission errors are returned in the `SendResponse`
         // rather than as a gRPC error status.
@@ -255,19 +270,7 @@ where
         &self,
         request: Request<Streaming<Address>>,
     ) -> Result<Response<Balance>, Status> {
-        let mut address_stream = request.into_inner();
-        let mut addresses = Vec::new();
-        while let Some(address) = address_stream.message().await? {
-            // Bound the buffered addresses, because the client controls how many
-            // messages it streams.
-            if addresses.len() >= MAX_REQUEST_ADDRESSES {
-                return Err(Status::invalid_argument(format!(
-                    "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
-                )));
-            }
-
-            addresses.push(address.address);
-        }
+        let addresses = collect_streamed_addresses(request.into_inner()).await?;
 
         address_balance(&self.rpc, addresses)
             .await
@@ -552,7 +555,9 @@ where
         let (tip_branch_id, _next_branch_id) = blockchain_info.consensus().into_parts();
 
         let lightd_info = LightdInfo {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            // The node's version, not this crate's: `CARGO_PKG_VERSION` here is
+            // `zebra-rpc`, which clients would read as the node version.
+            version: info.build().clone(),
             vendor: "ZcashFoundation/zebra".to_string(),
             taddr_support: true,
             chain_name: blockchain_info.chain().clone(),
@@ -583,7 +588,9 @@ where
 /// and the height otherwise.
 fn block_id_to_hash_or_height(block_id: BlockId) -> Result<HashOrHeight, Status> {
     if !block_id.hash.is_empty() {
-        // Hashes are sent in canonical little-endian (internal) byte order.
+        // Hashes are sent in canonical little-endian (internal) byte order, per
+        // zcash/lightwalletd#512. `GetTreeState` in lightwalletd still reads
+        // big-endian here, which is an unfixed instance of the same bug.
         let hash: [u8; 32] = block_id.hash.try_into().map_err(|hash: Vec<u8>| {
             Status::invalid_argument(format!("block hash must be 32 bytes, got {}", hash.len()))
         })?;
@@ -628,50 +635,55 @@ async fn compact_block<ReadStateService: ReadState>(
         }
     };
 
-    // Fetch the trees by the block's hash rather than the caller's hash or height,
-    // so a concurrent reorg can't make the tree sizes inconsistent with the block.
     let hash = block.hash();
-    let sapling_request = read_state
-        .clone()
-        .oneshot(ReadRequest::SaplingTree(hash.into()));
-    let orchard_request = read_state.oneshot(ReadRequest::OrchardTree(hash.into()));
 
-    let (sapling_response, orchard_response) = futures::join!(sapling_request, orchard_request);
+    // `nullifiers_only` responses carry zeroed tree sizes, like lightwalletd's
+    // `pruneCompactBlockToNullifiers`, so don't read the trees at all.
+    let (sapling_tree_size, orchard_tree_size) = if nullifiers_only {
+        (0, 0)
+    } else {
+        // Fetch the trees by the block's hash rather than the caller's hash or height,
+        // so a concurrent reorg can't make the tree sizes inconsistent with the block.
+        let sapling_request = read_state
+            .clone()
+            .oneshot(ReadRequest::SaplingTree(hash.into()));
+        let orchard_request = read_state.oneshot(ReadRequest::OrchardTree(hash.into()));
 
-    // # Correctness
-    //
-    // A missing tree is not an empty tree. The block was read successfully, so its
-    // trees exist unless the block left the best chain between the two reads. Serving
-    // a size of zero would tell the client that no notes exist as of this block, and
-    // corrupt every note position it derives from that.
-    let sapling_tree_size = match sapling_response {
-        Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
-        Ok(ReadResponse::SaplingTree(None)) => {
-            return Err(Status::aborted(
-                "sapling tree not found for this block, it may have been reorged",
-            ));
-        }
-        Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => {
-            return Err(Status::internal(format!(
-                "failed to read sapling tree: {error}"
-            )));
-        }
-    };
+        let (sapling_response, orchard_response) = futures::join!(sapling_request, orchard_request);
 
-    let orchard_tree_size = match orchard_response {
-        Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
-        Ok(ReadResponse::OrchardTree(None)) => {
-            return Err(Status::aborted(
-                "orchard tree not found for this block, it may have been reorged",
-            ));
-        }
-        Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => {
-            return Err(Status::internal(format!(
-                "failed to read orchard tree: {error}"
-            )));
-        }
+        // A missing tree is not an empty tree: serving zero would tell the client no
+        // notes exist as of this block, corrupting every position derived from it.
+        let sapling_tree_size = match sapling_response {
+            Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
+            Ok(ReadResponse::SaplingTree(None)) => {
+                return Err(Status::aborted(
+                    "sapling tree not found for this block, it may have been reorged",
+                ));
+            }
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => {
+                return Err(Status::internal(format!(
+                    "failed to read sapling tree: {error}"
+                )));
+            }
+        };
+
+        let orchard_tree_size = match orchard_response {
+            Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
+            Ok(ReadResponse::OrchardTree(None)) => {
+                return Err(Status::aborted(
+                    "orchard tree not found for this block, it may have been reorged",
+                ));
+            }
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => {
+                return Err(Status::internal(format!(
+                    "failed to read orchard tree: {error}"
+                )));
+            }
+        };
+
+        (sapling_tree_size, orchard_tree_size)
     };
 
     let height = block
@@ -826,6 +838,37 @@ fn serialize_transaction(tx: &transaction::Transaction) -> Result<Vec<u8>, Statu
 }
 
 /// Returns an error if `addresses` exceeds [`MAX_REQUEST_ADDRESSES`].
+/// Collects the transparent addresses a client streams, validating each one as it
+/// arrives and stopping at the first invalid or excess entry.
+///
+/// Each message is only bounded by the gRPC message size, so buffering unvalidated
+/// input is unbounded in bytes even though the message count is capped.
+async fn collect_streamed_addresses<S>(mut address_stream: S) -> Result<Vec<String>, Status>
+where
+    S: futures::Stream<Item = Result<Address, Status>> + Unpin,
+{
+    use futures::StreamExt;
+
+    let mut addresses = Vec::new();
+
+    while let Some(address) = address_stream.next().await.transpose()? {
+        if addresses.len() >= MAX_REQUEST_ADDRESSES {
+            return Err(Status::invalid_argument(format!(
+                "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
+            )));
+        }
+
+        if address.address.parse::<transparent::Address>().is_err() {
+            return Err(Status::invalid_argument("invalid transparent address"));
+        }
+
+        addresses.push(address.address);
+    }
+
+    Ok(addresses)
+}
+
+/// Returns an error if there are too many addresses in a single request.
 fn check_address_count(addresses: &[String]) -> Result<(), Status> {
     if addresses.len() > MAX_REQUEST_ADDRESSES {
         return Err(Status::invalid_argument(format!(
@@ -1058,8 +1101,63 @@ fn rpc_arg_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
+    use std::sync::Arc;
     use tonic::Code;
     use zebra_chain::serialization::BytesInDisplayOrder;
+
+    /// A streamed address list must be validated entry by entry, so an invalid
+    /// address ends the stream instead of being buffered until it closes.
+    #[tokio::test]
+    async fn streamed_addresses_are_validated_before_the_stream_ends() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _init_guard = zebra_test::init();
+
+        let valid = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
+        let yielded = Arc::new(AtomicUsize::new(0));
+
+        // A valid address, an invalid one, then more input the server must not read.
+        let addresses = futures::stream::iter(
+            [valid.clone(), "not an address".to_string(), valid.clone()]
+                .map(|address| Ok(Address { address })),
+        )
+        .inspect({
+            let yielded = yielded.clone();
+            move |_| {
+                yielded.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+
+        let status = collect_streamed_addresses(Box::pin(addresses))
+            .await
+            .expect_err("an invalid address must be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert_eq!(
+            yielded.load(Ordering::SeqCst),
+            2,
+            "the server must stop reading at the first invalid address",
+        );
+    }
+
+    /// The streamed address count is bounded, so a client can't buffer without limit.
+    #[tokio::test]
+    async fn streamed_addresses_are_bounded() {
+        let _init_guard = zebra_test::init();
+
+        let valid = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
+        let addresses = futures::stream::iter(
+            std::iter::repeat_n(valid, MAX_REQUEST_ADDRESSES + 1)
+                .map(|address| Ok(Address { address })),
+        );
+
+        let status = collect_streamed_addresses(Box::pin(addresses))
+            .await
+            .expect_err("too many addresses must be rejected");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+    }
 
     fn txid(byte: u8) -> transaction::Hash {
         transaction::Hash::from_bytes_in_display_order(&[byte; 32])

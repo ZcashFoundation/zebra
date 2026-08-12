@@ -97,6 +97,80 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
     Ok(())
 }
 
+/// A `nullifiers_only` response must not read the note commitment trees.
+///
+/// lightwalletd's `pruneCompactBlockToNullifiers` zeroes the tree sizes, so reading
+/// them costs two state reads per block on the bulk-scan path for a value the client
+/// discards, and lets a reorg between the reads abort the whole stream.
+#[tokio::test]
+async fn get_block_nullifiers_does_not_read_the_commitment_trees() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let height = block
+        .coinbase_height()
+        .expect("test block has a coinbase height");
+
+    let request_task = tokio::spawn(async move {
+        client
+            .get_block_nullifiers(tonic::Request::new(BlockId {
+                height: height.0.into(),
+                hash: Vec::new(),
+            }))
+            .await
+    });
+
+    read_state
+        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .await
+        .respond(ReadResponse::Block(Some(block)));
+
+    // Only the block was answered: if the trees were still read, this would hang.
+    let compact_block = request_task
+        .await
+        .expect("request task should not panic")
+        .expect("the block should be served without reading the trees")
+        .into_inner();
+
+    let chain_metadata = compact_block
+        .chain_metadata
+        .expect("compact blocks always carry chain metadata");
+
+    assert_eq!(chain_metadata.sapling_commitment_tree_size, 0);
+    assert_eq!(chain_metadata.orchard_commitment_tree_size, 0);
+
+    Ok(())
+}
+
+/// A raw transaction larger than a block must be rejected before it is hex-encoded.
+///
+/// Hex-encoding doubles a client-controlled buffer, and a transaction that big can
+/// never be mined.
+#[tokio::test]
+async fn send_transaction_rejects_oversized_raw_transactions() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, _read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let oversized = vec![0; zebra_chain::block::MAX_BLOCK_BYTES as usize + 1];
+
+    let status = client
+        .send_transaction(tonic::Request::new(lightwalletd::RawTransaction {
+            data: oversized,
+            height: 0,
+        }))
+        .await
+        .expect_err("an oversized transaction must be rejected");
+
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+
+    Ok(())
+}
+
 /// A lagged mempool change subscription must not silently drop transactions.
 ///
 /// The change channel is bounded, so a stream that falls behind loses changes and the
