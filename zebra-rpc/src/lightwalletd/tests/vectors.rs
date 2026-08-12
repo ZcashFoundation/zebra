@@ -7,7 +7,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, BoxError};
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
     chain_sync_status::MockSyncStatus,
     chain_tip::{
         mock::{MockChainTip, MockChainTipSender},
@@ -25,7 +25,10 @@ use zebra_test::{
 };
 
 use crate::{
-    lightwalletd::{self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, Empty},
+    lightwalletd::{
+        self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, BlockRange, ChainSpec,
+        CompactBlock, Empty,
+    },
     methods::RpcImpl,
 };
 
@@ -34,6 +37,148 @@ type MockReadState = MockService<ReadRequest, ReadResponse, PanicAssertion, BoxE
 
 /// The mocked mempool service the server is built on.
 type MockMempool = MockService<mempool::Request, mempool::Response, PanicAssertion, BoxError>;
+
+/// `GetLatestBlock` must return the current best tip without reading state.
+#[tokio::test]
+async fn get_latest_block_returns_the_mocked_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let tip_height = block::Height(42);
+    let tip_hash = block::Hash([0xab; 32]);
+    chain_tip_sender.send_best_tip_height(tip_height);
+    chain_tip_sender.send_best_tip_hash(tip_hash);
+
+    let response = client
+        .get_latest_block(tonic::Request::new(ChainSpec {}))
+        .await?
+        .into_inner();
+
+    assert_eq!(response.height, u64::from(tip_height.0));
+    assert_eq!(response.hash, tip_hash.0.to_vec());
+    read_state.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// An empty `BlockId` must be rejected instead of being read as genesis.
+#[tokio::test]
+async fn get_block_rejects_an_unspecified_id_without_reading_state() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let status = client
+        .get_block(tonic::Request::new(BlockId {
+            height: 0,
+            hash: Vec::new(),
+        }))
+        .await
+        .expect_err("an unspecified block ID must be rejected");
+
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    assert_eq!(status.message(), "block id must specify a hash or a height");
+    read_state.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// `GetBlockRange` must include both bounds and stream them in ascending order.
+#[tokio::test]
+async fn get_block_range_is_inclusive_and_ascending() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let blocks = mainnet_blocks_1_to_3()?;
+
+    let mut stream = client
+        .get_block_range(tonic::Request::new(block_range(1, 3)))
+        .await?
+        .into_inner();
+
+    for (block, expected_height) in blocks.into_iter().zip(1..=3) {
+        respond_with_block(&mut read_state, block).await;
+
+        let response = next_compact_block_message(&mut stream)
+            .await??
+            .ok_or_else(|| eyre!("block range ended before height {expected_height}"))?;
+        assert_eq!(response.height, expected_height);
+    }
+
+    assert!(next_compact_block_message(&mut stream).await??.is_none());
+
+    Ok(())
+}
+
+/// A descending range must preserve the caller's requested order.
+#[tokio::test]
+async fn get_block_range_is_inclusive_and_descending() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let blocks = mainnet_blocks_1_to_3()?;
+
+    let mut stream = client
+        .get_block_range(tonic::Request::new(block_range(3, 1)))
+        .await?
+        .into_inner();
+
+    for (block, expected_height) in blocks.into_iter().rev().zip((1..=3).rev()) {
+        respond_with_block(&mut read_state, block).await;
+
+        let response = next_compact_block_message(&mut stream)
+            .await??
+            .ok_or_else(|| eyre!("block range ended before height {expected_height}"))?;
+        assert_eq!(response.height, expected_height);
+    }
+
+    assert!(next_compact_block_message(&mut stream).await??.is_none());
+
+    Ok(())
+}
+
+/// A range crossing the available state must return prior blocks, then stop with `NotFound`.
+#[tokio::test]
+async fn get_block_range_stops_when_a_block_is_missing() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let [_block_1, block_2, block_3] = mainnet_blocks_1_to_3()?;
+
+    let mut stream = client
+        .get_block_range(tonic::Request::new(block_range(2, 4)))
+        .await?
+        .into_inner();
+
+    for (block, expected_height) in [(block_2, 2), (block_3, 3)] {
+        respond_with_block(&mut read_state, block).await;
+
+        let response = next_compact_block_message(&mut stream)
+            .await??
+            .ok_or_else(|| eyre!("block range ended before height {expected_height}"))?;
+        assert_eq!(response.height, expected_height);
+    }
+
+    read_state
+        .expect_request(ReadRequest::Block(block::Height(4).into()))
+        .await
+        .respond(ReadResponse::Block(None));
+
+    let status = next_compact_block_message(&mut stream)
+        .await?
+        .expect_err("a missing block must terminate the range with an error");
+    assert_eq!(status.code(), tonic::Code::NotFound);
+    assert_eq!(status.message(), "block not found");
+    read_state.expect_no_requests().await;
+
+    Ok(())
+}
 
 /// A missing note commitment tree must not be served as an empty tree.
 ///
@@ -140,6 +285,69 @@ async fn mempool_stream_re_reads_the_mempool_after_lagging() -> Result<()> {
         .respond(empty_mempool_response());
 
     Ok(())
+}
+
+/// Returns mainnet blocks at heights 1 through 3.
+fn mainnet_blocks_1_to_3() -> Result<[Arc<Block>; 3]> {
+    Ok([
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?,
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?,
+        zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?,
+    ])
+}
+
+/// Returns an inclusive block range specified by height.
+fn block_range(start: u64, end: u64) -> BlockRange {
+    let block_id = |height| BlockId {
+        height,
+        hash: Vec::new(),
+    };
+
+    BlockRange {
+        start: Some(block_id(start)),
+        end: Some(block_id(end)),
+    }
+}
+
+/// Responds to the state requests needed to build one compact block.
+async fn respond_with_block(read_state: &mut MockReadState, block: Arc<Block>) {
+    let height = block
+        .coinbase_height()
+        .expect("fixed mainnet block vectors contain a coinbase transaction");
+
+    read_state
+        .expect_request(ReadRequest::Block(height.into()))
+        .await
+        .respond(ReadResponse::Block(Some(block)));
+
+    // The Sapling and Orchard trees are read concurrently, so answer whichever
+    // arrives first.
+    for _ in 0..2 {
+        let handler = read_state
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                )
+            })
+            .await;
+
+        let response = match handler.request() {
+            ReadRequest::SaplingTree(_) => ReadResponse::SaplingTree(Some(Default::default())),
+            _ => ReadResponse::OrchardTree(Some(Default::default())),
+        };
+
+        handler.respond(response);
+    }
+}
+
+/// Returns the next compact block stream message within the test timeout.
+async fn next_compact_block_message(
+    stream: &mut tonic::Streaming<CompactBlock>,
+) -> Result<Result<Option<CompactBlock>, tonic::Status>> {
+    tokio::time::timeout(Duration::from_secs(2), stream.message())
+        .await
+        .map_err(|_| eyre!("timed out waiting for the next compact block stream message"))
 }
 
 /// Returns a mempool response with no transactions in it.
