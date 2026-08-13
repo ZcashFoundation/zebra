@@ -89,6 +89,57 @@ async fn rpc_server_spawn_unallocated_port_shutdown() {
     rpc_spawn_unallocated_port(true).await
 }
 
+/// Test that the RPC server returns an error when the configured max response body size
+/// is larger than the jsonrpsee server supports.
+#[tokio::test]
+#[cfg(target_pointer_width = "64")]
+async fn rpc_server_rejects_oversized_max_response_body_size() {
+    let _init_guard = zebra_test::init();
+
+    let conf = Config {
+        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
+        indexer_listen_addr: None,
+        parallel_cpu_threads: 0,
+        debug_force_finished_sync: false,
+        cookie_dir: Default::default(),
+        enable_cookie_auth: false,
+        max_response_body_size: u32::MAX as usize + 1,
+    };
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let block_verifier_router: MockService<_, _, _, BoxError> =
+        MockService::build().for_unit_tests();
+
+    let (_tx, rx) = watch::channel(None);
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        false,
+        "RPC test",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state, 1),
+        Buffer::new(block_verifier_router, 1),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let err = RpcServer::start(rpc_impl, conf)
+        .await
+        .expect_err("oversized max response body size should return an error");
+
+    let err = err.to_string();
+    assert!(err.contains("rpc.max_response_body_size"));
+    assert!(err.contains("4294967296"));
+    assert!(err.contains("4294967295"));
+}
+
 /// Test if the RPC server will spawn on an OS-assigned unallocated port.
 ///
 /// Set `do_shutdown` to true to close the server using the close handle.
