@@ -255,7 +255,7 @@ pub enum AwaitUtxoError {
 
     /// The `ReadStateService` returned an error while looking up the UTXO.
     #[error("the read state service returned an error: {0}")]
-    ReadStateFailed(BoxError),
+    ReadStateFailed(#[source] BoxError),
 }
 
 impl From<RecvError> for AwaitUtxoError {

@@ -47,8 +47,8 @@ pub use error::{
     CommitSemanticallyVerifiedError, DuplicateNullifierError, StateInitError, ValidateContextError,
 };
 pub use request::{
-    CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
-    ReadRequest, Request, SemanticallyVerifiedBlock,
+    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
+    HashOrHeight, MappedRequest, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
