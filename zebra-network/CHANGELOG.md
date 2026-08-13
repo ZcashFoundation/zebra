@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `max_connections_per_subnet_v6` and `max_connections_per_subnet_v4` config options limiting
+  the number of peer connections per IPv6 `/64` and IPv4 `/24` subnet, defaulting to 2 each.
+  A single VPS with a standard `/64` allocation has 18 quintillion distinct `IpAddr` values,
+  each passing the per-IP cap (`max_connections_per_ip = 1`) individually. The subnet cap
+  prevents one `/64` from filling all connection slots
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
 ## [12.0.0] - 2026-08-10
 
 ### Breaking Changes

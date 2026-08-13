@@ -98,7 +98,7 @@ use std::{
     convert,
     fmt::Debug,
     marker::PhantomData,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -316,6 +316,16 @@ where
     /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
 
+    /// The configured maximum number of peers that can be in the
+    /// peer set per IPv6 `/64` subnet, defaults to
+    /// [`crate::constants::DEFAULT_MAX_CONNS_PER_SUBNET_V6`]
+    max_conns_per_subnet_v6: usize,
+
+    /// The configured maximum number of peers that can be in the
+    /// peer set per IPv4 `/24` subnet, defaults to
+    /// [`crate::constants::DEFAULT_MAX_CONNS_PER_SUBNET_V4`]
+    max_conns_per_subnet_v4: usize,
+
     /// The network of this peer set.
     network: Network,
 }
@@ -371,6 +381,8 @@ where
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
+        max_conns_per_subnet_v6: Option<usize>,
+        max_conns_per_subnet_v4: Option<usize>,
     ) -> Self {
         let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
         Self {
@@ -411,6 +423,10 @@ where
             address_metrics,
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
+            max_conns_per_subnet_v6: max_conns_per_subnet_v6
+                .unwrap_or(config.max_connections_per_subnet_v6),
+            max_conns_per_subnet_v4: max_conns_per_subnet_v4
+                .unwrap_or(config.max_connections_per_subnet_v4),
 
             network: config.network.clone(),
         }
@@ -710,6 +726,47 @@ where
             .count()
     }
 
+    /// Returns the `/64` (IPv6) or `/24` (IPv4) subnet key for an IP address.
+    ///
+    /// The subnet key is the IP address with its host portion zeroed:
+    /// - IPv4: first 3 octets preserved, last octet zeroed (`/24`)
+    /// - IPv6: first 8 bytes preserved, last 8 bytes zeroed (`/64`)
+    ///
+    /// This is used for per-subnet connection limiting, complementing the
+    /// per-IP cap. A single VPS with a `/64` allocation has 18 quintillion
+    /// distinct `IpAddr` values, each passing the per-IP cap individually.
+    /// The subnet key groups them so the per-subnet cap can limit the total.
+    fn subnet_key(ip: IpAddr) -> IpAddr {
+        match ip {
+            IpAddr::V4(v4) => {
+                let o = v4.octets();
+                IpAddr::V4(Ipv4Addr::new(o[0], o[1], o[2], 0))
+            }
+            IpAddr::V6(v6) => {
+                let o = v6.octets();
+                let mut masked = [0u8; 16];
+                masked[..8].copy_from_slice(&o[..8]);
+                IpAddr::V6(Ipv6Addr::from(masked))
+            }
+        }
+    }
+
+    /// Returns the number of peers in the set from the same `/64` (IPv6) or
+    /// `/24` (IPv4) subnet as the given IP address.
+    ///
+    /// # Performance
+    ///
+    /// This method is `O(connected peers)`, so it should not be called from a loop
+    /// that is already iterating through the peer set.
+    fn num_peers_with_subnet(&self, ip: IpAddr) -> usize {
+        let subnet = Self::subnet_key(ip);
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .filter(|addr| Self::subnet_key(addr.ip()) == subnet)
+            .count()
+    }
+
     /// Returns `true` if Zebra is already connected to the IP and port in `addr`.
     fn has_peer_with_addr(&self, addr: PeerSocketAddr) -> bool {
         self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
@@ -776,6 +833,25 @@ where
                     // the same IP address in the peer set. Sidecars are exempt: they
                     // are trusted, and the listener already caps their inbound slots.
                     if !is_sidecar && self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
+                    // # Security
+                    //
+                    // Drop the new peer if there are already `max_conns_per_subnet_v6`
+                    // (IPv6) or `max_conns_per_subnet_v4` (IPv4) peers from the same
+                    // `/64` or `/24` subnet in the peer set. A single VPS with a standard
+                    // `/64` allocation has 18 quintillion distinct `IpAddr` values, each
+                    // passing the per-IP cap above individually. The subnet cap prevents
+                    // one `/64` from filling all connection slots. Sidecars are exempt,
+                    // matching the per-IP cap behavior.
+                    let subnet_limit = match key.ip() {
+                        IpAddr::V4(_) => self.max_conns_per_subnet_v4,
+                        IpAddr::V6(_) => self.max_conns_per_subnet_v6,
+                    };
+                    if !is_sidecar && self.num_peers_with_subnet(key.ip()) >= subnet_limit {
+                        debug!(?key, "dropping peer: subnet connection limit reached");
                         std::mem::drop(svc);
                         continue;
                     }

@@ -27,9 +27,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP,
-        DEFAULT_PEERSET_INITIAL_TARGET_SIZE, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
-        MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
+        DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP, DEFAULT_MAX_CONNS_PER_SUBNET_V4,
+        DEFAULT_MAX_CONNS_PER_SUBNET_V6, DEFAULT_PEERSET_INITIAL_TARGET_SIZE, DNS_LOOKUP_TIMEOUT,
+        INBOUND_PEER_LIMIT_MULTIPLIER, MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
@@ -193,6 +193,21 @@ pub struct Config {
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
     /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
+
+    /// The maximum number of peer connections Zebra will maintain per IPv6 `/64` subnet.
+    ///
+    /// A single VPS with a standard `/64` allocation has 18 quintillion distinct
+    /// `IpAddr` values on one machine. Without a per-subnet cap, each address passes
+    /// the per-IP cap individually, allowing one machine to fill all connection slots.
+    /// Defaults to [`constants::DEFAULT_MAX_CONNS_PER_SUBNET_V6`].
+    pub max_connections_per_subnet_v6: usize,
+
+    /// The maximum number of peer connections Zebra will maintain per IPv4 `/24` subnet.
+    ///
+    /// A `/24` is the standard provider subnet size. Without a per-subnet cap, an
+    /// attacker with a `/24` of IPv4 addresses could fill all connection slots.
+    /// Defaults to [`constants::DEFAULT_MAX_CONNS_PER_SUBNET_V4`].
+    pub max_connections_per_subnet_v4: usize,
 }
 
 impl Config {
@@ -585,6 +600,8 @@ impl Default for Config {
             // so that idle peers don't use too many connection slots.
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
+            max_connections_per_subnet_v6: DEFAULT_MAX_CONNS_PER_SUBNET_V6,
+            max_connections_per_subnet_v4: DEFAULT_MAX_CONNS_PER_SUBNET_V4,
         }
     }
 }
@@ -656,6 +673,8 @@ struct DConfig {
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
     crawl_new_peer_interval: Duration,
     max_connections_per_ip: Option<usize>,
+    max_connections_per_subnet_v6: Option<usize>,
+    max_connections_per_subnet_v4: Option<usize>,
 }
 
 impl Default for DConfig {
@@ -672,6 +691,8 @@ impl Default for DConfig {
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
             max_connections_per_ip: Some(config.max_connections_per_ip),
+            max_connections_per_subnet_v6: Some(config.max_connections_per_subnet_v6),
+            max_connections_per_subnet_v4: Some(config.max_connections_per_subnet_v4),
         }
     }
 }
@@ -730,6 +751,8 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            max_connections_per_subnet_v6,
+            max_connections_per_subnet_v4,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -764,6 +787,8 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip: Some(max_connections_per_ip),
+            max_connections_per_subnet_v6: Some(max_connections_per_subnet_v6),
+            max_connections_per_subnet_v4: Some(max_connections_per_subnet_v4),
         }
     }
 }
@@ -784,6 +809,8 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            max_connections_per_subnet_v6,
+            max_connections_per_subnet_v4,
         } = DConfig::deserialize(deserializer)?;
 
         let network = match (dnetwork, testnet_parameters) {
@@ -832,8 +859,10 @@ impl<'de> Deserialize<'de> for Config {
             None
         };
 
-        let [max_connections_per_ip, peerset_initial_target_size] = [
+        let [max_connections_per_ip, max_connections_per_subnet_v6, max_connections_per_subnet_v4, peerset_initial_target_size] = [
             ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP),
+            ("max_connections_per_subnet_v6", max_connections_per_subnet_v6, DEFAULT_MAX_CONNS_PER_SUBNET_V6),
+            ("max_connections_per_subnet_v4", max_connections_per_subnet_v4, DEFAULT_MAX_CONNS_PER_SUBNET_V4),
             // If we want Zebra to operate with no network,
             // we should implement a `zebrad` command that doesn't use `zebra-network`.
             ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
@@ -859,6 +888,8 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            max_connections_per_subnet_v6,
+            max_connections_per_subnet_v4,
         })
     }
 }
