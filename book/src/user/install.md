@@ -24,10 +24,11 @@ Or download an archive, verify it, and extract `zebrad`:
 ```bash
 gh attestation verify zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz \
   --repo ZcashFoundation/zebra \
-  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml
+  --signer-workflow ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml \
+  --source-ref 'refs/tags/v<version>'
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity-regexp='^https://github\.com/ZcashFoundation/zebra/\.github/workflows/zfnd-release-binaries\.yml@' \
+  --certificate-identity='https://github.com/ZcashFoundation/zebra/.github/workflows/zfnd-release-binaries.yml@refs/tags/v<version>' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 sha256sum --ignore-missing -c SHA256SUMS
 tar xzf zebrad-<version>-x86_64-unknown-linux-gnu.tar.gz

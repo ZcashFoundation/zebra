@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Consensus rules that apply to a transaction in both block and mempool context
+  are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+
+## [15.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Split the unified transaction verifier API into separate
+  `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  services with dedicated request/response types
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- Removed the unified verifier API ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)):
+  - `transaction::Verifier`
+  - `transaction::Request`
+  - `transaction::Response`
+- `transaction::BlockRequest::transaction_hash` must now be the hash of the request's
+  `transaction`. It is used to build `BlockResponse::tx_id` instead of re-hashing the
+  transaction, so a mismatched value yields a response identifying a different transaction.
+  A debug assertion checks this in test and debug builds
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- The second value returned by `router::init` and `router::init_test` is now a
+  `transaction::MempoolTxVerifier` service and can no longer verify block
+  transactions. Callers verifying transactions as part of block verification
+  should construct a `transaction::BlockTxVerifier` directly.
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
+### Added
+
+- `transaction::BlockTxVerifier` and `transaction::MempoolTxVerifier`
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+- `transaction::BlockRequest`, `transaction::BlockResponse`,
+  `transaction::MempoolRequest`, and `transaction::MempoolResponse`
+  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
+
 ## [14.0.1] - 2026-07-27
 
 ### Changed

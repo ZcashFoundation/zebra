@@ -40,7 +40,8 @@ type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
 type MockState = MockService<zs::Request, zs::Response, PropTestAssertion>;
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
-type MockTxVerifier = MockService<tx::Request, tx::Response, PropTestAssertion, TransactionError>;
+type MockTxVerifier =
+    MockService<tx::MempoolRequest, tx::MempoolResponse, PropTestAssertion, TransactionError>;
 
 const CHAIN_LENGTH: usize = 5;
 

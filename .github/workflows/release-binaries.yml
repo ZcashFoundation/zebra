@@ -7,12 +7,14 @@
 # This workflow is triggered if:
 # - A release is published
 # - A pre-release is changed to a release
+# - A maintainer manually validates binary preparation before a release
 name: Release binaries
 
 on:
   release:
     types:
       - released
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -51,15 +53,52 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Build and attach downloadable zebrad binaries to the GitHub release.
-  binaries:
-    name: Attach release binaries
+  # Resolve the release tag into the version used in binary asset names.
+  binary-version:
+    name: Resolve release binary version
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve release inputs
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          printf 'version=%s\n' "${RELEASE_TAG#v}" >> "${GITHUB_OUTPUT}"
+
+  prepare-binaries:
+    name: Prepare release binaries
+    needs: binary-version
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
+      id-token: write # authenticate binary provenance and signatures
+      attestations: write # store binary provenance
     uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      version: ${{ needs.binary-version.outputs.version }}
+      features: default-release-binaries
+
+  validate-binaries:
+    name: Validate release binary preparation
+    if: github.event_name == 'workflow_dispatch' && github.repository_owner == 'ZcashFoundation'
+    permissions:
+      contents: read
+      id-token: write # authenticate test provenance and signatures
+      attestations: write # store test provenance
+    uses: ./.github/workflows/zfnd-release-binaries.yml
+    with:
+      version: 0.0.0-test
+      features: default-release-binaries
+
+  attach-binaries:
+    name: Attach release binaries
+    needs: prepare-binaries
+    permissions:
+      contents: write # attach assets to the existing release
+    uses: ./.github/workflows/zfnd-attach-release-binaries.yml
     with:
       release_tag: ${{ github.event.release.tag_name }}
 
@@ -95,7 +134,9 @@ jobs:
       }}
     needs:
       - build
-      - binaries
+      - binary-version
+      - prepare-binaries
+      - attach-binaries
     timeout-minutes: 1
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -106,7 +147,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, binaries ]
+    needs: [ build, binary-version, prepare-binaries, attach-binaries ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest

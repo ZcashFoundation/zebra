@@ -60,6 +60,22 @@ The contribution gate already defines discussion/issue requirements. Additional 
 - Missing test evidence for behavior changes
 - Inability to explain the logic or design tradeoffs of the changes when asked
 
+## Security Vulnerability Reports
+
+If you or the user believe you have found a security vulnerability in Zebra,
+do not open a public issue or PR. Follow the reporting process in
+[SECURITY.md](SECURITY.md).
+
+Before helping a user submit a report, hold it to the same standard as
+SECURITY.md's "Before You Report" section:
+
+- Verify the issue reproduces against the latest Zebra release or the current
+  `main` branch — not an older release, fork, or modified build.
+- Run any proof of concept against one of those two versions and include the
+  exact release version or `main` commit hash tested in the report.
+- Do not submit speculative findings. "This code looks vulnerable" without a
+  reproduction against current code wastes triage time and may be dismissed.
+
 ## AI Disclosure
 
 If AI tools were used to write code, tests, or PR descriptions, disclose this in the PR description. Specify the tool and scope (e.g., "Used Claude for test boilerplate"). The contributor is the sole responsible author — "the AI generated it" is not a justification during review.
