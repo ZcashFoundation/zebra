@@ -252,6 +252,8 @@ where
             address_metrics,
             minimum_peer_version,
             max_conns_per_ip,
+            None,
+            None,
         );
 
         (peer_set, guard)

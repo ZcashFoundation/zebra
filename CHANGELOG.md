@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- `max_connections_per_subnet_v6` and `max_connections_per_subnet_v4` network config options
+  limiting peer connections per IPv6 `/64` and IPv4 `/24` subnet (default 2 each), preventing
+  one VPS with a `/64` allocation from bypassing the per-IP cap and filling all connection slots
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
 ## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
 ### Added

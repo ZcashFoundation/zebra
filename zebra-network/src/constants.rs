@@ -80,6 +80,21 @@ pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 ///       connections to an IP.
 pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 
+/// The default maximum number of peer connections per IPv6 `/64` subnet.
+///
+/// A single VPS with a standard `/64` allocation has 18 quintillion distinct
+/// `IpAddr` values on one machine. Without a per-subnet cap, each address passes
+/// the per-IP cap individually, allowing one machine to fill all connection slots.
+/// A default of 2 allows legitimate multi-homed nodes while preventing one `/64`
+/// from dominating the peer set.
+pub const DEFAULT_MAX_CONNS_PER_SUBNET_V6: usize = 2;
+
+/// The default maximum number of peer connections per IPv4 `/24` subnet.
+///
+/// A `/24` is the standard provider subnet size. A default of 2 allows
+/// legitimate co-located nodes while preventing one `/24` from dominating.
+pub const DEFAULT_MAX_CONNS_PER_SUBNET_V4: usize = 2;
+
 /// The default peerset target size.
 ///
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
