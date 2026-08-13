@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
-- RPC server startup now returns an error instead of panicking when
+- Configuration loading now returns an error instead of allowing RPC server startup to panic when
   `rpc.max_response_body_size` is larger than jsonrpsee supports
   ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
 
