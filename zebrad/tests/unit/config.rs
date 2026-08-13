@@ -820,6 +820,28 @@ network = "Testnet"
 }
 
 #[test]
+fn config_oversized_rpc_max_response_body_size_errors() {
+    let _env = EnvGuard::new();
+
+    let temp_dir = TempDir::new().expect("create temp dir");
+    let config_path = temp_dir.path().join("oversized_rpc_config.toml");
+
+    let invalid_config = r#"
+[rpc]
+max_response_body_size = 4294967296
+"#;
+
+    fs::write(&config_path, invalid_config).expect("write oversized RPC config");
+
+    let error = ZebradConfig::load(Some(config_path))
+        .expect_err("Should fail to load oversized RPC max response body size");
+
+    let error = error.to_string();
+    assert!(error.contains("max_response_body_size"));
+    assert!(error.contains("4294967296"));
+}
+
+#[test]
 fn config_invalid_env_values_error() {
     let env = EnvGuard::new();
 
