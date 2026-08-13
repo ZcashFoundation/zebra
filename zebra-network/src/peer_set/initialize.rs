@@ -665,13 +665,12 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(
-            None,
-            Some(config.max_connections_per_ip),
-            Some(config.max_connections_per_subnet_v6),
-            Some(config.max_connections_per_subnet_v4),
-        );
+    let mut recent_inbound_connections = recent_by_ip::RecentByIp::new(
+        None,
+        Some(config.max_connections_per_ip),
+        Some(config.max_connections_per_subnet_v6),
+        Some(config.max_connections_per_subnet_v4),
+    );
 
     let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),

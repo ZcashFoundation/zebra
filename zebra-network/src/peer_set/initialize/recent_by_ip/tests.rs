@@ -95,8 +95,14 @@ fn subnet_cap_rejects_third_ipv4_peer_from_same_24() {
     let ip3: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30));
     // All in 192.168.1.0/24
 
-    assert!(!recent.is_past_limit_or_add(ip1), "first peer from /24 accepted");
-    assert!(!recent.is_past_limit_or_add(ip2), "second peer from /24 accepted");
+    assert!(
+        !recent.is_past_limit_or_add(ip1),
+        "first peer from /24 accepted"
+    );
+    assert!(
+        !recent.is_past_limit_or_add(ip2),
+        "second peer from /24 accepted"
+    );
     assert!(
         recent.is_past_limit_or_add(ip3),
         "third peer from same /24 rejected by subnet cap"
@@ -135,8 +141,14 @@ fn subnet_cap_rejects_third_ipv6_peer_from_same_64() {
     ]));
     // All in 2001:db8::/64
 
-    assert!(!recent.is_past_limit_or_add(ip1), "first peer from /64 accepted");
-    assert!(!recent.is_past_limit_or_add(ip2), "second peer from /64 accepted");
+    assert!(
+        !recent.is_past_limit_or_add(ip1),
+        "first peer from /64 accepted"
+    );
+    assert!(
+        !recent.is_past_limit_or_add(ip2),
+        "second peer from /64 accepted"
+    );
     assert!(
         recent.is_past_limit_or_add(ip3),
         "third peer from same /64 rejected by subnet cap"
