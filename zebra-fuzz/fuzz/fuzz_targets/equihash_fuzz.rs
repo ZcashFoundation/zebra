@@ -130,8 +130,11 @@ fuzz_target!(|data: &[u8]| {
     // (148K exec/s, corp +0, cov+ft 323/389) confirms.
     //
     // Small Equihash params let the verifier finish in microseconds:
-    //   (n=50,  k=3) — minimum sane params, exercises the
+    //   (n=48,  k=3) — minimum sane params, exercises the
     //                  collision_byte_length / hash_length math edge.
+    //                  `Params::new` requires n % 8 == 0 and n % (k + 1) == 0;
+    //                  48 is the closest value to the 50 used previously that
+    //                  satisfies both.
     //   (n=96,  k=5) — the upstream `all_bits_matter` test vector
     //                  param; soln length 68 bytes (vs Zcash 1344).
     //
@@ -157,8 +160,10 @@ fuzz_target!(|data: &[u8]| {
         let soln_bytes = &data[split_b..];
 
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            // (50, 3) — minimum sane.
-            let _ = equihash::is_valid_solution(50, 3, input_bytes, nonce_bytes, soln_bytes);
+            // (48, 3) — minimum sane. Was (50, 3), which `Params::new`
+            // rejects (50 % 8 == 2), so this probe returned `None` for every
+            // input and never reached the verifier.
+            let _ = equihash::is_valid_solution(48, 3, input_bytes, nonce_bytes, soln_bytes);
         }));
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             // (96, 5) — upstream test-vector params.
