@@ -76,11 +76,14 @@ enum TreeOp {
     /// Drives the `position` / `count` accessors.
     MarkAtPosition,
     /// Stand-in for `RemoveMark` (no public marking API on Frontier).
-    /// Drives the `hash` and `cached_root` accessors.
-    RemoveMark(u8),
+    /// Drives the `hash` and `cached_root` accessors. Carries no payload:
+    /// every handling site ignored it, so `Arbitrary` was spending an input
+    /// byte per op that could not change behaviour.
+    RemoveMark,
     /// Stand-in for `WitnessRoot` (no public witness API on Frontier).
-    /// Drives `recalculate_root` against the current frontier state.
-    WitnessRoot(u8),
+    /// Drives `recalculate_root` against the current frontier state. Carries
+    /// no payload, for the same reason as `RemoveMark`.
+    WitnessRoot,
     /// Stand-in for `RewindCheckpoint` (no checkpoint stack on Frontier).
     /// Drives subtree-tracking accessors which feed RPC and shielded-pool
     /// finalization paths.
@@ -95,9 +98,10 @@ struct Program {
 
 /// Cap the number of ops executed per fuzz iteration. Without this cap a
 /// single input could spin forever on a long `Vec<TreeOp>` and starve the
-/// fuzzer. 256 is plenty to drive an interesting frontier shape while still
-/// fitting comfortably under the libFuzzer per-input timeout.
-const MAX_OPS: usize = 256;
+/// fuzzer. Every append invalidates the cached root, so the per-input cost
+/// grows with this number while the frontier shapes it reaches stop getting
+/// more interesting; 32 keeps mutation feedback responsive.
+const MAX_OPS: usize = 32;
 
 fuzz_target!(|program: Program| {
     let ops: Vec<TreeOp> = program.ops.into_iter().take(MAX_OPS).collect();
@@ -135,16 +139,13 @@ fn run_sapling(ops: &[TreeOp]) {
                     continue;
                 }
 
-                // Oracle: root() must succeed (it is infallible — `pub fn root() -> Root`)
-                // and the second call must return the same value (cached-root idempotency).
-                let r1 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                let r2 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                match (r1, r2) {
-                    (Ok(a), Ok(b)) => assert_eq!(
-                        a, b,
-                        "sapling root() not idempotent — cached vs recomputed divergence",
-                    ),
-                    _ => return,
+                // `root()` must not panic on any frontier reachable by appends.
+                // The cached-vs-recomputed comparison lives in the `WitnessRoot`
+                // arm instead: `recalculate_root()` walks the whole frontier, so
+                // running it after every append dominates the cost of the target
+                // while checking the same property less often per CPU-second.
+                if panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root())).is_err() {
+                    return;
                 }
             }
             TreeOp::Root => {
@@ -165,12 +166,24 @@ fn run_sapling(ops: &[TreeOp]) {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.position()));
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.count()));
             }
-            TreeOp::RemoveMark(_) => {
+            TreeOp::RemoveMark => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.hash()));
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.cached_root()));
             }
-            TreeOp::WitnessRoot(_) => {
-                let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+            TreeOp::WitnessRoot => {
+                // Oracle: the memoised root must equal one computed from
+                // scratch. `root()` caches into the `RwLock`, so comparing it
+                // against itself cannot fail; `recalculate_root()` bypasses the
+                // cache, which makes this a real check on the memoisation and
+                // on the frontier state it derives from. How often it runs is
+                // left to the fuzzer, which decides how many of these ops to
+                // emit.
+                let cached = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
+                let recomputed =
+                    panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+                if let (Ok(a), Ok(b)) = (cached, recomputed) {
+                    assert_eq!(a, b, "cached root() diverges from recalculate_root()");
+                }
             }
             TreeOp::RewindCheckpoint => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.is_complete_subtree()));
@@ -212,14 +225,13 @@ fn run_orchard(ops: &[TreeOp]) {
                     continue;
                 }
 
-                let r1 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                let r2 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                match (r1, r2) {
-                    (Ok(a), Ok(b)) => assert_eq!(
-                        a, b,
-                        "orchard root() not idempotent — cached vs recomputed divergence",
-                    ),
-                    _ => return,
+                // `root()` must not panic on any frontier reachable by appends.
+                // The cached-vs-recomputed comparison lives in the `WitnessRoot`
+                // arm instead: `recalculate_root()` walks the whole frontier, so
+                // running it after every append dominates the cost of the target
+                // while checking the same property less often per CPU-second.
+                if panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root())).is_err() {
+                    return;
                 }
             }
             TreeOp::Root => {
@@ -247,12 +259,24 @@ fn run_orchard(ops: &[TreeOp]) {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.position()));
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.count()));
             }
-            TreeOp::RemoveMark(_) => {
+            TreeOp::RemoveMark => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.hash()));
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.cached_root()));
             }
-            TreeOp::WitnessRoot(_) => {
-                let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+            TreeOp::WitnessRoot => {
+                // Oracle: the memoised root must equal one computed from
+                // scratch. `root()` caches into the `RwLock`, so comparing it
+                // against itself cannot fail; `recalculate_root()` bypasses the
+                // cache, which makes this a real check on the memoisation and
+                // on the frontier state it derives from. How often it runs is
+                // left to the fuzzer, which decides how many of these ops to
+                // emit.
+                let cached = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
+                let recomputed =
+                    panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+                if let (Ok(a), Ok(b)) = (cached, recomputed) {
+                    assert_eq!(a, b, "cached root() diverges from recalculate_root()");
+                }
             }
             TreeOp::RewindCheckpoint => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.is_complete_subtree()));
@@ -298,14 +322,13 @@ fn run_sprout(ops: &[TreeOp]) {
                     continue;
                 }
 
-                let r1 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                let r2 = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
-                match (r1, r2) {
-                    (Ok(a), Ok(b)) => assert_eq!(
-                        a, b,
-                        "sprout root() not idempotent — cached vs recomputed divergence",
-                    ),
-                    _ => return,
+                // `root()` must not panic on any frontier reachable by appends.
+                // The cached-vs-recomputed comparison lives in the `WitnessRoot`
+                // arm instead: `recalculate_root()` walks the whole frontier, so
+                // running it after every append dominates the cost of the target
+                // while checking the same property less often per CPU-second.
+                if panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root())).is_err() {
+                    return;
                 }
             }
             TreeOp::Root => {
@@ -322,12 +345,24 @@ fn run_sprout(ops: &[TreeOp]) {
             TreeOp::MarkAtPosition => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.count()));
             }
-            TreeOp::RemoveMark(_) => {
+            TreeOp::RemoveMark => {
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.hash()));
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.cached_root()));
             }
-            TreeOp::WitnessRoot(_) => {
-                let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+            TreeOp::WitnessRoot => {
+                // Oracle: the memoised root must equal one computed from
+                // scratch. `root()` caches into the `RwLock`, so comparing it
+                // against itself cannot fail; `recalculate_root()` bypasses the
+                // cache, which makes this a real check on the memoisation and
+                // on the frontier state it derives from. How often it runs is
+                // left to the fuzzer, which decides how many of these ops to
+                // emit.
+                let cached = panic::catch_unwind(panic::AssertUnwindSafe(|| tree.root()));
+                let recomputed =
+                    panic::catch_unwind(panic::AssertUnwindSafe(|| tree.recalculate_root()));
+                if let (Ok(a), Ok(b)) = (cached, recomputed) {
+                    assert_eq!(a, b, "cached root() diverges from recalculate_root()");
+                }
             }
             TreeOp::RewindCheckpoint => {
                 // No subtree API on Sprout — exercise count() again as a
