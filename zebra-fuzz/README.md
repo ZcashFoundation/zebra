@@ -21,7 +21,6 @@ zebra-fuzz/
     ├── Cargo.lock
     ├── fuzz_targets/        # 15 targets, one file each
     ├── dicts/               # libFuzzer dictionaries, named <target>.dict
-    ├── seeds/               # committed seed corpora, <target>_seed_corpus.zip
     ├── seed_gen.rs          # helper binary, not a fuzz target
     └── corpus/              # runtime corpus, git-ignored
 ```
@@ -95,9 +94,17 @@ left as follow-up work rather than folded in here.
 
 ## Seed corpora
 
-Each target ships a seed corpus as `seeds/<target>_seed_corpus.zip`, which
-libFuzzer takes as its starting corpus. Without one, a run spends its first weeks
-rediscovering the input format instead of exercising the code under test.
+Each target has a seed corpus, which libFuzzer takes as its starting corpus.
+Without one, a run spends its first weeks rediscovering the input format instead
+of exercising the code under test.
+
+The archives live in
+[`ZcashFoundation/zebra-fuzz-corpora`](https://github.com/ZcashFoundation/zebra-fuzz-corpora),
+one `seeds/<target>_seed_corpus.zip` per target, and not in this repository:
+they are binaries, and binaries committed here would stay in Zebra's git history
+permanently. That repository carries `SHA256SUMS` and a `verify.sh` for checking
+an archive against it. The OSS-Fuzz Dockerfile clones it, and `build.sh` takes
+the seeds from that clone.
 
 The archives are minimised with `cargo fuzz cmin`, which is libFuzzer's
 `-merge=1`: it keeps an input only when that input contributes a coverage
@@ -106,15 +113,16 @@ retains every coverage feature of what went in. It is not necessarily the
 smallest such subset — the pass is greedy and order-dependent — but no coverage
 is lost by construction. The inputs are derived from public chain data.
 
-`seeds/` (checked in) and `corpus/` (git-ignored) are deliberately separate
-directories: the first is the committed starting point, the second is the
-evolving corpus `cargo fuzz run` writes at runtime.
+`corpus/` is git-ignored: it is the evolving corpus `cargo fuzz run` writes at
+runtime, kept separate from the fixed starting point the archives provide.
 
-To run a target against its shipped seeds:
+To run a target against its seed corpus:
 
 ```sh
+git clone --depth 1 https://github.com/ZcashFoundation/zebra-fuzz-corpora \
+      /tmp/zebra-fuzz-corpora
 mkdir -p zebra-fuzz/fuzz/corpus/<target>
-unzip -o zebra-fuzz/fuzz/seeds/<target>_seed_corpus.zip \
+unzip -o /tmp/zebra-fuzz-corpora/seeds/<target>_seed_corpus.zip \
       -d zebra-fuzz/fuzz/corpus/<target>
 cargo +nightly fuzz run --fuzz-dir zebra-fuzz/fuzz <target>
 ```
