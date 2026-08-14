@@ -133,7 +133,12 @@ const METHOD_NAMES: &[&str] = &[
     "getblocktemplate",
     "getrawmempool",
     "getmempoolinfo",
-    "stop",
+    // "stop" is deliberately excluded: on a non-Windows build the handler
+    // raises SIGINT directly (`nix::sys::signal::raise`) once
+    // `network.is_regtest()`, which would kill the fuzzer. Mainnet and Testnet
+    // both return MethodNotFound instead, so neither this target (Mainnet,
+    // hard-coded) nor `rpc_handler_fuzz` (Mainnet or Testnet only) can reach
+    // that path today — and neither must regain it by adding Regtest.
     "help",
     "ping",
     "z_getnotescount",
@@ -711,7 +716,7 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
         "getinfo" | "getblockchaininfo" | "getbestblockhash"
         | "getbestblockheightandhash" | "getblockcount" | "getmempoolinfo"
         | "getmininginfo" | "getdifficulty" | "getnetworkinfo" | "getpeerinfo"
-        | "getconnectioncount" | "stop" | "ping" | "z_getnotescount"
+        | "getconnectioncount" | "ping" | "z_getnotescount"
         | "getacceptedaddrs" | "estimatefee" | "getexperimentalfeatures"
         | "help" => "[]".to_string(),
         // For methods we don't have a template for, fall back to the raw-

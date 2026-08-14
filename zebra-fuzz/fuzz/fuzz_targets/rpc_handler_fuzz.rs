@@ -257,8 +257,8 @@ enum RpcCall {
     /// which is a complex DTO, so we feed an empty `Vec<String>` proxy
     /// in the dispatch arm.)
     /// `stop()` — sync; exercises trait method dispatch only (do NOT call
-    /// in fuzz: the handler triggers an actual app shutdown via a oneshot).
-    /// (Intentionally NOT included.)
+    /// in fuzz: on regtest the handler raises SIGINT directly, which would
+    /// kill the fuzzer). (Intentionally NOT included.)
 
     /// `generate(num_blocks)` — Regtest-only; gated on network kind, returns
     /// an error on Mainnet. Cheap dispatch surface.
