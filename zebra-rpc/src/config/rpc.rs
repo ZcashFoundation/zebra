@@ -58,11 +58,21 @@ pub struct Config {
     /// This server implements the lightwalletd `CompactTxStreamer` service, so
     /// Zcash light clients can connect directly to Zebra.
     ///
+    /// This server is experimental: its behaviour and configuration may change
+    /// in any release, including in ways that break clients.
+    ///
     /// # Security
     ///
-    /// If you bind Zebra's lightwalletd gRPC port to a public IP address,
-    /// anyone on the internet can query your node's state and send
-    /// transactions via your node.
+    /// The port serves plaintext HTTP/2, with no TLS and no authentication —
+    /// cookie authentication does not apply to it. Anyone who can reach the
+    /// port can query your node's state and send transactions through it, and
+    /// anyone on the network path can read and modify the traffic, including
+    /// the addresses a light client is querying. Terminate TLS in a reverse
+    /// proxy, and bind Zebra to a loopback or private address.
+    ///
+    /// Run this on infrastructure you operate, not on end users' machines: a
+    /// loopback port is reachable by any local process, and by web pages
+    /// loaded in a browser on that machine.
     pub lightwalletd_listen_addr: Option<SocketAddr>,
 
     /// The number of threads used to process RPC requests and responses.
