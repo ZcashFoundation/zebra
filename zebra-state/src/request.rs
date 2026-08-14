@@ -29,8 +29,8 @@ use crate::{
     ReadResponse, Response,
 };
 use crate::{
-    error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
-    CommitSemanticallyVerifiedError,
+    error::{InvalidateError, LayeredStateError, ReconsiderError},
+    AwaitUtxoError, CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError,
 };
 
 /// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
@@ -753,6 +753,28 @@ impl MappedRequest for ReconsiderBlockRequest {
     }
 }
 
+/// Request a UTXO, waiting for it to arrive if it is not yet available.
+///
+/// See the [`crate`] documentation and [`Request::AwaitUtxo`] for details.
+#[allow(dead_code)]
+pub struct AwaitUtxoRequest(pub transparent::OutPoint);
+
+impl MappedRequest for AwaitUtxoRequest {
+    type MappedResponse = transparent::Utxo;
+    type Error = AwaitUtxoError;
+
+    fn map_request(self) -> Request {
+        Request::AwaitUtxo(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Utxo(utxo) => utxo,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
@@ -933,6 +955,9 @@ pub enum Request {
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification or to wait until
     /// the UTXO arrives in the state before validating dependent transactions.
+    ///
+    /// Returns [`Response::Utxo`] with the UTXO, or an [`AwaitUtxoError`] if
+    /// the state stopped responding before the UTXO arrived.
     ///
     /// # Correctness
     ///
