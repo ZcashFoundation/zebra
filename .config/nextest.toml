@@ -76,6 +76,18 @@ test-group = 'serial-live-mainnet'
 
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.
+#
+# This split is only safe while no other running test dials live Testnet peers.
+# `integration::sync::sync_one_checkpoint_testnet` and the Testnet half of
+# `integration::sync::restart_stop_at_height` are currently disabled; if they are
+# re-enabled, they join 'serial-live-mainnet' via the filter above and can then
+# contend with this group for Testnet connections. A test can only belong to one
+# group, and `restart_stop_at_height` syncs both networks, so re-enabling them
+# means merging these two groups back into one live-peer group.
+#
+# Keep the 'profile.default' and 'profile.ci' copies of each filter below in
+# sync: nextest is invoked with '--profile ci' by the test workflows, and with
+# the default profile by the coverage workflow.
 [[profile.default.overrides]]
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
 test-group = 'serial-live-testnet'
