@@ -42,10 +42,53 @@
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
 use std::panic;
+use std::sync::OnceLock;
 use tokio_util::codec::{Decoder, Encoder};
 use zebra_chain::parameters::Network;
+use zebra_chain::serialization::sha256d;
 use zebra_network::protocol::external::{Codec, Message};
 use zebra_network::types::MetaAddr;
+
+/// Cached default testnet.
+///
+/// `Network::new_default_testnet()` builds a `BTreeMap` of activation heights,
+/// parses the genesis hash and round-trips 256-bit difficulty. It was called
+/// once per gossiped address, which dominated this target's cost. The value is immutable and its payload sits behind an
+/// `Arc`, so building it once and cloning the handle is equivalent and cheap.
+fn default_testnet() -> &'static Network {
+    static TESTNET: OnceLock<Network> = OnceLock::new();
+    TESTNET.get_or_init(Network::new_default_testnet)
+}
+
+/// Header length (4 magic + 12 command + 4 body_len + 4 checksum).
+/// Tracks `HEADER_LEN` in `zebra-network/src/protocol/external/codec.rs`.
+const FUZZ_HEADER_LEN: usize = 24;
+
+/// Body cap a codec starts at, before a handshake raises it. Tracks
+/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private.
+const FUZZ_MAX_HANDSHAKE_BODY_LEN: usize = 1024;
+
+/// The two commands whose bodies this target inspects. Framing only these keeps
+/// the cost proportional to what the target actually asserts on.
+const ADDR_COMMANDS: [&[u8; 12]; 2] = [b"addr\0\0\0\0\0\0\0\0", b"addrv2\0\0\0\0\0\0"];
+
+/// Build a well-formed frame around a fuzzer-supplied body.
+///
+/// Layout: `magic(4) | command(12) | body_len(4 LE) | sha256d(body)[..4] | body`
+///
+/// The checksum is computed here rather than read from the input: `decode`
+/// rejects any frame whose body does not hash to its checksum, and a mutator
+/// cannot learn sha256d, so raw fuzzer bytes never reach an address parser.
+/// Owning the framing leaves the body fully under mutator control.
+fn assemble_frame(network: &Network, command: &[u8; 12], body: &[u8]) -> BytesMut {
+    let mut frame = BytesMut::with_capacity(FUZZ_HEADER_LEN + body.len());
+    frame.extend_from_slice(&network.magic().0);
+    frame.extend_from_slice(command);
+    frame.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&sha256d::Checksum::from(body).0);
+    frame.extend_from_slice(body);
+    frame
+}
 
 fuzz_target!(|data: &[u8]| {
     // ═══════════════════════════════════════════════════════════════════
@@ -59,6 +102,29 @@ fuzz_target!(|data: &[u8]| {
     let mut codec = Codec::builder().finish();
     let mut buf = BytesMut::from(data);
     let mut addr_batches: Vec<Vec<MetaAddr>> = Vec::new();
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Layer 0: Framed body — reach the address parsers.
+    //
+    // The Layer 1 loop below feeds raw input to `decode`, so a mutated input
+    // dies on the checksum check and the address parsers are only ever reached
+    // by the shipped seeds. Here the harness owns the framing and computes the
+    // checksum, leaving the body mutable. Batches parsed this way join
+    // `addr_batches`, so the invariants below run on them too.
+    //
+    // The selector is the *last* byte: a corpus entry starts with the network
+    // magic, so a leading byte is effectively constant and would pin every
+    // input to one command.
+    // ═══════════════════════════════════════════════════════════════════
+    if let Some((&selector, body)) = data.split_last() {
+        let command = ADDR_COMMANDS[selector as usize % ADDR_COMMANDS.len()];
+        let body = &body[..body.len().min(FUZZ_MAX_HANDSHAKE_BODY_LEN)];
+        let mut framed = assemble_frame(&Network::Mainnet, command, body);
+        let mut framed_codec = Codec::builder().finish();
+        if let Ok(Some(Message::Addr(addrs))) = framed_codec.decode(&mut framed) {
+            addr_batches.push(addrs);
+        }
+    }
 
     loop {
         match codec.decode(&mut buf) {
@@ -246,7 +312,7 @@ fuzz_target!(|data: &[u8]| {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             for addr in addrs.iter() {
                 let _m = addr.sanitize(&Network::Mainnet);
-                let _t = addr.sanitize(&Network::new_default_testnet());
+                let _t = addr.sanitize(default_testnet());
             }
         }));
 

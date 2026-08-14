@@ -24,10 +24,22 @@
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
 use std::panic;
+use std::sync::OnceLock;
 use tokio_util::codec::{Decoder, Encoder};
 use zebra_chain::parameters::Network;
-use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
+use zebra_chain::serialization::{sha256d, MAX_PROTOCOL_MESSAGE_LEN};
 use zebra_network::protocol::external::{Codec, Message};
+
+/// Cached default testnet.
+///
+/// `Network::new_default_testnet()` builds a `BTreeMap` of activation heights,
+/// parses the genesis hash and round-trips 256-bit difficulty. It was called
+/// once per input, on the cross-network probe. The value is immutable and its payload sits behind an
+/// `Arc`, so building it once and cloning the handle is equivalent and cheap.
+fn default_testnet() -> &'static Network {
+    static TESTNET: OnceLock<Network> = OnceLock::new();
+    TESTNET.get_or_init(Network::new_default_testnet)
+}
 
 /// Header length (4 magic + 12 command + 4 body_len + 4 checksum).
 /// Tracks `HEADER_LEN` in `zebra-network/src/protocol/external/codec.rs`.
@@ -63,7 +75,80 @@ enum CrossNetwork {
     Accepted(&'static str),
 }
 
+/// The wire commands `Codec::read_body` dispatches on, in the order they appear
+/// in `zebra-network/src/protocol/external/codec.rs`.
+const WIRE_COMMANDS: [&[u8; 12]; 20] = [
+    b"version\0\0\0\0\0",
+    b"verack\0\0\0\0\0\0",
+    b"ping\0\0\0\0\0\0\0\0",
+    b"pong\0\0\0\0\0\0\0\0",
+    b"reject\0\0\0\0\0\0",
+    b"addr\0\0\0\0\0\0\0\0",
+    b"addrv2\0\0\0\0\0\0",
+    b"getaddr\0\0\0\0\0",
+    b"block\0\0\0\0\0\0\0",
+    b"getblocks\0\0\0",
+    b"headers\0\0\0\0\0",
+    b"getheaders\0\0",
+    b"inv\0\0\0\0\0\0\0\0\0",
+    b"getdata\0\0\0\0\0",
+    b"notfound\0\0\0\0",
+    b"tx\0\0\0\0\0\0\0\0\0\0",
+    b"mempool\0\0\0\0\0",
+    b"filterload\0\0",
+    b"filteradd\0\0\0",
+    b"filterclear\0",
+];
+
+/// Body cap a codec starts at, before a handshake raises it. Tracks
+/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private. A body longer than
+/// this is rejected on the length check, which runs before the checksum is
+/// verified, so the assembled frame keeps its body under it.
+const FUZZ_MAX_HANDSHAKE_BODY_LEN: usize = 1024;
+
+/// Build a well-formed frame around a fuzzer-supplied body.
+///
+/// Layout: `magic(4) | command(12) | body_len(4 LE) | sha256d(body)[..4] | body`
+///
+/// The checksum is **computed here** rather than taken from the input. That is
+/// the whole point: `Codec::decode` rejects any frame whose body does not hash
+/// to its checksum, and a mutator cannot learn sha256d, so a fuzzer editing raw
+/// bytes never gets past that check and never reaches a body reader. Letting the
+/// harness own the framing leaves the body — the part with the parsers in it —
+/// fully under mutator control.
+fn assemble_frame(network: &Network, command: &[u8; 12], body: &[u8]) -> BytesMut {
+    let mut frame = BytesMut::with_capacity(FUZZ_HEADER_LEN + body.len());
+    frame.extend_from_slice(&network.magic().0);
+    frame.extend_from_slice(command);
+    frame.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&sha256d::Checksum::from(body).0);
+    frame.extend_from_slice(body);
+    frame
+}
+
 fuzz_target!(|data: &[u8]| {
+    // ═══════════════════════════════════════════════════════════════════
+    // Layer 0: Framed body — reach the body readers.
+    //
+    // Layer 1 below feeds raw input straight to `decode`, which means every
+    // mutated input dies on the checksum check and the body readers are only
+    // ever reached by the shipped seeds. Here the harness owns the framing and
+    // computes the checksum, so the whole body stays mutable and the reader
+    // selected by `command` actually runs. Errors are expected — a body is
+    // arbitrary bytes — so nothing is asserted; the point is reachability.
+    //
+    // The selector is the *last* byte: a corpus entry starts with the network
+    // magic, so a leading byte is effectively constant and would pin every
+    // input to one command.
+    // ═══════════════════════════════════════════════════════════════════
+    if let Some((&selector, body)) = data.split_last() {
+        let command = WIRE_COMMANDS[selector as usize % WIRE_COMMANDS.len()];
+        let body = &body[..body.len().min(FUZZ_MAX_HANDSHAKE_BODY_LEN)];
+        let mut framed = assemble_frame(&Network::Mainnet, command, body);
+        let mut framed_codec = Codec::builder().finish();
+        let _ = framed_codec.decode(&mut framed);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // Layer 1: Codec Decode — Multi-message Extraction
     // Same shape as the original thin target: feed raw bytes that may
@@ -289,7 +374,7 @@ fuzz_target!(|data: &[u8]| {
             if codec_main.encode(msg.clone(), &mut out).is_err() {
                 return None;
             }
-            let mut codec_test = Codec::builder().for_network(&Network::new_default_testnet()).finish();
+            let mut codec_test = Codec::builder().for_network(default_testnet()).finish();
             Some(match codec_test.decode(&mut out) {
                 Err(_) => CrossNetwork::Rejected,
                 Ok(None) => CrossNetwork::Incomplete,

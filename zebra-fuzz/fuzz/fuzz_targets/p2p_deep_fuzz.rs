@@ -3,37 +3,112 @@
 use libfuzzer_sys::fuzz_target;
 use bytes::BytesMut;
 use std::panic;
+use std::sync::OnceLock;
 use tokio_util::codec::{Decoder, Encoder};
 use zebra_chain::parameters::Network;
+use zebra_chain::serialization::sha256d;
 use zebra_network::protocol::external::{Codec, Message};
+
+/// Cached default testnet.
+///
+/// `Network::new_default_testnet()` builds a `BTreeMap` of activation heights,
+/// parses the genesis hash and round-trips 256-bit difficulty. It was called
+/// once per address and once per message, which dominated this target's cost. The value is immutable and its payload sits behind an
+/// `Arc`, so building it once and cloning the handle is equivalent and cheap.
+fn default_testnet() -> &'static Network {
+    static TESTNET: OnceLock<Network> = OnceLock::new();
+    TESTNET.get_or_init(Network::new_default_testnet)
+}
+
+/// Header length (4 magic + 12 command + 4 body_len + 4 checksum).
+/// Tracks `HEADER_LEN` in `zebra-network/src/protocol/external/codec.rs`.
+const FUZZ_HEADER_LEN: usize = 24;
+
+/// Body cap a codec starts at, before a handshake raises it. Tracks
+/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private.
+const FUZZ_MAX_HANDSHAKE_BODY_LEN: usize = 1024;
+
+/// The wire commands `Codec::read_body` dispatches on, in the order they appear
+/// in `zebra-network/src/protocol/external/codec.rs`.
+const WIRE_COMMANDS: [&[u8; 12]; 20] = [
+    b"version\0\0\0\0\0",
+    b"verack\0\0\0\0\0\0",
+    b"ping\0\0\0\0\0\0\0\0",
+    b"pong\0\0\0\0\0\0\0\0",
+    b"reject\0\0\0\0\0\0",
+    b"addr\0\0\0\0\0\0\0\0",
+    b"addrv2\0\0\0\0\0\0",
+    b"getaddr\0\0\0\0\0",
+    b"block\0\0\0\0\0\0\0",
+    b"getblocks\0\0\0",
+    b"headers\0\0\0\0\0",
+    b"getheaders\0\0",
+    b"inv\0\0\0\0\0\0\0\0\0",
+    b"getdata\0\0\0\0\0",
+    b"notfound\0\0\0\0",
+    b"tx\0\0\0\0\0\0\0\0\0\0",
+    b"mempool\0\0\0\0\0",
+    b"filterload\0\0",
+    b"filteradd\0\0\0",
+    b"filterclear\0",
+];
+
+/// Build a well-formed frame around a fuzzer-supplied body.
+///
+/// Layout: `magic(4) | command(12) | body_len(4 LE) | sha256d(body)[..4] | body`
+///
+/// The checksum is computed here rather than read from the input: `decode`
+/// rejects any frame whose body does not hash to its checksum, and a mutator
+/// cannot learn sha256d, so raw fuzzer bytes never reach a body reader. Owning
+/// the framing leaves the body fully under mutator control.
+fn assemble_frame(network: &Network, command: &[u8; 12], body: &[u8]) -> BytesMut {
+    let mut frame = BytesMut::with_capacity(FUZZ_HEADER_LEN + body.len());
+    frame.extend_from_slice(&network.magic().0);
+    frame.extend_from_slice(command);
+    frame.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&sha256d::Checksum::from(body).0);
+    frame.extend_from_slice(body);
+    frame
+}
 
 fuzz_target!(|data: &[u8]| {
     // ═══════════════════════════════════════════════════════════════════
-    // Layer 1: Codec Decode — Multi-message Extraction (with byte tracking)
+    // Layer 1: Codec Decode — Multi-message Extraction
     // Target: codec parsing bugs, buffer handling errors
-    //
-    // Track each message's byte segment [start..end] within `data` so Layer 3
-    // can run a true input-vs-re-encode oracle (`serialized == input[start..end]`)
-    // — strictly stronger than an encode/decode/encode oracle, since it verifies
-    // asymmetry on the *attacker-supplied* bytes rather than only on encoder
-    // output.
     // ═══════════════════════════════════════════════════════════════════
     let mut codec = Codec::builder().finish();
     let mut buf = BytesMut::from(data);
     let mut messages = Vec::new();
-    // Byte-segment for each parsed message inside `data`.
-    let mut msg_segments: Vec<(usize, usize)> = Vec::new();
-    let total_len = data.len();
 
-    // Decode all messages from the buffer, recording each message's byte
-    // segment in the original `data`. BytesMut::split_to consumes from the
-    // front, so consumed bytes = total_len - buf.len() at any point.
+    // ═══════════════════════════════════════════════════════════════════
+    // Layer 0: Framed body — reach the body readers.
+    //
+    // The loop below feeds raw input to `decode`, so a mutated input dies on
+    // the checksum check and the body readers are only ever reached by the
+    // shipped seeds. Here the harness owns the framing and computes the
+    // checksum, leaving the body mutable; whatever parses joins `messages`, so
+    // every oracle below runs on it.
+    //
+    // The selector is the *last* byte: a corpus entry starts with the network
+    // magic, so a leading byte is effectively constant and would pin every
+    // input to one command.
+    // ═══════════════════════════════════════════════════════════════════
+    if let Some((&selector, body)) = data.split_last() {
+        let command = WIRE_COMMANDS[selector as usize % WIRE_COMMANDS.len()];
+        let body = &body[..body.len().min(FUZZ_MAX_HANDSHAKE_BODY_LEN)];
+        let mut framed = assemble_frame(&Network::Mainnet, command, body);
+        let mut framed_codec = Codec::builder().finish();
+        if let Ok(Some(msg)) = framed_codec.decode(&mut framed) {
+            messages.push(msg);
+        }
+    }
+
+    // Decode all messages from the buffer. The per-message byte segments this
+    // loop used to record fed only the re-encode-vs-input-segment oracle, which
+    // has been removed, so they are no longer computed.
     loop {
-        let consumed_before = total_len - buf.len();
         match codec.decode(&mut buf) {
             Ok(Some(msg)) => {
-                let consumed_after = total_len - buf.len();
-                msg_segments.push((consumed_before, consumed_after));
                 messages.push(msg);
                 continue;
             }
@@ -208,7 +283,7 @@ fuzz_target!(|data: &[u8]| {
             // last_known_info_is_valid_for_outbound(network).
             let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 for a in addrs {
-                    let _ = a.sanitize(&Network::new_default_testnet());
+                    let _ = a.sanitize(default_testnet());
                 }
             }));
         }
@@ -310,7 +385,7 @@ fuzz_target!(|data: &[u8]| {
     // ═══════════════════════════════════════════════════════════════════
     for msg in &messages {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            for net in [Network::Mainnet, Network::new_default_testnet()] {
+            for net in [Network::Mainnet, default_testnet().clone()] {
                 let mut codec_x = Codec::builder().for_network(&net).finish();
                 let mut out = BytesMut::new();
                 if codec_x.encode(msg.clone(), &mut out).is_ok() && out.len() >= 4 {
@@ -466,7 +541,7 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
-    for (msg, &(seg_start, seg_end)) in messages.iter().zip(msg_segments.iter()) {
+    for msg in &messages {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             let mut codec_enc = Codec::builder().finish();
             let mut out_buf = BytesMut::new();
@@ -484,58 +559,14 @@ fuzz_target!(|data: &[u8]| {
                     );
                 }
 
-                // Input-eq oracle: compare re-encoded bytes against the
-                // original input segment. Variants whose wire form has
-                // legitimate non-determinism are excluded.
-                //
-                // Excluded:
-                //   - Version : address V1/V2 form ambiguity, services /
-                //               timestamp normalization on parse.
-                //   - Verack / GetAddr / Mempool / FilterClear : zero-body
-                //               variants whose `read_*` consumers ignore
-                //               trailing bytes (BTC-derived codec quirk;
-                //               decoder accepts attacker-supplied body
-                //               bytes that the encoder will not emit).
-                //               Tracked as a separate family-7 finding —
-                //               not surfaced here per fuzz_known_panic
-                //               filter SOP so libfuzzer can explore
-                //               other paths.
-                //   - Reject  : `reason` is a var-string whose length
-                //               prefix can be encoded in multiple
-                //               valid widths.
-                //   - Addr    : V1 / V2 form interleaving may produce
-                //               canonicalized output on re-encode.
-                //   - FilterAdd : `data` length-prefix has multi-byte
-                //               varint forms the encoder canonicalizes.
-                let body_eq_eligible = !matches!(
-                    msg,
-                    Message::Version(_)
-                        | Message::Verack
-                        | Message::GetAddr
-                        | Message::Mempool
-                        | Message::FilterClear
-                        | Message::Reject { .. }
-                        | Message::Addr(_)
-                        | Message::FilterAdd { .. }
-                );
-                if body_eq_eligible
-                    && seg_start <= seg_end
-                    && seg_end <= total_len
-                {
-                    let input_segment = &data[seg_start..seg_end];
-                    // Header is deterministic given body (magic/command/
-                    // length/checksum). If lengths differ, parse already
-                    // accepted slack bytes the encoder will not emit —
-                    // a real codec asymmetry.
-                    assert_eq!(
-                        out_buf.as_ref(),
-                        input_segment,
-                        "Codec asymmetry: re-encode != input segment (cmd={}, in_len={}, enc_len={})",
-                        msg.command(),
-                        input_segment.len(),
-                        out_buf.len()
-                    );
-                }
+                // The re-encode-vs-input-segment oracle that used to live here
+                // has been removed. It was not a real invariant: the codec
+                // deliberately accepts trailing bytes after a message body, so a
+                // re-encode can legitimately be shorter than the bytes the
+                // decoder consumed. It never fired only because the checksum
+                // barrier kept mutated frames from reaching it; with Layer 0
+                // feeding well-formed frames it would report those accepted
+                // slack bytes as codec asymmetry on every such input.
             }
         }));
     }
