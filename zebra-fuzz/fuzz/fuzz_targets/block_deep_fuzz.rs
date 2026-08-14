@@ -5,12 +5,24 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::panic;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use zebra_chain::amount::DeferredPoolBalanceChange;
 use zebra_chain::block::{merkle, Block, Height, MAX_BLOCK_BYTES};
 use zebra_chain::parameters::Network;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::transaction::Transaction;
 use zebra_chain::transparent;
+
+/// Cached default testnet.
+///
+/// `Network::new_default_testnet()` builds a `BTreeMap` of activation heights,
+/// parses the genesis hash and round-trips 256-bit difficulty. It was called
+/// several times per input, which dominated this target's cost. The value is immutable and its payload sits behind an
+/// `Arc`, so building it once and cloning the handle is equivalent and cheap.
+fn default_testnet() -> &'static Network {
+    static TESTNET: OnceLock<Network> = OnceLock::new();
+    TESTNET.get_or_init(Network::new_default_testnet)
+}
 
 // ───────────────────────────────────────────────────────────────────────
 // NU fork sweep table.
@@ -65,7 +77,7 @@ fuzz_target!(|data: &[u8]| {
     let fork_idx = (fork_byte as usize) % NU_FORK_HEIGHTS.len();
     let nu_height = Height(NU_FORK_HEIGHTS[fork_idx].0);
     let nu_network = if fork_byte & 0x80 != 0 {
-        Network::new_default_testnet()
+        default_testnet().clone()
     } else {
         Network::Mainnet
     };
@@ -104,7 +116,7 @@ fuzz_target!(|data: &[u8]| {
         let _ = block.commitment(&Network::Mainnet);
     }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let _ = block.commitment(&Network::new_default_testnet());
+        let _ = block.commitment(default_testnet());
     }));
 
     // block.check_transaction_network_upgrade_consistency()
@@ -199,7 +211,7 @@ fuzz_target!(|data: &[u8]| {
     }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
-        let _ = block.header.commitment(&Network::new_default_testnet(), height);
+        let _ = block.header.commitment(default_testnet(), height);
     }));
 
     // Serialize the header separately (exercises block/serialize.rs)
@@ -330,7 +342,7 @@ fuzz_target!(|data: &[u8]| {
     // -------------------------------------------------------------------
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(Height(0));
-        for net in [Network::Mainnet, Network::new_default_testnet()] {
+        for net in [Network::Mainnet, default_testnet().clone()] {
             if let Ok(subsidy) =
                 zebra_chain::parameters::subsidy::block_subsidy(height, &net)
             {
@@ -360,7 +372,7 @@ fuzz_target!(|data: &[u8]| {
         // network constants).
         let height = block.coinbase_height().unwrap_or(Height(0));
         let hash = block.hash();
-        for net in [Network::Mainnet, Network::new_default_testnet()] {
+        for net in [Network::Mainnet, default_testnet().clone()] {
             let _ = zebra_consensus::block::check::difficulty_threshold_is_valid(
                 &block.header,
                 &net,

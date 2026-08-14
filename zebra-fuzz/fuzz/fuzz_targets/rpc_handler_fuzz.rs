@@ -68,6 +68,7 @@ use std::{
 
 use futures::FutureExt;
 use libfuzzer_sys::{arbitrary::Arbitrary, fuzz_target};
+use std::sync::OnceLock;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -79,6 +80,17 @@ use zebra_rpc::methods::{
     AddNodeCommand, GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosRequest,
     RpcImpl, RpcServer,
 };
+
+/// Cached default testnet.
+///
+/// `Network::new_default_testnet()` builds a `BTreeMap` of activation heights,
+/// parses the genesis hash and round-trips 256-bit difficulty. It ran once per
+/// input here. The value is immutable and its payload sits behind an `Arc`, so
+/// building it once and cloning the handle is equivalent and cheap.
+fn default_testnet() -> &'static Network {
+    static TESTNET: OnceLock<Network> = OnceLock::new();
+    TESTNET.get_or_init(Network::new_default_testnet)
+}
 
 // NOTE on `submitblock`: the production handler signature is
 // `async fn submit_block(&self, hex_data: HexData, _: Option<SubmitBlockParameters>) -> ...`
@@ -628,7 +640,7 @@ fuzz_target!(|data: &[u8]| {
     // address kind and subsidy edge cases, so we keep the option.
     let network = match u.int_in_range::<u8>(0..=1).unwrap_or(0) {
         0 => Network::Mainnet,
-        _ => Network::new_default_testnet(),
+        _ => default_testnet().clone(),
     };
 
     // Build the runtime once per iteration — we want a fresh state for
