@@ -334,7 +334,14 @@ fn drive_is_valid(
         let res = cached.is_valid(oob);
         // We only assert the shape (must be Err) when the call returned
         // — a Rust panic is caught above and is itself the finding.
-        debug_assert!(res.is_err(), "S-3 violated: out-of-bounds is_valid returned Ok");
+        // `assert!`, not `debug_assert!`: `cargo fuzz build -O` builds in
+        // release and this workspace declares no `[profile.release]`, so a
+        // `debug_assert!` is compiled out and this target would ship with no
+        // oracle at all.
+        assert!(
+            res.is_err(),
+            "S-3 violated: out-of-bounds is_valid returned Ok"
+        );
     }));
 
     // ───────────────────────────────────────────────────────────────────
