@@ -5,12 +5,6 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-### Fixed
-
-- Configuration loading now returns an error instead of allowing RPC server startup to panic when
-  `rpc.max_response_body_size` is larger than jsonrpsee supports
-  ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
-
 ## [16.0.0] - 2026-08-10
 
 ### Breaking Changes
