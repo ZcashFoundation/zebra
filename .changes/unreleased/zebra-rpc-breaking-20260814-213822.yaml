@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`config::Config::max_response_body_size` now has type `u32` instead of `usize`. Convert existing `usize` values before assigning them ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).'
+time: 2026-08-14T21:38:22.479052949Z
