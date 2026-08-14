@@ -13,7 +13,7 @@ use tower::util::ServiceExt;
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{BytesInDisplayOrder, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction, transparent,
@@ -100,7 +100,13 @@ where
 
     async fn get_block(&self, request: Request<BlockId>) -> Result<Response<CompactBlock>, Status> {
         let hash_or_height = block_id_to_hash_or_height(request.into_inner())?;
-        let block = compact_block(self.read_state.clone(), hash_or_height, false).await?;
+        let block = compact_block(
+            self.read_state.clone(),
+            &self.network,
+            hash_or_height,
+            false,
+        )
+        .await?;
 
         Ok(Response::new(block))
     }
@@ -110,7 +116,8 @@ where
         request: Request<BlockId>,
     ) -> Result<Response<CompactBlock>, Status> {
         let hash_or_height = block_id_to_hash_or_height(request.into_inner())?;
-        let block = compact_block(self.read_state.clone(), hash_or_height, true).await?;
+        let block =
+            compact_block(self.read_state.clone(), &self.network, hash_or_height, true).await?;
 
         Ok(Response::new(block))
     }
@@ -119,7 +126,12 @@ where
         &self,
         request: Request<BlockRange>,
     ) -> Result<Response<Self::GetBlockRangeStream>, Status> {
-        let stream = block_range_stream(self.read_state.clone(), request.into_inner(), false)?;
+        let stream = block_range_stream(
+            self.read_state.clone(),
+            self.network.clone(),
+            request.into_inner(),
+            false,
+        )?;
 
         Ok(Response::new(stream))
     }
@@ -128,7 +140,12 @@ where
         &self,
         request: Request<BlockRange>,
     ) -> Result<Response<Self::GetBlockRangeNullifiersStream>, Status> {
-        let stream = block_range_stream(self.read_state.clone(), request.into_inner(), true)?;
+        let stream = block_range_stream(
+            self.read_state.clone(),
+            self.network.clone(),
+            request.into_inner(),
+            true,
+        )?;
 
         Ok(Response::new(stream))
     }
@@ -441,6 +458,7 @@ where
         let pool = match ShieldedProtocol::try_from(args.shielded_protocol) {
             Ok(ShieldedProtocol::Sapling) => "sapling",
             Ok(ShieldedProtocol::Orchard) => "orchard",
+            Ok(ShieldedProtocol::Ironwood) => "ironwood",
             Err(_) => return Err(Status::invalid_argument("unknown shielded protocol")),
         };
 
@@ -623,6 +641,7 @@ fn block_id_to_hash_or_height(block_id: BlockId) -> Result<HashOrHeight, Status>
 /// them into a [`CompactBlock`].
 async fn compact_block<ReadStateService: ReadState>(
     read_state: ReadStateService,
+    network: &Network,
     hash_or_height: HashOrHeight,
     nullifiers_only: bool,
 ) -> Result<CompactBlock, Status> {
@@ -641,19 +660,31 @@ async fn compact_block<ReadStateService: ReadState>(
 
     let hash = block.hash();
 
+    let height = block
+        .coinbase_height()
+        .ok_or_else(|| Status::internal("block in the state must have a height"))?;
+
+    // The Ironwood pool only exists from NU6.3, and the state has no Ironwood tree for
+    // earlier blocks. Before activation the tree is legitimately empty, not missing.
+    let is_ironwood_active = NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3;
+
     // `nullifiers_only` responses carry zeroed tree sizes, like lightwalletd's
     // `pruneCompactBlockToNullifiers`, so don't read the trees at all.
-    let (sapling_tree_size, orchard_tree_size) = if nullifiers_only {
-        (0, 0)
+    let (sapling_tree_size, orchard_tree_size, ironwood_tree_size) = if nullifiers_only {
+        (0, 0, 0)
     } else {
         // Fetch the trees by the block's hash rather than the caller's hash or height,
         // so a concurrent reorg can't make the tree sizes inconsistent with the block.
         let sapling_request = read_state
             .clone()
             .oneshot(ReadRequest::SaplingTree(hash.into()));
-        let orchard_request = read_state.oneshot(ReadRequest::OrchardTree(hash.into()));
+        let orchard_request = read_state
+            .clone()
+            .oneshot(ReadRequest::OrchardTree(hash.into()));
+        let ironwood_request = read_state.oneshot(ReadRequest::IronwoodTree(hash.into()));
 
-        let (sapling_response, orchard_response) = futures::join!(sapling_request, orchard_request);
+        let (sapling_response, orchard_response, ironwood_response) =
+            futures::join!(sapling_request, orchard_request, ironwood_request);
 
         // A missing tree is not an empty tree: serving zero would tell the client no
         // notes exist as of this block, corrupting every position derived from it.
@@ -687,12 +718,25 @@ async fn compact_block<ReadStateService: ReadState>(
             }
         };
 
-        (sapling_tree_size, orchard_tree_size)
-    };
+        let ironwood_tree_size = match ironwood_response {
+            Ok(ReadResponse::IronwoodTree(Some(tree))) => tree.count(),
+            // Before NU6.3 there is no Ironwood tree to read, and zero is the correct size.
+            Ok(ReadResponse::IronwoodTree(None)) if !is_ironwood_active => 0,
+            Ok(ReadResponse::IronwoodTree(None)) => {
+                return Err(Status::aborted(
+                    "ironwood tree not found for this block, it may have been reorged",
+                ));
+            }
+            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+            Err(error) => {
+                return Err(Status::internal(format!(
+                    "failed to read ironwood tree: {error}"
+                )));
+            }
+        };
 
-    let height = block
-        .coinbase_height()
-        .ok_or_else(|| Status::internal("block in the state must have a height"))?;
+        (sapling_tree_size, orchard_tree_size, ironwood_tree_size)
+    };
 
     Ok(CompactBlock::from_block(
         &block,
@@ -700,6 +744,7 @@ async fn compact_block<ReadStateService: ReadState>(
         height,
         sapling_tree_size,
         orchard_tree_size,
+        ironwood_tree_size,
         nullifiers_only,
     ))
 }
@@ -710,6 +755,7 @@ async fn compact_block<ReadStateService: ReadState>(
 /// range: ascending if `start <= end`, and descending otherwise.
 fn block_range_stream<ReadStateService: ReadState>(
     read_state: ReadStateService,
+    network: Network,
     block_range: BlockRange,
     nullifiers_only: bool,
 ) -> Result<ResponseStream<CompactBlock>, Status> {
@@ -739,7 +785,13 @@ fn block_range_stream<ReadStateService: ReadState>(
 
         for height in heights {
             let hash_or_height = HashOrHeight::Height(block::Height(height));
-            let response = compact_block(read_state.clone(), hash_or_height, nullifiers_only).await;
+            let response = compact_block(
+                read_state.clone(),
+                &network,
+                hash_or_height,
+                nullifiers_only,
+            )
+            .await;
             let is_err = response.is_err();
 
             if !send_bounded(&response_sender, response).await || is_err {
@@ -1091,6 +1143,12 @@ fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> Tre
         time: treestate.time(),
         sapling_tree: final_state_hex(treestate.sapling().commitments().final_state()),
         orchard_tree: final_state_hex(treestate.orchard().commitments().final_state()),
+        // Absent before NU6.3, where an empty tree is the correct answer.
+        ironwood_tree: treestate
+            .ironwood()
+            .as_ref()
+            .map(|ironwood| final_state_hex(ironwood.commitments().final_state()))
+            .unwrap_or_default(),
     }
 }
 

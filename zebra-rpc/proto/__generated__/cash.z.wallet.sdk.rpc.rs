@@ -8,6 +8,9 @@ pub struct ChainMetadata {
     /// the size of the Orchard note commitment tree as of the end of this block
     #[prost(uint32, tag = "2")]
     pub orchard_commitment_tree_size: u32,
+    /// the size of the Ironwood note commitment tree as of the end of this block
+    #[prost(uint32, tag = "3")]
+    pub ironwood_commitment_tree_size: u32,
 }
 /// A compact representation of the shielded data in a Zcash block.
 ///
@@ -64,7 +67,8 @@ pub struct CompactTx {
     /// stateless server and a transaction with transparent inputs, this will be
     /// unset because the calculation requires reference to prior transactions.
     /// If there are no transparent inputs, the fee will be calculable as:
-    /// valueBalanceSapling + valueBalanceOrchard + sum(vPubNew) - sum(vPubOld) - sum(tOut)
+    /// valueBalanceSapling + valueBalanceOrchard + valueBalanceIronwood
+    /// + sum(vPubNew) - sum(vPubOld) - sum(tOut)
     #[prost(uint32, tag = "3")]
     pub fee: u32,
     #[prost(message, repeated, tag = "4")]
@@ -73,6 +77,10 @@ pub struct CompactTx {
     pub outputs: ::prost::alloc::vec::Vec<CompactSaplingOutput>,
     #[prost(message, repeated, tag = "6")]
     pub actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
+    /// Ironwood reuses the Orchard action encoding, so it reuses CompactOrchardAction.
+    /// Fields 7 and 8 are `vin` and `vout` upstream; they are left free here.
+    #[prost(message, repeated, tag = "9")]
+    pub ironwood_actions: ::prost::alloc::vec::Vec<CompactOrchardAction>,
 }
 /// A compact representation of a [Sapling Spend](<https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus>).
 ///
@@ -313,6 +321,9 @@ pub struct TreeState {
     /// orchard commitment tree state
     #[prost(string, tag = "6")]
     pub orchard_tree: ::prost::alloc::string::String,
+    /// ironwood commitment tree state
+    #[prost(string, tag = "7")]
+    pub ironwood_tree: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetSubtreeRootsArg {
@@ -375,6 +386,7 @@ pub struct GetAddressUtxosReplyList {
 pub enum ShieldedProtocol {
     Sapling = 0,
     Orchard = 1,
+    Ironwood = 2,
 }
 impl ShieldedProtocol {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -385,6 +397,7 @@ impl ShieldedProtocol {
         match self {
             Self::Sapling => "sapling",
             Self::Orchard => "orchard",
+            Self::Ironwood => "ironwood",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -392,6 +405,7 @@ impl ShieldedProtocol {
         match value {
             "sapling" => Some(Self::Sapling),
             "orchard" => Some(Self::Orchard),
+            "ironwood" => Some(Self::Ironwood),
             _ => None,
         }
     }
@@ -925,7 +939,7 @@ pub mod compact_tx_streamer_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns a stream of information about roots of subtrees of the note commitment tree
-        /// for the specified shielded protocol (Sapling or Orchard).
+        /// for the specified shielded protocol (Sapling, Orchard, or Ironwood).
         pub async fn get_subtree_roots(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSubtreeRootsArg>,
@@ -1229,7 +1243,7 @@ pub mod compact_tx_streamer_server {
             + std::marker::Send
             + 'static;
         /// Returns a stream of information about roots of subtrees of the note commitment tree
-        /// for the specified shielded protocol (Sapling or Orchard).
+        /// for the specified shielded protocol (Sapling, Orchard, or Ironwood).
         async fn get_subtree_roots(
             &self,
             request: tonic::Request<super::GetSubtreeRootsArg>,

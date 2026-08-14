@@ -141,11 +141,13 @@ message TreeState {
     uint32 time = 4;        // Unix epoch time when the block was mined
     string saplingTree = 5; // sapling commitment tree state
     string orchardTree = 6; // orchard commitment tree state
+    string ironwoodTree = 7; // ironwood commitment tree state
 }
 
 enum ShieldedProtocol {
     sapling = 0;
     orchard = 1;
+    ironwood = 2;
 }
 
 message GetSubtreeRootsArg {
@@ -232,7 +234,7 @@ service CompactTxStreamer {
     rpc GetLatestTreeState(Empty) returns (TreeState) {}
 
     // Returns a stream of information about roots of subtrees of the note commitment tree
-    // for the specified shielded protocol (Sapling or Orchard).
+    // for the specified shielded protocol (Sapling, Orchard, or Ironwood).
     rpc GetSubtreeRoots(GetSubtreeRootsArg) returns (stream SubtreeRoot) {}
 
     rpc GetAddressUtxos(GetAddressUtxosArg) returns (GetAddressUtxosReplyList) {}

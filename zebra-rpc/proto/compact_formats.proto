@@ -14,6 +14,7 @@ option swift_prefix = "";
 message ChainMetadata {
     uint32 saplingCommitmentTreeSize = 1; // the size of the Sapling note commitment tree as of the end of this block
     uint32 orchardCommitmentTreeSize = 2; // the size of the Orchard note commitment tree as of the end of this block
+    uint32 ironwoodCommitmentTreeSize = 3; // the size of the Ironwood note commitment tree as of the end of this block
 }
 
 // A compact representation of the shielded data in a Zcash block.
@@ -49,12 +50,16 @@ message CompactTx {
     // stateless server and a transaction with transparent inputs, this will be
     // unset because the calculation requires reference to prior transactions.
     // If there are no transparent inputs, the fee will be calculable as:
-    //    valueBalanceSapling + valueBalanceOrchard + sum(vPubNew) - sum(vPubOld) - sum(tOut)
+    //    valueBalanceSapling + valueBalanceOrchard + valueBalanceIronwood
+    //    + sum(vPubNew) - sum(vPubOld) - sum(tOut)
     uint32 fee = 3;
 
     repeated CompactSaplingSpend spends = 4;
     repeated CompactSaplingOutput outputs = 5;
     repeated CompactOrchardAction actions = 6;
+    // Ironwood reuses the Orchard action encoding, so it reuses CompactOrchardAction.
+    // Fields 7 and 8 are `vin` and `vout` upstream; they are left free here.
+    repeated CompactOrchardAction ironwoodActions = 9;
 }
 
 // A compact representation of a [Sapling Spend](https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus).

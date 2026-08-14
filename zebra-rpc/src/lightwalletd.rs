@@ -6,7 +6,7 @@
 //!
 //! [`zcash/lightwalletd`]: https://github.com/zcash/lightwalletd/tree/master/walletrpc
 
-use zebra_chain::{block, transaction, transaction::Transaction};
+use zebra_chain::{block, orchard, transaction, transaction::Transaction};
 
 #[cfg(test)]
 mod tests;
@@ -32,11 +32,12 @@ pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
 const COMPACT_CIPHERTEXT_SIZE: usize = 52;
 
 /// Returns true if the transaction contains any data that belongs in a
-/// [`CompactTx`]: Sapling spends or outputs, or Orchard actions.
+/// [`CompactTx`]: Sapling spends or outputs, or Orchard or Ironwood actions.
 pub(crate) fn has_compact_data(tx: &Transaction) -> bool {
     tx.sapling_nullifiers().next().is_some()
         || tx.sapling_outputs().next().is_some()
         || tx.orchard_actions().next().is_some()
+        || tx.ironwood_actions().next().is_some()
 }
 
 /// Returns true if the transaction contains any nullifiers, so it belongs in a
@@ -45,7 +46,29 @@ pub(crate) fn has_compact_data(tx: &Transaction) -> bool {
 /// Outputs are omitted in that mode, so a transaction with only Sapling outputs would
 /// otherwise be included as a [`CompactTx`] carrying nothing but an index and a hash.
 pub(crate) fn has_nullifiers(tx: &Transaction) -> bool {
-    tx.sapling_nullifiers().next().is_some() || tx.orchard_actions().next().is_some()
+    tx.sapling_nullifiers().next().is_some()
+        || tx.orchard_actions().next().is_some()
+        || tx.ironwood_actions().next().is_some()
+}
+
+/// Builds a [`CompactOrchardAction`] from an Orchard-encoded action.
+///
+/// Ironwood reuses the Orchard action encoding, so the same conversion serves both pools.
+/// If `nullifiers_only` is true, only the nullifier is included.
+fn compact_action(action: &orchard::Action, nullifiers_only: bool) -> CompactOrchardAction {
+    let mut compact_action = CompactOrchardAction {
+        nullifier: <[u8; 32]>::from(action.nullifier).to_vec(),
+        ..Default::default()
+    };
+
+    if !nullifiers_only {
+        compact_action.cmx = <[u8; 32]>::from(action.cm_x).to_vec();
+        compact_action.ephemeral_key = <[u8; 32]>::from(&action.ephemeral_key).to_vec();
+        compact_action.ciphertext =
+            <[u8; 580]>::from(action.enc_ciphertext)[..COMPACT_CIPHERTEXT_SIZE].to_vec();
+    }
+
+    compact_action
 }
 
 impl CompactBlock {
@@ -61,6 +84,7 @@ impl CompactBlock {
         height: block::Height,
         sapling_tree_size: u64,
         orchard_tree_size: u64,
+        ironwood_tree_size: u64,
         nullifiers_only: bool,
     ) -> Self {
         let vtx = block
@@ -89,10 +113,11 @@ impl CompactBlock {
             header: Vec::new(),
             vtx,
             chain_metadata: Some(ChainMetadata {
-                // Casts are safe: the Sapling and Orchard note commitment trees hold
-                // at most `2^32 - 1` notes, since note positions are 32-bit values.
+                // Casts are safe: note commitment trees hold at most `2^32 - 1` notes,
+                // since note positions are 32-bit values.
                 sapling_commitment_tree_size: sapling_tree_size as u32,
                 orchard_commitment_tree_size: orchard_tree_size as u32,
+                ironwood_commitment_tree_size: ironwood_tree_size as u32,
             }),
         }
     }
@@ -132,22 +157,12 @@ impl CompactTx {
 
         let actions = tx
             .orchard_actions()
-            .map(|action| {
-                let mut compact_action = CompactOrchardAction {
-                    nullifier: <[u8; 32]>::from(action.nullifier).to_vec(),
-                    ..Default::default()
-                };
+            .map(|action| compact_action(action, nullifiers_only))
+            .collect();
 
-                if !nullifiers_only {
-                    compact_action.cmx = <[u8; 32]>::from(action.cm_x).to_vec();
-                    compact_action.ephemeral_key = <[u8; 32]>::from(&action.ephemeral_key).to_vec();
-                    compact_action.ciphertext = <[u8; 580]>::from(action.enc_ciphertext)
-                        [..COMPACT_CIPHERTEXT_SIZE]
-                        .to_vec();
-                }
-
-                compact_action
-            })
+        let ironwood_actions = tx
+            .ironwood_actions()
+            .map(|action| compact_action(action, nullifiers_only))
             .collect();
 
         CompactTx {
@@ -159,6 +174,7 @@ impl CompactTx {
             spends,
             outputs,
             actions,
+            ironwood_actions,
         }
     }
 }

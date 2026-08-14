@@ -7,12 +7,14 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, BoxError};
 
 use zebra_chain::{
+    amount::Amount,
     block::Block,
     chain_sync_status::MockSyncStatus,
     chain_tip::{
         mock::{MockChainTip, MockChainTipSender},
         NoChainTip,
     },
+    ironwood,
     parameters::Network::Mainnet,
     serialization::ZcashDeserializeInto,
 };
@@ -25,7 +27,9 @@ use zebra_test::{
 };
 
 use crate::{
-    lightwalletd::{self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, Empty},
+    lightwalletd::{
+        self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, CompactTx, Empty,
+    },
     methods::RpcImpl,
 };
 
@@ -67,21 +71,24 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
         .await
         .respond(ReadResponse::Block(Some(block)));
 
-    // The Sapling and Orchard trees are read concurrently, so answer whichever
-    // arrives first. Both are missing here.
-    for _ in 0..2 {
+    // The trees are read concurrently, so answer whichever arrives first. All are
+    // missing here.
+    for _ in 0..3 {
         let handler = read_state
             .expect_request_that(|request| {
                 matches!(
                     request,
-                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                    ReadRequest::SaplingTree(_)
+                        | ReadRequest::OrchardTree(_)
+                        | ReadRequest::IronwoodTree(_)
                 )
             })
             .await;
 
         let response = match handler.request() {
             ReadRequest::SaplingTree(_) => ReadResponse::SaplingTree(None),
-            _ => ReadResponse::OrchardTree(None),
+            ReadRequest::OrchardTree(_) => ReadResponse::OrchardTree(None),
+            _ => ReadResponse::IronwoodTree(None),
         };
 
         handler.respond(response);
@@ -141,8 +148,164 @@ async fn get_block_nullifiers_does_not_read_the_commitment_trees() -> Result<()>
 
     assert_eq!(chain_metadata.sapling_commitment_tree_size, 0);
     assert_eq!(chain_metadata.orchard_commitment_tree_size, 0);
+    assert_eq!(chain_metadata.ironwood_commitment_tree_size, 0);
 
     Ok(())
+}
+
+/// Before NU6.3 there is no Ironwood tree, so a missing one is an empty tree.
+///
+/// The Sapling and Orchard trees are missing-is-an-error, because a zero size would
+/// corrupt the note positions a client derives. Ironwood is different only before its
+/// activation height: zero is then the true size, so a pre-NU6.3 block must still be
+/// served instead of failing the way a reorged tree read does.
+#[tokio::test]
+async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let height = block
+        .coinbase_height()
+        .expect("test block has a coinbase height");
+
+    let request_task = tokio::spawn(async move {
+        client
+            .get_block(tonic::Request::new(BlockId {
+                height: height.0.into(),
+                hash: Vec::new(),
+            }))
+            .await
+    });
+
+    read_state
+        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .await
+        .respond(ReadResponse::Block(Some(block)));
+
+    // Sapling and Orchard have trees at this height; Ironwood does not exist yet.
+    for _ in 0..3 {
+        let handler = read_state
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    ReadRequest::SaplingTree(_)
+                        | ReadRequest::OrchardTree(_)
+                        | ReadRequest::IronwoodTree(_)
+                )
+            })
+            .await;
+
+        let response = match handler.request() {
+            ReadRequest::SaplingTree(_) => {
+                ReadResponse::SaplingTree(Some(Arc::new(Default::default())))
+            }
+            ReadRequest::OrchardTree(_) => {
+                ReadResponse::OrchardTree(Some(Arc::new(Default::default())))
+            }
+            _ => ReadResponse::IronwoodTree(None),
+        };
+
+        handler.respond(response);
+    }
+
+    let compact_block = request_task
+        .await
+        .expect("request task should not panic")
+        .expect("a pre-NU6.3 block must be served without an Ironwood tree")
+        .into_inner();
+
+    let chain_metadata = compact_block
+        .chain_metadata
+        .expect("compact blocks always carry chain metadata");
+
+    assert_eq!(chain_metadata.ironwood_commitment_tree_size, 0);
+
+    Ok(())
+}
+
+/// Ironwood actions must be served in their own field, not merged into `actions`.
+///
+/// Ironwood reuses the Orchard action encoding, so the two are structurally identical
+/// and easy to conflate. They commit to separate note commitment trees, so a client
+/// that received them in one list would derive Ironwood note positions from the Orchard
+/// tree.
+#[test]
+fn compact_tx_keeps_ironwood_actions_separate_from_orchard() {
+    use zebra_chain::{
+        orchard::{Flags, ShieldedDataV6},
+        parameters::NetworkUpgrade,
+        transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction},
+    };
+
+    let _init_guard = zebra_test::init();
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
+        zero,
+        1,
+    ));
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        2,
+    )));
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), Some(ironwood));
+    let compact_tx = CompactTx::from_transaction(0, tx.hash(), &tx, false);
+
+    assert_eq!(
+        compact_tx.actions.len(),
+        1,
+        "the Orchard bundle's actions belong in `actions`",
+    );
+    assert_eq!(
+        compact_tx.ironwood_actions.len(),
+        2,
+        "the Ironwood bundle's actions belong in `ironwood_actions`",
+    );
+
+    // A nullifiers-only tx carries nullifiers for both pools, and nothing else.
+    let nullifiers_only = CompactTx::from_transaction(0, tx.hash(), &tx, true);
+
+    assert_eq!(nullifiers_only.ironwood_actions.len(), 2);
+    assert!(nullifiers_only
+        .ironwood_actions
+        .iter()
+        .all(|action| !action.nullifier.is_empty() && action.cmx.is_empty()));
+}
+
+/// A transaction whose only shielded data is an Ironwood bundle belongs in a compact block.
+#[test]
+fn ironwood_only_transactions_have_compact_data() {
+    use zebra_chain::{
+        orchard::{Flags, ShieldedDataV6},
+        parameters::NetworkUpgrade,
+        transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction},
+    };
+
+    let _init_guard = zebra_test::init();
+    let zero = Amount::try_from(0).expect("zero is a valid amount");
+
+    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
+        Flags::ENABLE_SPENDS,
+        zero,
+        1,
+    )));
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+
+    assert!(
+        lightwalletd::has_compact_data(&tx),
+        "an Ironwood-only transaction must not be filtered out of a compact block",
+    );
+    assert!(
+        lightwalletd::has_nullifiers(&tx),
+        "an Ironwood-only transaction must not be filtered out of a nullifiers-only block",
+    );
 }
 
 /// A raw transaction larger than a block must be rejected before it is hex-encoded.
