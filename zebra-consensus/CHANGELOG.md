@@ -10,13 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Consensus rules that apply to a transaction in both block and mempool context
   are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
 
-### Added
-
-- A `fuzzing` feature, off by default, which makes the `block` module public for
-  the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies
-  and leaves default and release builds unchanged
-  ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
-
 ## [15.0.0] - 2026-08-10
 
 ### Breaking Changes

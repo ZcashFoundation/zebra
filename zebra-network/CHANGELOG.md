@@ -5,13 +5,6 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-### Added
-
-- A `fuzzing` feature, off by default, which makes the `protocol` module public for
-  the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies
-  and leaves default and release builds unchanged
-  ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
-
 ## [12.0.0] - 2026-08-10
 
 ### Breaking Changes
