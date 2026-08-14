@@ -10,8 +10,11 @@ use zebra_node_services::mempool::{MempoolService, MempoolTxSubscriber};
 use zebra_state::ReadState;
 
 use crate::{
-    lightwalletd::compact_tx_streamer_server::CompactTxStreamerServer,
-    methods::RpcServer as RpcMethods, server::OPENED_LIGHTWALLETD_ENDPOINT_MSG,
+    lightwalletd::{
+        compact_tx_streamer_server::CompactTxStreamerServer, tracing::GrpcTracingLayer,
+    },
+    methods::RpcServer as RpcMethods,
+    server::OPENED_LIGHTWALLETD_ENDPOINT_MSG,
 };
 
 /// Maximum concurrent HTTP/2 streams per connection.
@@ -93,6 +96,7 @@ where
             .max_concurrent_streams(Some(MAX_CONCURRENT_STREAMS))
             .http2_keepalive_interval(Some(HTTP2_KEEPALIVE_INTERVAL))
             .http2_keepalive_timeout(Some(HTTP2_KEEPALIVE_TIMEOUT))
+            .layer(GrpcTracingLayer)
             .add_service(reflection_service)
             .add_service(CompactTxStreamerServer::new(lightwalletd_service))
             .serve_with_incoming(TcpIncoming::from(tcp_listener))

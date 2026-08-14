@@ -13,6 +13,7 @@ mod tests;
 
 pub mod methods;
 pub mod server;
+pub mod tracing;
 
 // The generated lightwalletd proto for the `cash.z.wallet.sdk.rpc` package.
 //
