@@ -1,0 +1,11 @@
+# Changie generates every changelog in this repository from the change fragments
+# in `.changes/`, so release-plz must not write changelogs itself: with the
+# default `changelog_update = true` it would look for an `[Unreleased]` section
+# that no longer exists, and would create `zebrad/CHANGELOG.md`, which is not
+# where zebrad's changelog lives.
+#
+# release-plz still decides every version. The Release workflow turns the
+# fragments into versioned entries for the versions release-plz picked, by running
+# `.github/scripts/batch-release-changelogs.sh` on the Release PR branch.
+[workspace]
+changelog_update = false
