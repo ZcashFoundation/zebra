@@ -1100,6 +1100,95 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     Ok(())
 }
 
+/// Regression test for #10689: `poll_ready()` must stay ready when the
+/// `MempoolChange` broadcast channel has no subscribers.
+///
+/// The gossip and indexer tasks that consume the mempool change feed are
+/// optional consumers, not preconditions for mempool operation. With zero
+/// receivers, `broadcast::Sender::send` returns an error; propagating it out of
+/// `poll_ready()` with `?` made Tower treat the mempool service as permanently
+/// failed. This test builds a mempool with no change subscribers, drives a
+/// `MempoolChange::invalidated` through `poll_ready()`, and asserts the service
+/// does not fail.
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mempool_config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    };
+
+    // `spawn_change_drain: false` leaves the returned receiver as the only
+    // subscriber; dropping it below gives the channel zero receivers.
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mempool_transaction_receiver,
+    ) = setup_with_mempool_config(&network, mempool_config, true, false).await;
+
+    drop(mempool_transaction_receiver);
+
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=2);
+    let rejected_tx = unmined_transactions.next().unwrap().clone();
+
+    mempool.enable(&mut recent_syncs).await;
+
+    // Queue a transaction and make the verifier reject it, so a subsequent
+    // `poll_ready()` emits a `MempoolChange::invalidated` on the empty channel.
+    let request = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.transaction.clone().into()]));
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        responder.respond(Err(TransactionError::BadBalance));
+    });
+    let (response, _) = futures::join!(request, verification);
+    assert!(matches!(response.unwrap(), Response::Queued(_)));
+
+    // Poll the mempool so the invalidated change is sent with no subscribers.
+    // Before the fix, the `?` on the zero-receiver send made `poll_ready()`
+    // return an error at this point.
+    for _ in 0..3 {
+        assert!(
+            mempool.ready().await.is_ok(),
+            "poll_ready() must stay ready with no MempoolChange subscribers",
+        );
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
+
+    // Confirm the invalidated path actually ran (so the test is not vacuous):
+    // re-queueing the rejected transaction by ID now returns a
+    // failed-verification rejection.
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.transaction.id.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("queue request returns a Queued response"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(matches!(
+        queued_responses
+            .into_iter()
+            .next()
+            .unwrap()
+            .unbox_mempool_error(),
+        MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
+    ));
+
+    Ok(())
+}
+
 /// Check if a transaction that fails download is _not_ rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
@@ -1631,7 +1720,7 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
         _tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
-    ) = setup_with_mempool_config(&network, mempool_config, true).await;
+    ) = setup_with_mempool_config(&network, mempool_config, true, true).await;
 
     service.enable(&mut recent_syncs).await;
 
@@ -2124,13 +2213,14 @@ async fn setup(
         ..Default::default()
     };
 
-    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block).await
+    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block, true).await
 }
 
 async fn setup_with_mempool_config(
     network: &Network,
     mempool_config: mempool::Config,
     should_commit_genesis_block: bool,
+    spawn_change_drain: bool,
 ) -> (
     Mempool,
     MockPeerSet,
@@ -2164,8 +2254,14 @@ async fn setup_with_mempool_config(
         misbehavior_tx,
     );
 
-    let mut mempool_transaction_receiver = mempool_transaction_subscriber.subscribe();
-    tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
+    // Keep the change feed drained in the background so tests that ignore it
+    // don't leave the broadcast channel without receivers (which would make
+    // `broadcast::Sender::send` fail). Tests that specifically need a channel
+    // with no subscribers pass `spawn_change_drain: false`.
+    if spawn_change_drain {
+        let mut mempool_transaction_receiver = mempool_transaction_subscriber.subscribe();
+        tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
+    }
 
     if should_commit_genesis_block {
         let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
