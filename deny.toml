@@ -138,14 +138,6 @@ skip-tree = [
     # remove once ed25519-zebra updates hashbrown.
     { name = "hashbrown", version = "=0.16.1" },
 
-    # toml 0.9.x pulled by zebrad direct; 1.1.x by config 0.15 (also via zebrad).
-    # toml 1.x is the spec-1.1 line; remove once zebrad migrates its direct dep.
-    { name = "toml", version = "=0.9.12+spec-1.1.0" },
-
-    # winnow 0.7.x pulled by toml 0.9.x; 1.x by toml 1.x / config 0.15.
-    # resolved together with the toml entry above.
-    { name = "winnow", version = "=0.7.15" },
-
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
@@ -154,8 +146,6 @@ skip-tree = [
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
-    # hashbrown 0.14.x pulled by indexmap 1.9 (transitive of librustzcash)
-    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
 
@@ -195,11 +185,9 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
-# List of URLs for allowed Git repositories
-# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
-allow-git = [
-    "https://github.com/zcash/librustzcash.git",
-]
+# List of URLs for allowed Git repositories.
+# Empty: every dependency comes from the crates.io registry.
+allow-git = []
 
 [sources.allow-org]
 github = [
