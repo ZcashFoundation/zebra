@@ -146,6 +146,8 @@ skip-tree = [
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.14.x pulled by ordered-multimap, via rust-ini and config
+    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
 
