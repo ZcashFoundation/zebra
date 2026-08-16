@@ -98,7 +98,8 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # wait for bindgen to update itertools
+    # itertools 0.13.x pulled by halo2 deps and bindgen; 0.14.x by other deps.
+    # remove once bindgen updates itertools.
     { name = "itertools", version = "0.13" },
 
     # wait for ordered-map to release a dependency fix
@@ -148,11 +149,9 @@ skip-tree = [
     { name = "hashbrown", version = "0.12" },
     # hashbrown 0.14.x pulled by ordered-multimap, via rust-ini and config
     { name = "hashbrown", version = "0.14" },
-    # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
+    # hashbrown 0.15.x pulled by various deps, incl. hashlink/petgraph/metrics-util;
+    # 0.16.x by indexmap 2.x. remove once they update hashbrown and foldhash.
     { name = "hashbrown", version = "0.15" },
-
-    # itertools 0.13.x pulled by halo2 deps; 0.14.x pulled by other deps
-    { name = "itertools", version = "0.13" },
 
     { name = "getrandom", version = "0.2" },
     { name = "getrandom", version = "0.3" },
@@ -166,9 +165,6 @@ skip-tree = [
 
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
-
-    # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
-    { name = "hashbrown", version = "0.15" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
