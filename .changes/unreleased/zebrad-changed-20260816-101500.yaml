@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Updated the `nix` dependency to 0.31 ([#9630](https://github.com/ZcashFoundation/zebra/issues/9630)).'
+time: 2026-08-16T10:15:00.000000000Z
