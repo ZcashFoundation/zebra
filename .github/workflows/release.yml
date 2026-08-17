@@ -102,6 +102,87 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "chore: release v${VERSION}"
 
+      # Changie owns every changelog, so the versioned entries for this release
+      # are generated here instead of by release-plz: the fragments that source
+      # PRs committed are batched into the versions release-plz picked, and every
+      # changelog is regenerated from `.changes/`. release-plz stays the only
+      # thing that decides versions.
+      - name: Plan changelog batching
+        id: batch-plan
+        env:
+          RELEASE_PRS: ${{ steps.release-plz-pr.outputs.prs }}
+        run: |
+          set -euo pipefail
+
+          PR_COUNT="$(jq 'length' <<< "${RELEASE_PRS:-[]}")"
+          NEEDED=false
+          : > "${RUNNER_TEMP}/release-prs.txt"
+
+          for ((INDEX = 0; INDEX < PR_COUNT; INDEX++)); do
+            NUMBER="$(jq -r --argjson index "${INDEX}" '.[$index].number' <<< "${RELEASE_PRS}")"
+            jq -r --argjson index "${INDEX}" \
+              '.[$index].releases[]? | [.package_name, .version] | @tsv' \
+              <<< "${RELEASE_PRS}" > "${RUNNER_TEMP}/releases-${NUMBER}.tsv"
+
+            if [ -s "${RUNNER_TEMP}/releases-${NUMBER}.tsv" ]; then
+              echo "${NUMBER}" >> "${RUNNER_TEMP}/release-prs.txt"
+              NEEDED=true
+            fi
+          done
+
+          echo "needed=${NEEDED}" >> "${GITHUB_OUTPUT}"
+
+      # Installs changie and puts it on PATH. With no `args` the action runs no
+      # command of its own, so the batching script below drives it. The changie
+      # version is pinned because its newline handling and template data decide
+      # the exact bytes of every changelog.
+      - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
+        if: steps.batch-plan.outputs.needed == 'true'
+        with:
+          version: v1.25.2
+
+      - name: Batch changelogs into the Release PR
+        if: steps.batch-plan.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          # The checkout is credential-free (`persist-credentials: false`), so the
+          # fetch and push carry the token themselves. The runner masks it in logs.
+          RELEASE_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REMOTE="https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # The push is authenticated as the release app; this author metadata is
+          # only what shows up in `git log`.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          while IFS= read -r NUMBER; do
+            BRANCH="$(gh pr view "${NUMBER}" \
+              --repo "${GITHUB_REPOSITORY}" --json headRefName --jq .headRefName)"
+
+            git fetch --quiet "${REMOTE}" "${BRANCH}"
+            git checkout --quiet -B "${BRANCH}" FETCH_HEAD
+
+            # The commit the Release PR forked from: its fragments are the ones to
+            # batch, and its manifests show which dependencies release-plz moved.
+            BASE_REVISION="$(git merge-base "${BRANCH}" "${GITHUB_SHA}")"
+
+            .github/scripts/batch-release-changelogs.sh \
+              "${BASE_REVISION}" "${RUNNER_TEMP}/releases-${NUMBER}.tsv"
+
+            git add --all
+            if git diff --cached --quiet; then
+              echo "PR #${NUMBER} already has current changelogs."
+              continue
+            fi
+
+            git commit --quiet --message "chore: generate release changelogs"
+            git push --quiet "${REMOTE}" "HEAD:${BRANCH}"
+            echo "Pushed generated changelogs to ${BRANCH}."
+          done < "${RUNNER_TEMP}/release-prs.txt"
+
   release-target:
     name: Verify Release PR
     if: >-

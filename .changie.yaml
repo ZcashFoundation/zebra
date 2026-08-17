@@ -1,0 +1,94 @@
+changesDir: .changes
+unreleasedDir: unreleased
+# One header is shared by every changelog, so its wording has to suit both zebrad
+# and the library crates.
+headerPath: header.tpl.md
+versionExt: md
+# Only `batch` renders this, once per project, so the style is taken from the
+# project the batched fragments belong to: zebrad keeps the release-tag link,
+# crates get the bare `## [13.0.0] - 2026-08-12` header they used before changie.
+# `.Version` includes the `v` prefix, `.VersionNoPrefix` doesn't.
+versionFormat: '{{ $p := "" }}{{ range .Changes }}{{ $p = .Project }}{{ end }}{{ if eq $p "zebrad" }}## [Zebra {{ .VersionNoPrefix }}](https://github.com/ZcashFoundation/zebra/releases/tag/{{ .Version }}){{ else }}## [{{ .VersionNoPrefix }}]{{ end }} - {{ .Time.Format "2006-01-02" }}'
+kindFormat: '### {{.Kind}}'
+# Dashes, because markdownlint's MD004 is configured with `style: dash`.
+changeFormat: '- {{.Body}}'
+# Makes `changie latest -j zebra-state` print `zebra-state-v13.0.0`, which is the
+# crate's release tag. Note zebrad's tags have no prefix, so `latest -j zebrad`
+# prints `zebrad-v6.3.0` and the `zebrad-` part has to be stripped.
+projectsVersionSeparator: '-'
+# Every changelog Zebra publishes needs a project here: `changie merge` only
+# writes the paths listed below, and it rewrites each one from
+# `.changes/<key>/v*.md`. A project with no version files gets truncated to just
+# the header, so never add a project before migrating its history.
+# `zebra-grpc` and `zebra-scan` are deliberately absent: those crates were
+# removed, and their changelogs are frozen history that changie must not touch.
+projects:
+    - label: zebrad
+      key: zebrad
+      changelog: CHANGELOG.md
+    - label: zebra-chain
+      key: zebra-chain
+      changelog: zebra-chain/CHANGELOG.md
+    - label: zebra-consensus
+      key: zebra-consensus
+      changelog: zebra-consensus/CHANGELOG.md
+    - label: zebra-network
+      key: zebra-network
+      changelog: zebra-network/CHANGELOG.md
+    - label: zebra-node-services
+      key: zebra-node-services
+      changelog: zebra-node-services/CHANGELOG.md
+    - label: zebra-rpc
+      key: zebra-rpc
+      changelog: zebra-rpc/CHANGELOG.md
+    - label: zebra-script
+      key: zebra-script
+      changelog: zebra-script/CHANGELOG.md
+    - label: zebra-state
+      key: zebra-state
+      changelog: zebra-state/CHANGELOG.md
+    - label: zebra-test
+      key: zebra-test
+      changelog: zebra-test/CHANGELOG.md
+    - label: zebra-utils
+      key: zebra-utils
+      changelog: zebra-utils/CHANGELOG.md
+    - label: tower-batch-control
+      key: tower-batch-control
+      changelog: tower-batch-control/CHANGELOG.md
+    - label: tower-fallback
+      key: tower-fallback
+      changelog: tower-fallback/CHANGELOG.md
+# Order follows the section order in book/src/dev/changelog-guidelines.md.
+# Only `Breaking Changes` has a key, to keep `Breaking Changes` out of fragment
+# file names; note that setting a key disables the label, so it is `-k breaking`
+# on the command line while the other kinds stay `-k Fixed` and so on.
+kinds:
+    - key: breaking
+      label: Breaking Changes
+      auto: major
+    - label: Added
+      auto: minor
+    - label: Changed
+      auto: minor
+    - label: Deprecated
+      auto: minor
+    - label: Removed
+      auto: major
+    - label: Fixed
+      auto: patch
+    - label: Security
+      auto: patch
+# Changie always writes one newline before each kind header and each change, so
+# these counts are the *extra* blank lines on top of that.
+newlines:
+    # Blank line above and below every `### Kind` header (MD022, MD032).
+    beforeKind: 1
+    afterKind: 1
+    # Single trailing newline at the end of each version file (MD047).
+    endOfVersion: 1
+    # Blank line before each version in a changelog. Combined with the newline
+    # ending header.tpl.md and endOfVersion above, this gives exactly one blank
+    # line after the header and between versions (MD012).
+    beforeChangelogVersion: 1
+envPrefix: CHANGIE_
