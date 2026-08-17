@@ -1651,7 +1651,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
 dependencies = [
  "byteorder",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rustc-hex",
  "static_assertions",
 ]
@@ -1990,7 +1990,7 @@ dependencies = [
  "halo2_proofs",
  "lazy_static",
  "pasta_curves",
- "rand 0.8.6",
+ "rand 0.8.7",
  "sinsemilla",
  "subtle",
  "uint 0.9.5",
@@ -2769,7 +2769,7 @@ dependencies = [
  "http-body-util",
  "jsonrpsee-types",
  "parking_lot",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -3584,7 +3584,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "pasta_curves",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rand_core 0.6.4",
  "reddsa",
  "serde",
@@ -3709,7 +3709,7 @@ dependencies = [
  "ff",
  "group",
  "lazy_static",
- "rand 0.8.6",
+ "rand 0.8.7",
  "static_assertions",
  "subtle",
 ]
@@ -4250,9 +4250,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -4860,7 +4860,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "memuse",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rand_core 0.6.4",
  "redjubjub",
  "subtle",
@@ -5362,7 +5362,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
- "rand 0.8.6",
+ "rand 0.8.7",
  "sha1",
 ]
 
@@ -5961,7 +5961,7 @@ dependencies = [
  "futures",
  "futures-core",
  "pin-project",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rayon",
  "tokio",
  "tokio-test",
@@ -7376,7 +7376,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "rayon",
@@ -7438,7 +7438,7 @@ dependencies = [
  "orchard",
  "proptest",
  "proptest-derive",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rayon",
  "sapling-crypto",
  "serde",
@@ -7486,7 +7486,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-derive",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rayon",
  "regex",
  "schemars 1.2.1",
@@ -7549,7 +7549,7 @@ dependencies = [
  "phf",
  "proptest",
  "prost",
- "rand 0.8.6",
+ "rand 0.8.7",
  "sapling-crypto",
  "schemars 1.2.1",
  "semver",
@@ -7593,7 +7593,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "libzcash_script",
- "rand 0.8.6",
+ "rand 0.8.7",
  "ripemd 0.1.3",
  "secp256k1",
  "sha2 0.10.9",
@@ -7633,7 +7633,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "proptest-derive",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rayon",
  "regex",
  "rlimit",
@@ -7669,7 +7669,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "rand 0.8.6",
+ "rand 0.8.7",
  "regex",
  "spandoc",
  "tempfile",
@@ -7745,7 +7745,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "prost",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rayon",
  "regex",
  "reqwest 0.12.28",
