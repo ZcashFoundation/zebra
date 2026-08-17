@@ -4,3 +4,14 @@ coverage/
 *.profraw
 *.profdata
 corpus/
+
+# libFuzzer writes its artifacts into the working directory when it is given no
+# `-artifact_prefix`, which happens when a target binary is run directly rather
+# than through `cargo fuzz run`. A `git add -A` after such a run would otherwise
+# commit a crash reproducer for an unfixed bug into a public repository.
+crash-*
+leak-*
+timeout-*
+oom-*
+slow-unit-*
+minimized-from-*
