@@ -16,7 +16,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -314,6 +314,12 @@ pub(super) struct SharedConnection {
     /// response from this peer.
     pub(super) consecutive_timeouts: AtomicU32,
 
+    /// The number of responses received from this peer, used to ignore
+    /// request timeouts that overlapped a response: requests run
+    /// concurrently, and only a peer that answers nothing at all is
+    /// unresponsive.
+    pub(super) responses_received: AtomicU64,
+
     /// The bulk block streams (`get-block-range`) this node is currently
     /// serving to the peer.
     pub(super) active_bulk_streams: SlotCounter,
@@ -438,12 +444,25 @@ impl SharedConnection {
     /// Records that this peer answered a request, clearing the consecutive
     /// timeout count.
     pub(super) fn record_response(&self) {
+        self.responses_received.fetch_add(1, Ordering::Relaxed);
         self.consecutive_timeouts.store(0, Ordering::Relaxed);
     }
 
     /// Records that a request to this peer timed out, and fails the
-    /// connection once [`MAX_CONSECUTIVE_REQUEST_TIMEOUTS`] are reached.
-    pub(super) fn record_request_timeout(&self) {
+    /// connection once [`MAX_CONSECUTIVE_REQUEST_TIMEOUTS`] unanswered
+    /// windows are reached.
+    ///
+    /// `responses_at_request_start` is the caller's snapshot of
+    /// [`responses_received`](Self::responses_received) from when it sent the
+    /// request. A timeout only counts if the peer answered nothing at all
+    /// while the request was outstanding: requests run concurrently, so a
+    /// batch of requests timing out together must not each count towards the
+    /// disconnect threshold when the peer is merely slow.
+    pub(super) fn record_request_timeout(&self, responses_at_request_start: u64) {
+        if self.responses_received.load(Ordering::Relaxed) != responses_at_request_start {
+            return;
+        }
+
         let timeouts = self.consecutive_timeouts.fetch_add(1, Ordering::Relaxed) + 1;
 
         if timeouts >= MAX_CONSECUTIVE_REQUEST_TIMEOUTS {
@@ -1337,6 +1356,7 @@ fn spawn_outbound_request(
     tokio::spawn(
         async move {
             let command = request.command();
+            let responses_at_request_start = shared.responses_received.load(Ordering::Relaxed);
             let result = tokio::time::timeout(
                 constants::REQUEST_TIMEOUT,
                 drive_outbound_request(&shared, request),
@@ -1349,7 +1369,9 @@ fn spawn_outbound_request(
                     shared.record_response();
                     Ok(response)
                 }
-                Err(error) => Err(error.into_shared_error(&shared, command)),
+                Err(error) => {
+                    Err(error.into_shared_error(&shared, command, responses_at_request_start))
+                }
             };
 
             let _ = tx.send(result);
@@ -1383,15 +1405,19 @@ impl OutboundError {
     /// Converts this error to the [`SharedPeerError`] reported to the
     /// caller, failing the connection for connection-level errors.
     ///
-    /// `command` is the command name of the failed request, for logging.
+    /// `command` is the command name of the failed request, for logging, and
+    /// `responses_at_request_start` is the caller's
+    /// [`responses_received`](SharedConnection::responses_received) snapshot
+    /// from when it sent the request.
     fn into_shared_error(
         self,
         shared: &SharedConnection,
         command: &'static str,
+        responses_at_request_start: u64,
     ) -> SharedPeerError {
         match self {
             OutboundError::Timeout => {
-                shared.record_request_timeout();
+                shared.record_request_timeout(responses_at_request_start);
                 PeerError::ConnectionReceiveTimeout.into()
             }
             // A local error: the peer is not at fault, so the connection

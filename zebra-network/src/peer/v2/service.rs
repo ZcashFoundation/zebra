@@ -288,6 +288,7 @@ where
                 open_inbound_announcements: Default::default(),
                 sent_get_addr: Default::default(),
                 consecutive_timeouts: Default::default(),
+                responses_received: Default::default(),
                 active_bulk_streams: Default::default(),
                 artifact_dir,
             });
