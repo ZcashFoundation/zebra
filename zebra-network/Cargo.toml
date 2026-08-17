@@ -40,6 +40,9 @@ progress-bar = [
 # Testing features that activate extra dependencies
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
+# Exposes `protocol` to fuzz harnesses; private in normal builds.
+fuzzing = []
+
 [dependencies]
 bitflags = { workspace = true }
 byteorder = { workspace = true }
