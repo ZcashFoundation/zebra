@@ -59,6 +59,9 @@ serial-state = { max-threads = 1 }
 # Live Mainnet tests compete for the same limited set of usable peers when they
 # connect concurrently from one public IP.
 serial-live-mainnet = { max-threads = 1 }
+# Live Testnet tests have the same per-IP connection limit, but use a separate
+# peer set from Mainnet, so they can run concurrently with Mainnet tests.
+serial-live-testnet = { max-threads = 1 }
 # zcashd-compat integration tests each spawn a zebrad + zcashd on
 # bind-probed-then-released ports, so they must never run concurrently, even
 # under a parallel profile invoked with --run-ignored=all.
@@ -71,6 +74,28 @@ serial-zcashd-compat = { max-threads = 1 }
 filter = 'test(/^integration::sync::/)'
 test-group = 'serial-live-mainnet'
 
+# Force live Testnet peer-limit tests to run serially with each other, while
+# allowing them to run concurrently with live Mainnet tests.
+#
+# This split is only safe while no other running test dials live Testnet peers.
+# `integration::sync::sync_one_checkpoint_testnet` and the Testnet half of
+# `integration::sync::restart_stop_at_height` are currently disabled; if they are
+# re-enabled, they join 'serial-live-mainnet' via the filter above and can then
+# contend with this group for Testnet connections. A test can only belong to one
+# group, and `restart_stop_at_height` syncs both networks, so re-enabling them
+# means merging these two groups back into one live-peer group.
+#
+# Keep the 'profile.default' and 'profile.ci' copies of each filter below in
+# sync: nextest is invoked with '--profile ci' by the test workflows, and with
+# the default profile by the coverage workflow.
+[[profile.default.overrides]]
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
+test-group = 'serial-live-testnet'
+
+[[profile.ci.overrides]]
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
+test-group = 'serial-live-testnet'
+
 # Force zcashd-compat integration tests serial in every profile, so a parallel
 # --run-ignored=all run cannot collide on their released RPC/P2P ports.
 [[profile.default.overrides]]
@@ -80,6 +105,43 @@ test-group = 'serial-zcashd-compat'
 [[profile.ci.overrides]]
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
+
+# All other tests that dial live Mainnet peers: zebra-network's crawler and
+# peer-cache tests, and every zebrad test that starts a node without clearing
+# the default DNS seeders. Remote Zebra peers accept then drop any second
+# connection from the same IP within ~2 minutes (max_connections_per_ip is 1 by
+# default), so concurrent live tests on one runner reject each other's
+# handshakes. These overrides set only the test-group; retries and timeouts fall
+# through to earlier overrides or profile defaults.
+[[profile.default.overrides]]
+filter = '''
+test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
+or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
+or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
+or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
+or test(=unit::config::config_tests)
+or test(=unit::config::non_blocking_logger)
+or test(=unit::end_of_support::end_of_support_is_checked_at_start)
+or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
+or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
+or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
+'''
+test-group = 'serial-live-mainnet'
+
+[[profile.ci.overrides]]
+filter = '''
+test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
+or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
+or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
+or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
+or test(=unit::config::config_tests)
+or test(=unit::config::non_blocking_logger)
+or test(=unit::end_of_support::end_of_support_is_checked_at_start)
+or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
+or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
+or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
+'''
+test-group = 'serial-live-mainnet'
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test
