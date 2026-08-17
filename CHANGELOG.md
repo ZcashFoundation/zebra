@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Zebra can now serve Zcash light clients directly: a new gRPC server implements
-  the lightwalletd `CompactTxStreamer` interface, enabled by setting
-  `rpc.lightwalletd_listen_addr` in the config
-  ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,

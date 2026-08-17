@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- A new `lightwalletd` module with a tonic gRPC server that implements the
-  lightwalletd `CompactTxStreamer` interface (`lightwalletd::server::init`),
-  and a new `rpc.lightwalletd_listen_addr` config field to enable it
-  ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
 - New `getdeprecationinfo` RPC method and `GetDeprecationInfoResponse` type. The reported end of
   support height is set with `RpcImpl::with_end_of_support_height`; without it the response omits
   the `end_of_service` object ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
