@@ -413,8 +413,25 @@ impl AddressBook {
     /// As an exception, this function can ignore all changes for specific
     /// [`PeerSocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
-    #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        let updated = self.update_without_metrics(change);
+
+        if updated.is_some() {
+            self.update_metrics(Instant::now(), Utc::now());
+        }
+
+        updated
+    }
+
+    /// Applies `change`, without refreshing the address metrics.
+    ///
+    /// # Correctness
+    ///
+    /// Callers must call [`AddressBook::update_metrics`] once they have finished applying
+    /// changes, and only once: a refresh walks the address book several times, under the
+    /// mutex, so refreshing per change makes a batch quadratic.
+    #[allow(clippy::unwrap_in_result)]
+    fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         if self.bans_by_ip.contains_key(&change.addr().ip()) {
             // Remote peers control how often this fires, so keep it below `warn` (#11134).
             tracing::debug!(
@@ -554,9 +571,6 @@ impl AddressBook {
             }
 
             assert!(self.len() <= self.addr_limit);
-
-            std::mem::drop(_guard);
-            self.update_metrics(instant_now, chrono_now);
         }
 
         updated
@@ -858,8 +872,14 @@ impl Extend<MetaAddrChange> for AddressBook {
     where
         T: IntoIterator<Item = MetaAddrChange>,
     {
+        let mut any_updated = false;
+
         for change in iter.into_iter() {
-            self.update(change);
+            any_updated |= self.update_without_metrics(change).is_some();
+        }
+
+        if any_updated {
+            self.update_metrics(Instant::now(), Utc::now());
         }
     }
 }
