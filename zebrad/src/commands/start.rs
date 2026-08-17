@@ -431,6 +431,10 @@ impl StartCmd {
             chain_tip_change.clone(),
             misbehavior_sender.clone(),
         );
+
+        // Subscribe as soon as possible to not miss any events
+        let mempool_change_receiver = mempool_transaction_subscriber.subscribe();
+
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
@@ -577,11 +581,8 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(
-                mempool_transaction_subscriber.subscribe(),
-                peer_set.clone(),
-            )
-            .in_current_span(),
+            mempool::gossip_mempool_transaction_id(mempool_change_receiver, peer_set.clone())
+                .in_current_span(),
         );
 
         info!("spawning delete old databases task");
