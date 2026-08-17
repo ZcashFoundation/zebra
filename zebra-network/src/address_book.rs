@@ -426,7 +426,7 @@ impl AddressBook {
     /// changes, and only once: a refresh walks the address book several times, so
     /// refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
-    fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+    pub(crate) fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         // Banned addresses are filtered out by the peer book actor before
         // they reach the address book, so changes here are never banned.
         let previous = self.get(change.addr());
@@ -654,17 +654,26 @@ impl AddressBook {
             .cloned()
     }
 
+    /// Refreshes the address metrics, after a batch of
+    /// [`update_without_metrics`](Self::update_without_metrics) calls.
+    pub(crate) fn refresh_metrics(&mut self) {
+        self.update_metrics(Instant::now(), Utc::now());
+    }
+
     /// Removes the entry for `addr`, and its per-IP bookkeeping.
     ///
     /// Used by the peer book actor when a gossiped entry is evicted by
     /// bucket replacement.
     pub(crate) fn remove(&mut self, addr: PeerSocketAddr) {
         if self.by_addr.remove(&addr).is_some() {
-            // `most_recent_by_ip` is only populated when
-            // `max_connections_per_ip == 1`, so the optional cache must be
-            // guarded, not unwrapped.
-            if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                most_recent_by_ip.remove(&addr.ip());
+            // Only clear the per-IP most-recent cache when the removed
+            // entry is the cached one: another peer on the same IP may
+            // still be the most recent responder.
+            if self.should_remove_most_recent_by_ip(addr) {
+                self.most_recent_by_ip
+                    .as_mut()
+                    .expect("should be some when should_remove_most_recent_by_ip is true")
+                    .remove(&addr.ip());
             }
         }
     }

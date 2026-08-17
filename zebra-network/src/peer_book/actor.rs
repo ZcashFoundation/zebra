@@ -1,9 +1,9 @@
-//! The peer book actor: a single blocking thread that owns the address book.
+//! The peer book actor: an async task that owns the address book.
 //!
 //! The actor is the address book's only owner. It applies
 //! [`MetaAddrChange`]s and answers [`PeerBookHandle`](super::PeerBookHandle)
-//! calls in channel order on one dedicated blocking thread, so book access
-//! needs no locks at all, and it maintains the bans and recently-live watch
+//! calls in channel order on one dedicated task, so book access needs no
+//! locks at all, and it maintains the bans and recently-live watch
 //! snapshots for lock-free readers.
 
 use std::{
@@ -17,7 +17,7 @@ use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
 };
-use tracing::Span;
+use tracing::{Instrument, Span};
 
 use crate::{
     address_book_updater::AllAddressBookUpdaterSendersClosed,
@@ -54,7 +54,7 @@ pub(crate) fn spawn_actor(
         crate::address_book::AddressMetrics,
     >,
 ) -> JoinHandle<Result<(), BoxError>> {
-    let actor = move || {
+    let actor = async move {
         info!("starting the peer book actor");
 
         #[cfg(feature = "progress-bar")]
@@ -74,14 +74,21 @@ pub(crate) fn spawn_actor(
         let mut last_live_refresh = Instant::now();
         let mut live_changed = false;
 
-        while let Some(message) = messages_rx.blocking_recv() {
+        while let Some(message) = messages_rx.recv().await {
+            // Expired bans must leave the published snapshot too, or the
+            // peer set and inbound admission would enforce them forever
+            // while the actor already re-admits the peer.
+            if misbehavior.prune_due(Instant::now()) {
+                let _ = bans_sender.send(misbehavior.bans_snapshot());
+            }
+
             match message {
                 Message::Change(change) => {
                     trace!(?change, "got address book change");
 
                     let ban_key = BanKey::from(change.addr().ip());
 
-                    if let MetaAddrChange::UpdateMisbehavior {
+                    let apply = if let MetaAddrChange::UpdateMisbehavior {
                         score_increment, ..
                     } = &change
                     {
@@ -99,37 +106,37 @@ pub(crate) fn spawn_actor(
                             transports.remove_if(|addr| BanKey::from(addr.ip()) == ban_key);
                             let _ = bans_sender.send(misbehavior.bans_snapshot());
 
-                            continue;
+                            // The removed entries were typically recently
+                            // live, so the snapshot must be refreshed.
+                            live_changed = true;
+                            false
+                        } else {
+                            // A sub-threshold report for a still-banned key
+                            // must not re-create the peer's book entry: the
+                            // ban reset its score, so later reports start
+                            // from zero and fall through the threshold.
+                            !misbehavior.is_banned(&ban_key)
                         }
-                    } else if misbehavior.is_banned(&ban_key) {
+                    } else {
                         // Ignore changes for banned peers, so they cannot
                         // re-enter the book while the ban lasts.
-                        continue;
-                    }
+                        !misbehavior.is_banned(&ban_key)
+                    };
 
-                    // # Security
-                    //
-                    // Gossiped addresses are unauthenticated relay data:
-                    // new ones are admitted through the secret-keyed
-                    // buckets, which bound the book share of any address
-                    // group and of gossip as a whole (eclipse resistance).
-                    if let MetaAddrChange::NewGossiped { addr, .. } = &change {
-                        let addr = *addr;
-                        if address_book.get(addr).is_none() {
-                            let victim = gossip_buckets.admit(addr, |entry| {
-                                address_book.get(entry).is_some_and(|meta| {
-                                    meta.last_connection_state
-                                        == crate::PeerAddrState::NeverAttemptedGossiped
-                                })
-                            });
-                            if let Some(victim) = victim {
-                                address_book.remove(victim);
-                            }
+                    if apply {
+                        // # Security
+                        //
+                        // Gossiped addresses are unauthenticated relay data:
+                        // new ones are admitted through the secret-keyed
+                        // buckets, which bound the book share of any address
+                        // group and of gossip as a whole (eclipse resistance).
+                        if let MetaAddrChange::NewGossiped { addr, .. } = &change {
+                            admit_gossiped(&mut address_book, &mut gossip_buckets, *addr);
                         }
-                    }
 
-                    address_book.update(change);
-                    live_changed = true;
+                        address_book.update(change);
+                        live_changed = true;
+                    }
                 }
 
                 Message::Transport {
@@ -148,6 +155,7 @@ pub(crate) fn spawn_actor(
                     let response = answer_call(
                         &mut address_book,
                         &mut misbehavior,
+                        &mut gossip_buckets,
                         &mut transports,
                         &mut get_addr_cache,
                         request,
@@ -210,10 +218,38 @@ pub(crate) fn spawn_actor(
         error
     };
 
-    // The actor accesses the address book on its own dedicated blocking
-    // thread, so async tasks never block on book operations (#1976).
+    // # Correctness
+    //
+    // The actor is an async task, not a blocking thread:
+    // - each message is handled without awaiting while the book is
+    //   borrowed, so the task never blocks the runtime for long, and no
+    //   other task can observe the book mid-change (#1976), and
+    // - a long-lived blocking thread would inhibit auto-advance in tests
+    //   that pause the tokio clock.
     let span = Span::current();
-    tokio::task::spawn_blocking(move || span.in_scope(actor))
+    tokio::spawn(actor.instrument(span))
+}
+
+/// Admits a newly gossiped `addr` through the secret-keyed buckets,
+/// removing the bucket's eviction victim from the book, if any.
+///
+/// Addresses already in the book only refresh their entry, so repeated
+/// gossip cannot evict other peers.
+fn admit_gossiped(
+    address_book: &mut AddressBook,
+    gossip_buckets: &mut super::buckets::GossipBuckets,
+    addr: crate::PeerSocketAddr,
+) {
+    if address_book.get(addr).is_none() {
+        let victim = gossip_buckets.admit(addr, |entry| {
+            address_book.get(entry).is_some_and(|meta| {
+                meta.last_connection_state == crate::PeerAddrState::NeverAttemptedGossiped
+            })
+        });
+        if let Some(victim) = victim {
+            address_book.remove(victim);
+        }
+    }
 }
 
 /// How long one sanitized `get-addr` response snapshot is served before a
@@ -234,6 +270,7 @@ const GET_ADDR_CACHE_JITTER: Duration = Duration::from_secs(6 * 60 * 60);
 fn answer_call(
     address_book: &mut AddressBook,
     misbehavior: &mut MisbehaviorStore,
+    gossip_buckets: &mut super::buckets::GossipBuckets,
     transports: &mut TransportTable,
     get_addr_cache: &mut Option<(Instant, Vec<MetaAddr>)>,
     request: PeerBookRequest,
@@ -315,7 +352,22 @@ fn answer_call(
                 .map(|change| change.expect("gossiped peers always have services set"))
                 .collect();
 
-            address_book.extend(changes);
+            // # Security
+            //
+            // New gossiped addresses are admitted through the secret-keyed
+            // buckets before entering the book, which bound the book share
+            // of any address group and of gossip as a whole (eclipse
+            // resistance). Admission is interleaved with the writes,
+            // because each bucket decision depends on the book state left
+            // by the changes before it.
+            let mut applied = false;
+            for change in changes {
+                admit_gossiped(address_book, gossip_buckets, change.addr());
+                applied |= address_book.update_without_metrics(change).is_some();
+            }
+            if applied {
+                address_book.refresh_metrics();
+            }
 
             PeerBookResponse::Done
         }
