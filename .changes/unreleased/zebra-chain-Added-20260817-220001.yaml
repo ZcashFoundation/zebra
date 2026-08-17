@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'The known-hash list format for trusted-commitment synchronization: pinned per-chunk SHA-256 constants for Mainnet and Testnet, the versioned chunk encoding with per-block size hints and sparse note-commitment-tree roots, and a windowed, hash-verified chunk loader. Chunk data is never shipped: nodes download chunks from peers over the version 2 protocol and verify them against the pins.'
+time: 2026-08-17T22:00:01.000000000Z

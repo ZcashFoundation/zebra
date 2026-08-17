@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'The spentness-hint bitmap artifact for SwiftSync-style synchronization below the final checkpoint: a strictly parsed, canonically framed bitmap over global transparent-output ordinals, verified whole against a release-pinned `MaxCheckpoint` hash before use.'
+time: 2026-08-17T22:00:02.000000000Z

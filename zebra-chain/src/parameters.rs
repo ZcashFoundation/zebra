@@ -14,6 +14,8 @@
 
 pub mod checkpoint;
 pub mod constants;
+pub mod spentness_hints;
+
 mod genesis;
 pub mod known_hashes;
 mod network;
