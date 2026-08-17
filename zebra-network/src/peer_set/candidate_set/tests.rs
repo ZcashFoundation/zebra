@@ -1,4 +1,4 @@
-//! [`CandidateSet`] tests.
+//! Candidate peer selection tests.
 
 #![allow(clippy::unwrap_in_result)]
 
