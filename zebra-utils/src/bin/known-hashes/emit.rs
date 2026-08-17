@@ -1,0 +1,151 @@
+//! Chunked known-hash asset emission and `KnownHashListSpec` constant
+//! printing.
+//!
+//! Converts a completed sweep into the assets consumed by the known-hash IBD
+//! engine:
+//!
+//! - `<prefix>-NN.bin` chunk files, each holding up to [`HASHES_PER_CHUNK`]
+//!   raw 32-byte internal-order block hashes followed by one quantized
+//!   size-hint byte per block, and
+//! - the `KnownHashListSpec` constant block that pins each chunk with a
+//!   SHA-256 digest, printed ready to paste into `zebra-chain`.
+
+use std::{fmt::Write as _, fs, path::Path};
+
+use color_eyre::eyre::{ensure, eyre, Result, WrapErr};
+use sha2::{Digest, Sha256};
+
+use zebra_chain::block::MAX_BLOCK_BYTES;
+
+/// Returns the chunk file name for `file_prefix` and chunk `index`:
+/// `<file_prefix>-NN.bin` (e.g. `main-known-hashes-00.bin`).
+///
+/// Emitted files are local review artifacts for the pinning flow; chunks are
+/// never distributed as files.
+fn chunk_file_name(file_prefix: &str, index: usize) -> String {
+    format!("{file_prefix}-{index:02}.bin")
+}
+
+// The size-hint quantum and chunk size are defined once in `zebra-chain` so
+// the emitter and the IBD engine encode and decode the same format;
+// re-exported here for the sweep and its tests.
+pub use zebra_chain::parameters::known_hashes::SIZE_HINT_UNIT;
+
+/// The number of block hashes in each chunk file (except the last), as a
+/// `usize` for slicing.
+///
+/// Defined once in `zebra-chain`
+/// ([`HASHES_PER_CHUNK`](zebra_chain::parameters::known_hashes::HASHES_PER_CHUNK))
+/// so the emitter and the loader's specs can't disagree.
+//
+// 150,000 fits usize on all supported platforms.
+pub const HASHES_PER_CHUNK: usize =
+    zebra_chain::parameters::known_hashes::HASHES_PER_CHUNK as usize;
+
+/// The asset digests pinned by a `KnownHashListSpec`.
+#[derive(Debug)]
+pub struct EmittedSpec {
+    /// SHA-256 of each emitted chunk file, in chunk order.
+    pub chunk_hashes: Vec<[u8; 32]>,
+}
+
+/// Quantizes a serialized block size into its 1-byte size hint:
+/// `serialized_size.div_ceil(SIZE_HINT_UNIT)`.
+///
+/// Returns an error unless the size is in `1..=MAX_BLOCK_BYTES`, which keeps
+/// every emitted hint in the loader's valid `1..=255` range.
+pub fn size_hint(serialized_size: u32) -> Result<u8> {
+    ensure!(serialized_size > 0, "block size 0 marks an unswept height");
+    ensure!(
+        u64::from(serialized_size) <= MAX_BLOCK_BYTES,
+        "block size {serialized_size} is above the {MAX_BLOCK_BYTES} byte protocol limit",
+    );
+
+    let hint = serialized_size.div_ceil(SIZE_HINT_UNIT);
+
+    // `serialized_size <= MAX_BLOCK_BYTES <= 255 * SIZE_HINT_UNIT`, so the
+    // rounded-up quotient is in `1..=255` and fits in a u8.
+    Ok(hint as u8)
+}
+
+/// Writes the chunk files for `hashes` and `hints` into `out_dir`, using
+/// `file_prefix` (`main-known-hashes` or `test-known-hashes`) in the file
+/// names, and returns their SHA-256
+/// digests.
+///
+/// Each chunk holds the raw 32-byte hashes for its heights, followed by one
+/// size-hint byte per height in the same order.
+///
+/// `hashes` and `hints` must each have one entry per height, starting at
+/// genesis.
+pub fn emit_assets(
+    out_dir: &Path,
+    file_prefix: &str,
+    hashes: &[[u8; 32]],
+    hints: &[u8],
+) -> Result<EmittedSpec> {
+    ensure!(
+        !hashes.is_empty(),
+        "the known-hash list must contain at least the genesis block hash",
+    );
+    ensure!(
+        hashes.len() == hints.len(),
+        "the hash list covers {} heights but the size-hint array covers {}",
+        hashes.len(),
+        hints.len(),
+    );
+    if let Some(height) = hints.iter().position(|hint| *hint == 0) {
+        return Err(eyre!(
+            "invalid size hint 0 at height {height}: hints must be in 1..=255"
+        ));
+    }
+
+    let mut chunk_hashes = Vec::new();
+    for (index, (hash_chunk, hint_chunk)) in hashes
+        .chunks(HASHES_PER_CHUNK)
+        .zip(hints.chunks(HASHES_PER_CHUNK))
+        .enumerate()
+    {
+        let mut bytes: Vec<u8> = hash_chunk.iter().flatten().copied().collect();
+        bytes.extend_from_slice(hint_chunk);
+
+        let path = out_dir.join(chunk_file_name(file_prefix, index));
+        fs::write(&path, &bytes).wrap_err_with(|| format!("writing {}", path.display()))?;
+
+        chunk_hashes.push(Sha256::digest(&bytes).into());
+    }
+
+    Ok(EmittedSpec { chunk_hashes })
+}
+
+/// Formats the `KnownHashListSpec` constant block for `spec`, ready to paste
+/// into `zebra-chain`.
+///
+/// `const_prefix` is the network part of the constant name (`MAINNET` or
+/// `TESTNET`), and `max_height` is the reviewed highest height the list
+/// covers. The output matches the [`KnownHashListSpec`] struct field for
+/// field so it compiles when pasted in.
+pub fn spec_constant_block(const_prefix: &str, max_height: u32, spec: &EmittedSpec) -> String {
+    let mut block = String::new();
+
+    // Writing to a `String` is infallible, so the `expect`s below hold.
+    writeln!(
+        block,
+        "/// Known-hash list spec for {const_prefix}, generated by the `known-hashes` tool\n\
+         /// from a checkpoint-anchored sweep of a synced local node.\n\
+         pub const {const_prefix}_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {{\n\
+         \x20   max_height: block::Height({max_height}),\n\
+         \x20   chunk_blocks: {HASHES_PER_CHUNK},\n\
+         \x20   chunk_hashes: &["
+    )
+    .expect("writing to a String never fails");
+
+    for chunk_hash in &spec.chunk_hashes {
+        writeln!(block, "        \"{}\",", hex::encode(chunk_hash))
+            .expect("writing to a String never fails");
+    }
+
+    writeln!(block, "    ],\n}};").expect("writing to a String never fails");
+
+    block
+}
