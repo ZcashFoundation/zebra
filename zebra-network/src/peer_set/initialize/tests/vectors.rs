@@ -1977,9 +1977,7 @@ async fn self_connections_should_fail() {
     .await;
 
     // Insert our own address into the address book, and make sure it works
-    let real_self_listener =
-        MetaAddr::new_local_listener_change(address_book.local_listener_socket_addr())
-            .local_listener_into_new_meta_addr(Utc::now().try_into().expect("in range"));
+    let real_self_listener = address_book.local_listener_meta_addr(Utc::now());
 
     // Set a fake listener on the book to get past the check for adding our
     // own address. The change below travels the same channel, so it is
@@ -2245,24 +2243,24 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         "Test user agent".to_string(),
     )
     .await;
-    let local_listener = peer_book_reader.local_listener_socket_addr();
+    let local_listener = peer_book_reader.local_listener_meta_addr(Utc::now());
 
     if listen_addr.port() == 0 {
         assert_ne!(
-            local_listener.port(),
+            local_listener.addr.port(),
             0,
             "dynamic ports are replaced with OS-assigned ports"
         );
     } else {
         assert_eq!(
-            local_listener.port(),
+            local_listener.addr.port(),
             listen_addr.port(),
             "fixed ports are correctly propagated"
         );
     }
 
     assert_eq!(
-        local_listener.ip(),
+        local_listener.addr.ip(),
         listen_addr.ip(),
         "IP addresses are correctly propagated"
     );

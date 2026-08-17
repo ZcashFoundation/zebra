@@ -167,11 +167,7 @@ impl Request {
                 stop,
                 tx_ids,
             } => {
-                record::check_send_limit(
-                    known_blocks.len() as u64,
-                    MAX_LOCATOR_HASHES,
-                    "locator hashes",
-                )?;
+                record::check_send_limit(known_blocks.len(), MAX_LOCATOR_HASHES, "locator hashes")?;
 
                 record::write_compact_size(&mut writer, known_blocks.len() as u64)?;
                 for hash in known_blocks {
@@ -181,11 +177,7 @@ impl Request {
                 writer.write_all(&[u8::from(*tx_ids)])?;
             }
             Request::GetBlocks { hashes } => {
-                record::check_send_limit(
-                    hashes.len() as u64,
-                    MAX_GET_BLOCKS_HASHES,
-                    "block requests",
-                )?;
+                record::check_send_limit(hashes.len(), MAX_GET_BLOCKS_HASHES, "block requests")?;
 
                 record::write_compact_size(&mut writer, hashes.len() as u64)?;
                 for hash in hashes {
@@ -193,11 +185,7 @@ impl Request {
                 }
             }
             Request::GetTx { refs } => {
-                record::check_send_limit(
-                    refs.len() as u64,
-                    MAX_GET_TX_REFS,
-                    "transaction references",
-                )?;
+                record::check_send_limit(refs.len(), MAX_GET_TX_REFS, "transaction references")?;
 
                 record::write_compact_size(&mut writer, refs.len() as u64)?;
                 for txref in refs {
@@ -222,12 +210,12 @@ impl Request {
                 count,
                 max_bytes,
             } => {
-                record::check_send_limit(
+                record::check_send_value(
                     *count,
-                    MAX_GET_BLOCK_RANGE_COUNT,
+                    MAX_GET_BLOCK_RANGE_COUNT as u64,
                     "get-block-range count",
                 )?;
-                record::check_send_limit(
+                record::check_send_value(
                     *max_bytes,
                     MAX_GET_BLOCK_RANGE_BYTES,
                     "get-block-range max_bytes",
@@ -242,7 +230,11 @@ impl Request {
                 final_hash,
                 count,
             } => {
-                record::check_send_limit(*count, MAX_GET_TREE_ROOTS_COUNT, "get-tree-roots count")?;
+                record::check_send_value(
+                    *count,
+                    MAX_GET_TREE_ROOTS_COUNT as u64,
+                    "get-tree-roots count",
+                )?;
 
                 writer.write_all(&start_height.to_le_bytes())?;
                 writer.write_all(&final_hash.0)?;
@@ -253,7 +245,7 @@ impl Request {
                 offset,
                 length,
             } => {
-                record::check_send_limit(*length, MAX_GET_OBJECT_LENGTH, "get-object length")?;
+                record::check_send_value(*length, MAX_GET_OBJECT_LENGTH, "get-object length")?;
 
                 writer.write_all(&hash.0)?;
                 record::write_compact_size(&mut writer, *offset)?;
@@ -346,13 +338,13 @@ impl Request {
             StreamType::GetBlockRange => {
                 let final_hash = record::read_block_hash(reader).await?;
                 let count = record::read_compact_size(reader).await?;
-                record::check_recv_limit(
+                record::check_recv_value(
                     count,
-                    MAX_GET_BLOCK_RANGE_COUNT,
+                    MAX_GET_BLOCK_RANGE_COUNT as u64,
                     "get-block-range count",
                 )?;
                 let max_bytes = record::read_compact_size(reader).await?;
-                record::check_recv_limit(
+                record::check_recv_value(
                     max_bytes,
                     MAX_GET_BLOCK_RANGE_BYTES,
                     "get-block-range max_bytes",
@@ -368,7 +360,11 @@ impl Request {
                 let start_height = record::read_exact_u32_le(reader).await?;
                 let final_hash = record::read_block_hash(reader).await?;
                 let count = record::read_compact_size(reader).await?;
-                record::check_recv_limit(count, MAX_GET_TREE_ROOTS_COUNT, "get-tree-roots count")?;
+                record::check_recv_value(
+                    count,
+                    MAX_GET_TREE_ROOTS_COUNT as u64,
+                    "get-tree-roots count",
+                )?;
 
                 Ok(Request::GetTreeRoots {
                     start_height,
@@ -381,7 +377,7 @@ impl Request {
                 record::read_exact_or_incomplete(reader, &mut hash).await?;
                 let offset = record::read_compact_size(reader).await?;
                 let length = record::read_compact_size(reader).await?;
-                record::check_recv_limit(length, MAX_GET_OBJECT_LENGTH, "get-object length")?;
+                record::check_recv_value(length, MAX_GET_OBJECT_LENGTH, "get-object length")?;
 
                 Ok(Request::GetObject {
                     hash: ObjectHash(hash),
@@ -411,7 +407,7 @@ fn check_get_hashes_bounds(start_height: u32, stride: u32, count: u64) -> Result
         return Err("get-hashes stride must not be 0".to_string());
     }
 
-    if count > MAX_GET_HASHES_COUNT {
+    if count > MAX_GET_HASHES_COUNT as u64 {
         return Err(format!(
             "get-hashes count {count} exceeds the limit {MAX_GET_HASHES_COUNT}",
         ));

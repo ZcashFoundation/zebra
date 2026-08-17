@@ -96,7 +96,6 @@ pub struct HandshakeParams {
 ///
 /// The handshake stream halves are kept open for the life of the connection:
 /// finishing or resetting the handshake stream signals intent to disconnect.
-#[derive(Debug)]
 pub struct V2Handshake {
     /// The remote peer's `init` record.
     pub remote_init: InitRecord,
@@ -110,6 +109,15 @@ pub struct V2Handshake {
 
     /// The receiving half of the handshake stream.
     pub handshake_recv: quinn::RecvStream,
+}
+
+impl std::fmt::Debug for V2Handshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2Handshake")
+            .field("remote_init", &self.remote_init)
+            .field("negotiated_version", &self.negotiated_version)
+            .finish()
+    }
 }
 
 /// Performs the version 2 handshake as the connection initiator:

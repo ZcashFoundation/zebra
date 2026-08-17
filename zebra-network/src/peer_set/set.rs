@@ -139,7 +139,7 @@ use crate::{
     },
     protocol::{
         external::InventoryHash,
-        internal::{Request, Response},
+        internal::{PeerCapability, Request, Response},
     },
     BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
@@ -913,15 +913,17 @@ where
         }
     }
 
-    /// Performs P2C over the ready peers that can answer the request.
+    /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
+    /// Performs P2C over the ready peers that can answer `capability`.
     ///
-    /// Returns `None` when no ready peer can, so the caller reports no ready
-    /// peers instead of spending the request on one that will refuse it.
-    fn select_ready_p2c_peer(&self, requires_v2: bool) -> Option<D::Key> {
+    /// Returns `None` when no ready peer supports it, so the caller can fall
+    /// back to a request every peer understands, instead of spending the
+    /// request on a peer that will refuse it.
+    fn select_ready_p2c_peer(&self, capability: PeerCapability) -> Option<D::Key> {
         let capable: HashSet<D::Key> = self
             .ready_services
             .iter()
-            .filter(|(_key, svc)| !requires_v2 || svc.is_v2())
+            .filter(|(_key, svc)| capability == PeerCapability::Any || svc.is_v2())
             .map(|(key, _svc)| *key)
             .collect();
 
@@ -1053,7 +1055,7 @@ where
 
     /// Routes a request using P2C load-balancing.
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        if let Some(p2c_key) = self.select_ready_p2c_peer(req.requires_v2_peer()) {
+        if let Some(p2c_key) = self.select_ready_p2c_peer(req.peer_capability()) {
             tracing::trace!(?p2c_key, "routing based on p2c");
 
             let mut svc = self

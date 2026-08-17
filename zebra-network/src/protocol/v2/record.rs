@@ -48,8 +48,8 @@ pub fn write_compact_size<W: io::Write>(mut writer: W, value: u64) -> Result<(),
 ///
 /// Exceeding the limit is a scored violation rather than a connection
 /// error: the response is discarded, and the peer is penalized.
-pub fn check_recv_limit_scored(count: u64, limit: u64, what: &str) -> Result<(), WireError> {
-    if count > limit {
+pub fn check_recv_limit_scored(count: u64, limit: usize, what: &str) -> Result<(), WireError> {
+    if count > limit as u64 {
         return Err(WireError::Misbehavior {
             points: super::constants::MISBEHAVIOR_PENALTY_LIMIT_EXCEEDED,
             reason: format!("{what} response with {count} entries exceeds the limit {limit}"),
@@ -59,12 +59,41 @@ pub fn check_recv_limit_scored(count: u64, limit: u64, what: &str) -> Result<(),
     Ok(())
 }
 
-/// Checks an outbound count or length against a protocol limit.
+/// Checks an outbound collection length against a protocol limit.
 ///
 /// Exceeding the limit is a [`WireError::Local`] error: this node built the
 /// over-limit message, so the peer is never blamed for it, and the
 /// connection stays open.
-pub fn check_send_limit(value: u64, limit: u64, what: &str) -> Result<(), WireError> {
+pub fn check_send_limit(len: usize, limit: usize, what: &str) -> Result<(), WireError> {
+    if len > limit {
+        return Err(WireError::Local(format!(
+            "attempted to send {len} {what}; the limit is {limit}",
+        )));
+    }
+
+    Ok(())
+}
+
+/// Checks an untrusted collection count from the peer against a protocol
+/// limit.
+///
+/// Exceeding the limit is a connection error of type `PROTOCOL_ERROR`.
+pub fn check_recv_limit(count: u64, limit: usize, what: &str) -> Result<(), WireError> {
+    if count > limit as u64 {
+        return Err(WireError::Protocol(format!(
+            "{what} count {count} exceeds the limit {limit}",
+        )));
+    }
+
+    Ok(())
+}
+
+/// Checks an outbound numeric request field against a protocol limit.
+///
+/// Exceeding the limit is a [`WireError::Local`] error: this node built the
+/// over-limit request, so the peer is never blamed for it, and the
+/// connection stays open.
+pub fn check_send_value(value: u64, limit: u64, what: &str) -> Result<(), WireError> {
     if value > limit {
         return Err(WireError::Local(format!(
             "attempted to send a {what} of {value}; the limit is {limit}",
@@ -74,11 +103,11 @@ pub fn check_send_limit(value: u64, limit: u64, what: &str) -> Result<(), WireEr
     Ok(())
 }
 
-/// Checks an untrusted count or length from the peer against a protocol
+/// Checks an untrusted numeric field from the peer against a protocol
 /// limit.
 ///
 /// Exceeding the limit is a connection error of type `PROTOCOL_ERROR`.
-pub fn check_recv_limit(value: u64, limit: u64, what: &str) -> Result<(), WireError> {
+pub fn check_recv_value(value: u64, limit: u64, what: &str) -> Result<(), WireError> {
     if value > limit {
         return Err(WireError::Protocol(format!(
             "{what} {value} exceeds the limit {limit}",

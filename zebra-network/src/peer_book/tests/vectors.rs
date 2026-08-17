@@ -237,14 +237,19 @@ async fn ban_removes_every_entry_for_the_banned_ip() {
     let response = handles
         .handle
         .clone()
-        .oneshot(PeerBookRequest::SelectCandidate)
+        .oneshot(PeerBookRequest::SelectCandidates { max: 1 })
         .await
         .expect("the actor is running");
     match response {
-        PeerBookResponse::Candidate(Some((peer, _transports))) => assert_eq!(
-            peer.addr, unrelated_addr,
-            "a banned IP must never be a reconnection candidate",
-        ),
-        other => panic!("the unrelated peer should be a candidate: {other:?}"),
+        PeerBookResponse::Candidates(candidates) => {
+            let (peer, _transports) = candidates
+                .first()
+                .expect("the unrelated peer should be a candidate");
+            assert_eq!(
+                peer.addr, unrelated_addr,
+                "a banned IP must never be a reconnection candidate",
+            );
+        }
+        other => panic!("unexpected response variant: {other:?}"),
     }
 }

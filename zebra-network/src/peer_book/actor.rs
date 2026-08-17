@@ -101,7 +101,7 @@ pub(crate) fn spawn_actor(
 
                             continue;
                         }
-                    } else if misbehavior.is_banned(ban_key) {
+                    } else if misbehavior.is_banned(&ban_key) {
                         // Ignore changes for banned peers, so they cannot
                         // re-enter the book while the ban lasts.
                         continue;
@@ -263,26 +263,32 @@ fn answer_call(
         PeerBookRequest::CacheSnapshot => {
             PeerBookResponse::Addrs(address_book.cacheable(Utc::now()))
         }
-        PeerBookRequest::SelectCandidate => {
+        PeerBookRequest::SelectCandidates { max } => {
             // The pick and the attempt mark happen in the same actor turn,
             // so concurrent selections cannot return the same peer.
             let instant_now = Instant::now();
-            let next_peer = address_book
-                .reconnection_peers(instant_now, Utc::now())
-                .next();
+            let chrono_now = Utc::now();
 
-            let candidate = next_peer
-                .and_then(|peer| address_book.update(MetaAddr::new_reconnect(peer.addr)))
-                .map(|marked| {
+            let mut candidates = Vec::new();
+            for _ in 0..max {
+                let Some(next_peer) = address_book
+                    .reconnection_peers(instant_now, chrono_now)
+                    .next()
+                else {
+                    break;
+                };
+
+                let change = MetaAddr::new_reconnect(next_peer.addr);
+                if let Some(marked) = address_book.update(change) {
                     // The dialer needs to know which transports this peer
                     // accepts, so it can reach version 2 peers it learned
                     // about over the legacy network.
                     let transports = transports.dialable(&marked.addr, instant_now);
+                    candidates.push((marked, transports));
+                }
+            }
 
-                    (marked, transports)
-                });
-
-            PeerBookResponse::Candidate(candidate)
+            PeerBookResponse::Candidates(candidates)
         }
         PeerBookRequest::ReadyCandidateCount => {
             let instant_now = Instant::now();
@@ -304,7 +310,7 @@ fn answer_call(
                 super::intake::validate_addrs(addrs, zebra_chain::serialization::DateTime32::now());
 
             let changes: Vec<MetaAddrChange> = addrs
-                .filter(|addr| !misbehavior.is_banned(BanKey::from(addr.addr.ip())))
+                .filter(|addr| !misbehavior.is_banned(&BanKey::from(addr.addr.ip())))
                 .map(MetaAddr::new_gossiped_change)
                 .map(|change| change.expect("gossiped peers always have services set"))
                 .collect();

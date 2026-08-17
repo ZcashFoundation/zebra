@@ -152,7 +152,7 @@ where
     let next_peer_service = RateLimitOnYield::new(
         peer_book_handle.clone(),
         constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
-        |response| matches!(response, PeerBookResponse::Candidate(Some(_))),
+        |response| matches!(response, PeerBookResponse::Candidates(candidates) if !candidates.is_empty()),
     );
 
     let crawl_service = CrawlFanout::service(peer_service, peer_book_handle);
@@ -201,15 +201,15 @@ pub(crate) async fn next_reconnect_peer(
     let response = match next_peer_service.ready().await {
         Ok(next_peer_service) => {
             next_peer_service
-                .call(PeerBookRequest::SelectCandidate)
+                .call(PeerBookRequest::SelectCandidates { max: 1 })
                 .await
         }
         Err(error) => Err(error),
     };
 
     match response {
-        Ok(PeerBookResponse::Candidate(next_peer)) => next_peer,
-        Ok(_) => unreachable!("SelectCandidate requests always return Candidate"),
+        Ok(PeerBookResponse::Candidates(candidates)) => candidates.into_iter().next(),
+        Ok(_) => unreachable!("SelectCandidates requests always return Candidates"),
         Err(error) => {
             debug!(
                 ?error,

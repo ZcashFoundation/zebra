@@ -3,7 +3,7 @@
 use std::io;
 
 use tokio::time::sleep;
-use tower::ServiceExt;
+use tower::{Service, ServiceExt};
 
 use crate::{
     constants::{DNS_LOOKUP_TIMEOUT, PEER_DISK_CACHE_UPDATE_INTERVAL},
@@ -29,7 +29,7 @@ pub async fn peer_cache_updater(
     loop {
         // Ignore errors because updating the cache is optional.
         // Errors are already logged by the functions we're calling.
-        wrote_cache |= update_peer_cache_once(&config, peer_book_handle.clone())
+        wrote_cache |= update_peer_cache_once(&config, &mut peer_book_handle.clone())
             .await
             .unwrap_or(false);
 
@@ -52,10 +52,13 @@ pub async fn peer_cache_updater(
 /// keeping any previous cache.
 pub async fn update_peer_cache_once(
     config: &Config,
-    peer_book_handle: PeerBookHandle,
+    peer_book_handle: &mut PeerBookHandle,
 ) -> io::Result<bool> {
     let response = peer_book_handle
-        .oneshot(PeerBookRequest::CacheSnapshot)
+        .ready()
+        .await
+        .map_err(io::Error::other)?
+        .call(PeerBookRequest::CacheSnapshot)
         .await
         .map_err(io::Error::other)?;
     let PeerBookResponse::Addrs(cacheable) = response else {

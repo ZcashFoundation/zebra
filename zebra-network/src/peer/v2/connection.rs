@@ -60,9 +60,8 @@ use crate::{
             record,
             request::Request as WireRequest,
             response::{
-                encode_result_entry, read_result_entry, AddrResponse, HashesResponse,
-                HeadersResponse, MempoolResponse, TreeRootsResponse, RESULT_NOT_FOUND,
-                RESULT_OBJECT,
+                AddrResponse, BlockResponseEntry, HashesResponse, HeadersResponse, MempoolResponse,
+                TreeRootsResponse, TxResponseEntry, RESULT_NOT_FOUND, RESULT_OBJECT,
             },
             txref::TransactionReference,
             types::{ErrorCode, StreamType, WireError},
@@ -128,13 +127,19 @@ const RECONSTRUCTED_BLOCK_CACHE_LIMIT: usize = 4;
 /// a QUIC stream locks shared transport state.
 const RESPONSE_STREAM_READ_BUFFER_SIZE: usize = 64 * 1024;
 
-/// The read buffer size for record streams: inbound requests, and the
-/// long-lived handshake and announcement streams.
+/// The read buffer size for inbound request streams.
 ///
-/// Their records are small and infrequent, and the remote peer can hold
-/// many of these streams open at once, each keeping its buffer for as long
-/// as the stream lives. A large per-stream buffer would let it pin
-/// megabytes of allocations per connection.
+/// Inbound requests are small (only `get-tx` exceeds a few KiB), and the
+/// remote peer can hold many request streams open concurrently, so a large
+/// per-stream buffer would let it pin megabytes of allocations per
+/// connection.
+const INBOUND_REQUEST_STREAM_READ_BUFFER_SIZE: usize = 8 * 1024;
+
+/// The read buffer size for the long-lived handshake and announcement
+/// streams.
+///
+/// Their records are small and infrequent, and each open stream keeps its
+/// buffer for the life of the connection.
 const RECORD_STREAM_READ_BUFFER_SIZE: usize = 8 * 1024;
 
 /// An announcement record queued for the announcement writer task.
@@ -866,13 +871,18 @@ where
         .oneshot(Request::BlocksByHash(std::iter::once(hash).collect()))
         .await;
 
-    let block = response
-        .ok()
-        .and_then(|response| available_blocks(response).swap_remove(&hash));
-
-    let Some(block) = block else {
-        debug!(?hash, "skipping announcement of block not found locally");
-        return;
+    let block = match response {
+        Ok(Response::Blocks(mut blocks)) => match blocks.pop() {
+            Some(InventoryResponse::Available((block, _))) => block,
+            _ => {
+                debug!(?hash, "skipping announcement of block not found locally");
+                return;
+            }
+        },
+        other => {
+            debug!(?hash, ?other, "skipping block announcement");
+            return;
+        }
     };
 
     match build_block_announcement(&block, &shared.remote_init, rand::random()) {
@@ -1138,9 +1148,9 @@ where
             .await
             .ok()?;
         for position in wire_positions {
-            match read_result_entry(&mut recv, "get-tx").await.ok()? {
-                Some(tx) => slots[position] = Some(tx),
-                None => return None,
+            match TxResponseEntry::read(&mut recv).await.ok()? {
+                TxResponseEntry::Found(tx) => slots[position] = Some(tx),
+                TxResponseEntry::NotFound => return None,
             }
         }
         record::expect_end_of_stream(&mut recv).await.ok()?;
@@ -1268,12 +1278,13 @@ async fn fetch_announced_block(shared: &SharedConnection, hash: block::Hash) -> 
     let mut recv = send_wire_request(shared, WireRequest::GetBlocks { hashes: vec![hash] })
         .await
         .ok()?;
-    let entry = read_result_entry::<Block, _>(&mut recv, "get-blocks")
-        .await
-        .ok()?;
+    let entry = BlockResponseEntry::read(&mut recv).await.ok()?;
     record::expect_end_of_stream(&mut recv).await.ok()?;
 
-    entry.filter(|block| block.hash() == hash)
+    match entry {
+        BlockResponseEntry::Full(block) if block.hash() == hash => Some(block),
+        _ => None,
+    }
 }
 
 /// Builds the short transaction ID table of a block, using the nonce of the
@@ -1530,10 +1541,9 @@ async fn drive_outbound_request(
                 transient_addr,
                 "get-blocks",
                 "block",
-                async |recv| {
-                    Ok(read_result_entry::<Block, _>(recv, "get-blocks")
-                        .await?
-                        .map(|block| (block.hash(), block)))
+                async |recv| match BlockResponseEntry::read(recv).await? {
+                    BlockResponseEntry::Full(block) => Ok(Some((block.hash(), block))),
+                    BlockResponseEntry::NotFound => Ok(None),
                 },
             )
             .await?;
@@ -1556,12 +1566,12 @@ async fn drive_outbound_request(
                 transient_addr,
                 "get-tx",
                 "transaction",
-                async |recv| {
-                    Ok(read_result_entry(recv, "get-tx").await?.map(|transaction| {
+                async |recv| match TxResponseEntry::read(recv).await? {
+                    TxResponseEntry::Found(transaction) => {
                         let transaction = UnminedTx::from(transaction);
-
-                        (transaction.id, transaction)
-                    }))
+                        Ok(Some((transaction.id, transaction)))
+                    }
+                    TxResponseEntry::NotFound => Ok(None),
                 },
             )
             .await?;
@@ -1871,7 +1881,8 @@ async fn read_inbound_request(
         }
     };
 
-    let mut recv = tokio::io::BufReader::with_capacity(RECORD_STREAM_READ_BUFFER_SIZE, recv);
+    let mut recv =
+        tokio::io::BufReader::with_capacity(INBOUND_REQUEST_STREAM_READ_BUFFER_SIZE, recv);
     let request = match WireRequest::read(stream_type, &mut recv).await {
         Ok(request) => request,
         Err(error) => {
@@ -2147,8 +2158,13 @@ where
             // not grow a fresh buffer from empty.
             let mut bytes = Vec::new();
             for hash in hashes {
+                let entry = match available.get(&hash) {
+                    Some(block) => BlockResponseEntry::Full(block.clone()),
+                    None => BlockResponseEntry::NotFound,
+                };
+
                 bytes.clear();
-                encode_result_entry(&mut bytes, available.get(&hash).map(Arc::as_ref))?;
+                entry.encode(&mut bytes)?;
                 write_response_bytes(send, &bytes).await?;
             }
 
@@ -2290,17 +2306,22 @@ where
             // not grow a fresh buffer from empty.
             let mut bytes = Vec::new();
             for source in ids {
-                let entry: Option<&Transaction> = match &source {
-                    TxSource::ById(id) => available
-                        .get(id)
-                        .map(|transaction| transaction.transaction.as_ref())
-                        .or_else(|| direct.get(id).map(Arc::as_ref)),
-                    TxSource::Direct(transaction) => Some(transaction),
-                    TxSource::NotFound => None,
+                let entry = match source {
+                    TxSource::ById(id) => match available.get(&id) {
+                        Some(transaction) => {
+                            TxResponseEntry::Found(transaction.transaction.clone())
+                        }
+                        None => match direct.get(&id) {
+                            Some(transaction) => TxResponseEntry::Found(transaction.clone()),
+                            None => TxResponseEntry::NotFound,
+                        },
+                    },
+                    TxSource::Direct(transaction) => TxResponseEntry::Found(transaction),
+                    TxSource::NotFound => TxResponseEntry::NotFound,
                 };
 
                 bytes.clear();
-                encode_result_entry(&mut bytes, entry)?;
+                entry.encode(&mut bytes)?;
                 write_response_bytes(send, &bytes).await?;
             }
 
@@ -2352,7 +2373,13 @@ where
                 )
                 .await?;
 
-                let block = available_blocks(response).swap_remove(&next_hash);
+                let block = match response {
+                    Response::Blocks(mut blocks) => match blocks.pop() {
+                        Some(InventoryResponse::Available((block, _))) => Some(block),
+                        _ => None,
+                    },
+                    _ => None,
+                };
 
                 let Some(block) = block else {
                     if delivered_count == 0 {

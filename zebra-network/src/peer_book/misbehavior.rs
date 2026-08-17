@@ -109,12 +109,7 @@ impl MisbehaviorStore {
 
         if entry.score >= MAX_PEER_MISBEHAVIOR_SCORE {
             self.scores.shift_remove(&key);
-            self.bans.insert(key, now);
-
-            // Bound the number of banned keys, dropping the oldest bans.
-            while self.bans.len() > MAX_BANNED_IPS {
-                self.bans.shift_remove_index(0);
-            }
+            self.ban(key, now);
 
             return true;
         }
@@ -127,10 +122,20 @@ impl MisbehaviorStore {
         false
     }
 
+    /// Bans `key` at `now`.
+    pub(crate) fn ban(&mut self, key: BanKey, now: Instant) {
+        self.bans.insert(key, now);
+
+        // Bound the number of banned keys, dropping the oldest bans.
+        while self.bans.len() > MAX_BANNED_IPS {
+            self.bans.shift_remove_index(0);
+        }
+    }
+
     /// Returns true if `key` is currently banned.
-    pub(crate) fn is_banned(&self, key: BanKey) -> bool {
+    pub(crate) fn is_banned(&self, key: &BanKey) -> bool {
         self.bans
-            .get(&key)
+            .get(key)
             .is_some_and(|banned_at| banned_at.elapsed() < DEFAULT_BAN_DURATION)
     }
 

@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 use zebra_chain::{
     block::{self, Block},
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{AuthDigest, Transaction, UnminedTxId, WtxId},
+    transaction::{AuthDigest, UnminedTxId, WtxId},
 };
 
 use crate::{
@@ -29,7 +29,7 @@ use super::super::{
     record,
     request::Request,
     response::{
-        encode_result_entry, read_result_entry, AddrResponse, HeadersResponse, MempoolResponse,
+        AddrResponse, BlockResponseEntry, HeadersResponse, MempoolResponse, TxResponseEntry,
     },
     txref::TransactionReference,
     types::{ErrorCode, ObjectHash, StreamType, WireError},
@@ -173,7 +173,7 @@ async fn record_stream_end_and_errors() {
 
     // A length prefix over the payload limit is a FLOOD error.
     let mut over_limit = Vec::new();
-    record::write_compact_size(&mut over_limit, MAX_RECORD_PAYLOAD_LEN as u64 + 1)
+    record::write_compact_size(&mut over_limit, (MAX_RECORD_PAYLOAD_LEN + 1) as u64)
         .expect("write to Vec succeeds");
     let mut reader = over_limit.as_slice();
     let result = record::read_record(&mut reader).await;
@@ -615,7 +615,7 @@ async fn request_rejects_over_limit() {
     // A locator with more than the maximum hashes is rejected on encode
     // and on decode.
     let over_limit = Request::GetHeaders {
-        known_blocks: vec![block::Hash([0; 32]); MAX_LOCATOR_HASHES as usize + 1],
+        known_blocks: vec![block::Hash([0; 32]); MAX_LOCATOR_HASHES + 1],
         stop: None,
         tx_ids: false,
     };
@@ -629,13 +629,15 @@ async fn request_rejects_over_limit() {
     );
 
     let mut buf = Vec::new();
-    record::write_compact_size(&mut buf, MAX_LOCATOR_HASHES + 1).expect("write to Vec succeeds");
+    record::write_compact_size(&mut buf, (MAX_LOCATOR_HASHES + 1) as u64)
+        .expect("write to Vec succeeds");
     let mut reader = buf.as_slice();
     let result = Request::read(StreamType::GetHeaders, &mut reader).await;
     assert_protocol_error(&result, "the encoding");
 
     let mut buf = Vec::new();
-    record::write_compact_size(&mut buf, MAX_GET_BLOCKS_HASHES + 1).expect("write to Vec succeeds");
+    record::write_compact_size(&mut buf, (MAX_GET_BLOCKS_HASHES + 1) as u64)
+        .expect("write to Vec succeeds");
     let mut reader = buf.as_slice();
     let result = Request::read(StreamType::GetBlocks, &mut reader).await;
     assert_protocol_error(&result, "the encoding");
@@ -730,7 +732,7 @@ async fn sync_request_bounds_are_enforced() {
         Request::GetHashes {
             start_height: 0,
             stride: 1,
-            count: MAX_GET_HASHES_COUNT + 1,
+            count: MAX_GET_HASHES_COUNT as u64 + 1,
         },
         // The greatest requested height must not exceed `u32::MAX`:
         // this request's second hash would be above it.
@@ -741,7 +743,7 @@ async fn sync_request_bounds_are_enforced() {
         },
         Request::GetBlockRange {
             final_hash: block::Hash([0; 32]),
-            count: MAX_GET_BLOCK_RANGE_COUNT + 1,
+            count: MAX_GET_BLOCK_RANGE_COUNT as u64 + 1,
             max_bytes: 0,
         },
         Request::GetBlockRange {
@@ -752,7 +754,7 @@ async fn sync_request_bounds_are_enforced() {
         Request::GetTreeRoots {
             start_height: 0,
             final_hash: block::Hash([0; 32]),
-            count: MAX_GET_TREE_ROOTS_COUNT + 1,
+            count: MAX_GET_TREE_ROOTS_COUNT as u64 + 1,
         },
         Request::GetObject {
             hash: ObjectHash([0; 32]),
@@ -954,13 +956,14 @@ async fn sync_response_round_trips() {
 
     // Counts over the request limits are rejected while reading.
     let mut buf = Vec::new();
-    record::write_compact_size(&mut buf, MAX_GET_HASHES_COUNT + 1).expect("write to Vec succeeds");
+    record::write_compact_size(&mut buf, (MAX_GET_HASHES_COUNT + 1) as u64)
+        .expect("write to Vec succeeds");
     let mut reader = buf.as_slice();
     let result = HashesResponse::read(&mut reader).await;
     assert_protocol_error(&result, "the encoding");
 
     let mut buf = Vec::new();
-    record::write_compact_size(&mut buf, MAX_GET_TREE_ROOTS_COUNT + 1)
+    record::write_compact_size(&mut buf, (MAX_GET_TREE_ROOTS_COUNT + 1) as u64)
         .expect("write to Vec succeeds");
     let mut reader = buf.as_slice();
     let result = TreeRootsResponse::read(&mut reader).await;
@@ -973,30 +976,36 @@ async fn block_response_entries_round_trip() {
 
     let block = test_block();
 
+    let entries = vec![
+        BlockResponseEntry::Full(block.clone()),
+        BlockResponseEntry::NotFound,
+    ];
+
     let mut buf = Vec::new();
-    encode_result_entry(&mut buf, Some(block.as_ref())).expect("write to Vec succeeds");
-    encode_result_entry::<Block, _>(&mut buf, None).expect("write to Vec succeeds");
+    for entry in &entries {
+        entry.encode(&mut buf).expect("write to Vec succeeds");
+    }
 
     let mut reader = buf.as_slice();
-    let read_full = read_result_entry::<Block, _>(&mut reader, "get-blocks")
+    let read_full = BlockResponseEntry::read(&mut reader)
         .await
         .expect("entry parses");
-    assert_eq!(read_full.as_deref(), Some(block.as_ref()));
-    let read_missing = read_result_entry::<Block, _>(&mut reader, "get-blocks")
+    assert!(matches!(&read_full, BlockResponseEntry::Full(b) if *b == block));
+    let read_missing = BlockResponseEntry::read(&mut reader)
         .await
         .expect("entry parses");
-    assert!(read_missing.is_none());
+    assert!(matches!(read_missing, BlockResponseEntry::NotFound));
     assert!(reader.is_empty());
 
     // The compact block result byte of earlier draft revisions was removed:
     // compact blocks occur only as announcements, so `0x01` is unrecognized.
     let mut reader = &[0x01][..];
-    let result = read_result_entry::<Block, _>(&mut reader, "get-blocks").await;
+    let result = BlockResponseEntry::read(&mut reader).await;
     assert_protocol_error(&result, "the encoding");
 
     // An unrecognized result byte is rejected.
     let mut reader = &[0x03][..];
-    let result = read_result_entry::<Block, _>(&mut reader, "get-blocks").await;
+    let result = BlockResponseEntry::read(&mut reader).await;
     assert_protocol_error(&result, "the encoding");
 }
 
@@ -1007,24 +1016,30 @@ async fn tx_response_entries_round_trip() {
     let block = test_block();
     let tx = block.transactions[1].clone();
 
+    let entries = vec![
+        TxResponseEntry::Found(tx.clone()),
+        TxResponseEntry::NotFound,
+    ];
+
     let mut buf = Vec::new();
-    encode_result_entry(&mut buf, Some(tx.as_ref())).expect("write to Vec succeeds");
-    encode_result_entry::<Transaction, _>(&mut buf, None).expect("write to Vec succeeds");
+    for entry in &entries {
+        entry.encode(&mut buf).expect("write to Vec succeeds");
+    }
 
     let mut reader = buf.as_slice();
-    let read_found = read_result_entry::<Transaction, _>(&mut reader, "get-tx")
+    let read_found = TxResponseEntry::read(&mut reader)
         .await
         .expect("entry parses");
-    assert_eq!(read_found.as_deref(), Some(tx.as_ref()));
-    let read_missing = read_result_entry::<Transaction, _>(&mut reader, "get-tx")
+    assert!(matches!(&read_found, TxResponseEntry::Found(t) if *t == tx));
+    let read_missing = TxResponseEntry::read(&mut reader)
         .await
         .expect("entry parses");
-    assert!(read_missing.is_none());
+    assert!(matches!(read_missing, TxResponseEntry::NotFound));
     assert!(reader.is_empty());
 
     // A compact block result byte is not valid in a get-tx response.
     let mut reader = &[0x01][..];
-    let result = read_result_entry::<Transaction, _>(&mut reader, "get-tx").await;
+    let result = TxResponseEntry::read(&mut reader).await;
     assert_protocol_error(&result, "the encoding");
 }
 

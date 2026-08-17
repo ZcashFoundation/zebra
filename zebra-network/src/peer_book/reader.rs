@@ -78,6 +78,16 @@ impl PeerBookReader {
     pub(crate) fn change_sender(&self) -> &ChangeSender {
         &self.changes
     }
+
+    /// Returns the local listener as a [`MetaAddr`].
+    ///
+    /// This address contains minimal state, but it is not sanitized.
+    pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
+        let now = now.try_into().expect("will succeed until 2038");
+
+        MetaAddr::new_local_listener_change(self.local_listener)
+            .local_listener_into_new_meta_addr(now)
+    }
 }
 
 impl AddressBookPeers for PeerBookReader {

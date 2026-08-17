@@ -29,27 +29,27 @@ pub const ALPN_REGTEST: &[u8] = b"zcash/regtest";
 pub const MAX_RECORD_PAYLOAD_LEN: usize = MAX_PROTOCOL_MESSAGE_LEN;
 
 /// The maximum number of block locator hashes in a `get-headers` request.
-pub const MAX_LOCATOR_HASHES: u64 = 101;
+pub const MAX_LOCATOR_HASHES: usize = 101;
 
 /// The maximum number of headers in a `get-headers` response
 /// (`MAX_HEADERS_RESULTS`): the same limit as legacy `headers` messages.
 ///
 /// A response with more headers incurs a misbehavior penalty of
 /// [`MISBEHAVIOR_PENALTY_LIMIT_EXCEEDED`] points.
-pub const MAX_HEADERS_RESULTS: u64 = MAX_HEADERS_PER_MESSAGE as u64;
+pub const MAX_HEADERS_RESULTS: usize = MAX_HEADERS_PER_MESSAGE;
 
 /// The maximum number of block hashes in a `get-blocks` request.
-pub const MAX_GET_BLOCKS_HASHES: u64 = 128;
+pub const MAX_GET_BLOCKS_HASHES: usize = 128;
 
 /// The maximum number of transaction references in a `get-tx` request.
-pub const MAX_GET_TX_REFS: u64 = 50_000;
+pub const MAX_GET_TX_REFS: usize = 50_000;
 
 /// The maximum number of address records in a `get-addr` response: the same
 /// limit as legacy `addr` messages.
 ///
 /// A response with more address records incurs a misbehavior penalty of
 /// [`MISBEHAVIOR_PENALTY_LIMIT_EXCEEDED`] points.
-pub const MAX_ADDRS_IN_RESPONSE: u64 = crate::constants::MAX_ADDRS_IN_MESSAGE as u64;
+pub const MAX_ADDRS_IN_RESPONSE: usize = crate::constants::MAX_ADDRS_IN_MESSAGE;
 
 /// The maximum number of transaction references in a `get-mempool` response.
 ///
@@ -71,10 +71,10 @@ pub const MAX_MEMPOOL_RESPONSE_REFS: usize = MAX_INV_IN_RECEIVED_MESSAGE as usiz
 pub const MAX_MEMPOOL_RECORD_REFS: usize = 25_000;
 
 /// The maximum number of block hashes requested by a `get-hashes` request.
-pub const MAX_GET_HASHES_COUNT: u64 = 50_000;
+pub const MAX_GET_HASHES_COUNT: usize = 50_000;
 
 /// The maximum number of blocks requested by a `get-block-range` request.
-pub const MAX_GET_BLOCK_RANGE_COUNT: u64 = 65_536;
+pub const MAX_GET_BLOCK_RANGE_COUNT: usize = 65_536;
 
 /// The maximum total serialized size of the blocks requested by a
 /// `get-block-range` request, in bytes (64 MiB).
@@ -100,7 +100,7 @@ pub const MAX_PENDING_INBOUND_HANDSHAKES: usize = 32;
 pub const MAX_CONCURRENT_BULK_STREAMS: usize = 2;
 
 /// The maximum number of entries requested by a `get-tree-roots` request.
-pub const MAX_GET_TREE_ROOTS_COUNT: u64 = 4_000;
+pub const MAX_GET_TREE_ROOTS_COUNT: usize = 4_000;
 
 /// The maximum number of bytes requested by a `get-object` request (32 MiB).
 ///

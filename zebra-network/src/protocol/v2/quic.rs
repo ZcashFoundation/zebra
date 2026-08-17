@@ -127,6 +127,11 @@ fn transport_config() -> Result<TransportConfig, BoxError> {
     Ok(transport)
 }
 
+/// Returns the ring [`CryptoProvider`] used for v2 protocol TLS.
+fn crypto_provider() -> Arc<CryptoProvider> {
+    Arc::new(rustls::crypto::ring::default_provider())
+}
+
 /// Builds the QUIC server configuration for `network`.
 ///
 /// The server presents `cert` and `key`, offers the network's ALPN
@@ -136,7 +141,7 @@ pub fn server_config(
     cert: CertificateDer<'static>,
     key: PrivatePkcs8KeyDer<'static>,
 ) -> Result<quinn::ServerConfig, BoxError> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = crypto_provider();
 
     let mut crypto = rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])?
@@ -156,7 +161,7 @@ pub fn server_config(
 /// The client accepts any server certificate (see
 /// [`AcceptAnyServerCert`]), and offers the network's ALPN identifier.
 pub fn client_config(network: &Network) -> Result<quinn::ClientConfig, BoxError> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = crypto_provider();
 
     let mut crypto = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])?

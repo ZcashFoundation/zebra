@@ -115,10 +115,13 @@ pub enum PeerBookRequest {
     /// Requests the addresses worth writing to the peer cache on disk.
     CacheSnapshot,
 
-    /// Selects a peer for an outbound connection attempt, marking it as
-    /// attempted in the same actor turn, so concurrent selections cannot
-    /// return the same peer.
-    SelectCandidate,
+    /// Selects up to `max` peers for outbound connection attempts, marking
+    /// them as attempted in the same actor turn, so concurrent selections
+    /// cannot return the same peer.
+    SelectCandidates {
+        /// The maximum number of candidates to select.
+        max: usize,
+    },
 
     /// Requests the number of peers currently ready for an outbound
     /// connection attempt.
@@ -151,9 +154,9 @@ pub enum PeerBookResponse {
     /// The requested addresses.
     Addrs(Vec<MetaAddr>),
 
-    /// The selected outbound connection candidate, marked as attempted,
-    /// with the transports it is known to accept.
-    Candidate(Option<(MetaAddr, AddrTransports)>),
+    /// The selected outbound connection candidates, marked as attempted,
+    /// each with the transports it is known to accept.
+    Candidates(Vec<(MetaAddr, AddrTransports)>),
 
     /// The number of peers ready for an outbound connection attempt.
     ReadyCandidateCount(usize),

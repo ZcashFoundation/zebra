@@ -262,6 +262,7 @@ where
     {
         advertised_services |= crate::protocol::external::types::PeerServices::NODE_SYNC_ARTIFACTS;
     }
+    let want_transactions = true;
 
     // The v2 (QUIC) transport, if enabled: it shares the
     // inbound service, address book, and inventory collector with the
@@ -272,8 +273,7 @@ where
             config.clone(),
             user_agent.clone(),
             advertised_services,
-            // Zebra always wants transaction announcements.
-            true,
+            want_transactions,
             inbound_service.clone(),
             address_book_updater.clone(),
             misbehavior_tx.clone(),
@@ -298,7 +298,7 @@ where
             .with_advertised_services(advertised_services)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
-            .want_transactions(true)
+            .want_transactions(want_transactions)
             .finish()
             .expect("configured all required parameters");
         (
@@ -1442,7 +1442,7 @@ where
         )
         .await
         {
-            Ok(client) => {
+            V2Dial::Connected(client) => {
                 debug!(?candidate.addr, "successfully dialed new v2 peer");
                 address_book_updater.record_transport(candidate.addr, AddrTransports::QUIC, true);
 
@@ -1450,9 +1450,8 @@ where
                 return Ok(());
             }
             // The legacy dial below continues with the tracker the attempt
-            // returned, so one logical dial holds one outbound slot however
-            // many transports it tries.
-            Err(tracker) => outbound_connection_tracker = tracker,
+            // returned.
+            V2Dial::Fallback(tracker) => outbound_connection_tracker = tracker,
         }
     }
 
@@ -1478,6 +1477,7 @@ where
     match handshake_result {
         Ok((address, client)) => {
             debug!(?candidate.addr, "successfully dialed new peer");
+            address_book_updater.record_transport(candidate.addr, AddrTransports::TCP, true);
 
             // The connection limit makes sure this send doesn't block.
             peerset_tx.send((address, client)).await?;
@@ -1511,6 +1511,18 @@ where
     Ok(())
 }
 
+/// The outcome of a version 2 dial attempt.
+enum V2Dial {
+    /// The peer connected over version 2.
+    Connected(peer::Client),
+
+    /// Version 2 was not attempted, or the attempt failed. The caller
+    /// falls back to the legacy transport with the returned tracker, so one
+    /// logical dial holds one outbound slot however many transports it
+    /// tries.
+    Fallback(ConnectionTracker),
+}
+
 /// Attempts a version 2 dial to `candidate`, if the dial policy calls for
 /// one, and records what the attempt taught about the peer's reachability.
 ///
@@ -1519,9 +1531,6 @@ where
 /// version 2 peers it learned about over the legacy network: relayed
 /// addresses carry no transport hint, so reachability can only be learned
 /// by trying.
-///
-/// Returns the connected client, or the outbound connection tracker for the
-/// caller's legacy dial.
 async fn dial_v2(
     candidate: &MetaAddr,
     transports: AddrTransports,
@@ -1529,7 +1538,7 @@ async fn dial_v2(
     connection_tracker: ConnectionTracker,
     active_outbound_connections: &SharedConnectionCounter,
     address_book_updater: &crate::peer_book::ChangeSender,
-) -> Result<peer::Client, ConnectionTracker> {
+) -> V2Dial {
     let known_v2 = transports.contains(AddrTransports::QUIC);
 
     // A peer that speaks the legacy protocol may also speak version 2, so
@@ -1538,7 +1547,7 @@ async fn dial_v2(
     // completed one legacy handshake.
     let probe = !known_v2 && rand::random::<f32>() < V2_PROBE_RATIO;
     if !known_v2 && !probe {
-        return Err(connection_tracker);
+        return V2Dial::Fallback(connection_tracker);
     }
 
     // A probe of a peer that does not answer must barely delay the legacy
@@ -1559,7 +1568,7 @@ async fn dial_v2(
     // drops the future, which cancels the dial and releases the slot, so an
     // abandoned attempt cannot hold one until the transport's idle timeout.
     match tokio::time::timeout(timeout, connector.oneshot(request)).await {
-        Ok(Ok((_addr, client))) => return Ok(client),
+        Ok(Ok((_addr, client))) => return V2Dial::Connected(client),
         Ok(Err(error)) => {
             debug!(?error, ?candidate.addr, "v2 dial failed, trying the legacy transport");
 
@@ -1574,7 +1583,7 @@ async fn dial_v2(
         }
     }
 
-    Err(active_outbound_connections.track_connection())
+    V2Dial::Fallback(active_outbound_connections.track_connection())
 }
 
 /// Mark `addr` as a failed peer to `address_book_updater`.
