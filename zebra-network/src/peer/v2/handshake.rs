@@ -206,7 +206,7 @@ async fn read_and_validate_remote_init(
     // Check the remote nonce against every nonce this node recently sent:
     // any match means the connection is to the node itself, possibly via a
     // simultaneous connection in each direction.
-    if params.nonces.contains(&remote_init.nonce).await {
+    if params.nonces.contains(&remote_init.nonce) {
         return Err(V2HandshakeError::SelfConnection);
     }
 
@@ -226,7 +226,6 @@ async fn register_local_nonce(params: &HandshakeParams) -> Result<(), V2Handshak
     if !params
         .nonces
         .register(params.local_init.nonce, params.nonce_limit)
-        .await
     {
         return Err(V2HandshakeError::LocalDuplicateNonce);
     }

@@ -17,7 +17,7 @@ use futures::{channel::oneshot, future, pin_mut, FutureExt, SinkExt, StreamExt};
 use indexmap::IndexSet;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::broadcast,
+    sync::{broadcast, watch},
     task::JoinError,
     time::{error, timeout, Instant},
 };
@@ -129,8 +129,18 @@ where
 ///
 /// Each transport keeps its own set: a nonce is only ever echoed back on the
 /// protocol that sent it.
-#[derive(Clone, Debug, Default)]
-pub struct HandshakeNonces(Arc<futures::lock::Mutex<IndexSet<Nonce>>>);
+///
+/// The set is a [`watch`] channel used as a shared cell: updates run
+/// atomically in [`watch::Sender::send_modify`], and reads take a
+/// [`watch::Sender::borrow`] snapshot, so handshakes never hold a lock.
+#[derive(Clone, Debug)]
+pub struct HandshakeNonces(watch::Sender<IndexSet<Nonce>>);
+
+impl Default for HandshakeNonces {
+    fn default() -> Self {
+        Self(watch::channel(IndexSet::new()).0)
+    }
+}
 
 impl HandshakeNonces {
     /// Inserts a newly generated local `nonce` into the set, bounding the
@@ -141,11 +151,6 @@ impl HandshakeNonces {
     /// progress. Duplicate nonces are very rare, because they require a
     /// 64-bit random number collision, and the nonce set is limited to a few
     /// hundred entries.
-    ///
-    /// # Correctness
-    ///
-    /// It is ok to wait for the lock here, because handshakes have a short
-    /// timeout, and the async mutex will be released when the task times out.
     ///
     /// # Security
     ///
@@ -160,28 +165,24 @@ impl HandshakeNonces {
     /// - memory usage: 16 bytes per [`Nonce`], 3.2 kB for 200 nonces
     /// - collision probability: two hundred 64-bit nonces have a very low collision probability
     ///   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
-    pub async fn register(&self, nonce: Nonce, limit: usize) -> bool {
-        let mut nonces = self.0.lock().await;
+    pub fn register(&self, nonce: Nonce, limit: usize) -> bool {
+        let mut inserted = false;
 
-        if !nonces.insert(nonce) {
-            return false;
-        }
+        self.0.send_modify(|nonces| {
+            inserted = nonces.insert(nonce);
 
-        while nonces.len() > limit {
-            nonces.shift_remove_index(0);
-        }
+            if inserted {
+                while nonces.len() > limit {
+                    nonces.shift_remove_index(0);
+                }
+            }
+        });
 
-        true
+        inserted
     }
 
     /// Returns true if `nonce` was recently sent in one of this node's own
     /// handshake messages: the peer that echoed it is this node itself.
-    ///
-    /// # Correctness
-    ///
-    /// The caller must wait for the lock before continuing with the
-    /// connection, to avoid self-connection. If the connection times out, the
-    /// async lock will be released.
     ///
     /// # Security
     ///
@@ -189,14 +190,14 @@ impl HandshakeNonces {
     /// that observe this node's network traffic could maliciously fail
     /// handshakes to evict nonces, and force it to make self-connections.
     /// The set is bounded by [`register`](Self::register) instead.
-    pub async fn contains(&self, nonce: &Nonce) -> bool {
-        self.0.lock().await.contains(nonce)
+    pub fn contains(&self, nonce: &Nonce) -> bool {
+        self.0.borrow().contains(nonce)
     }
 
     /// Returns the number of nonces in the set.
     #[cfg(test)]
-    pub async fn len(&self) -> usize {
-        self.0.lock().await.len()
+    pub fn len(&self) -> usize {
+        self.0.borrow().len()
     }
 }
 
@@ -757,10 +758,7 @@ where
 
     // Insert the nonce for this handshake into the shared nonce set.
     // Each connection has its own connection state, and handshakes execute concurrently.
-    if !nonces
-        .register(local_nonce, config.peerset_total_connection_limit())
-        .await
-    {
+    if !nonces.register(local_nonce, config.peerset_total_connection_limit()) {
         return Err(HandshakeError::LocalDuplicateNonce);
     }
 
@@ -876,7 +874,7 @@ where
     }
 
     // Check for nonce reuse, indicating self-connection
-    let nonce_reuse = nonces.contains(&remote.nonce).await;
+    let nonce_reuse = nonces.contains(&remote.nonce);
     if nonce_reuse {
         info!(?connected_addr, "rejecting self-connection attempt");
         return Err(remote_version_outcome.record_error(HandshakeError::RemoteNonceReuse));

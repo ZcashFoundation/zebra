@@ -17,7 +17,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
@@ -177,6 +177,37 @@ fn insert_bounded<K: std::hash::Hash + Eq, V>(
 }
 
 /// State shared between the connection task and the per-stream tasks it
+/// A mutable value shared between the connection task and the per-stream
+/// tasks it spawns.
+///
+/// Backed by a [`watch`](tokio::sync::watch) channel used as a cell: updates
+/// run atomically inside [`send_modify`](tokio::sync::watch::Sender::send_modify),
+/// and reads take a short borrow snapshot.
+pub(super) struct SharedCell<T>(tokio::sync::watch::Sender<T>);
+
+impl<T: Default> Default for SharedCell<T> {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(T::default()).0)
+    }
+}
+
+impl<T> SharedCell<T> {
+    /// Runs `f` on the shared value, atomically with other updates.
+    fn with<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let mut result = None;
+        self.0.send_modify(|value| result = Some(f(value)));
+        result.expect("send_modify runs the closure exactly once")
+    }
+
+    /// Returns a read snapshot of the shared value.
+    ///
+    /// The snapshot must be dropped before any await point, like a lock
+    /// guard.
+    fn read(&self) -> tokio::sync::watch::Ref<'_, T> {
+        self.0.borrow()
+    }
+}
+
 /// spawns.
 pub(super) struct SharedConnection {
     /// The QUIC connection.
@@ -220,18 +251,18 @@ pub(super) struct SharedConnection {
     pub(super) announcement_tx: tokio::sync::mpsc::Sender<AnnouncementRecord>,
 
     /// Recently pushed transactions, served to the peer's `get-tx` requests.
-    pub(super) pushed_transactions: Mutex<IndexMap<UnminedTxId, UnminedTx>>,
+    pub(super) pushed_transactions: SharedCell<IndexMap<UnminedTxId, UnminedTx>>,
 
     /// Blocks recently sent to this peer with their transactions identified
     /// rather than included — as compact block announcements or `get-headers`
     /// entries with transaction IDs — retained to serve the peer's
     /// reconstruction `get-tx` requests, including by `SHORTID` reference.
-    pub(super) sent_blocks: Mutex<IndexMap<block::Hash, SentBlock>>,
+    pub(super) sent_blocks: SharedCell<IndexMap<block::Hash, SentBlock>>,
 
     /// Blocks reconstructed from this peer's compact block announcements,
     /// serving the local gossip downloader's follow-up block requests
     /// without a wire round-trip.
-    pub(super) reconstructed_blocks: Mutex<IndexMap<block::Hash, Arc<Block>>>,
+    pub(super) reconstructed_blocks: SharedCell<IndexMap<block::Hash, Arc<Block>>>,
 
     /// Broadcasts transactions newly accepted into the local mempool to the
     /// peer's `get-mempool` subscription, if one is active.
@@ -242,7 +273,7 @@ pub(super) struct SharedConnection {
 
     /// Transactions queued for announcement to this peer at the next
     /// trickle flush.
-    pub(super) pending_tx_announcements: Mutex<IndexSet<UnminedTxId>>,
+    pub(super) pending_tx_announcements: SharedCell<IndexSet<UnminedTxId>>,
 
     /// Whether the peer currently has a `get-mempool` subscription open;
     /// a second concurrent subscription is a connection error.
@@ -256,20 +287,20 @@ pub(super) struct SharedConnection {
     /// oldest half beyond the bound: removals from the remote mempool are
     /// never communicated, so old entries only expire by eviction or
     /// disconnection.
-    pub(super) remote_mempool: Mutex<IndexSet<UnminedTxId>>,
+    pub(super) remote_mempool: SharedCell<IndexSet<UnminedTxId>>,
 
     /// Peer addresses announced by the remote peer, served to internal
     /// [`Request::Peers`] requests, mirroring the legacy connection's
     /// address cache.
-    pub(super) cached_addrs: Mutex<Vec<MetaAddr>>,
+    pub(super) cached_addrs: SharedCell<Vec<MetaAddr>>,
 
     /// Rate-limits the relayed addresses accepted from this peer's address
     /// announcement stream.
-    pub(super) addr_tokens: Mutex<AddrTokenBucket>,
+    pub(super) addr_tokens: SharedCell<AddrTokenBucket>,
 
     /// The announcement stream types the remote peer currently has open
     /// towards this node, to enforce the one-stream-per-type rule.
-    pub(super) open_inbound_announcements: Mutex<HashSet<u8>>,
+    pub(super) open_inbound_announcements: SharedCell<HashSet<u8>>,
 
     /// Whether this node has already sent a `get-addr` request on this
     /// connection.
@@ -364,17 +395,17 @@ impl SharedConnection {
     /// request it.
     pub(super) fn record_sent_block(&self, block: Arc<Block>, nonce: Option<u64>) {
         let hash = block.hash();
-        let mut sent = self.sent_blocks.lock().expect("mutex is not poisoned");
-
         // Re-recording moves the block to the most recent slot, and a
         // compact block's nonce replaces a `get-headers` entry's absent
         // nonce.
-        insert_bounded(
-            &mut sent,
-            hash,
-            SentBlock { block, nonce },
-            SENT_BLOCK_CACHE_LIMIT,
-        );
+        self.sent_blocks.with(|sent| {
+            insert_bounded(
+                sent,
+                hash,
+                SentBlock { block, nonce },
+                SENT_BLOCK_CACHE_LIMIT,
+            )
+        });
     }
 
     /// Fails the connection: records `error` in the error slot and closes
@@ -720,12 +751,11 @@ fn dispatch_client_request<S>(
         // address requests without a wire round-trip, mirroring the legacy
         // connection's address cache.
         Request::Peers => {
-            let cached: Vec<MetaAddr> = {
-                let mut cached_addrs = shared.cached_addrs.lock().expect("mutex is not poisoned");
-                // Security: this method performs security-sensitive operations, see its comments
-                // for details.
-                update_addr_cache(&mut cached_addrs, None, constants::PEER_ADDR_RESPONSE_LIMIT)
-            };
+            // Security: this method performs security-sensitive operations, see its comments
+            // for details.
+            let cached: Vec<MetaAddr> = shared.cached_addrs.with(|cached_addrs| {
+                update_addr_cache(cached_addrs, None, constants::PEER_ADDR_RESPONSE_LIMIT)
+            });
 
             // To impede fingerprinting, a node only answers address requests
             // on connections the remote peer initiated, and sends `get-addr`
@@ -751,18 +781,14 @@ fn dispatch_client_request<S>(
         // v2 has no unsolicited transaction push: cache the transaction for
         // the peer's `get-tx`, and announce it.
         Request::PushTransaction(transaction, _) => {
-            {
-                let mut pushed = shared
-                    .pushed_transactions
-                    .lock()
-                    .expect("mutex is not poisoned");
+            shared.pushed_transactions.with(|pushed| {
                 insert_bounded(
-                    &mut pushed,
+                    pushed,
                     transaction.id,
                     transaction.clone(),
                     PUSHED_TRANSACTION_CACHE_LIMIT,
-                );
-            }
+                )
+            });
 
             queue_transaction_announcements(shared, [transaction.id]);
             let _ = tx.send(Ok(Response::Nil));
@@ -789,18 +815,16 @@ fn queue_transaction_announcements(
     shared: &SharedConnection,
     ids: impl IntoIterator<Item = UnminedTxId>,
 ) {
-    let mut pending = shared
-        .pending_tx_announcements
-        .lock()
-        .expect("mutex is not poisoned");
-    for id in ids {
-        // Announcements are best-effort and unordered, so the bound evicts
-        // an arbitrary old entry.
-        if pending.len() >= PENDING_TX_ANNOUNCEMENT_LIMIT {
-            pending.swap_remove_index(0);
+    shared.pending_tx_announcements.with(|pending| {
+        for id in ids {
+            // Announcements are best-effort and unordered, so the bound evicts
+            // an arbitrary old entry.
+            if pending.len() >= PENDING_TX_ANNOUNCEMENT_LIMIT {
+                pending.swap_remove_index(0);
+            }
+            pending.insert(id);
         }
-        pending.insert(id);
-    }
+    });
 }
 
 /// Trickles this connection's transaction announcements: queued
@@ -817,13 +841,9 @@ pub(super) async fn trickle_transaction_announcements(shared: Arc<SharedConnecti
             _ = shared.quic.closed() => return,
         }
 
-        let batch: Vec<UnminedTxId> = {
-            let mut pending = shared
-                .pending_tx_announcements
-                .lock()
-                .expect("mutex is not poisoned");
-            pending.drain(..).collect()
-        };
+        let batch: Vec<UnminedTxId> = shared
+            .pending_tx_announcements
+            .with(|pending| pending.drain(..).collect());
         if batch.is_empty() {
             continue;
         }
@@ -1009,11 +1029,9 @@ async fn reconstruct_compact_block<S>(
 
     match block {
         Some(block) => {
-            let mut cache = shared
+            shared
                 .reconstructed_blocks
-                .lock()
-                .expect("mutex is not poisoned");
-            insert_bounded(&mut cache, hash, block, RECONSTRUCTED_BLOCK_CACHE_LIMIT);
+                .with(|cache| insert_bounded(cache, hash, block, RECONSTRUCTED_BLOCK_CACHE_LIMIT));
         }
         None => debug!(?hash, "an announced compact block could not be obtained"),
     }
@@ -1247,15 +1265,14 @@ pub(super) async fn maintain_mempool_subscription<S>(
 
         // Mirror the references into the cache, evicting the oldest half
         // beyond the bound.
-        {
-            let mut cache = shared.remote_mempool.lock().expect("mutex is not poisoned");
+        shared.remote_mempool.with(|cache| {
             cache.extend(ids.iter().copied());
             let len = cache.len();
             if len > MAX_MEMPOOL_RESPONSE_REFS {
                 let recent = cache.split_off(len / 2);
                 *cache = recent;
             }
-        }
+        });
 
         // Forward the references as an advertisement: the mempool dedups
         // known transactions and downloads the rest with `get-tx`.
@@ -1469,14 +1486,9 @@ async fn drive_outbound_request(
             // bounded random sample, so a single peer cannot control the
             // address book by the size or order of its response, like the
             // legacy connection.
-            let response_addrs = {
-                let mut cached_addrs = shared.cached_addrs.lock().expect("mutex is not poisoned");
-                update_addr_cache(
-                    &mut cached_addrs,
-                    &addrs.0,
-                    constants::PEER_ADDR_RESPONSE_LIMIT,
-                )
-            };
+            let response_addrs = shared.cached_addrs.with(|cached_addrs| {
+                update_addr_cache(cached_addrs, &addrs.0, constants::PEER_ADDR_RESPONSE_LIMIT)
+            });
 
             Ok(Response::Peers(response_addrs))
         }
@@ -1485,10 +1497,7 @@ async fn drive_outbound_request(
             // Answered from the mempool subscription's mirror: only one
             // concurrent `get-mempool` stream per peer is allowed, and the
             // connection's subscription task holds it.
-            let ids: Vec<UnminedTxId> = {
-                let cache = shared.remote_mempool.lock().expect("mutex is not poisoned");
-                cache.iter().copied().collect()
-            };
+            let ids: Vec<UnminedTxId> = shared.remote_mempool.read().iter().copied().collect();
             Ok(Response::TransactionIds(ids))
         }
 
@@ -1512,10 +1521,7 @@ async fn drive_outbound_request(
             // downloader fetches an announced block right back from the
             // announcing connection.
             let reconstructed: Option<Vec<Arc<Block>>> = {
-                let cache = shared
-                    .reconstructed_blocks
-                    .lock()
-                    .expect("mutex is not poisoned");
+                let cache = shared.reconstructed_blocks.read();
                 hashes.iter().map(|hash| cache.get(hash).cloned()).collect()
             };
             if let Some(blocks) = reconstructed {
@@ -2209,14 +2215,13 @@ where
                     } => {
                         let table = short_id_tables.entry(*block_hash).or_insert_with(|| {
                             // Take a handle to the block, then build the
-                            // table outside the lock: hashing every
+                            // table outside the borrow: hashing every
                             // transaction of a block must not block the
                             // announcement and reconstruction paths that
-                            // share this mutex.
+                            // share this cell.
                             let sent = shared
                                 .sent_blocks
-                                .lock()
-                                .expect("mutex is not poisoned")
+                                .read()
                                 .get(block_hash)
                                 .map(|sent| (sent.block.clone(), sent.nonce));
 
@@ -2244,10 +2249,7 @@ where
             let mut direct: IndexMap<UnminedTxId, Arc<Transaction>> = IndexMap::new();
 
             let mut available: IndexMap<UnminedTxId, UnminedTx> = {
-                let pushed = shared
-                    .pushed_transactions
-                    .lock()
-                    .expect("mutex is not poisoned");
+                let pushed = shared.pushed_transactions.read();
                 lookup_ids
                     .iter()
                     .filter_map(|id| pushed.get(id).map(|tx| (*id, tx.clone())))
@@ -2285,7 +2287,7 @@ where
             if !unresolved.is_empty() {
                 // Take handles to the blocks, then search outside the lock.
                 let sent: Vec<Arc<Block>> = {
-                    let sent = shared.sent_blocks.lock().expect("mutex is not poisoned");
+                    let sent = shared.sent_blocks.read();
                     sent.values().map(|entry| entry.block.clone()).collect()
                 };
 
@@ -2659,17 +2661,14 @@ async fn read_inbound_announcement_stream<S>(
     }
 
     // Enforce at most one open announcement stream per type and direction.
-    {
-        let mut open = shared
-            .open_inbound_announcements
-            .lock()
-            .expect("mutex is not poisoned");
-        if !open.insert(type_byte) {
-            shared.fail_protocol(format!(
-                "peer opened a second concurrent announcement stream of type {type_byte:#04x}",
-            ));
-            return;
-        }
+    let newly_opened = shared
+        .open_inbound_announcements
+        .with(|open| open.insert(type_byte));
+    if !newly_opened {
+        shared.fail_protocol(format!(
+            "peer opened a second concurrent announcement stream of type {type_byte:#04x}",
+        ));
+        return;
     }
 
     let mut recv = tokio::io::BufReader::with_capacity(RECORD_STREAM_READ_BUFFER_SIZE, recv);
@@ -2697,9 +2696,7 @@ async fn read_inbound_announcement_stream<S>(
     // The stream ended: the peer may open a replacement.
     shared
         .open_inbound_announcements
-        .lock()
-        .expect("mutex is not poisoned")
-        .remove(&type_byte);
+        .with(|open| open.remove(&type_byte));
 }
 
 /// Handles one inbound announcement record.
@@ -2816,15 +2813,14 @@ where
                 // incur no penalty.
                 let admitted = shared
                     .addr_tokens
-                    .lock()
-                    .expect("mutex is not poisoned")
-                    .try_take(std::time::Instant::now());
+                    .with(|tokens| tokens.try_take(std::time::Instant::now()));
                 if admitted {
-                    let mut cached = shared.cached_addrs.lock().expect("mutex is not poisoned");
                     // Adds the address to the cache and bounds the cache
                     // size, like the legacy connection's unsolicited `addr`
                     // handling.
-                    let no_response = update_addr_cache(&mut cached, &[addr], None);
+                    let no_response = shared
+                        .cached_addrs
+                        .with(|cached| update_addr_cache(cached, &[addr], None));
                     debug_assert!(no_response.is_empty(), "no response was requested");
                 }
             }
