@@ -119,7 +119,8 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 ## Commit & Pull Request Guidelines
 
 - PR titles must follow [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) (PRs are merged with a merge commit — the PR title becomes the merge commit message)
-- Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too
+- Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too — release-plz reads the commits that land on `main` to pick the next version (`release_commits` in `.release-plz.toml`)
+- A breaking change needs the `!` marker on the PR title *and* on the branch commit that introduces it: the PR gate reads the title, release-plz reads the commits
 - Do not add `Co-Authored-By` tags for AI tools
 - Do not add "Generated with [tool]" footers
 - Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
