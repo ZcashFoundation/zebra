@@ -1,5 +1,10 @@
 use std::{
-    collections::HashSet, env, fs, io::Write as _, path::PathBuf, sync::Mutex, time::Duration,
+    collections::HashSet,
+    env, fs,
+    io::Write as _,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
@@ -154,6 +159,141 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     );
 
     Ok(())
+}
+
+/// The message `zebra-network` logs after binding its Zcash protocol listener.
+///
+/// The listen address follows this message, so the tests below can read an OS-assigned port
+/// out of the logs instead of guessing a free port.
+const OPENED_P2P_ENDPOINT_MSG: &str = "Opened Zcash protocol endpoint at";
+
+/// The maximum time to wait for the peer cache to be created on disk.
+///
+/// The peer cache updater waits before its first write, then retries every 20 seconds until it
+/// has cacheable peers, so this needs to cover several attempts on a loaded machine.
+const PEER_CACHE_CREATION_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Check that a persistent state config writes the state cache to disk.
+///
+/// The state cache is created when the database is opened, so this node runs with no initial
+/// peers at all.
+#[test]
+fn persistent_mode_state_cache() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut config = persistent_test_config(&Mainnet)?;
+    // This test doesn't need peers, and dialing them makes it depend on the public network.
+    config.network.initial_mainnet_peers = [].into();
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let testdir = &testdir;
+    let state_dir = testdir.path().join("state");
+
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+
+    // The state cache is created while the node starts up, so it only needs the launch delay.
+    let created = wait_for(LAUNCH_DELAY, || dir_is_populated(&state_dir));
+
+    // Kill the node and make sure it was killed
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+    output.assert_was_killed()?;
+
+    assert_with_context!(
+        created,
+        &output,
+        "state directory missing or empty despite persistent state config"
+    );
+
+    Ok(())
+}
+
+/// Check that a persistent network config writes the peer cache to disk.
+///
+/// The peer cache is only written for peers that have responded, so this test starts a second
+/// local `zebrad` and uses it as the node's only initial peer. Using live Mainnet peers made this
+/// test flaky: a node that fails every initial handshake never gets a cacheable peer, and remote
+/// Zebra peers drop repeat connections from the same IP for `MIN_PEER_RECONNECTION_DELAY`
+/// (#11072, #11098).
+#[test]
+fn persistent_mode_peer_cache() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // The peer node only accepts connections: it must never dial the public network.
+    // `default_test_config()` already listens on an OS-assigned port on IPv4 localhost.
+    let mut peer_config = default_test_config(&Mainnet);
+    peer_config.network.initial_mainnet_peers = [].into();
+
+    let mut peer = testdir()?
+        .with_config(&mut peer_config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY);
+
+    let peer_addr = read_listen_addr_from_logs(&mut peer, OPENED_P2P_ENDPOINT_MSG)?;
+
+    // The node under test connects to the peer node, and to nothing else.
+    let mut config = persistent_test_config(&Mainnet)?;
+    config.network.initial_mainnet_peers = [peer_addr.to_string()].into();
+    config.network.peerset_initial_target_size = 1;
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let testdir = &testdir;
+    let peer_cache_file = testdir.path().join("network").join("mainnet.peers");
+
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+
+    let created = wait_for(PEER_CACHE_CREATION_TIMEOUT, || peer_cache_file.exists());
+
+    // Kill the node under test and make sure it was killed
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+    output.assert_was_killed()?;
+
+    assert_with_context!(
+        created,
+        &output,
+        "peer cache file missing despite persistent network config and a local peer at {peer_addr}"
+    );
+
+    let cached_peers = fs::read_to_string(&peer_cache_file)?;
+    assert_with_context!(
+        cached_peers.contains(&peer_addr.to_string()),
+        &output,
+        "peer cache does not contain the local peer {peer_addr}: {cached_peers:?}"
+    );
+
+    // Shut down the peer node
+    peer.kill(false)?;
+    peer.wait_with_output()?.assert_was_killed()?;
+
+    Ok(())
+}
+
+/// Waits up to `timeout` for `condition` to return `true`.
+///
+/// Returns `true` if it did, and `false` if the timeout elapsed first.
+fn wait_for(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if condition() {
+            return true;
+        }
+
+        if Instant::now() >= deadline {
+            return false;
+        }
+
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Returns `true` if `dir` exists and contains at least one entry.
+fn dir_is_populated(dir: &Path) -> bool {
+    matches!(
+        dir.read_dir().map(|mut entries| entries.next().is_some()),
+        Ok(true)
+    )
 }
 
 /// Run config tests that use the default ports and paths.
