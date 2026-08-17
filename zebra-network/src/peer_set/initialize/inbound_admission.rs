@@ -69,10 +69,7 @@ pub(super) fn screen_inbound_addr(
 /// Checks an inbound connection against the public inbound connection limit
 /// and the per-IP rate limit, and reserves a public inbound slot if allowed.
 ///
-/// `active_count` is the caller's snapshot of `active_inbound_connections`,
-/// taken before any transport-specific slot decisions, so one snapshot backs
-/// all of them. `limit` is the public inbound connection limit for this
-/// transport.
+/// `limit` is the public inbound connection limit for this transport.
 ///
 /// Returns a tracker holding the slot, or `None` after recording the
 /// "capacity_or_rate_limited" rejection metric. On `None`, the caller must
@@ -81,16 +78,34 @@ pub(super) fn screen_inbound_addr(
 pub(super) fn try_reserve_public_inbound_slot(
     network: &Network,
     addr: PeerSocketAddr,
-    active_count: usize,
     limit: usize,
     active_inbound_connections: &SharedConnectionCounter,
-    recent_inbound_connections: &mut RecentByIp,
+    recent_inbound_connections: &watch::Sender<RecentByIp>,
 ) -> Option<ConnectionTracker> {
-    if active_count >= limit || recent_inbound_connections.is_past_limit_or_add(addr.ip()) {
+    // # Security
+    //
+    // The capacity check and the slot reservation are one atomic update, so
+    // the transports' accept loops cannot both take the last free slot and
+    // overshoot the shared limit.
+    let Some(tracker) = active_inbound_connections.try_track_connection(limit) else {
         // Too many open inbound connections or pending handshakes already.
+        record_inbound_connection_rejected(network, addr, "capacity_or_rate_limited");
+        return None;
+    };
+
+    // # Security
+    //
+    // The per-IP limiter is shared between the transports' accept loops, so
+    // one IP cannot hold `max_connections_per_ip` connections on each
+    // transport. The check-and-record runs atomically inside the watch cell.
+    let mut past_limit = false;
+    recent_inbound_connections
+        .send_modify(|recent| past_limit = recent.is_past_limit_or_add(addr.ip()));
+    if past_limit {
+        // Dropping the tracker releases the reserved slot.
         record_inbound_connection_rejected(network, addr, "capacity_or_rate_limited");
         return None;
     }
 
-    Some(active_inbound_connections.track_connection())
+    Some(tracker)
 }

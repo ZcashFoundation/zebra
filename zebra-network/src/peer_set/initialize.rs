@@ -344,7 +344,8 @@ where
 
     // The legacy and v2 transports open connections from separate tasks, but
     // their connections share the configured limits, so they share these
-    // counters.
+    // counters, and one per-IP inbound limiter: separate limiters would let
+    // one IP hold `max_connections_per_ip` connections on each transport.
     let active_inbound_connections = SharedConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
@@ -353,6 +354,11 @@ where
         config.peerset_outbound_connection_limit(),
         "Outbound Connections",
     );
+    let recent_inbound_connections = watch::channel(recent_by_ip::RecentByIp::new(
+        None,
+        Some(config.max_connections_per_ip),
+    ))
+    .0;
 
     // Connect peerset_tx to the 3 peer sources:
     //
@@ -366,6 +372,7 @@ where
         bans_receiver.clone(),
         block_gossip_peer_ips,
         active_inbound_connections.clone(),
+        recent_inbound_connections.clone(),
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -399,6 +406,7 @@ where
                 peerset_tx.clone(),
                 bans_receiver,
                 active_inbound_connections,
+                recent_inbound_connections,
             );
 
             (
@@ -810,15 +818,13 @@ async fn accept_inbound_connections<S>(
     bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
     zcashd_compat_peer_ips: Vec<IpAddr>,
     active_inbound_connections: SharedConnectionCounter,
+    recent_inbound_connections: watch::Sender<recent_by_ip::RecentByIp>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone,
     S::Future: Send + 'static,
 {
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
-
     let zcashd_compat_peer_ips: HashSet<_> = zcashd_compat_peer_ips
         .into_iter()
         .map(|ip| canonical_socket_addr(SocketAddr::new(ip, 0)).ip())
@@ -900,10 +906,9 @@ where
                 match inbound_admission::try_reserve_public_inbound_slot(
                     &config.network,
                     addr,
-                    active_public_inbound_connections,
                     public_limit,
                     &active_inbound_connections,
-                    &mut recent_inbound_connections,
+                    &recent_inbound_connections,
                 ) {
                     Some(tracker) => tracker,
                     None => {

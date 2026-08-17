@@ -77,6 +77,7 @@ pub(super) async fn run_v2_endpoint<S, C>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
     active_inbound_connections: SharedConnectionCounter,
+    recent_inbound_connections: watch::Sender<recent_by_ip::RecentByIp>,
 ) -> Result<(), BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -84,9 +85,6 @@ where
     C: ChainTip + Clone + Send + Sync + 'static,
 {
     // Accept inbound v2 connections.
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
-
     // The inbound handshakes currently in progress; above the threshold,
     // unvalidated addresses are asked to retry with a token.
     let pending_handshakes = crate::peer_set::SlotCounter::default();
@@ -124,10 +122,9 @@ where
         let Some(connection_tracker) = inbound_admission::try_reserve_public_inbound_slot(
             &config.network,
             addr,
-            active_inbound_connections.update_count(),
             config.peerset_inbound_connection_limit(),
             &active_inbound_connections,
-            &mut recent_inbound_connections,
+            &recent_inbound_connections,
         ) else {
             incoming.refuse();
             // Allow invalid connections to be cleared quickly, but still put a
