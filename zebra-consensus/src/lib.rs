@@ -34,7 +34,12 @@
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_consensus")]
 
+// Fuzzing switch: expose `block::check::equihash_solution_is_valid` to the
+// equihash fuzz harness. Private in normal builds; public only under `fuzzing`.
+#[cfg(not(feature = "fuzzing"))]
 mod block;
+#[cfg(feature = "fuzzing")]
+pub mod block;
 mod checkpoint;
 mod primitives;
 mod script;
