@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`config::rpc::Config` gains a public `lightwalletd_listen_addr: Option<SocketAddr>` field. Code constructing the config literally must add it; the default `None` disables the lightwalletd gRPC server ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).'
+time: 2026-08-17T21:29:00.000000000Z
