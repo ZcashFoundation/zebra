@@ -67,7 +67,7 @@ pub struct Config {
     pub enable_cookie_auth: bool,
 
     /// The maximum size of the response body in bytes.
-    pub max_response_body_size: usize,
+    pub max_response_body_size: u32,
 }
 
 // This impl isn't derivable because it depends on features.

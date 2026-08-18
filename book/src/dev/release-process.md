@@ -137,7 +137,7 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs author curated changelog entries under `[Unreleased]`, then release-plz moves those entries under versioned headings and adds mechanical dependency-only entries when it refreshes the Release PR. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
 
 A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
 
@@ -165,7 +165,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | Failure | Next action |
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
-| A versioned changelog is missing or empty | For a direct package change, add the missing `[Unreleased]` entry on `main`, then let release-plz refresh the PR. A dependency-only failure indicates a release-plz configuration regression; do not edit the generated branch. |
+| A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 

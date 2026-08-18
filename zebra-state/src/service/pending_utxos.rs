@@ -6,7 +6,7 @@ use tokio::sync::broadcast;
 
 use zebra_chain::transparent;
 
-use crate::{BoxError, Response};
+use crate::{AwaitUtxoError, Response};
 
 #[derive(Debug, Default)]
 pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Utxo>>);
@@ -17,7 +17,7 @@ impl PendingUtxos {
     pub fn queue(
         &mut self,
         outpoint: transparent::OutPoint,
-    ) -> impl Future<Output = Result<Response, BoxError>> {
+    ) -> impl Future<Output = Result<Response, AwaitUtxoError>> {
         let mut receiver = self
             .0
             .entry(outpoint)
@@ -32,7 +32,7 @@ impl PendingUtxos {
                 .recv()
                 .await
                 .map(Response::Utxo)
-                .map_err(BoxError::from)
+                .map_err(AwaitUtxoError::from)
         }
     }
 

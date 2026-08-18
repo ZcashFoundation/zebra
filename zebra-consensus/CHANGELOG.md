@@ -1,19 +1,14 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+### Changed
 
-### Security
-
-- `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so
-  `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity
-  violations. The score reported by `router::RouterError`, `VerifyBlockError`, and
-  `VerifyCheckpointError` for this error changes from 0 to 100
-  ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
+- Consensus rules that apply to a transaction in both block and mempool context
+  are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
 
 ## [15.0.0] - 2026-08-10
 

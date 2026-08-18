@@ -1,17 +1,9 @@
-# CHANGELOG
+# Changelog
 
-All notable changes to Zebra are documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
-
-## [Unreleased]
-
-### Security
-
-- Score misbehavior for peers that advertise a block containing duplicate transactions, matching
-  the treatment of the other definitive block-validity violations
-  ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
 
 ## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 

@@ -280,6 +280,16 @@ jobs:
             -print0 | xargs -0 -r shellcheck --color=always
       - name: Test release changelog validator
         run: .github/scripts/test-validate-release-changelogs.sh
+      # Builds a throwaway cargo workspace, so it needs the runner image's cargo.
+      - name: Test PR changelog validator
+        run: .github/scripts/test-validate-pr-changelogs.sh
+      # No `args`, so this only installs changie and puts it on PATH, which is
+      # what the test needs. Pinned to the version release.yml batches with.
+      - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
+        with:
+          version: v1.25.2
+      - name: Test release changelog batching
+        run: .github/scripts/test-batch-release-changelogs.sh
 
   lint:
     runs-on: ubuntu-latest

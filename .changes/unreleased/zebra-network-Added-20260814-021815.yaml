@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'A `fuzzing` feature, off by default, which makes the `protocol` module public for the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies and leaves default and release builds unchanged ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).'
+time: 2026-08-14T02:18:15.000000000Z
