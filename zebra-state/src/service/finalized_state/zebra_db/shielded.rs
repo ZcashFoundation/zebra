@@ -598,9 +598,6 @@ impl ZebraDb {
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s shielded transaction indexes,
     /// and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
     pub fn prepare_shielded_transaction_batch(
         &mut self,
         zebra_db: &ZebraDb,
@@ -663,10 +660,6 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing the note commitment and history tree updates
     /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_trees_batch(
         &mut self,
         zebra_db: &ZebraDb,
