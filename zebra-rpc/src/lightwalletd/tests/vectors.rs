@@ -71,24 +71,21 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
         .await
         .respond(ReadResponse::Block(Some(block)));
 
-    // The trees are read concurrently, so answer whichever arrives first. All are
-    // missing here.
-    for _ in 0..3 {
+    // The trees are read concurrently, so answer whichever arrives first. Both are
+    // missing here. This block is pre-NU6.3, so no Ironwood read is issued.
+    for _ in 0..2 {
         let handler = read_state
             .expect_request_that(|request| {
                 matches!(
                     request,
-                    ReadRequest::SaplingTree(_)
-                        | ReadRequest::OrchardTree(_)
-                        | ReadRequest::IronwoodTree(_)
+                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
                 )
             })
             .await;
 
         let response = match handler.request() {
             ReadRequest::SaplingTree(_) => ReadResponse::SaplingTree(None),
-            ReadRequest::OrchardTree(_) => ReadResponse::OrchardTree(None),
-            _ => ReadResponse::IronwoodTree(None),
+            _ => ReadResponse::OrchardTree(None),
         };
 
         handler.respond(response);
@@ -153,12 +150,12 @@ async fn get_block_nullifiers_does_not_read_the_commitment_trees() -> Result<()>
     Ok(())
 }
 
-/// Before NU6.3 there is no Ironwood tree, so a missing one is an empty tree.
+/// Before NU6.3 there is no Ironwood tree, so the Ironwood read is skipped entirely.
 ///
 /// The Sapling and Orchard trees are missing-is-an-error, because a zero size would
 /// corrupt the note positions a client derives. Ironwood is different only before its
-/// activation height: zero is then the true size, so a pre-NU6.3 block must still be
-/// served instead of failing the way a reorged tree read does.
+/// activation height: zero is then the true size, so a pre-NU6.3 block must be served
+/// with a zero Ironwood size without issuing the third state read at all.
 #[tokio::test]
 async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -185,15 +182,14 @@ async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<
         .await
         .respond(ReadResponse::Block(Some(block)));
 
-    // Sapling and Orchard have trees at this height; Ironwood does not exist yet.
-    for _ in 0..3 {
+    // Sapling and Orchard have trees at this height; Ironwood does not exist yet, so
+    // only two reads arrive. If an Ironwood read were still issued, this would hang.
+    for _ in 0..2 {
         let handler = read_state
             .expect_request_that(|request| {
                 matches!(
                     request,
-                    ReadRequest::SaplingTree(_)
-                        | ReadRequest::OrchardTree(_)
-                        | ReadRequest::IronwoodTree(_)
+                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
                 )
             })
             .await;
@@ -202,10 +198,7 @@ async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<
             ReadRequest::SaplingTree(_) => {
                 ReadResponse::SaplingTree(Some(Arc::new(Default::default())))
             }
-            ReadRequest::OrchardTree(_) => {
-                ReadResponse::OrchardTree(Some(Arc::new(Default::default())))
-            }
-            _ => ReadResponse::IronwoodTree(None),
+            _ => ReadResponse::OrchardTree(Some(Arc::new(Default::default()))),
         };
 
         handler.respond(response);

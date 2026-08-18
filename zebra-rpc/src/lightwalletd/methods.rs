@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
 };
 
-use futures::Stream;
+use futures::{future::OptionFuture, Stream};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tower::util::ServiceExt;
@@ -664,8 +664,8 @@ async fn compact_block<ReadStateService: ReadState>(
         .coinbase_height()
         .ok_or_else(|| Status::internal("block in the state must have a height"))?;
 
-    // The Ironwood pool only exists from NU6.3, and the state has no Ironwood tree for
-    // earlier blocks. Before activation the tree is legitimately empty, not missing.
+    // The Ironwood pool only exists from NU6.3: before activation the tree is
+    // legitimately empty, so the read is skipped entirely.
     let is_ironwood_active = NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu6_3;
 
     // `nullifiers_only` responses carry zeroed tree sizes, like lightwalletd's
@@ -681,7 +681,9 @@ async fn compact_block<ReadStateService: ReadState>(
         let orchard_request = read_state
             .clone()
             .oneshot(ReadRequest::OrchardTree(hash.into()));
-        let ironwood_request = read_state.oneshot(ReadRequest::IronwoodTree(hash.into()));
+        let ironwood_request: OptionFuture<_> = is_ironwood_active
+            .then(|| read_state.oneshot(ReadRequest::IronwoodTree(hash.into())))
+            .into();
 
         let (sapling_response, orchard_response, ironwood_response) =
             futures::join!(sapling_request, orchard_request, ironwood_request);
@@ -719,16 +721,16 @@ async fn compact_block<ReadStateService: ReadState>(
         };
 
         let ironwood_tree_size = match ironwood_response {
-            Ok(ReadResponse::IronwoodTree(Some(tree))) => tree.count(),
-            // Before NU6.3 there is no Ironwood tree to read, and zero is the correct size.
-            Ok(ReadResponse::IronwoodTree(None)) if !is_ironwood_active => 0,
-            Ok(ReadResponse::IronwoodTree(None)) => {
+            // The read is only skipped before NU6.3, where zero is the correct size.
+            None => 0,
+            Some(Ok(ReadResponse::IronwoodTree(Some(tree)))) => tree.count(),
+            Some(Ok(ReadResponse::IronwoodTree(None))) => {
                 return Err(Status::aborted(
                     "ironwood tree not found for this block, it may have been reorged",
                 ));
             }
-            Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => {
+            Some(Ok(_)) => unreachable!("unexpected response type from ReadStateService"),
+            Some(Err(error)) => {
                 return Err(Status::internal(format!(
                     "failed to read ironwood tree: {error}"
                 )));

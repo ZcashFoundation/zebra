@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: 'The `[rpc]` config section gains a `lightwalletd_listen_addr` field through the embedded `zebra_rpc::config::rpc::Config`; code constructing that config literally must add it ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).'
-time: 2026-08-17T21:29:01.000000000Z
