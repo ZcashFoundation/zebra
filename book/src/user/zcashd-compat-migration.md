@@ -100,10 +100,10 @@ Balances and spending — including `getwalletinfo` — wait for the tip.
 
 ### 5. Verify
 
-Check the shield with
-[Verify the integration](zcashd-compat.md#verify-the-integration): one peer, no
-P2P listener, miner RPCs returning `Method not found`. Then confirm both nodes
-agree at the same height:
+Check that zcashd is still isolated from the network — one peer, no P2P
+listener, miner RPCs returning `Method not found` — with
+[Verify the integration](zcashd-compat.md#verify-the-integration). Then confirm
+both nodes agree at the same height:
 
 ```console
 $ zcash-cli -datadir=/var/lib/zcashd getbestblockhash
