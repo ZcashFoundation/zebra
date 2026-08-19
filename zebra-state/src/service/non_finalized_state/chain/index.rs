@@ -231,9 +231,17 @@ impl TransparentTransfers {
     }
 
     /// Returns the partial received balance for this address.
+    ///
+    /// This is a cumulative total of every UTXO ever created for the address in this partial
+    /// chain (spent UTXOs are not removed from the count). An address that repeatedly receives
+    /// and re-sends can therefore push the total past `u64::MAX` even though its balance stays
+    /// bounded, so the sum saturates rather than overflowing, matching the finalized path. See
+    /// #10556.
     pub fn received(&self) -> u64 {
-        let received_utxos = self.created_utxos.values();
-        received_utxos.map(|out| out.value()).map(u64::from).sum()
+        self.created_utxos
+            .values()
+            .map(|out| u64::from(out.value()))
+            .fold(0, u64::saturating_add)
     }
 
     /// Returns the [`transaction::Hash`]es of the transactions that sent or
@@ -304,4 +312,44 @@ impl Default for TransparentTransfers {
 /// Returns the transaction location for an [`transparent::OrderedUtxo`].
 pub fn transaction_location(ordered_utxo: &transparent::OrderedUtxo) -> TransactionLocation {
     TransactionLocation::from_usize(ordered_utxo.utxo.height, ordered_utxo.tx_index_in_block)
+}
+
+#[cfg(test)]
+mod tests {
+    use zebra_chain::{
+        amount::MAX_MONEY,
+        transparent::{Output, Script},
+    };
+
+    use super::*;
+
+    /// Regression test for #10556: the cumulative non-finalized `received` total for a
+    /// transparent address must saturate at `u64::MAX` rather than overflow.
+    ///
+    /// `received()` sums every UTXO ever created for the address in this partial chain, and
+    /// spent UTXOs are not removed from that set, so a high-churn self-transfer address can push
+    /// the total past `u64::MAX` while its balance stays bounded. Before the fix the plain
+    /// `.sum()` panicked in debug builds and wrapped in release builds.
+    #[test]
+    fn received_saturates_past_u64_max() {
+        let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount");
+        let output = Output::new(max_money, Script::new(&[]));
+
+        // `u64::MAX / MAX_MONEY` is ~8784, so 8786 max-money UTXOs overflow a plain sum.
+        let utxo_count = 8786;
+        assert!(
+            (utxo_count as u128) * (MAX_MONEY as u128) > u64::MAX as u128,
+            "test must actually exceed u64::MAX when summed exactly",
+        );
+
+        let mut transfers = TransparentTransfers::default();
+        for output_index in 0..utxo_count {
+            let output_location = OutputLocation::from_usize(Height(0), 0, output_index);
+            transfers
+                .created_utxos
+                .insert(output_location, output.clone());
+        }
+
+        assert_eq!(transfers.received(), u64::MAX);
+    }
 }
