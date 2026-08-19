@@ -1,5 +1,18 @@
 # zcashd-compat Mode (`zebrad start --zcashd-compat`)
 
+> [!IMPORTANT]
+> **This is a temporary workaround, not a destination.** zcashd-compat mode
+> exists for operators who have not yet migrated to Zebra +
+> [Zallet](https://github.com/zcash/wallet). It keeps an existing `zcashd`
+> wallet integration working _during_ that migration; plan to leave it.
+>
+> **The Ironwood shielded pool (NU6.3) is not supported in the sidecar.** The
+> zcashd wallet never supports Ironwood — a permanent descope, not a "not yet
+> available" gate. Orchard is also rejected from NU6.3 onward, including
+> spends of existing Orchard notes. Only transparent and Sapling flows are
+> unaffected. See
+> [Wallet shielded-pool support](#wallet-shielded-pool-support-orchard--ironwood).
+
 zcashd-compat mode is for operators — typically exchanges and custodial
 services who want to migrate to Zebra while keeping the `zcashd` wallet and
 RPC surface their integration already depends on. Zebra faces the Zcash P2P
