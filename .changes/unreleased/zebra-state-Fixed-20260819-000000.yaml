@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'The `getblocktemplate` RPC now looks up the Testnet minimum-difficulty block spacing at the candidate (next) block''s height instead of the previous block''s. At a network-upgrade activation boundary that changes the target spacing (such as Blossom), the template''s difficulty and `mintime` were previously computed from the pre-upgrade spacing ([#10621](https://github.com/ZcashFoundation/zebra/issues/10621)).'
+time: 2026-08-19T00:00:00.000000000Z
