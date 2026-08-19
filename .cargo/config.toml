@@ -12,6 +12,11 @@ rustdocflags = [
 [env]
 RUST_BACKTRACE="1"
 
+[resolver]
+# Prefer dependency versions that build on our MSRV, instead of picking the
+# newest version and failing on the oldest supported toolchain.
+incompatible-rust-versions = "fallback"
+
 [profile.profiling]
 inherits = "release"
 debug = true

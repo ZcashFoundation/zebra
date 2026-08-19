@@ -15,11 +15,6 @@ ignore = [
     "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained): via librustzcash orchard -> getset
     "RUSTSEC-2025-0119", # number_prefix: transitive via indicatif
     "RUSTSEC-2025-0141", # bincode: direct dependency
-    # quick-xml DoS advisories: via inferno (zebrad's `flamegraph` feature), which has no release
-    # allowing the fixed quick-xml 0.41 yet: https://github.com/jonhoo/inferno/pull/369.
-    # Zebra only feeds inferno locally generated profiling data, never untrusted XML.
-    "RUSTSEC-2026-0194", # quick-xml: quadratic duplicate-attribute check
-    "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
 ]
 
 # This section is considered when running `cargo deny check licenses`.
@@ -98,7 +93,8 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # wait for bindgen to update itertools
+    # itertools 0.13.x pulled by halo2 deps and bindgen; 0.14.x by other deps.
+    # remove once bindgen updates itertools.
     { name = "itertools", version = "0.13" },
 
     # wait for ordered-map to release a dependency fix
@@ -138,14 +134,6 @@ skip-tree = [
     # remove once ed25519-zebra updates hashbrown.
     { name = "hashbrown", version = "=0.16.1" },
 
-    # toml 0.9.x pulled by zebrad direct; 1.1.x by config 0.15 (also via zebrad).
-    # toml 1.x is the spec-1.1 line; remove once zebrad migrates its direct dep.
-    { name = "toml", version = "=0.9.12+spec-1.1.0" },
-
-    # winnow 0.7.x pulled by toml 0.9.x; 1.x by toml 1.x / config 0.15.
-    # resolved together with the toml entry above.
-    { name = "winnow", version = "=0.7.15" },
-
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
@@ -154,13 +142,11 @@ skip-tree = [
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
-    # hashbrown 0.14.x pulled by indexmap 1.9 (transitive of librustzcash)
+    # hashbrown 0.14.x pulled by ordered-multimap, via rust-ini and config
     { name = "hashbrown", version = "0.14" },
-    # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
+    # hashbrown 0.15.x pulled by various deps, incl. hashlink/petgraph/metrics-util;
+    # 0.16.x by indexmap 2.x. remove once they update hashbrown and foldhash.
     { name = "hashbrown", version = "0.15" },
-
-    # itertools 0.13.x pulled by halo2 deps; 0.14.x pulled by other deps
-    { name = "itertools", version = "0.13" },
 
     { name = "getrandom", version = "0.2" },
     { name = "getrandom", version = "0.3" },
@@ -174,9 +160,6 @@ skip-tree = [
 
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
-
-    # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
-    { name = "hashbrown", version = "0.15" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -195,11 +178,9 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
-# List of URLs for allowed Git repositories
-# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
-allow-git = [
-    "https://github.com/zcash/librustzcash.git",
-]
+# List of URLs for allowed Git repositories.
+# Empty: every dependency comes from the crates.io registry.
+allow-git = []
 
 [sources.allow-org]
 github = [
