@@ -24,7 +24,7 @@ Each push and each release fans out to six `deploy-nodes` jobs (2 networks × 3 
 4. If the zonal MIG does not exist, create it with `--size=1` and apply the stateful policy.
 5. Assign the static IP (push and release only; workflow_dispatch uses ephemeral). Zone-to-IP mapping is deterministic: zone `b` → primary, zone `c` → secondary, zone `d` → tertiary.
 
-Cache images come from `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first.
+Cache images come from `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first.
 
 Deploy success has two channels: `deploy-nodes` reports infrastructure, `verify-nodes` reports application health. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-channels) for details.
 

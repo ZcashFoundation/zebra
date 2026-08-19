@@ -62,6 +62,11 @@ Apply one of two labels:
 - `keep_until=YYYY-MM-DD` — self-expiring; eligible for reaping after the date passes.
 - `delete_protection=true` — indefinite; requires manual removal before reaping.
 
+> **Warning:** the daily cleanup workflow (`zfnd-delete-gcp-resources.yml`) sweeps PR-deploy
+> resources by age and name and does **not** honor these labels. They only take effect with
+> the label-aware [sweep recipe](#sweep-expired) below, so don't rely on a label alone to
+> protect a PR deploy from the daily sweep.
+
 Apply to the instance and disk now if you need protection immediately (labels propagate to new instances on the next template swap):
 
 ```bash
@@ -244,7 +249,7 @@ Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY
 
 The workflow assigns them via per-instance configs for push and release deploys; workflow_dispatch deploys use ephemeral IPs. Reserve new ones manually with `gcloud compute addresses create` before adding capacity.
 
-**Cache images** are produced by `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
+**Cache images** are produced by `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
 
 ```bash
 gcloud compute images list --project zfnd-dev-zebra \
