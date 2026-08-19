@@ -1604,10 +1604,12 @@ impl Chain {
         addresses: &HashSet<transparent::Address>,
     ) -> (Amount<NegativeAllowed>, u64) {
         let (balance, received) = self.partial_transparent_indexes(addresses).fold(
-            (Ok(Amount::zero()), 0),
+            (Ok(Amount::zero()), 0u64),
             |(balance, received), transfers| {
                 let balance = balance + transfers.balance();
-                (balance, received + transfers.received())
+                // Saturate: each per-address `received()` can already reach `u64::MAX`, so
+                // summing several of them could overflow. Matches the finalized path (#10556).
+                (balance, received.saturating_add(transfers.received()))
             },
         );
 
