@@ -2749,52 +2749,30 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     let expected_error = Err(expected_error);
 
-    // Modify a JoinSplit in the transaction following the given modification type.
+    // Modify a JoinSplit in the transaction following the given modification type, re-signing the
+    // JoinSplit signature where necessary so that exactly one check fails deterministically.
     let tx = Arc::get_mut(&mut transaction).expect("The tx should have only one active reference.");
-    match tx {
-        Transaction::V4 {
-            joinsplit_data: Some(ref mut joinsplit_data),
-            ..
-        } => modify_joinsplit_data(joinsplit_data, modification),
-        _ => unreachable!("Transaction should have some JoinSplit shielded data."),
-    }
+    modify_joinsplit_and_resign(tx, &network, height, modification);
 
     // Initialize the verifier
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called.") });
     let verifier = BlockTxVerifier::new(&network, state_service);
-    let verifier = Buffer::new(verifier, 10);
 
     // Test the transaction verifier.
     //
-    // Note that modifying the JoinSplit data invalidates the tx signatures. The signatures are
-    // checked concurrently with the ZK proofs, and when a signature check finishes before the proof
-    // check, the verifier reports an invalid signature instead of invalid proof. This race
-    // condition happens only occasionally, so we run the verifier in a loop with a small iteration
-    // threshold until it returns the correct error.
-    let mut i = 1;
-    let result = loop {
-        let result = verifier
-            .clone()
-            .oneshot(BlockRequest {
-                transaction_hash: transaction.hash(),
-                transaction: transaction.clone(),
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await
-            .map_err(|err| {
-                *err.downcast()
-                    .expect("error type should be TransactionError")
-            });
-
-        if result == expected_error || i >= 100 {
-            break result;
-        }
-
-        i += 1;
-    };
+    // Because the modification leaves exactly one of the proof or signature checks failing (the
+    // other is kept valid by re-signing), the verifier returns the same error every time, with no
+    // race between the concurrent proof and signature checks.
+    let result = verifier
+        .oneshot(BlockRequest {
+            transaction_hash: transaction.hash(),
+            transaction: transaction.clone(),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
 
     assert_eq!(result, expected_error);
 }
@@ -3754,38 +3732,94 @@ enum JoinSplitModification {
     ZeroProof,
 }
 
-/// Modify a [`JoinSplitData`] following the given modification type.
-fn modify_joinsplit_data(
-    joinsplit_data: &mut JoinSplitData<Groth16Proof>,
+/// Modify a JoinSplit in a V4 `transaction` following the given modification type, re-signing the
+/// JoinSplit signature where necessary so that exactly one of the proof or signature checks fails.
+///
+/// The JoinSplit signature covers the transaction sighash, which commits to the JoinSplit proofs
+/// (and to `joinSplitPubKey`). So corrupting a proof also invalidates the original signature, and
+/// the verifier checks the proof and signature concurrently — whichever fails first is reported.
+/// To test proof verification in isolation, deterministically, this takes over the JoinSplit key
+/// pair for the proof-corruption cases and re-signs the modified transaction, leaving a *valid*
+/// signature over an *invalid* proof, so only the proof check fails. Conversely,
+/// [`JoinSplitModification::CorruptSignature`] leaves the proof (and its signature) valid and then
+/// invalidates only the signature.
+///
+/// Re-signing only makes sense for v4: the v5 sighash does not depend on the (non-existent) Sprout
+/// proofs, so this exercises that v4 signatures do commit to the proofs.
+///
+/// # Panics
+///
+/// If `transaction` is not a V4 transaction with JoinSplit data.
+fn modify_joinsplit_and_resign(
+    transaction: &mut Transaction,
+    network: &Network,
+    height: block::Height,
     modification: JoinSplitModification,
 ) {
-    match modification {
-        JoinSplitModification::CorruptSignature => {
-            let mut sig_bytes: [u8; 64] = joinsplit_data.sig.into();
-            // Flip a bit from an arbitrary byte of the signature.
-            sig_bytes[10] ^= 0x01;
-            joinsplit_data.sig = sig_bytes.into();
-        }
-        JoinSplitModification::CorruptProof => {
-            let joinsplit = joinsplit_data
-                .joinsplits_mut()
-                .next()
-                .expect("must have a JoinSplit");
-            {
+    if let JoinSplitModification::CorruptSignature = modification {
+        // Leave the proof and its signature valid, then flip a bit of the signature so only the
+        // signature check fails. No re-signing needed.
+        let joinsplit_data = v4_joinsplit_data_mut(transaction);
+        let mut sig_bytes: [u8; 64] = joinsplit_data.sig.into();
+        sig_bytes[10] ^= 0x01;
+        joinsplit_data.sig = sig_bytes.into();
+        return;
+    }
+
+    // Proof-corruption cases: corrupt the proof, take over the JoinSplit key pair, then re-sign.
+    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let verification_key = ed25519::VerificationKey::from(&signing_key);
+
+    {
+        let joinsplit_data = v4_joinsplit_data_mut(transaction);
+        let joinsplit = joinsplit_data
+            .joinsplits_mut()
+            .next()
+            .expect("must have a JoinSplit");
+
+        match modification {
+            JoinSplitModification::CorruptProof => {
                 // A proof is composed of three field elements, the first and last having 48 bytes.
-                // (The middle one has 96 bytes.) To corrupt the proof without making it malformed,
-                // simply swap those first and last elements.
+                // (The middle one has 96 bytes.) Swapping the first and last elements corrupts the
+                // proof without making it malformed.
                 let (first, rest) = joinsplit.zkproof.0.split_at_mut(48);
                 first.swap_with_slice(&mut rest[96..144]);
             }
+            JoinSplitModification::ZeroProof => {
+                // An all-zero proof is malformed (not a valid curve point).
+                joinsplit.zkproof.0 = [0; 192];
+            }
+            JoinSplitModification::CorruptSignature => {
+                unreachable!("the signature case returns early above")
+            }
         }
-        JoinSplitModification::ZeroProof => {
-            let joinsplit = joinsplit_data
-                .joinsplits_mut()
-                .next()
-                .expect("must have a JoinSplit");
-            joinsplit.zkproof.0 = [0; 192];
-        }
+
+        // The sighash commits to `joinSplitPubKey` (but not to `joinSplitSig`), so set the new key
+        // before computing the sighash to sign below.
+        joinsplit_data.pub_key = verification_key.into();
+    }
+
+    // Re-sign the modified transaction so the JoinSplit signature is valid over the invalid proof.
+    let nu = NetworkUpgrade::current(network, height);
+    let sighash = transaction
+        .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+        .expect("network upgrade should be valid for tx");
+
+    v4_joinsplit_data_mut(transaction).sig = signing_key.sign(sighash.as_ref());
+}
+
+/// Returns a mutable reference to the [`JoinSplitData`] of a V4 `transaction`.
+///
+/// # Panics
+///
+/// If `transaction` is not a V4 transaction with JoinSplit data.
+fn v4_joinsplit_data_mut(transaction: &mut Transaction) -> &mut JoinSplitData<Groth16Proof> {
+    match transaction {
+        Transaction::V4 {
+            joinsplit_data: Some(joinsplit_data),
+            ..
+        } => joinsplit_data,
+        _ => unreachable!("Transaction should have some JoinSplit shielded data."),
     }
 }
 
