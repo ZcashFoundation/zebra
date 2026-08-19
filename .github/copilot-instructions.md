@@ -97,7 +97,7 @@ When the PR adds abstraction, flags, generics, or refactors:
 - User-visible changes need a change fragment: `changie new -j zebrad -k Added -b "..."`
 - Library-consumer-visible changes need one fragment per affected crate: `changie new -j zebra-chain -j zebra-state -k breaking -b "..."`
 - PR labels must match the intended changelog category (`C-bug`, `C-feature`, `C-security`, etc.)
-- PR title follows conventional commits (squash-merged to main)
+- PR title and branch commits follow conventional commits (merged to main with a merge commit, so branch commits are preserved)
 
 ## Extra Scrutiny Areas
 
