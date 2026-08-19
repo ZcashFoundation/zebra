@@ -3744,8 +3744,10 @@ enum JoinSplitModification {
 /// [`JoinSplitModification::CorruptSignature`] leaves the proof (and its signature) valid and then
 /// invalidates only the signature.
 ///
-/// Re-signing only makes sense for v4: the v5 sighash does not depend on the (non-existent) Sprout
-/// proofs, so this exercises that v4 signatures do commit to the proofs.
+/// Re-signing is required precisely because the v4 sighash commits to the JoinSplit proofs:
+/// corrupting a proof invalidates the original signature, so a fresh signature over the modified
+/// transaction is needed to isolate the proof check. Sprout JoinSplits, and this concern, exist
+/// only in v4.
 ///
 /// # Panics
 ///
