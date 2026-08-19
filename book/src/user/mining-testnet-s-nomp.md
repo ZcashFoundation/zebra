@@ -35,15 +35,16 @@ The `zebra-mining` branch of the ZcashFoundation s-nomp fork includes fixes that
    [network]
    crawl_new_peer_interval = '1m 1s'
    initial_mainnet_peers = [
-       'dnsseed.z.cash:8233',
        'dnsseed.str4d.xyz:8233',
+       'dnsseed.z.cash:8233',
+       'mainnet.seeder.shieldedinfra.net:8233',
        'mainnet.seeder.zfnd.org:8233',
-       'mainnet.is.yolo.money:8233',
+       'seeder.zec.rocks:8233',
    ]
    initial_testnet_peers = [
        'dnsseed.testnet.z.cash:18233',
+       'seeder.testnet.zec.rocks:18233',
        'testnet.seeder.zfnd.org:18233',
-       'testnet.is.yolo.money:18233',
    ]
    listen_addr = '0.0.0.0:18233'
    network = 'Testnet'

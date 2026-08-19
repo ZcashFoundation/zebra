@@ -15,14 +15,6 @@ For example, version `3.1.11` indicates major version 3, minor version 1, and pa
 
 The version number is incremented based on the level of change included in the release.
 
-<div class="alert pre-release">
-
-**NOTE**: <br />
-As Zebra is in a `pre-release` state (is unstable and might not satisfy the intended compatibility requirements as denoted by its associated normal version).
-The pre-release version is denoted by appending a hyphen and a series of dot separated identifiers immediately following the patch version.
-
-</div>
-
 | Level of change | Details                                                                                                                                                                                                                                                              |
 | :-------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Major release   | Contains significant new features, and commonly correspond to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
@@ -33,7 +25,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **16 weeks** but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **15 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
