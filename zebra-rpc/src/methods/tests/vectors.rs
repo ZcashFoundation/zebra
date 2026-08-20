@@ -2737,7 +2737,8 @@ async fn rpc_submitblock_errors() {
 
     mempool.expect_no_requests().await;
 
-    // See zebrad::tests::acceptance::submit_block for success case.
+    // See zebrad's `integration::regtest::regtest_block_templates_are_valid_block_submissions`
+    // for the success case.
 }
 
 #[tokio::test(flavor = "multi_thread")]
