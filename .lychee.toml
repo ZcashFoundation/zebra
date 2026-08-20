@@ -48,7 +48,7 @@ exclude_path = [
 ]
 
 # Accept these HTTP status codes as valid
-accept = ["200", "204", "206", "301", "302", "307", "308", "429"]
+accept = ["200", "202", "204", "206", "301", "302", "307", "308", "403", "429"]
 
 # Timeout for requests (seconds)
 timeout = 30
