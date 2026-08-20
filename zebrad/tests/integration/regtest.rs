@@ -61,6 +61,147 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     Ok(())
 }
 
+/// A `getblocktemplate` long poll request must return promptly with `submit_old: false` when the
+/// chain tip changes, and the template it returns must be a valid block proposal.
+///
+/// A long poll response tells a miner whether the work it already queued is still worth
+/// submitting: `submit_old: false` means the block header changed, so every queued share is now
+/// mining on a stale parent and must be discarded. Getting this wrong wastes miner hash power, or
+/// worse, keeps miners extending a chain that can no longer win.
+///
+/// This invalidation path had no assertion anywhere in the tree before this test. The stateful
+/// `rpc_get_block_template` test that this replaces observed it only opportunistically: it polled
+/// mainnet for a tip change it could not trigger, and never required a `submit_old: false` to
+/// occur, so a regression that stopped emitting it entirely would still have passed. Here the tip
+/// change is triggered deterministically with `generate`, so the response is required rather than
+/// hoped for.
+#[tokio::test]
+async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Result<()> {
+    use zebra_rpc::{
+        client::{BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource},
+        proposal_block_from_template,
+    };
+
+    /// How long to wait for the long poll to return after the tip changes, before
+    /// failing the test outright.
+    const LONG_POLL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// The tip-change fast path responds in milliseconds; the fallback is the free-running
+    /// 5-second mempool tick ([`MEMPOOL_LONG_POLL_INTERVAL`]), which typically lands 1-4
+    /// seconds after `generate`. This bound catches the fallback in most runs while leaving
+    /// headroom for a loaded runner. A tick landing early can still sneak under it, so it is
+    /// strong but not airtight: timing against a free-running tick cannot be deterministic.
+    ///
+    /// [`MEMPOOL_LONG_POLL_INTERVAL`]: zebra_rpc::methods::types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL
+    const FAST_PATH_RESPONSE_BOUND: Duration = Duration::from_secs(3);
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+
+    // Get an initial template, and take the long poll id a miner would hold work against.
+    let initial_template: BlockTemplateResponse = client
+        .json_result_from_call("getblocktemplate", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    let initial_long_poll_id = initial_template.long_poll_id();
+
+    // Start a long poll against that id. It must block until the template is invalidated.
+    let long_poll_client = client.clone();
+    let long_poll = tokio::spawn(async move {
+        long_poll_client
+            .json_result_from_call::<BlockTemplateResponse>(
+                "getblocktemplate",
+                format!(r#"[{{"longpollid":"{initial_long_poll_id}"}}]"#),
+            )
+            .await
+            .map_err(|err| eyre!(err))
+    });
+
+    // Let the long poll reach the RPC and start waiting before the tip moves under it.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !long_poll.is_finished(),
+        "long poll must keep waiting while the template is still valid",
+    );
+
+    // Invalidate the template by advancing the tip from a second client.
+    client.generate(1).await?;
+    let tip_changed_at = std::time::Instant::now();
+
+    let new_template = tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, long_poll)
+        .await
+        .map_err(|_| eyre!("long poll did not return within {LONG_POLL_RESPONSE_TIMEOUT:?} of the tip changing"))???;
+
+    let response_delay = tip_changed_at.elapsed();
+    assert!(
+        response_delay < FAST_PATH_RESPONSE_BOUND,
+        "the long poll must return via the tip-change fast path, not the mempool tick: \
+         took {response_delay:?}, bound {FAST_PATH_RESPONSE_BOUND:?}",
+    );
+
+    assert_eq!(
+        new_template.submit_old(),
+        Some(false),
+        "a tip change must tell miners to discard old work",
+    );
+
+    assert!(
+        new_template.height() > initial_template.height(),
+        "the long poll template must build on the new tip: got height {}, expected above {}",
+        new_template.height(),
+        initial_template.height(),
+    );
+
+    // The template handed back on invalidation must itself be usable, not just prompt.
+    // Every advertised time source must yield a valid proposal: on Regtest `max_time`
+    // interacts with the minimum-difficulty rule, so this is a consensus property,
+    // and these are the only test callers of `valid_sources()` in the tree.
+    for time_source in BlockTemplateTimeSource::valid_sources() {
+        let proposal_block = proposal_block_from_template(&new_template, time_source, &network)?;
+        let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+
+        let proposal_result: BlockProposalResponse = client
+            .json_result_from_call(
+                "getblocktemplate",
+                format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
+            )
+            .await
+            .map_err(|err| eyre!(err))?;
+
+        assert_eq!(
+            proposal_result,
+            BlockProposalResponse::Valid,
+            "the long poll template must be a valid block proposal with time source {time_source:?}",
+        );
+    }
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
 /// A rejected block body must not poison the children of a later valid block with the same header
 /// hash.
 ///
