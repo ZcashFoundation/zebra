@@ -82,13 +82,18 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         proposal_block_from_template,
     };
 
-    /// How long to wait for the long poll to return after the tip changes.
-    ///
-    /// The RPC returns as soon as it observes the new tip, so this only needs to cover
-    /// scheduling and block propagation within the test process. It is deliberately much
-    /// shorter than the mempool poll interval, so a response that only arrives on the next
-    /// mempool tick fails the test instead of passing it slowly.
+    /// How long to wait for the long poll to return after the tip changes, before
+    /// failing the test outright.
     const LONG_POLL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// The tip-change fast path responds in milliseconds; the fallback is the free-running
+    /// 5-second mempool tick ([`MEMPOOL_LONG_POLL_INTERVAL`]), which typically lands 1-4
+    /// seconds after `generate`. This bound catches the fallback in most runs while leaving
+    /// headroom for a loaded runner. A tick landing early can still sneak under it, so it is
+    /// strong but not airtight: timing against a free-running tick cannot be deterministic.
+    ///
+    /// [`MEMPOOL_LONG_POLL_INTERVAL`]: zebra_rpc::methods::types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL
+    const FAST_PATH_RESPONSE_BOUND: Duration = Duration::from_secs(3);
 
     let _init_guard = zebra_test::init();
 
@@ -141,10 +146,18 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
 
     // Invalidate the template by advancing the tip from a second client.
     client.generate(1).await?;
+    let tip_changed_at = std::time::Instant::now();
 
     let new_template = tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, long_poll)
         .await
         .map_err(|_| eyre!("long poll did not return within {LONG_POLL_RESPONSE_TIMEOUT:?} of the tip changing"))???;
+
+    let response_delay = tip_changed_at.elapsed();
+    assert!(
+        response_delay < FAST_PATH_RESPONSE_BOUND,
+        "the long poll must return via the tip-change fast path, not the mempool tick: \
+         took {response_delay:?}, bound {FAST_PATH_RESPONSE_BOUND:?}",
+    );
 
     assert_eq!(
         new_template.submit_old(),
@@ -160,23 +173,27 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     );
 
     // The template handed back on invalidation must itself be usable, not just prompt.
-    let proposal_block =
-        proposal_block_from_template(&new_template, BlockTemplateTimeSource::default(), &network)?;
-    let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+    // Every advertised time source must yield a valid proposal: on Regtest `max_time`
+    // interacts with the minimum-difficulty rule, so this is a consensus property,
+    // and these are the only test callers of `valid_sources()` in the tree.
+    for time_source in BlockTemplateTimeSource::valid_sources() {
+        let proposal_block = proposal_block_from_template(&new_template, time_source, &network)?;
+        let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
 
-    let proposal_result: BlockProposalResponse = client
-        .json_result_from_call(
-            "getblocktemplate",
-            format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
-        )
-        .await
-        .map_err(|err| eyre!(err))?;
+        let proposal_result: BlockProposalResponse = client
+            .json_result_from_call(
+                "getblocktemplate",
+                format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
+            )
+            .await
+            .map_err(|err| eyre!(err))?;
 
-    assert_eq!(
-        proposal_result,
-        BlockProposalResponse::Valid,
-        "the template returned by the long poll must be a valid block proposal",
-    );
+        assert_eq!(
+            proposal_result,
+            BlockProposalResponse::Valid,
+            "the long poll template must be a valid block proposal with time source {time_source:?}",
+        );
+    }
 
     zebrad.kill(false)?;
     let output = zebrad.wait_with_output()?;
