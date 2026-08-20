@@ -32,7 +32,13 @@ concurrency:
   # temporary PR's body and rewrites it on every check event, so these runs arrive
   # in bursts, and Mergify counts a cancelled required check as a failure and
   # dequeues the PR. Queue runs skip every policy job, so serialising them is cheap.
-  cancel-in-progress: ${{ !startsWith(github.head_ref, 'mergify/merge-queue/') }}
+  cancel-in-progress: >-
+    ${{
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login != 'mergify[bot]' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+    }}
 
 permissions:
   contents: read
