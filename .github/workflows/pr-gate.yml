@@ -13,17 +13,26 @@ on:
   # matching the sibling required-check workflows; jobs skip and the result skip-passes.
   merge_group:
 
-# Cancel obsolete gate runs after new commits. Unrelated label events use a
-# separate group so they cannot cancel the required PR Gate run.
+# Cancel obsolete gate runs after new commits. Events that cannot change the gate
+# outcome use separate groups so they cannot cancel the required PR Gate run:
+# unrelated labels, and edits that leave the title and the base branch alone.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'A-release' &&
       'ignored-label' ||
+      github.event.action == 'edited' &&
+      github.event.changes.title == null &&
+      github.event.changes.base == null &&
+      'ignored-edit' ||
       'required'
     }}
-  cancel-in-progress: true
+  # Never cancel a queue candidate's run. Mergify keeps its queue status in the
+  # temporary PR's body and rewrites it on every check event, so these runs arrive
+  # in bursts, and Mergify counts a cancelled required check as a failure and
+  # dequeues the PR. Queue runs skip every policy job, so serialising them is cheap.
+  cancel-in-progress: ${{ !startsWith(github.head_ref, 'mergify/merge-queue/') }}
 
 permissions:
   contents: read
@@ -34,10 +43,14 @@ env:
 
 jobs:
   changes:
-    # Only the A-release label affects gate results; other label events are no-ops.
+    # Only the A-release label affects gate results, and only a title or base edit can
+    # change the declaration this gate reads. Every other label and edit event is a
+    # no-op, so it must not spend a runner or replace the required check.
     if: >-
-      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release'
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'A-release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -172,6 +185,8 @@ jobs:
       github.event_name == 'pull_request' &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
       github.event.label.name == 'A-release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest-xl
@@ -269,19 +284,26 @@ jobs:
           fi
 
   pr-gate-result:
-    # Keep skipped unrelated-label runs from replacing the required check.
+    # Keep skipped unrelated-label and unrelated-edit runs from replacing the
+    # required check.
     name: >-
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
         github.event.label.name != 'A-release' &&
         'Label does not affect the PR gate' ||
+        github.event.action == 'edited' &&
+        github.event.changes.title == null &&
+        github.event.changes.base == null &&
+        'Edit does not affect the PR gate' ||
         'pr-gate-result'
       }}
     runs-on: ubuntu-latest
     if: >-
       always() &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release')
+      github.event.label.name == 'A-release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null)
     needs: [changes, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
