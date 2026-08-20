@@ -413,9 +413,6 @@ impl ZebraDb {
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s transparent transaction indexes,
     /// and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_transparent_transaction_batch(
         &mut self,
