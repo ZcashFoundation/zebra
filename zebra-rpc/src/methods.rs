@@ -473,8 +473,15 @@ pub trait Rpc {
     ///     - An object with the following named fields:
     ///         - `addresses`: (array, required, example=[\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]) The addresses to get outputs from.
     ///         - `chaininfo`: (boolean, optional, default=false) Include chain info with results
+    ///         - `startHeight`: (numeric, optional, default=0) Only return outputs at or above this height
+    ///         - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for no limit
     ///
     /// # Notes
+    ///
+    /// `startHeight` and `maxEntries` bound the index scan, not just the response, so a client
+    /// that pages through a large address does not make the node read the whole UTXO set each
+    /// time. Callers must set both or neither: `maxEntries` alone would truncate the outputs
+    /// before the height filter ran.
     ///
     /// lightwalletd always uses the multi-address request, without chaininfo:
     /// <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>
@@ -2295,11 +2302,22 @@ where
 
         let valid_addresses = utxos_request.valid_addresses()?;
 
+        // Clamp rather than error: a start height above the chain selects nothing, which is
+        // already what the request means.
+        let start_height = Height(
+            u32::try_from(utxos_request.start_height)
+                .unwrap_or(u32::MAX)
+                .min(Height::MAX.0),
+        );
+        let max_entries = (utxos_request.max_entries > 0)
+            // Cast is safe: `usize` is at least 32 bits on all supported platforms.
+            .then_some(utxos_request.max_entries as usize);
+
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses {
             addresses: valid_addresses,
-            height_range: Height::MIN..=Height::MAX,
-            max_entries: None,
+            height_range: start_height..=Height::MAX,
+            max_entries,
         };
         let response = read_state
             .ready()
@@ -3868,32 +3886,62 @@ pub use self::GetAddressBalanceResponse as AddressBalance;
 
 /// Parameters of [`RpcServer::get_address_utxos`] RPC method.
 #[derive(
-    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new, JsonSchema,
+    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, JsonSchema,
 )]
 #[serde(from = "DGetAddressUtxosRequest")]
 pub struct GetAddressUtxosRequest {
-    /// A list of addresses to get transactions from.
+    /// A list of addresses to get unspent outputs from.
     addresses: Vec<String>,
-    /// The height to start looking for transactions.
+    /// Whether to return chain info along with the unspent outputs.
     #[serde(default)]
     #[serde(rename = "chainInfo")]
     chain_info: bool,
+    /// The height to start looking for unspent outputs, or zero for the whole chain.
+    #[serde(default)]
+    #[serde(rename = "startHeight")]
+    start_height: u64,
+    /// The maximum number of unspent outputs to return, or zero for no limit.
+    #[serde(default)]
+    #[serde(rename = "maxEntries")]
+    max_entries: u32,
+}
+
+impl GetAddressUtxosRequest {
+    /// Creates a new request for every unspent output held by `addresses`.
+    pub fn new(addresses: Vec<String>, chain_info: bool) -> GetAddressUtxosRequest {
+        GetAddressUtxosRequest {
+            addresses,
+            chain_info,
+            start_height: 0,
+            max_entries: 0,
+        }
+    }
+
+    /// Limits this request to the unspent outputs at or above `start_height`, and to at most
+    /// `max_entries` of them. Zero means "from the genesis block" and "no limit".
+    ///
+    /// Both limits are taken together, because applying `max_entries` on its own would
+    /// truncate the outputs before the height filter ran.
+    pub fn with_limits(self, start_height: u64, max_entries: u32) -> GetAddressUtxosRequest {
+        GetAddressUtxosRequest {
+            start_height,
+            max_entries,
+            ..self
+        }
+    }
 }
 
 impl From<DGetAddressUtxosRequest> for GetAddressUtxosRequest {
     fn from(request: DGetAddressUtxosRequest) -> Self {
         match request {
-            DGetAddressUtxosRequest::Single(addr) => GetAddressUtxosRequest {
-                addresses: vec![addr],
-                chain_info: false,
-            },
+            DGetAddressUtxosRequest::Single(addr) => GetAddressUtxosRequest::new(vec![addr], false),
             DGetAddressUtxosRequest::Object {
                 addresses,
                 chain_info,
-            } => GetAddressUtxosRequest {
-                addresses,
-                chain_info,
-            },
+                start_height,
+                max_entries,
+            } => GetAddressUtxosRequest::new(addresses, chain_info)
+                .with_limits(start_height, max_entries),
         }
     }
 }
@@ -3904,14 +3952,22 @@ impl From<DGetAddressUtxosRequest> for GetAddressUtxosRequest {
 enum DGetAddressUtxosRequest {
     /// A single address string.
     Single(String),
-    /// A full request object with address list and chainInfo flag.
+    /// A full request object with an address list, a chainInfo flag, and optional limits.
     Object {
-        /// A list of addresses to get transactions from.
+        /// A list of addresses to get unspent outputs from.
         addresses: Vec<String>,
-        /// The height to start looking for transactions.
+        /// Whether to return chain info along with the unspent outputs.
         #[serde(default)]
         #[serde(rename = "chainInfo")]
         chain_info: bool,
+        /// The height to start looking for unspent outputs, or zero for the whole chain.
+        #[serde(default)]
+        #[serde(rename = "startHeight")]
+        start_height: u64,
+        /// The maximum number of unspent outputs to return, or zero for no limit.
+        #[serde(default)]
+        #[serde(rename = "maxEntries")]
+        max_entries: u32,
     },
 }
 

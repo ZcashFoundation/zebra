@@ -181,8 +181,10 @@ enum RpcCall {
     /// raw fields constructor.
     GetAddressTxIds(Vec<String>, Option<u32>, Option<u32>),
     /// `getaddressutxos(GetAddressUtxosRequest)` — methods.rs:2093. Two-
-    /// form DTO + `chain_info` bool. Same family as the two above.
-    GetAddressUtxos(Vec<String>, bool),
+    /// form DTO + `chain_info` bool, and the `start_height` / `max_entries`
+    /// limits, which are pushed into the state index scan. Same family as
+    /// the two above.
+    GetAddressUtxos(Vec<String>, bool, u64, u32),
 
     // ── Tier-B · treestate (hash_or_height + pool name) ────────────────
     /// `z_gettreestate(hash_or_height)` — methods.rs:1874. Same
@@ -762,8 +764,11 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
                 .catch_unwind()
                 .await;
         }
-        RpcCall::GetAddressUtxos(addrs, chain_info) => {
-            let req = GetAddressUtxosRequest::new(addrs, chain_info);
+        RpcCall::GetAddressUtxos(addrs, chain_info, start_height, max_entries) => {
+            // `start_height` is passed through unclamped so the fuzzer can reach the
+            // heights above `Height::MAX` that the RPC has to clamp rather than reject.
+            let req =
+                GetAddressUtxosRequest::new(addrs, chain_info).with_limits(start_height, max_entries);
             let _ = AssertUnwindSafe(rpc.get_address_utxos(req))
                 .catch_unwind()
                 .await;
