@@ -16,11 +16,10 @@ use zcash_primitives::transaction::{
     fees::fixed::FeeRule,
 };
 use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
+use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::ZatBalance, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
-    orchard,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
         Network, NetworkUpgrade,
@@ -33,7 +32,6 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, funding_stream_address};
 use zebra_script::Sigops;
-use zebra_state::IntoDisk;
 
 use super::zec::Zec;
 use super::{super::opthex, get_block_template::MinerParams};
@@ -763,25 +761,27 @@ pub struct OrchardAction {
 ///
 /// The Ironwood pool reuses the Orchard bundle shape, so both pools serialize through the same
 /// [`Orchard`] object; the caller selects which pool's shielded data and value balance to pass.
+/// Builds the RPC object for an Orchard-shaped bundle.
+///
+/// Both the Orchard and Ironwood pools use the same bundle type and the same wire shape, so this
+/// serves both. The caller supplies the pool's own value balance, since that is read from a
+/// separate field per pool.
 fn orchard_shaped_object(
-    shielded_data: Option<&orchard::ShieldedData>,
+    bundle: Option<&::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     value_balance: Amount<NegativeAllowed>,
 ) -> Orchard {
-    let actions = shielded_data
+    let actions = bundle
         .into_iter()
-        .flat_map(|data| data.actions.iter())
-        .map(|authorized_action| {
-            let action = &authorized_action.action;
-            OrchardAction {
-                cv: action.cv.into(),
-                nullifier: action.nullifier.into(),
-                rk: action.rk.into(),
-                cm_x: action.cm_x.into(),
-                ephemeral_key: action.ephemeral_key.into(),
-                enc_ciphertext: action.enc_ciphertext.into(),
-                spend_auth_sig: authorized_action.spend_auth_sig.into(),
-                out_ciphertext: action.out_ciphertext.into(),
-            }
+        .flat_map(|bundle| bundle.actions().iter())
+        .map(|action| OrchardAction {
+            cv: action.cv_net().to_bytes(),
+            nullifier: action.nullifier().to_bytes(),
+            rk: action.rk().into(),
+            cm_x: action.cmx().to_bytes(),
+            ephemeral_key: action.encrypted_note().epk_bytes,
+            enc_ciphertext: action.encrypted_note().enc_ciphertext,
+            spend_auth_sig: action.authorization().into(),
+            out_ciphertext: action.encrypted_note().out_ciphertext,
         })
         .collect();
 
@@ -789,15 +789,19 @@ fn orchard_shaped_object(
         actions,
         value_balance: Zec::from(value_balance).lossy_zec(),
         value_balance_zat: value_balance.zatoshis(),
-        flags: shielded_data.map(|data| {
-            OrchardFlags::new(
-                data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
-                data.flags.contains(orchard::Flags::ENABLE_SPENDS),
-            )
+        flags: bundle.map(|bundle| {
+            let flags = bundle.flags();
+            OrchardFlags::new(flags.outputs_enabled(), flags.spends_enabled())
         }),
-        anchor: shielded_data.map(|data| data.shared_anchor.bytes_in_display_order()),
-        proof: shielded_data.map(|data| data.proof.bytes_in_display_order()),
-        binding_sig: shielded_data.map(|data| data.binding_sig.into()),
+        anchor: bundle.map(|bundle| {
+            let mut anchor = bundle.anchor().to_bytes();
+            // Display order is reversed in the RPC output.
+            anchor.reverse();
+            anchor
+        }),
+        proof: bundle.map(|bundle| bundle.authorization().proof().as_ref().to_vec()),
+        binding_sig: bundle
+            .map(|bundle| <[u8; 64]>::from(bundle.authorization().binding_signature())),
     }
 }
 
@@ -949,25 +953,25 @@ impl TransactionObject {
                 })
                 .collect(),
             shielded_spends: tx
-                .sapling_spends_per_anchor()
+                .sapling_spends()
                 .map(|spend| {
-                    let mut anchor = spend.per_spend_anchor.as_bytes();
+                    let mut anchor = spend.anchor().to_bytes();
                     anchor.reverse();
 
-                    let mut nullifier = spend.nullifier.as_bytes();
+                    let mut nullifier = spend.nullifier().0;
                     nullifier.reverse();
 
-                    let mut rk: [u8; 32] = spend.clone().rk.into();
+                    let mut rk: [u8; 32] = (*spend.rk()).into();
                     rk.reverse();
 
-                    let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
+                    let spend_auth_sig: [u8; 64] = (*spend.spend_auth_sig()).into();
 
                     ShieldedSpend {
-                        cv: spend.cv.clone(),
+                        cv: ValueCommitment(spend.cv().clone()),
                         anchor,
                         nullifier,
                         rk,
-                        proof: spend.zkproof.0,
+                        proof: *spend.zkproof(),
                         spend_auth_sig,
                     }
                 })
@@ -975,79 +979,84 @@ impl TransactionObject {
             shielded_outputs: tx
                 .sapling_outputs()
                 .map(|output| {
-                    let mut cm_u: [u8; 32] = output.cm_u.to_bytes();
+                    let mut cm_u: [u8; 32] = output.cmu().to_bytes();
                     cm_u.reverse();
-                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
+                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key().0;
                     ephemeral_key.reverse();
-                    let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
-                    let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
+                    let enc_ciphertext: [u8; 580] = *output.enc_ciphertext();
+                    let out_ciphertext: [u8; 80] = *output.out_ciphertext();
 
                     ShieldedOutput {
-                        cv: output.cv.clone(),
+                        cv: ValueCommitment(output.cv().clone()),
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
-                        proof: output.zkproof.0,
+                        proof: *output.zkproof(),
                     }
                 })
                 .collect(),
             joinsplits: tx
-                .sprout_joinsplits()
+                .sprout_joinsplit_descriptions()
                 .map(|joinsplit| {
-                    let mut ephemeral_key_bytes: [u8; 32] = joinsplit.ephemeral_key.to_bytes();
-                    ephemeral_key_bytes.reverse();
+                    // `JsDescription` stores every field in wire order; the RPC renders the
+                    // 32-byte fields in display (reversed) order, matching zcashd.
+                    let display_order = |bytes: &[u8; 32]| {
+                        let mut bytes = *bytes;
+                        bytes.reverse();
+                        bytes
+                    };
+
+                    let (ephemeral_key, ciphertexts) =
+                        transaction::sprout_joinsplit_key_and_ciphertexts(joinsplit);
+
+                    let vpub_old = i64::from(joinsplit.vpub_old());
+                    let vpub_new = i64::from(joinsplit.vpub_new());
+                    let vpub_old_amount = Amount::<NonNegative>::try_from(vpub_old)
+                        .expect("vpub_old is a valid non-negative amount");
+                    let vpub_new_amount = Amount::<NonNegative>::try_from(vpub_new)
+                        .expect("vpub_new is a valid non-negative amount");
 
                     JoinSplit {
-                        old_public_value: Zec::from(joinsplit.vpub_old).lossy_zec(),
-                        old_public_value_zat: joinsplit.vpub_old.zatoshis(),
-                        new_public_value: Zec::from(joinsplit.vpub_new).lossy_zec(),
-                        new_public_value_zat: joinsplit.vpub_new.zatoshis(),
-                        anchor: joinsplit.anchor.bytes_in_display_order(),
-                        nullifiers: joinsplit
-                            .nullifiers
-                            .iter()
-                            .map(|n| n.bytes_in_display_order())
-                            .collect(),
-                        commitments: joinsplit
-                            .commitments
-                            .iter()
-                            .map(|c| c.bytes_in_display_order())
-                            .collect(),
-                        one_time_pubkey: ephemeral_key_bytes,
-                        random_seed: joinsplit.random_seed.bytes_in_display_order(),
-                        macs: joinsplit
-                            .vmacs
-                            .iter()
-                            .map(|m| m.bytes_in_display_order())
-                            .collect(),
-                        proof: joinsplit.zkproof.unwrap_or_default(),
-                        ciphertexts: joinsplit
-                            .enc_ciphertexts
-                            .iter()
-                            .map(|c| c.zcash_serialize_to_vec().unwrap_or_default())
-                            .collect(),
+                        old_public_value: Zec::from(vpub_old_amount).lossy_zec(),
+                        old_public_value_zat: vpub_old,
+                        new_public_value: Zec::from(vpub_new_amount).lossy_zec(),
+                        new_public_value_zat: vpub_new,
+                        anchor: display_order(joinsplit.anchor()),
+                        nullifiers: joinsplit.nullifiers().iter().map(display_order).collect(),
+                        commitments: joinsplit.commitments().iter().map(display_order).collect(),
+                        one_time_pubkey: display_order(&ephemeral_key),
+                        random_seed: display_order(joinsplit.random_seed()),
+                        macs: joinsplit.macs().iter().map(display_order).collect(),
+                        proof: joinsplit
+                            .groth_proof_bytes()
+                            .map(|proof| proof.to_vec())
+                            .unwrap_or_default(),
+                        ciphertexts: ciphertexts.iter().map(|c| c.to_vec()).collect(),
                     }
                 })
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
             orchard: Some(orchard_shaped_object(
-                tx.orchard_shielded_data(),
+                tx.orchard_bundle(),
                 tx.orchard_value_balance().orchard_amount(),
             )),
-            ironwood: tx.ironwood_shielded_data().map(|data| {
-                orchard_shaped_object(Some(data), tx.ironwood_value_balance().ironwood_amount())
+            ironwood: tx.ironwood_bundle().map(|bundle| {
+                orchard_shaped_object(Some(bundle), tx.ironwood_value_balance().ironwood_amount())
             }),
-            binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
-            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
+            binding_sig: tx.sapling_bundle().map(|b| {
+                let sig: [u8; 64] = b.authorization().binding_sig.into();
+                sig
+            }),
+            joinsplit_pub_key: tx.sprout_joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.
                 let mut key: [u8; 32] = raw_key.into();
                 key.reverse();
                 key
             }),
-            joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
-            size: tx.as_bytes().len().try_into().ok(),
+            joinsplit_sig: tx.sprout_bundle().map(|b| b.joinsplit_sig),
+            size: tx.zcash_serialized_size().try_into().ok(),
             time: block_time,
             txid,
             in_active_chain,
@@ -1066,5 +1075,117 @@ impl TransactionObject {
             block_hash,
             block_time,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+
+    /// `vjoinsplit` must be populated for transactions with Sprout JoinSplits.
+    ///
+    /// The existing `getrawtransaction` snapshots all use blocks that predate Sprout, so an empty
+    /// `vjoinsplit` is byte-identical to a correct one there and cannot catch a regression. This
+    /// uses mainnet block 419,201, which contains real JoinSplits.
+    #[test]
+    fn vjoinsplit_is_populated_for_sprout_transactions() {
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let tx = block
+            .transactions
+            .iter()
+            .find(|tx| tx.sprout_joinsplit_descriptions().next().is_some())
+            .expect("block 419,201 contains a transaction with JoinSplits")
+            .clone();
+
+        let expected_count = tx.sprout_joinsplit_descriptions().count();
+        assert!(expected_count > 0);
+
+        let object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &Network::Mainnet,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+
+        assert_eq!(
+            object.joinsplits.len(),
+            expected_count,
+            "every JoinSplit must appear in vjoinsplit",
+        );
+
+        // Field-level check against the parsed transaction, in the RPC's display byte order.
+        let joinsplit = tx
+            .sprout_joinsplit_descriptions()
+            .next()
+            .expect("the transaction has JoinSplits");
+        let rendered = &object.joinsplits[0];
+
+        let reversed = |bytes: &[u8; 32]| {
+            let mut bytes = *bytes;
+            bytes.reverse();
+            bytes
+        };
+
+        assert_eq!(rendered.anchor, reversed(joinsplit.anchor()));
+        assert_eq!(rendered.nullifiers[0], reversed(&joinsplit.nullifiers()[0]));
+        assert_eq!(
+            rendered.commitments[0],
+            reversed(&joinsplit.commitments()[0])
+        );
+        assert_eq!(rendered.random_seed, reversed(joinsplit.random_seed()));
+        assert_eq!(rendered.macs[0], reversed(&joinsplit.macs()[0]));
+        assert_eq!(
+            rendered.old_public_value_zat,
+            i64::from(joinsplit.vpub_old())
+        );
+        assert_eq!(
+            rendered.new_public_value_zat,
+            i64::from(joinsplit.vpub_new())
+        );
+
+        // These two fields have no upstream accessor and are read back out of the wire encoding.
+        assert_eq!(rendered.ciphertexts.len(), 2);
+        assert!(rendered.ciphertexts.iter().all(|c| c.len() == 601));
+        assert_ne!(
+            rendered.one_time_pubkey, [0u8; 32],
+            "the ephemeral key must be read from the JoinSplit, not left zeroed",
+        );
+
+        // V4 JoinSplits carry Groth16 proofs.
+        assert_eq!(rendered.proof.len(), 192);
+    }
+
+    /// The `Default` impl and coinbase path legitimately have no JoinSplits.
+    #[test]
+    fn vjoinsplit_is_empty_for_coinbase() {
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let coinbase = block.transactions[0].clone();
+        assert!(coinbase.is_coinbase());
+
+        let object = TransactionObject::from_transaction(
+            coinbase.clone(),
+            None,
+            None,
+            &Network::Mainnet,
+            None,
+            None,
+            None,
+            coinbase.hash(),
+        );
+
+        assert!(object.joinsplits.is_empty());
+        assert!(TransactionObject::default().joinsplits.is_empty());
     }
 }

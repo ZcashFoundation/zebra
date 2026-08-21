@@ -168,7 +168,7 @@ proptest! {
             let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
-            let unmined_transaction = UnminedTx::from(transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction));
             runner.queue.insert(unmined_transaction.clone());
             let transactions = runner.queue.transactions();
             prop_assert_eq!(transactions.len(), 1);
@@ -251,7 +251,7 @@ proptest! {
             let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
-            let unmined_transaction = UnminedTx::from(&transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction.clone()));
             runner.queue.insert(unmined_transaction.clone());
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
@@ -325,7 +325,7 @@ proptest! {
             let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
-            let unmined_transaction = UnminedTx::from(transaction.clone());
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction.clone()));
             runner.queue.insert(unmined_transaction.clone());
             let transactions = runner.queue.transactions();
             prop_assert_eq!(transactions.len(), 1);
@@ -337,7 +337,7 @@ proptest! {
             let send_task = tokio::spawn(Runner::retry(mempool.clone(), transactions_vec.clone()));
 
             // retry will queue the transaction to mempool
-            let gossip = Gossip::Tx(UnminedTx::from(transaction.clone()));
+            let gossip = Gossip::Tx(UnminedTx::from(std::sync::Arc::new(transaction.clone())));
             let expected_request = Request::Queue(vec![gossip]);
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Ok(()));

@@ -469,14 +469,22 @@ impl Block {
                         //       using `NoteCommitmentTrees::update_trees_parallel()`
                         if generate_valid_commitments && *height != Height(0) {
                             for sapling_note_commitment in transaction.sapling_note_commitments() {
-                                sapling_tree.append(*sapling_note_commitment).unwrap();
+                                sapling_tree.append(sapling_note_commitment).unwrap();
                             }
                             for orchard_note_commitment in transaction.orchard_note_commitments() {
-                                orchard_tree.append(*orchard_note_commitment).unwrap();
+                                use halo2::pasta::group::ff::PrimeField;
+                                let cm =
+                                    pallas::Base::from_repr(orchard_note_commitment.to_bytes())
+                                        .expect("valid orchard note commitment");
+                                orchard_tree.append(cm).unwrap();
                             }
                             for ironwood_note_commitment in transaction.ironwood_note_commitments()
                             {
-                                ironwood_tree.append(*ironwood_note_commitment).unwrap();
+                                use halo2::pasta::group::ff::PrimeField;
+                                let cm =
+                                    pallas::Base::from_repr(ironwood_note_commitment.to_bytes())
+                                        .expect("valid ironwood note commitment");
+                                ironwood_tree.append(cm).unwrap();
                             }
                         }
                         new_transactions.push(Arc::new(transaction));
@@ -599,28 +607,10 @@ where
         + 'static,
 {
     // Coinbase transactions must not contain Sapling spends (GHSA-rgwx-8r98-p34c).
-    // The arbitrary `Transaction` strategy generates these independently, so clear
-    // any generated Sapling shielded data on coinbase transactions before the chain
-    // builder commits them. The deserialization rejection path is still exercised
-    // by the `transaction_roundtrip` proptest and the GHSA-rgwx-8r98-p34c reproduction
-    // vector in `zebra-chain`.
-    if transaction.is_coinbase() {
-        match &mut transaction {
-            Transaction::V4 {
-                sapling_shielded_data,
-                ..
-            } => *sapling_shielded_data = None,
-            Transaction::V5 {
-                sapling_shielded_data,
-                ..
-            } => *sapling_shielded_data = None,
-            Transaction::V6 {
-                sapling_shielded_data,
-                ..
-            } => *sapling_shielded_data = None,
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {}
-        }
-    }
+    // The arbitrary `Transaction` strategies generate transparent-only transactions, so there
+    // is no generated Sapling shielded data to clear here. The deserialization rejection path
+    // is still exercised by the `transaction_roundtrip` proptest and the GHSA-rgwx-8r98-p34c
+    // reproduction vector in `zebra-chain`.
 
     let mut spend_restriction = transaction.coinbase_spend_restriction(&Network::Mainnet, height);
     let mut new_inputs = Vec::new();
@@ -653,7 +643,7 @@ where
     }
 
     // delete invalid inputs
-    *transaction.inputs_mut() = new_inputs;
+    transaction = transaction.with_transparent_inputs(new_inputs);
 
     let (_remaining_transaction_value, new_chain_value_pools) = transaction
         .fix_chain_value_pools(*chain_value_pools, &spent_outputs)
@@ -725,7 +715,7 @@ where
             )
             .is_ok()
         {
-            *transaction.outputs_mut() = Vec::new();
+            *transaction = transaction.clone().with_transparent_outputs(vec![]);
             *spend_restriction = delete_transparent_outputs;
 
             return Some(*candidate_outpoint);

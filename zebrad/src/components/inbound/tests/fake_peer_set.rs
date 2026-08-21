@@ -454,7 +454,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     // Change the expiration height of the transaction to block 3
     let mut tx1 = tx1.clone();
-    *tx1.expiry_height_mut() = zebra_chain::block::Height(3);
+    tx1.set_expiry_height(zebra_chain::block::Height(3));
 
     // Use the second transaction that is not coinbase to trigger `remove_expired_transactions()`
     let tx2 = block.transactions[2].clone();
@@ -476,7 +476,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     // Push test transaction
     let request = inbound_service.clone().oneshot(Request::PushTransaction(
-        tx1.clone().into(),
+        Arc::new(tx1.clone()).into(),
         Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
     ));
     // Simulate a successful transaction verification

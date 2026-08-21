@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: "Removed the `UpdateWith` implementations for Sprout, Sapling, Orchard and Ironwood shielded data. Nullifier bookkeeping happens directly in `Chain::update_chain_tip_with_block_except_trees` and its revert path, so those implementations were an unused second copy ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

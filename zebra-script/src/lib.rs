@@ -101,7 +101,7 @@ impl CachedFfiTransaction {
         all_previous_outputs: Arc<Vec<transparent::Output>>,
         nu: NetworkUpgrade,
     ) -> Result<Self, Error> {
-        let sighasher = transaction.sighasher(nu, all_previous_outputs.clone())?;
+        let sighasher = SigHasher::new(&transaction, nu, all_previous_outputs.clone())?;
         Ok(Self {
             transaction,
             all_previous_outputs,
@@ -110,7 +110,7 @@ impl CachedFfiTransaction {
     }
 
     /// Returns the transparent inputs for this transaction.
-    pub fn inputs(&self) -> &[transparent::Input] {
+    pub fn inputs(&self) -> Vec<transparent::Input> {
         self.transaction.inputs()
     }
 
@@ -162,8 +162,9 @@ impl CachedFfiTransaction {
             | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
 
         let lock_time = self.transaction.raw_lock_time();
-        let is_final = self.transaction.inputs()[input_index].sequence() == u32::MAX;
-        let signature_script = match &self.transaction.inputs()[input_index] {
+        let inputs = self.transaction.inputs();
+        let is_final = inputs[input_index].sequence() == u32::MAX;
+        let signature_script = match &inputs[input_index] {
             transparent::Input::PrevOut {
                 outpoint: _,
                 unlock_script,
@@ -282,26 +283,27 @@ pub trait Sigops {
     fn sigops(&self) -> Result<u32, libzcash_script::Error> {
         let interpreter = get_interpreter(&|_, _| None, 0, true);
 
-        Ok(self.scripts().try_fold(0, |acc, s| {
+        Ok(self.scripts().into_iter().try_fold(0, |acc, s| {
             interpreter
                 .legacy_sigop_count_script(&script::Code(s))
                 .map(|n| acc + n)
         })?)
     }
 
-    /// Returns an iterator over the input and output scripts in the transaction.
+    /// Returns the input and output scripts in the transaction as owned byte vectors.
     ///
     /// For consensus sigop accounting, this must include the coinbase input
     /// script (height prefix followed by extra data), matching zcashd's
     /// `GetLegacySigOpCount()`.
-    fn scripts(&self) -> impl Iterator<Item = Vec<u8>>;
+    fn scripts(&self) -> Vec<Vec<u8>>;
 }
 
 impl Sigops for zebra_chain::transaction::Transaction {
-    fn scripts(&self) -> impl Iterator<Item = Vec<u8>> {
-        self.inputs()
-            .iter()
-            .map(|input| match input {
+    fn scripts(&self) -> Vec<Vec<u8>> {
+        let mut scripts: Vec<Vec<u8>> = self
+            .inputs()
+            .into_iter()
+            .map(|input| match &input {
                 transparent::Input::PrevOut { unlock_script, .. } => {
                     unlock_script.as_raw_bytes().to_vec()
                 }
@@ -314,38 +316,45 @@ impl Sigops for zebra_chain::transaction::Transaction {
                     .coinbase_script()
                     .expect("coinbase_script reconstructs from a deserialized coinbase input"),
             })
-            .chain(
-                self.outputs()
-                    .iter()
-                    .map(|o| o.lock_script.as_raw_bytes().to_vec()),
-            )
+            .collect();
+
+        scripts.extend(
+            self.outputs()
+                .into_iter()
+                .map(|o| o.lock_script.as_raw_bytes().to_vec()),
+        );
+
+        scripts
     }
 }
 
 impl Sigops for zebra_chain::transaction::UnminedTx {
-    fn scripts(&self) -> impl Iterator<Item = Vec<u8>> {
+    fn scripts(&self) -> Vec<Vec<u8>> {
         self.transaction.scripts()
     }
 }
 
 impl Sigops for CachedFfiTransaction {
-    fn scripts(&self) -> impl Iterator<Item = Vec<u8>> {
+    fn scripts(&self) -> Vec<Vec<u8>> {
         self.transaction.scripts()
     }
 }
 
 impl Sigops for zcash_primitives::transaction::Transaction {
-    fn scripts(&self) -> impl Iterator<Item = Vec<u8>> {
-        self.transparent_bundle().into_iter().flat_map(|bundle| {
-            // `zcash_primitives` stores the coinbase input's full serialized scriptSig (height
-            // prefix + extra data) in the synthesized input's script_sig, so it is included as-is
-            // for sigop counting.
-            bundle
-                .vin
-                .iter()
-                .map(|i| i.script_sig().0 .0.clone())
-                .chain(bundle.vout.iter().map(|o| o.script_pubkey().0 .0.clone()))
-        })
+    fn scripts(&self) -> Vec<Vec<u8>> {
+        self.transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| {
+                // `zcash_primitives` stores the coinbase input's full serialized scriptSig (height
+                // prefix + extra data) in the synthesized input's script_sig, so it is included
+                // as-is for sigop counting.
+                bundle
+                    .vin
+                    .iter()
+                    .map(|i| i.script_sig().0 .0.clone())
+                    .chain(bundle.vout.iter().map(|o| o.script_pubkey().0 .0.clone()))
+            })
+            .collect()
     }
 }
 

@@ -271,8 +271,10 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
             .first_mut()
             .expect("block templates contain a coinbase transaction"),
     );
-    let transparent::Input::Coinbase { data, .. } = coinbase
-        .inputs_mut()
+    // The transaction's inputs are owned by `zcash_primitives`, so the coinbase input is edited
+    // in a detached copy and the transaction rebuilt from it.
+    let mut inputs = coinbase.inputs();
+    let transparent::Input::Coinbase { data, .. } = inputs
         .first_mut()
         .expect("coinbase transactions contain a transparent input")
     else {
@@ -286,6 +288,7 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .last_mut()
         .expect("configured extra coinbase data is non-empty");
     *last_data_byte = b'a';
+    *coinbase = coinbase.clone().with_transparent_inputs(inputs);
 
     assert_eq!(
         poisoned_block.hash(),
@@ -403,8 +406,10 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
             .first_mut()
             .expect("block templates contain a coinbase transaction"),
     );
-    let transparent::Input::Coinbase { data, .. } = coinbase
-        .inputs_mut()
+    // The transaction's inputs are owned by `zcash_primitives`, so the coinbase input is edited
+    // in a detached copy and the transaction rebuilt from it.
+    let mut inputs = coinbase.inputs();
+    let transparent::Input::Coinbase { data, .. } = inputs
         .first_mut()
         .expect("coinbase transactions contain a transparent input")
     else {
@@ -417,6 +422,7 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
     *data
         .last_mut()
         .expect("configured extra coinbase data is non-empty") = b'a';
+    *coinbase = coinbase.clone().with_transparent_inputs(inputs);
 
     assert_eq!(
         poisoned_block.hash(),

@@ -12,7 +12,6 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
-    transaction::Transaction,
     transparent,
     value_balance::ValueBalance,
 };
@@ -1122,8 +1121,9 @@ fn with_block_and_spent_utxos_preserves_deferred_pool_balance_change() -> Result
         .transactions
         .iter()
         .map(AsRef::as_ref)
-        .flat_map(Transaction::inputs)
-        .flat_map(transparent::Input::outpoint)
+        // `inputs()` returns an owned Vec under the newtype transaction.
+        .flat_map(|tx| tx.inputs())
+        .filter_map(|input| input.outpoint())
         .map(|outpoint| (outpoint, zero_utxo.clone()))
         .collect();
 

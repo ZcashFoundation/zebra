@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "`transaction::sprout_joinsplit_key_and_ciphertexts`, which reads the `ephemeralKey` and `encCiphertexts` of a Sprout JoinSplit. `zcash_primitives` does not expose accessors for those two fields ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

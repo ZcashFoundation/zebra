@@ -198,11 +198,7 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     outputs.push(output);
 
     // Create a big transaction
-    let big_transaction = Transaction::V1 {
-        inputs,
-        outputs,
-        lock_time,
-    };
+    let big_transaction = Transaction::test_v1(inputs, outputs, lock_time);
 
     // Put the big transaction into a block
     let transactions = vec![Arc::new(big_transaction)];
@@ -268,11 +264,7 @@ fn single_transaction_block_many_outputs(oversized: bool) -> Block {
     let outputs = std::iter::repeat_n(output, max_outputs_in_tx).collect::<Vec<_>>();
 
     // Create a big transaction
-    let big_transaction = Transaction::V1 {
-        inputs,
-        outputs,
-        lock_time,
-    };
+    let big_transaction = Transaction::test_v1(inputs, outputs, lock_time);
 
     // Put the big transaction into a block
     let transactions = vec![Arc::new(big_transaction)];

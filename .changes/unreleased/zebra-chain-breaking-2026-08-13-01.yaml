@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: "`transaction::Transaction` is now a newtype wrapping `zcash_primitives::transaction::Transaction`, rather than an enum of Zebra-owned structs. Its variants and their fields are no longer public: use the accessor methods, and the `Transaction::test_v*` constructors under the `proptest-impl` feature to build transactions in tests ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

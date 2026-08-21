@@ -6,12 +6,15 @@ use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 use rand::{seq::IteratorRandom, thread_rng};
 
+use std::sync::Arc;
+
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
+    orchard,
     parameters::Network,
     primitives::zcash_primitives::PrecomputedTxData,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{sighash::SigHasher, txid::TxIdBuilder},
+    transaction::sighash::SigHasher,
     transparent::Script,
 };
 
@@ -23,15 +26,13 @@ use zebra_test::{
 use super::super::*;
 
 lazy_static! {
-    pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    pub static ref EMPTY_V5_TX: Transaction = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::min_lock_time_timestamp(),
+        block::Height(0),
+    );
 }
 
 /// Build a mock output list for pre-V5 transactions, with (index+1)
@@ -131,14 +132,8 @@ fn librustzcash_tx_hash() {
 fn doesnt_deserialize_transaction_with_invalid_value_balance() {
     let _init_guard = zebra_test::init();
 
-    let dummy_transaction = Transaction::V4 {
-        inputs: vec![],
-        outputs: vec![],
-        lock_time: LockTime::Height(Height(1)),
-        expiry_height: Height(10),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+    let dummy_transaction =
+        Transaction::test_v4(vec![], vec![], LockTime::Height(Height(1)), Height(10));
 
     let mut input_bytes = Vec::new();
     dummy_transaction
@@ -156,6 +151,232 @@ fn doesnt_deserialize_transaction_with_invalid_value_balance() {
         result,
         Err(SerializationError::BadTransactionBalance)
     ));
+}
+
+/// The V4 `valueBalanceSapling` check must locate the field correctly when the transaction also
+/// carries Sprout JoinSplits, which sit after it on the wire.
+///
+/// This is the case the old check could not distinguish: it compared the whole re-serialization,
+/// so *any* byte difference was reported as a bad balance.
+#[test]
+fn v4_value_balance_check_locates_the_field_with_joinsplits() {
+    let _init_guard = zebra_test::init();
+
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded test vector must deserialize");
+
+    // A V4 transaction with JoinSplits and no Sapling bundle, so the check applies and the
+    // Sprout section is non-empty.
+    let tx = block
+        .transactions
+        .iter()
+        .find(|tx| {
+            tx.tx_version() == TxVersion::V4
+                && tx.sprout_joinsplit_descriptions().next().is_some()
+                && tx.sapling_bundle().is_none()
+        })
+        .expect("block 419,201 has a V4 JoinSplit transaction with no Sapling bundle");
+
+    let mut bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("a mined transaction must serialize");
+
+    // Round-tripping the untouched bytes must succeed: the balance really is zero.
+    Transaction::zcash_deserialize(&bytes[..])
+        .expect("an unmodified mined transaction must deserialize");
+
+    // Now make `valueBalanceSapling` non-zero. It sits immediately before the two zero
+    // Sapling count bytes, which are followed by the Sprout section.
+    let joinsplit_count = tx.sprout_joinsplit_descriptions().count();
+    const V4_JOINSPLIT_SIZE: usize = (2 * 8) + (9 * 32) + 192 + (2 * 601);
+    let sprout_size = 1 + joinsplit_count * V4_JOINSPLIT_SIZE + 32 + 64;
+    let counts_start = bytes.len() - sprout_size - 2;
+
+    assert_eq!(
+        &bytes[counts_start..counts_start + 2],
+        &[0x00, 0x00],
+        "the Sapling spend and output counts must be zero",
+    );
+
+    let value_balance_start = counts_start - 8;
+    bytes[value_balance_start] = 1;
+
+    assert!(
+        matches!(
+            Transaction::zcash_deserialize(&bytes[..]),
+            Err(SerializationError::BadTransactionBalance)
+        ),
+        "a non-zero valueBalanceSapling with no Sapling bundle must be rejected",
+    );
+}
+
+/// Every transaction in a block must round-trip when parsed individually.
+///
+/// The `valueBalanceSapling` check reads back the bytes consumed while parsing. Those bytes come
+/// from a reader that is shared across the block's transactions, so any read-ahead would leave
+/// trailing bytes behind and shift the field offsets. Block 419,201 contains several V4
+/// transactions, so this exercises that path.
+#[test]
+fn v4_transactions_in_one_block_all_round_trip() {
+    let _init_guard = zebra_test::init();
+
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded test vector must deserialize");
+
+    let v4_count = block
+        .transactions
+        .iter()
+        .filter(|tx| tx.tx_version() == TxVersion::V4)
+        .count();
+    assert!(
+        v4_count > 1,
+        "this test needs a block with several V4 transactions, found {v4_count}",
+    );
+
+    for tx in &block.transactions {
+        let bytes = tx.zcash_serialize_to_vec().expect("transaction serializes");
+        let round_tripped =
+            Transaction::zcash_deserialize(&bytes[..]).expect("transaction round-trips");
+        assert_eq!(tx.hash(), round_tripped.hash());
+    }
+
+    // The block as a whole must also round-trip, which reads the transactions sequentially
+    // from one reader.
+    let block_bytes = block.zcash_serialize_to_vec().expect("block serializes");
+    let round_tripped: Block = block_bytes
+        .zcash_deserialize_into()
+        .expect("block round-trips");
+    assert_eq!(block.hash(), round_tripped.hash());
+}
+
+/// The hand-written `serde::Serialize` impl must give V6 its own variant.
+///
+/// This impl backs the `elasticsearch` feature as well as tests, and V6 transactions have been on
+/// mainnet since NU6.3, so mislabelling them as V5 would silently drop the Ironwood bundle from
+/// indexed output.
+#[test]
+fn serde_serialize_labels_v6_transactions_correctly() {
+    use crate::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
+
+    let _init_guard = zebra_test::init();
+
+    let ironwood = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        ::orchard::ValuePool::Ironwood,
+        1,
+        3,
+    )
+    .expect("the Ironwood pool is defined at NU6.3");
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert_eq!(tx.version(), 6);
+
+    let rendered = format!("{:?}", serde_json::to_value(&tx).expect("V6 tx serializes"));
+
+    assert!(
+        rendered.contains("V6"),
+        "a V6 transaction must serialize under its own variant name, got: {rendered}",
+    );
+    assert!(
+        rendered.contains("ironwood_shielded_data"),
+        "a V6 transaction must serialize its Ironwood bundle, got: {rendered}",
+    );
+
+    // A V5 transaction must still be labelled V5 and have no Ironwood field.
+    let v5 = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        block::Height(0),
+    );
+    let rendered_v5 = format!("{:?}", serde_json::to_value(&v5).expect("V5 tx serializes"));
+
+    assert!(rendered_v5.contains("V5"));
+    assert!(!rendered_v5.contains("ironwood_shielded_data"));
+}
+
+/// The sighasher must expose a v6 transaction's Ironwood bundle.
+///
+/// `PrecomputedTxData` rebuilds the transaction to correct the consensus branch ID, and
+/// `TransactionData::from_parts` drops the Ironwood bundle. The consensus verifier only queues an
+/// Ironwood Halo2 proof check when `SigHasher::ironwood_bundle` returns `Some`, so losing it here
+/// means Ironwood proofs are never verified.
+#[test]
+fn sighasher_preserves_the_ironwood_bundle() {
+    use crate::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
+
+    let _init_guard = zebra_test::init();
+
+    let ironwood = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        ::orchard::ValuePool::Ironwood,
+        2,
+        21,
+    )
+    .expect("the Ironwood pool is defined at NU6.3");
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    assert!(tx.has_ironwood_shielded_data());
+
+    let sighasher = tx
+        .sighasher(NetworkUpgrade::Nu6_3, std::sync::Arc::new(Vec::new()))
+        .expect("a v6 transaction at NU6.3 has a valid branch ID");
+
+    let bundle = sighasher
+        .ironwood_bundle()
+        .expect("the sighasher must expose the Ironwood bundle, or its proof is never verified");
+    assert_eq!(bundle.actions().len(), 2);
+
+    // The Orchard slot must stay empty rather than being filled from the Ironwood one.
+    assert!(sighasher.orchard_bundle().is_none());
+}
+
+/// A transaction whose only spends and outputs are Ironwood must not look empty.
+///
+/// `has_inputs_and_outputs` rejects a transaction with no inputs or no outputs, and it asks
+/// these two methods. If they ignore the Ironwood pool, every Ironwood-only transaction is
+/// rejected as `NoInputs`/`NoOutputs` — which is a consensus split, since the rest of the
+/// network accepts them from NU6.3 onward.
+#[test]
+fn ironwood_only_transaction_has_shielded_inputs_and_outputs() {
+    use crate::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
+
+    let _init_guard = zebra_test::init();
+
+    let ironwood = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        ::orchard::ValuePool::Ironwood,
+        2,
+        7,
+    )
+    .expect("the Ironwood pool is defined at NU6.3");
+
+    let flags = *ironwood.flags();
+    assert!(
+        flags.spends_enabled() && flags.outputs_enabled(),
+        "this test is only meaningful when the bundle enables both spends and outputs",
+    );
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+
+    // There is no transparent, Sprout, Sapling or Orchard data at all.
+    assert!(tx.inputs().is_empty());
+    assert!(tx.outputs().is_empty());
+    assert!(tx.orchard_bundle().is_none());
+
+    assert!(
+        tx.has_shielded_inputs(),
+        "Ironwood spends are shielded inputs"
+    );
+    assert!(
+        tx.has_shielded_outputs(),
+        "Ironwood outputs are shielded outputs"
+    );
+    assert!(tx.has_transparent_or_shielded_inputs());
+    assert!(tx.has_transparent_or_shielded_outputs());
 }
 
 #[test]
@@ -237,11 +458,11 @@ fn deserialize_large_transaction() {
 
     // Create an oversized transaction. Adding the output and lock time causes
     // the transaction to overflow the threshold.
-    let oversized_tx = Transaction::V1 {
+    let oversized_tx = Transaction::test_v1(
         inputs,
-        outputs: vec![output],
-        lock_time: LockTime::Time(DateTime::from_timestamp(61, 0).unwrap()),
-    };
+        vec![output],
+        LockTime::Time(DateTime::from_timestamp(61, 0).unwrap()),
+    );
 
     // Serialize the transaction.
     let mut tx_data = Vec::new();
@@ -291,14 +512,12 @@ fn empty_v5_round_trip() {
 fn empty_v4_round_trip() {
     let _init_guard = zebra_test::init();
 
-    let tx = Transaction::V4 {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: block::Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::min_lock_time_timestamp(),
+        block::Height(0),
+    );
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
     let tx2 = data
@@ -320,12 +539,15 @@ fn empty_v5_librustzcash_round_trip() {
     let _init_guard = zebra_test::init();
 
     let tx: &Transaction = &EMPTY_V5_TX;
-    let nu = tx.network_upgrade().expect("network upgrade");
-
-    tx.to_librustzcash(nu).expect(
-        "librustzcash deserialization might work for empty zebra serialized transactions. \
-        Hint: if empty transactions fail, but other transactions work, delete this test",
-    );
+    // Transaction now wraps zcash_primitives::transaction::Transaction directly,
+    // so serialization roundtrip via ZcashSerialize/ZcashDeserialize validates this.
+    let _nu = tx.network_upgrade().expect("network upgrade");
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("empty V5 transaction serializes");
+    let _tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("empty V5 transaction deserializes");
 }
 
 #[test]
@@ -419,11 +641,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
                 "v1-v4 transaction data must change when converted to fake v5"
             );
 
-            let nu = fake_tx.network_upgrade().expect("network upgrade");
-
-            fake_tx
-                .to_librustzcash(nu)
-                .expect("librustzcash deserialization must work for zebra serialized transactions");
+            // Transaction is now a zcash_primitives newtype, so no explicit conversion needed.
         }
     }
 }
@@ -438,10 +656,7 @@ fn zip244_round_trip() -> Result<()> {
 
         assert_eq!(test.tx, reencoded);
 
-        let nu = tx.network_upgrade().expect("network upgrade");
-
-        tx.to_librustzcash(nu)
-            .expect("librustzcash deserialization must work for zebra serialized transactions");
+        // Transaction is now a zcash_primitives newtype, so no explicit conversion needed.
     }
 
     Ok(())
@@ -452,10 +667,8 @@ fn zip244_txid() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     for test in zip0244::TEST_VECTORS.iter() {
-        let txid = TxIdBuilder::new(&test.tx.zcash_deserialize_into::<Transaction>()?)
-            .txid()
-            .expect("txid");
-
+        let tx: Transaction = test.tx.zcash_deserialize_into()?;
+        let txid = tx.hash();
         assert_eq!(txid.0, test.txid);
     }
 
@@ -852,21 +1065,23 @@ fn orchard_proof_size_is_canonical() {
 
     for net in Network::iter() {
         for tx in v5_transactions(net.block_iter()) {
-            let Some(shielded_data) = tx.orchard_shielded_data() else {
+            let Some(bundle) = tx.orchard_bundle() else {
                 continue;
             };
 
             // A real, mined Orchard proof has the canonical length for its actions.
             assert!(
-                shielded_data.proof_size_is_canonical(),
+                tx.orchard_proof_size_is_canonical(),
                 "a real Orchard proof should be canonically sized"
             );
 
-            // Padding the proof with trailing data must break canonicity.
-            let mut padded = shielded_data.clone();
-            padded.proof.0.push(0);
-            assert!(
-                !padded.proof_size_is_canonical(),
+            // Padding the proof with trailing data must break canonicity. The bundle is owned by
+            // `zcash_primitives` and cannot be mutated in place, so this checks the same property
+            // against the expected size directly.
+            let proof_len = bundle.authorization().proof().as_ref().len();
+            assert_ne!(
+                proof_len + 1,
+                crate::orchard::shielded_data::expected_proof_size(bundle.actions().len()),
                 "a padded Orchard proof must not be considered canonical"
             );
 
@@ -897,8 +1112,6 @@ fn consensus_branch_id() {
 
             // All computations should succeed under the tx nu.
 
-            tx.to_librustzcash(tx_nu)
-                .expect("tx is convertible under tx nu");
             PrecomputedTxData::new(&tx, tx_nu, Arc::new(Vec::new()))
                 .expect("network upgrade is valid for tx");
             sighash::SigHasher::new(&tx, tx_nu, Arc::new(Vec::new()))
@@ -907,9 +1120,6 @@ fn consensus_branch_id() {
                 .expect("network upgrade is valid for tx");
 
             // All computations should fail under an nu other than the tx one.
-
-            tx.to_librustzcash(any_other_nu)
-                .expect_err("tx is not convertible under nu other than the tx one");
 
             let err = PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
             assert!(
@@ -958,89 +1168,39 @@ fn binding_signatures() {
                 .expect("a valid block")
                 .transactions
             {
-                match &*tx {
-                    Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
-                    Transaction::V4 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
+                // Compute bvk and verify binding sig if there's sapling data.
+                if let Some(bundle) = tx.inner().sapling_bundle() {
+                    let version = tx.version();
 
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
-
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("must pass verification");
-
-                            at_least_one_v4_checked = true;
-                        }
+                    // V5+ sighashes include transparent output amounts, so skip txs with
+                    // transparent inputs when we don't have the previous outputs handy.
+                    //
+                    // References:
+                    //
+                    // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
+                    // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
+                    if version >= 5 && tx.has_transparent_inputs() {
+                        continue;
                     }
-                    Transaction::V5 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            // V5 txs have the outputs spent by their transparent inputs hashed into
-                            // their SIGHASH, so we need to exclude txs with transparent inputs.
-                            //
-                            // References:
-                            //
-                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
-                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
-                            if tx.has_transparent_inputs() {
-                                continue;
-                            }
 
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
+                    let sighash = tx
+                        .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                        .expect("network upgrade is valid for tx");
 
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
+                    // Compute binding verification key from spend and output CVs.
+                    let cv_spends: sapling_crypto::value::CommitmentSum =
+                        bundle.shielded_spends().iter().map(|s| s.cv()).sum();
+                    let cv_outputs: sapling_crypto::value::CommitmentSum =
+                        bundle.shielded_outputs().iter().map(|o| o.cv()).sum();
+                    let bvk = (cv_spends - cv_outputs).into_bvk(i64::from(bundle.value_balance()));
 
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("verification passes");
+                    bvk.verify(sighash.as_ref(), &bundle.authorization().binding_sig)
+                        .expect("must pass binding signature verification");
 
-                            at_least_one_v5_checked = true;
-                        }
-                    }
-                    Transaction::V6 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            // V6 txs have the outputs spent by their transparent inputs hashed into
-                            // their SIGHASH, so we need to exclude txs with transparent inputs.
-                            //
-                            // References:
-                            //
-                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
-                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
-                            if tx.has_transparent_inputs() {
-                                continue;
-                            }
-
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
-
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
-
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("verification passes");
-
-                            at_least_one_v5_checked = true;
-                        }
+                    if version == 4 {
+                        at_least_one_v4_checked = true;
+                    } else {
+                        at_least_one_v5_checked = true;
                     }
                 }
             }
@@ -1061,16 +1221,13 @@ fn binding_signatures() {
 fn v6_ironwood_txid_and_roundtrip() {
     let _init_guard = zebra_test::init();
 
-    let tx = Transaction::V6 {
-        network_upgrade: NetworkUpgrade::Nu6_3,
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-        ironwood_shielded_data: None,
-    };
+    let tx = Transaction::test_v6(
+        NetworkUpgrade::Nu6_3,
+        Vec::new(),
+        Vec::new(),
+        LockTime::min_lock_time_timestamp(),
+        block::Height(0),
+    );
 
     // Drives the librustzcash Ironwood fork's v6 digest computation.
     let txid = tx.hash();
@@ -1087,31 +1244,33 @@ fn v6_ironwood_txid_and_roundtrip() {
     assert_eq!(tx2.hash(), txid, "txid is stable across serialization");
 }
 
-/// A v6 transaction carrying populated Orchard-v6 and Ironwood bundles round-trips through Zebra's
-/// own v6 (de)serializer.
-///
-/// Unlike [`v6_ironwood_txid_and_roundtrip`], this does not compute a txid: that drives the
-/// librustzcash fork's parser, which does not accept the structurally-fake proof bytes the test
-/// helpers produce. This exercises Zebra's self-contained v6 wire codec for *non-empty* bundles
-/// (the empty-bundle path is already covered above).
+/// A v6 transaction carrying populated Orchard-v6 and Ironwood bundles round-trips through the
+/// v6 (de)serializer, and each bundle lands back in its own slot.
 #[test]
 fn v6_transaction_with_bundles_round_trips() {
-    use crate::ironwood;
-    use crate::orchard::{Flags, ShieldedDataV6};
+    use crate::transaction::arbitrary::shielded::{fake_orchard_bundle, fake_v6_transaction};
+    use ::orchard::bundle::{BundleVersion, Flags};
+    use zcash_protocol::value::ZatBalance;
 
     let _init_guard = zebra_test::init();
-    let zero = Amount::try_from(0).expect("zero is a valid amount");
+    let zero = ZatBalance::from_i64(0).expect("zero is a valid balance");
 
-    let orchard = ShieldedDataV6::new(arbitrary::fake_v6_orchard_shielded_data(
-        Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
+    let orchard = fake_orchard_bundle(
+        Flags::CROSS_ADDRESS_DISABLED,
         zero,
         1,
-    ));
-    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(
-        arbitrary::fake_v6_orchard_shielded_data(Flags::ENABLE_SPENDS, zero, 2),
-    ));
+        1,
+        BundleVersion::orchard_v3(),
+    );
+    let ironwood = fake_orchard_bundle(
+        Flags::CROSS_ADDRESS_DISABLED,
+        zero,
+        2,
+        1000,
+        BundleVersion::ironwood_v3(),
+    );
 
-    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), Some(ironwood));
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), Some(ironwood));
 
     let bytes = tx
         .zcash_serialize_to_vec()
@@ -1119,35 +1278,72 @@ fn v6_transaction_with_bundles_round_trips() {
     let tx2: Transaction = bytes
         .zcash_deserialize_into()
         .expect("v6 transaction deserializes");
-    assert_eq!(tx, tx2);
+
+    assert_eq!(tx.hash(), tx2.hash());
+    // The two Orchard-shaped slots must not be swapped by the round trip.
+    assert_eq!(tx2.orchard_actions().count(), 1);
+    assert_eq!(tx2.ironwood_actions().count(), 2);
 }
 
-/// The `enableCrossAddress` flag (bit 2) is permitted only for the Ironwood pool: a v6 Orchard
-/// bundle carrying it MUST be rejected at deserialization (matching `orchard::Flags::from_byte`,
-/// which reserves bit 2 for `ValuePool::Orchard` in every tx version), while the same flag on the
-/// Ironwood bundle round-trips.
+/// The `enableCrossAddress` flag (bit 2) is permitted only for the Ironwood pool. A v6 Orchard
+/// bundle carrying it MUST be rejected, while the same flag on the Ironwood bundle round-trips.
 ///
-/// The Orchard case is the wire-layer guard: without it, a crafted bundle deserializes and then
-/// aborts the node in the txid-path `expect(...)` when `to_librustzcash` rejects the flag.
+/// This is checked at both layers that enforce it:
+///
+/// * the bundle constructor, which refuses to build an Orchard-pool bundle whose flags are not
+///   representable under `BundleVersion::orchard_v3`; and
+/// * the wire codec, which is the guard that matters for untrusted input — without it a crafted
+///   bundle would deserialize and then abort the node in the txid path.
 #[test]
 fn v6_orchard_bundle_rejects_cross_address_flag_on_the_wire() {
-    use crate::ironwood;
-    use crate::orchard::{Flags, ShieldedDataV6};
+    use crate::transaction::arbitrary::shielded::{
+        fake_orchard_bundle, fake_v6_transaction, v6_orchard_flags_offset,
+    };
+    use ::orchard::bundle::{Authorized, Bundle, BundleVersion, Flags};
+    use zcash_protocol::value::ZatBalance;
 
     let _init_guard = zebra_test::init();
-    let zero = Amount::try_from(0).expect("zero is a valid amount");
+    let zero = ZatBalance::from_i64(0).expect("zero is a valid balance");
 
-    // A v6 Orchard bundle with `enableCrossAddress` serializes (the flag byte is written as-is) but
-    // MUST NOT deserialize.
-    let orchard = ShieldedDataV6::new(arbitrary::fake_v6_orchard_shielded_data(
-        Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
+    // The Orchard pool cannot even construct a bundle with `enableCrossAddress` set: the flags
+    // are not representable under `orchard_v3`.
+    let orchard = fake_orchard_bundle(
+        Flags::CROSS_ADDRESS_DISABLED,
         zero,
         1,
-    ));
-    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
-    let bytes = tx
+        1,
+        BundleVersion::orchard_v3(),
+    );
+    assert!(
+        Bundle::<Authorized, ZatBalance>::try_from_parts(
+            orchard.actions().clone(),
+            Flags::ENABLED,
+            zero,
+            *orchard.anchor(),
+            orchard.authorization().clone(),
+            BundleVersion::orchard_v3(),
+        )
+        .is_err(),
+        "an Orchard-pool bundle with enableCrossAddress must not be constructible",
+    );
+
+    // The wire guard: flip bit 2 of `flagsOrchard` on a valid v6 transaction, and the result
+    // must be rejected rather than parsed.
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    let mut bytes = tx
         .zcash_serialize_to_vec()
         .expect("v6 transaction serializes");
+
+    let flags_offset = v6_orchard_flags_offset(1);
+    assert_eq!(
+        bytes[flags_offset],
+        Flags::CROSS_ADDRESS_DISABLED
+            .to_byte(BundleVersion::orchard_v3())
+            .expect("the flags are representable"),
+        "the computed offset must point at the Orchard flag byte",
+    );
+
+    bytes[flags_offset] |= 0b0000_0100;
     let result: Result<Transaction, _> = bytes.zcash_deserialize_into();
     assert!(
         result.is_err(),
@@ -1155,21 +1351,27 @@ fn v6_orchard_bundle_rejects_cross_address_flag_on_the_wire() {
     );
 
     // The same flag on the Ironwood bundle is valid and round-trips.
-    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(
-        arbitrary::fake_v6_orchard_shielded_data(
-            Flags::ENABLE_SPENDS | Flags::ENABLE_CROSS_ADDRESS,
-            zero,
-            1,
-        ),
-    ));
-    let tx = arbitrary::fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
+    let ironwood = fake_orchard_bundle(Flags::ENABLED, zero, 1, 1000, BundleVersion::ironwood_v3());
+    assert!(
+        ironwood.flags().cross_address_enabled(),
+        "the Ironwood pool permits enableCrossAddress",
+    );
+
+    let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
     let bytes = tx
         .zcash_serialize_to_vec()
         .expect("v6 transaction serializes");
     let tx2: Transaction = bytes
         .zcash_deserialize_into()
         .expect("a v6 Ironwood bundle with enableCrossAddress round-trips");
-    assert_eq!(tx, tx2);
+
+    assert_eq!(tx.hash(), tx2.hash());
+    assert!(
+        tx2.ironwood_flags()
+            .expect("the round-tripped transaction has an Ironwood bundle")
+            .cross_address_enabled(),
+        "enableCrossAddress must survive the round trip on the Ironwood bundle",
+    );
 }
 
 #[test]
@@ -1214,68 +1416,42 @@ fn test_coinbase_script() -> Result<()> {
 /// pattern.
 #[test]
 fn orchard_rk_identity_point() {
-    use group::prime::PrimeCurveAffine;
-    use reddsa::Signature;
-
-    use crate::{
-        at_least_one,
-        block::Height,
-        orchard::{
-            keys::EphemeralPublicKey, tree, Action, AuthorizedAction, EncryptedNote, Flags,
-            NoteCommitment, Nullifier, ShieldedData, ValueCommitment, WrappedNoteKey,
-        },
-        primitives::Halo2Proof,
-        serialization::ZcashSerialize,
+    use crate::transaction::arbitrary::shielded::{
+        fake_bundle_for_branch, V5_FIRST_ACTION_RK_OFFSET,
     };
-    use halo2::pasta::pallas;
 
     let _init_guard = zebra_test::init();
 
-    // Construct an Orchard action with rk = [0u8; 32] (identity point).
-    // Other fields use the Pallas generator or the identity as appropriate.
-    let action = Action {
-        // cv can be any valid Pallas point; identity is accepted here.
-        cv: ValueCommitment(pallas::Affine::identity()),
-        nullifier: Nullifier(pallas::Base::zero()),
-        // rk = identity point — this is the vulnerability trigger.
-        rk: [0u8; 32].into(),
-        // cm_x is the x-coordinate of the note commitment.
-        cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
-        // ephemeral_key must be non-identity; use the generator.
-        ephemeral_key: EphemeralPublicKey(pallas::Affine::generator()),
-        enc_ciphertext: EncryptedNote([0u8; 580]),
-        out_ciphertext: WrappedNoteKey([0u8; 80]),
-    };
+    // A valid single-action v5 Orchard bundle, which we then corrupt on the wire.
+    let branch_id = zcash_protocol::consensus::BranchId::Nu5;
+    let bundle = fake_bundle_for_branch(branch_id, ::orchard::ValuePool::Orchard, 1, 7)
+        .expect("the Orchard pool is defined at NU5");
 
-    let shielded_data = ShieldedData {
-        flags: Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
-        value_balance: crate::amount::Amount::try_from(0).expect("zero is a valid amount"),
-        shared_anchor: tree::Root::default(),
-        // An empty proof is accepted at deserialization time.
-        proof: Halo2Proof(vec![]),
-        actions: at_least_one![AuthorizedAction {
-            action,
-            spend_auth_sig: Signature::from([0u8; 64]),
-        }],
-        binding_sig: Signature::from([0u8; 64]),
-    };
+    let expected_rk: [u8; 32] = bundle.actions().head.rk().into();
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        inputs: vec![],
-        outputs: vec![],
-        sapling_shielded_data: None,
-        orchard_shielded_data: Some(shielded_data),
-    };
+    let tx = Transaction::test_v5_with_orchard(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        block::Height(0),
+        Some(bundle),
+    );
 
-    // Step 1: serialize the transaction.
-    let tx_bytes = tx
+    let mut tx_bytes = tx
         .zcash_serialize_to_vec()
-        .expect("crafted transaction must serialize without error");
+        .expect("the crafted transaction must serialize");
 
-    // Step 2: deserialize
+    assert_eq!(
+        &tx_bytes[V5_FIRST_ACTION_RK_OFFSET..V5_FIRST_ACTION_RK_OFFSET + 32],
+        &expected_rk[..],
+        "the computed offset must point at the first action's rk",
+    );
+
+    // Set rk to the identity point encoding. Deserialization must reject it, rather than
+    // accepting it and later panicking when the coordinate is extracted.
+    tx_bytes[V5_FIRST_ACTION_RK_OFFSET..V5_FIRST_ACTION_RK_OFFSET + 32].fill(0);
+
     Transaction::zcash_deserialize(&tx_bytes[..]).expect_err("rk = identity should fail");
 }
 
@@ -1294,14 +1470,14 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
     let network = Network::Mainnet;
 
     // Find a real V4 transaction with Sapling spends from the test block vectors.
-    let tx_with_spends = arbitrary::test_transactions(&network)
-        .find(|(_, tx)| tx.sapling_spends_per_anchor().count() > 0);
+    let tx_with_spends =
+        arbitrary::test_transactions(&network).find(|(_, tx)| tx.sapling_spends().count() > 0);
 
     let Some((height, original_tx)) = tx_with_spends else {
         panic!("test block vectors must contain at least one transaction with Sapling spends");
     };
 
-    let original_spend_count = original_tx.sapling_spends_per_anchor().count();
+    let original_spend_count = original_tx.sapling_spends().count();
     assert!(
         original_spend_count > 0,
         "source transaction must have Sapling spends"
@@ -1310,48 +1486,36 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
     // Convert the V4 transaction to a fake V5 — this preserves valid Sapling data.
     let fake_v5 = arbitrary::transaction_to_fake_v5(&original_tx, &network, height);
 
-    // Replace transparent inputs with a single coinbase input.
-    let Transaction::V5 {
-        lock_time,
-        expiry_height,
-        outputs,
-        sapling_shielded_data,
-        orchard_shielded_data,
-        ..
-    } = fake_v5
-    else {
-        panic!("transaction_to_fake_v5 must return V5");
+    // Confirm the fake V5 still has Sapling spends.
+    assert!(
+        fake_v5.sapling_spends().count() > 0,
+        "converted V5 must retain Sapling shielded data with spends",
+    );
+
+    // Replace the transparent inputs with a single coinbase input. The rebuild preserves the
+    // Sapling and Orchard bundles.
+    let outputs = fake_v5.outputs();
+    let outputs = if outputs.is_empty() {
+        vec![transparent::Output {
+            value: crate::amount::Amount::zero(),
+            lock_script: Script::new(&[0u8; 20]),
+        }]
+    } else {
+        outputs
     };
 
-    // Confirm the fake V5 still has Sapling spends.
-    let sapling_shielded_data =
-        sapling_shielded_data.expect("converted V5 must retain Sapling shielded data with spends");
-
-    let coinbase_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time,
-        expiry_height,
-        inputs: vec![transparent::Input::Coinbase {
+    let coinbase_tx = fake_v5
+        .with_transparent_inputs(vec![transparent::Input::Coinbase {
             height,
             data: vec![0x00; 4],
             sequence: 0xFFFF_FFFF,
-        }],
-        outputs: if outputs.is_empty() {
-            vec![transparent::Output {
-                value: crate::amount::Amount::zero(),
-                lock_script: Script::new(&[0u8; 20]),
-            }]
-        } else {
-            outputs
-        },
-        sapling_shielded_data: Some(sapling_shielded_data),
-        orchard_shielded_data,
-    };
+        }])
+        .with_transparent_outputs(outputs);
 
     // The constructed transaction must look like a coinbase with Sapling spends.
     assert!(coinbase_tx.is_coinbase(), "transaction must be coinbase");
     assert!(
-        coinbase_tx.sapling_spends_per_anchor().count() > 0,
+        coinbase_tx.sapling_spends().count() > 0,
         "coinbase transaction has Sapling spends"
     );
 

@@ -45,7 +45,7 @@ fn pre_nu6_2_bundle_and_sighash() -> (Bundle<Authorized, ZatBalance>, SigHash) {
             .expect("hard-coded test vector must deserialize");
 
         for tx in &block.transactions {
-            if tx.orchard_shielded_data().is_none() || !tx.inputs().is_empty() {
+            if !tx.has_orchard_shielded_data() || !tx.inputs().is_empty() {
                 continue;
             }
 
