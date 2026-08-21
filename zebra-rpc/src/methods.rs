@@ -2296,7 +2296,11 @@ where
         let valid_addresses = utxos_request.valid_addresses()?;
 
         // get utxos data for addresses
-        let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
+        let request = zebra_state::ReadRequest::UtxosByAddresses {
+            addresses: valid_addresses,
+            height_range: Height::MIN..=Height::MAX,
+            max_entries: None,
+        };
         let response = read_state
             .ready()
             .and_then(|service| service.call(request))

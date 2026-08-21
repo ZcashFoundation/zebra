@@ -1649,6 +1649,19 @@ impl Chain {
         (created_utxos, spent_utxos)
     }
 
+    /// Returns the number of UTXOs that `addresses` spend in this partial non-finalized chain.
+    ///
+    /// A limited finalized UTXO query has to over-fetch by this many entries, because any of
+    /// the UTXOs it returns can turn out to be spent here.
+    pub fn partial_transparent_spent_utxo_count(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> usize {
+        self.partial_transparent_indexes(addresses)
+            .map(|transfers| transfers.spent_utxos().len())
+            .sum()
+    }
+
     /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds,
     /// in the non-finalized chain, filtered using the `query_height_range`.
     ///

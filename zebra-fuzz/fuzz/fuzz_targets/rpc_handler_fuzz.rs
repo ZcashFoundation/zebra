@@ -411,7 +411,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::TransactionIdsByAddresses { .. } => {
                 Ok(Resp::AddressesTransactionIds(Default::default()))
             }
-            R::UtxosByAddresses(_) => {
+            R::UtxosByAddresses { .. } => {
                 // AddressUtxos requires an `AddressUtxos` struct; the field is
                 // private to zebra-state so we cannot construct it without a
                 // public constructor. Fall back to Err for this variant.
