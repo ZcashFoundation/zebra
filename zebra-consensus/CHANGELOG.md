@@ -5,10 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-### Changed
+## [16.0.0] - 2026-08-22
 
-- Consensus rules that apply to a transaction in both block and mempool context
-  are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears throughout this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Replaced `groth16::Item::from_joinsplit` with `groth16::joinsplit_to_item`, which takes the `zcash_primitives` `JsDescription` that transactions now carry. The `groth16::Description` trait and `groth16::DescriptionWrapper` are removed, leaving a single JoinSplit primary-input encoder: the one the verifier uses ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+
+### Added
+
+- A `fuzzing` feature, off by default, which makes the `block` module public for the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies and leaves default and release builds unchanged ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
 
 ## [15.0.0] - 2026-08-10
 
