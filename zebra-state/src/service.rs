@@ -36,7 +36,6 @@ use zebra_chain::{
     diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
-    subtree::NoteCommitmentSubtreeIndex,
 };
 
 use crate::{
@@ -56,9 +55,9 @@ use crate::{
         read::find,
         watch_receiver::WatchReceiver,
     },
-    AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
-    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
-    StateInitError,
+    AwaitUtxoError, BoxError, ChainSelector, CheckpointVerifiedBlock,
+    CommitSemanticallyVerifiedError, Config, KnownBlock, ReadRequest, ReadResponse, Request,
+    Response, SemanticallyVerifiedBlock, StateInitError, UtxoQuery,
 };
 
 pub mod block_iter;
@@ -1213,7 +1212,10 @@ impl Service<Request> for StateService {
 
                 // Run the request in an async block, so we can await the response.
                 async move {
-                    let req = ReadRequest::AnyChainUtxo(outpoint);
+                    let req = ReadRequest::UtxoQuery(UtxoQuery {
+                        outpoint,
+                        chain: ChainSelector::Any,
+                    });
 
                     let rsp = read_service
                         .oneshot(req)
@@ -1232,7 +1234,7 @@ impl Service<Request> for StateService {
                     //
                     // And if the block is in the finalized queue,
                     // that's rare enough that a retry is ok.
-                    if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
+                    if let ReadResponse::UtxoQuery(Some(utxo)) = rsp {
                         // We got a UTXO, so we replace the response future with the result own.
                         timer.finish_desc("AwaitUtxo/any-chain");
 
@@ -1414,103 +1416,10 @@ impl Service<ReadRequest> for ReadStateService {
                 })
             }
 
-            // Used by getblock
-            ReadRequest::BlockInfo(hash_or_height) => Ok(ReadResponse::BlockInfo(
-                read::block_info(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
-
-            // Used by the StateService.
-            ReadRequest::Depth(hash) => Ok(ReadResponse::Depth(read::depth(
-                state.latest_best_chain(),
-                &state.db,
-                hash,
-            ))),
-
             // Used by the StateService.
             ReadRequest::BestChainNextMedianTimePast => {
                 Ok(ReadResponse::BestChainNextMedianTimePast(
                     read::next_median_time_past(&state.latest_non_finalized_state(), &state.db)?,
-                ))
-            }
-
-            // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::Block(hash_or_height) => Ok(ReadResponse::Block(read::block(
-                state.latest_best_chain(),
-                &state.db,
-                hash_or_height,
-            ))),
-
-            ReadRequest::AnyChainBlock(hash_or_height) => Ok(ReadResponse::Block(read::any_block(
-                state.latest_non_finalized_state().chain_iter(),
-                &state.db,
-                hash_or_height,
-            ))),
-
-            // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::BlockAndSize(hash_or_height) => Ok(ReadResponse::BlockAndSize(
-                read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
-
-            // Used by the get_block (verbose) RPC and the StateService.
-            ReadRequest::BlockHeader(hash_or_height) => {
-                let best_chain = state.latest_best_chain();
-
-                let height = hash_or_height
-                    .height_or_else(|hash| {
-                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                let hash = hash_or_height
-                    .hash_or_else(|height| {
-                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                let next_height = height.next()?;
-                let next_block_hash =
-                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
-
-                let header = read::block_header(best_chain, &state.db, height.into())
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                Ok(ReadResponse::BlockHeader {
-                    header,
-                    hash,
-                    height,
-                    next_block_hash,
-                })
-            }
-
-            // For the get_raw_transaction RPC and the StateService.
-            ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
-                read::mined_transaction(state.latest_best_chain(), &state.db, hash),
-            )),
-
-            ReadRequest::AnyChainTransaction(hash) => {
-                Ok(ReadResponse::AnyChainTransaction(read::any_transaction(
-                    state.latest_non_finalized_state().chain_iter(),
-                    &state.db,
-                    hash,
-                )))
-            }
-
-            // Used by the getblock (verbose) RPC.
-            ReadRequest::TransactionIdsForBlock(hash_or_height) => Ok(
-                ReadResponse::TransactionIdsForBlock(read::transaction_hashes_for_block(
-                    state.latest_best_chain(),
-                    &state.db,
-                    hash_or_height,
-                )),
-            ),
-
-            ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => {
-                Ok(ReadResponse::AnyChainTransactionIdsForBlock(
-                    read::transaction_hashes_for_any_block(
-                        state.latest_non_finalized_state().chain_iter(),
-                        &state.db,
-                        hash_or_height,
-                    ),
                 ))
             }
 
@@ -1530,17 +1439,6 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::SpendingTransactionId(spend) => Ok(ReadResponse::TransactionId(
                 read::spending_transaction_hash(state.latest_best_chain(), &state.db, spend),
             )),
-
-            ReadRequest::UnspentBestChainUtxo(outpoint) => Ok(ReadResponse::UnspentBestChainUtxo(
-                read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint),
-            )),
-
-            // Manually used by the StateService to implement part of AwaitUtxo.
-            ReadRequest::AnyChainUtxo(outpoint) => Ok(ReadResponse::AnyChainUtxo(read::any_utxo(
-                state.latest_non_finalized_state(),
-                &state.db,
-                outpoint,
-            ))),
 
             // Generic UTXO query.
             ReadRequest::UtxoQuery(query) => Ok(ReadResponse::UtxoQuery(read::utxo_query(
@@ -1601,75 +1499,6 @@ impl Service<ReadRequest> for ReadStateService {
                 )))
             }
 
-            ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
-                read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
-
-            ReadRequest::OrchardTree(hash_or_height) => Ok(ReadResponse::OrchardTree(
-                read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
-
-            ReadRequest::IronwoodTree(hash_or_height) => Ok(ReadResponse::IronwoodTree(
-                read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
-
-            ReadRequest::SaplingSubtrees { start_index, limit } => {
-                let end_index = limit
-                    .and_then(|limit| start_index.0.checked_add(limit.0))
-                    .map(NoteCommitmentSubtreeIndex);
-
-                let best_chain = state.latest_best_chain();
-                let sapling_subtrees = if let Some(end_index) = end_index {
-                    read::sapling_subtrees(best_chain, &state.db, start_index..end_index)
-                } else {
-                    // If there is no end bound, just return all the trees.
-                    // If the end bound would overflow, just returns all the trees, because that's what
-                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
-                    // the trees run out.)
-                    read::sapling_subtrees(best_chain, &state.db, start_index..)
-                };
-
-                Ok(ReadResponse::SaplingSubtrees(sapling_subtrees))
-            }
-
-            ReadRequest::OrchardSubtrees { start_index, limit } => {
-                let end_index = limit
-                    .and_then(|limit| start_index.0.checked_add(limit.0))
-                    .map(NoteCommitmentSubtreeIndex);
-
-                let best_chain = state.latest_best_chain();
-                let orchard_subtrees = if let Some(end_index) = end_index {
-                    read::orchard_subtrees(best_chain, &state.db, start_index..end_index)
-                } else {
-                    // If there is no end bound, just return all the trees.
-                    // If the end bound would overflow, just returns all the trees, because that's what
-                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
-                    // the trees run out.)
-                    read::orchard_subtrees(best_chain, &state.db, start_index..)
-                };
-
-                Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
-            }
-
-            ReadRequest::IronwoodSubtrees { start_index, limit } => {
-                let end_index = limit
-                    .and_then(|limit| start_index.0.checked_add(limit.0))
-                    .map(NoteCommitmentSubtreeIndex);
-
-                let best_chain = state.latest_best_chain();
-                let ironwood_subtrees = if let Some(end_index) = end_index {
-                    read::ironwood_subtrees(best_chain, &state.db, start_index..end_index)
-                } else {
-                    // If there is no end bound, just return all the trees.
-                    // If the end bound would overflow, just returns all the trees, because that's what
-                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
-                    // the trees run out.)
-                    read::ironwood_subtrees(best_chain, &state.db, start_index..)
-                };
-
-                Ok(ReadResponse::IronwoodSubtrees(ironwood_subtrees))
-            }
-
             // Generic note commitment subtree query.
             ReadRequest::NoteCommitmentSubtrees {
                 kind,
@@ -1684,34 +1513,6 @@ impl Service<ReadRequest> for ReadStateService {
                     limit,
                 ),
             )),
-
-            // For the get_address_balance RPC.
-            ReadRequest::AddressBalance(addresses) => {
-                let (balance, received) =
-                    read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
-                Ok(ReadResponse::AddressBalance { balance, received })
-            }
-
-            // For the get_address_tx_ids RPC.
-            ReadRequest::TransactionIdsByAddresses {
-                addresses,
-                height_range,
-            } => read::transparent_tx_ids(
-                state.latest_best_chain(),
-                &state.db,
-                addresses,
-                height_range,
-            )
-            .map(ReadResponse::AddressesTransactionIds),
-
-            // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => read::address_utxos(
-                &state.network,
-                state.latest_best_chain(),
-                &state.db,
-                addresses,
-            )
-            .map(ReadResponse::AddressUtxos),
 
             // Generic address query: reads only the requested fields.
             ReadRequest::AddressQuery(query) => {
@@ -1736,11 +1537,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
             }
-
-            // Used by the get_block and get_block_hash RPCs.
-            ReadRequest::BestChainBlockHash(height) => Ok(ReadResponse::BlockHash(
-                read::hash_by_height(state.latest_best_chain(), &state.db, height),
-            )),
 
             // Used by get_block_template and getblockchaininfo RPCs.
             ReadRequest::ChainInfo => {

@@ -135,25 +135,6 @@ where
     }
 }
 
-/// Return the depth of block `hash` from the chain tip.
-/// Searches `chain` for `hash`, then searches `db`.
-pub fn depth<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> Option<u32>
-where
-    C: AsRef<Chain>,
-{
-    let chain = chain.as_ref();
-
-    // # Correctness
-    //
-    // It is ok to do this lookup in two different calls. Finalized state updates
-    // can only add overlapping blocks, and hashes are unique.
-
-    let tip = tip_height(chain, db)?;
-    let height = height_by_hash(chain, db, hash)?;
-
-    Some(tip.0 - height.0)
-}
-
 /// Returns the location of the block if present in the non-finalized state.
 /// Returns None if the block hash is not found in the non-finalized state.
 pub fn non_finalized_state_contains_block_hash(

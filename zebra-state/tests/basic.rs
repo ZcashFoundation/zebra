@@ -31,8 +31,17 @@ static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<
             Ok(Response::Committed(hash)),
         ),
         (
-            Request::Read(ReadRequest::Block(hash.into())),
-            Ok(Response::Read(ReadResponse::Block(Some(block2)))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(Some(
+                QueriedBlock {
+                    block: Some(block2),
+                    ..QueriedBlock::default()
+                },
+            )))),
         ),
     ]
 });
@@ -52,8 +61,17 @@ static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<
             Ok(Response::Committed(hash)),
         ),
         (
-            Request::Read(ReadRequest::Block(hash.into())),
-            Ok(Response::Read(ReadResponse::Block(Some(block2)))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(Some(
+                QueriedBlock {
+                    block: Some(block2),
+                    ..QueriedBlock::default()
+                },
+            )))),
         ),
     ]
 });

@@ -342,48 +342,6 @@ pub enum ReadResponse {
         value_balance: ValueBalance<NonNegative>,
     },
 
-    /// Response to [`ReadRequest::BlockInfo`] with
-    /// the block info after the specified block.
-    BlockInfo(Option<BlockInfo>),
-
-    /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
-    Depth(Option<u32>),
-
-    /// Response to [`ReadRequest::Block`] with the specified block.
-    Block(Option<Arc<Block>>),
-
-    /// Response to [`ReadRequest::BlockAndSize`] with the specified block and
-    /// serialized size.
-    BlockAndSize(Option<(Arc<Block>, usize)>),
-
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
-
-    /// Response to [`ReadRequest::Transaction`] with the specified transaction.
-    Transaction(Option<MinedTx>),
-
-    /// Response to [`ReadRequest::AnyChainTransaction`] with the specified transaction.
-    AnyChainTransaction(Option<AnyTx>),
-
-    /// Response to [`ReadRequest::TransactionIdsForBlock`],
-    /// with an list of transaction hashes in block order,
-    /// or `None` if the block was not found.
-    TransactionIdsForBlock(Option<Arc<[transaction::Hash]>>),
-
-    /// Response to [`ReadRequest::AnyChainTransactionIdsForBlock`], with an list of
-    /// transaction hashes in block order and a flag indicating if the block is
-    /// in the best chain, or `None` if the block was not found.
-    AnyChainTransactionIdsForBlock(Option<(Arc<[transaction::Hash]>, bool)>),
-
     /// Response to [`ReadRequest::BlockQuery`] with the requested block fields,
     /// or `None` if the block was not found.
     BlockQuery(Option<QueriedBlock>),
@@ -417,63 +375,9 @@ pub enum ReadResponse {
     /// on the best chain.
     ForkPoint(Option<(block::Height, block::Hash)>),
 
-    /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
-    /// _best_ non-finalized chain, or the finalized chain.
-    UnspentBestChainUtxo(Option<transparent::Utxo>),
-
-    /// The response to an `AnyChainUtxo` request, from verified blocks in
-    /// _any_ non-finalized chain, or the finalized chain.
-    ///
-    /// This response is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    AnyChainUtxo(Option<transparent::Utxo>),
-
-    /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
-    SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
-
-    /// Response to [`ReadRequest::OrchardTree`] with the specified Orchard note commitment tree.
-    OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
-
-    /// Response to [`ReadRequest::IronwoodTree`] with the specified Ironwood note commitment tree.
-    IronwoodTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
-
-    /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
-    /// subtrees.
-    SaplingSubtrees(
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
-    ),
-
-    /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
-    /// subtrees.
-    OrchardSubtrees(
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
-    ),
-
-    /// Response to [`ReadRequest::IronwoodSubtrees`] with the specified Ironwood note commitment
-    /// subtrees. Ironwood reuses the Orchard note type.
-    IronwoodSubtrees(
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
-    ),
-
     /// Response to [`ReadRequest::NoteCommitmentSubtrees`] with the subtrees of the
     /// requested tree kind.
     NoteCommitmentSubtrees(NoteCommitmentSubtrees),
-
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
-    /// and the total received funds, including change.
-    AddressBalance {
-        /// The total balance of the addresses.
-        balance: Amount<NonNegative>,
-        /// The total received funds in zatoshis, including change.
-        received: u64,
-    },
-
-    /// Response to [`ReadRequest::TransactionIdsByAddresses`]
-    /// with the obtained transaction ids, in the order they appear in blocks.
-    AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
-
-    /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
-    AddressUtxos(AddressUtxos),
 
     /// Response to [`ReadRequest::AddressQuery`] with the requested address fields.
     AddressQuery(QueriedAddresses),
@@ -486,9 +390,6 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainNextMedianTimePast`].
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
-
-    /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
-    BlockHash(Option<block::Hash>),
 
     /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.

@@ -24,29 +24,24 @@ pub mod tree;
 mod tests;
 
 pub use address::address_query;
-pub use address::{
-    balance::transparent_balance,
-    tx_id::transparent_tx_ids,
-    utxo::{address_utxos, AddressUtxos},
-};
-pub use block::{
-    any_block, any_transaction, any_utxo, block, block_and_size, block_header, block_info,
-    mined_transaction, queried_block, transaction_hashes_for_any_block,
-    transaction_hashes_for_block, transaction_query, unspent_utxo, utxo_query,
-};
+pub use address::utxo::AddressUtxos;
+pub use block::{block, block_header, block_info, queried_block, transaction_query, utxo_query};
+
+pub use block::unspent_utxo;
 
 #[cfg(feature = "indexer")]
 pub use block::spending_transaction_hash;
 
 pub use find::{
-    best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
+    best_tip, block_locator, finalized_state_contains_block_hash, find_chain_hashes,
     find_chain_headers, find_fork_point, hash_by_height, height_by_hash, next_median_time_past,
     non_finalized_state_contains_block_hash, tip, tip_with_value_balance,
 };
-pub use tree::{
-    ironwood_subtrees, ironwood_tree, note_commitment_subtrees, orchard_subtrees, orchard_tree,
-    sapling_subtrees, sapling_tree,
-};
+pub use tree::note_commitment_subtrees;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+#[allow(unused_imports)]
+pub use tree::{orchard_subtrees, sapling_subtrees};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(unused_imports)]

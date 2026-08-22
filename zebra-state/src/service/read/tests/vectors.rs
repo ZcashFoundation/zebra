@@ -103,12 +103,26 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
     for block in blocks {
         let block_cases = vec![
             (
-                ReadRequest::Block(block.hash().into()),
-                Ok(ReadResponse::Block(Some(block.clone()))),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: block.hash().into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Block].into(),
+                }),
+                Ok(ReadResponse::BlockQuery(Some(QueriedBlock {
+                    block: Some(block.clone()),
+                    ..QueriedBlock::default()
+                }))),
             ),
             (
-                ReadRequest::Block(block.coinbase_height().unwrap().into()),
-                Ok(ReadResponse::Block(Some(block.clone()))),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: block.coinbase_height().unwrap().into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Block].into(),
+                }),
+                Ok(ReadResponse::BlockQuery(Some(QueriedBlock {
+                    block: Some(block.clone()),
+                    ..QueriedBlock::default()
+                }))),
             ),
         ];
 
@@ -134,14 +148,19 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
         for transaction in &block.transactions {
             let transaction_cases = vec![(
-                ReadRequest::Transaction(transaction.hash()),
-                Ok(ReadResponse::Transaction(Some(MinedTx {
-                    tx: transaction.clone(),
-                    height: block.coinbase_height().unwrap(),
-                    confirmations: 1 + tip_height.0 - block.coinbase_height().unwrap().0,
-                    block_time: block.header.time,
-                    best_chain_tip_hash: tip_hash,
-                }))),
+                ReadRequest::TransactionQuery(TransactionQuery {
+                    hash: transaction.hash(),
+                    chain: ChainSelector::Best,
+                }),
+                Ok(ReadResponse::TransactionQuery(Some(AnyTx::Mined(
+                    MinedTx {
+                        tx: transaction.clone(),
+                        height: block.coinbase_height().unwrap(),
+                        confirmations: 1 + tip_height.0 - block.coinbase_height().unwrap().0,
+                        block_time: block.header.time,
+                        best_chain_tip_hash: tip_hash,
+                    },
+                )))),
             )];
 
             let transaction_cases = Transcript::from(transaction_cases);
@@ -391,16 +410,27 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
 
     vec![
         (
-            ReadRequest::Transaction(transaction::Hash([0; 32])),
-            Ok(ReadResponse::Transaction(None)),
+            ReadRequest::TransactionQuery(TransactionQuery {
+                hash: transaction::Hash([0; 32]),
+                chain: ChainSelector::Best,
+            }),
+            Ok(ReadResponse::TransactionQuery(None)),
         ),
         (
-            ReadRequest::Block(block.hash().into()),
-            Ok(ReadResponse::Block(None)),
+            ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.hash().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            }),
+            Ok(ReadResponse::BlockQuery(None)),
         ),
         (
-            ReadRequest::Block(block.coinbase_height().unwrap().into()),
-            Ok(ReadResponse::Block(None)),
+            ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.coinbase_height().unwrap().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            }),
+            Ok(ReadResponse::BlockQuery(None)),
         ),
         (
             ReadRequest::FindForkPoint {
@@ -513,37 +543,22 @@ async fn block_query_test() -> Result<()> {
     assert_eq!(queried.auth_data_root, Some(block.auth_data_root()));
 
     // These mainnet test blocks are before Sapling activation, but Zebra stores
-    // (empty) note commitment trees for every block. Check the queried trees
-    // against the dedicated tree requests instead of hardcoding them.
-    let expected_sapling = read_state
-        .clone()
-        .oneshot(ReadRequest::SaplingTree(hash.into()))
-        .await
-        .expect("request should succeed");
-    let ReadResponse::SaplingTree(expected_sapling) = expected_sapling else {
-        unreachable!("wrong response to SaplingTree request")
-    };
-    assert_eq!(queried.sapling_tree, expected_sapling);
+    // (empty) note commitment trees for every block.
+    assert!(
+        queried.sapling_tree.is_some(),
+        "sapling tree should be stored for every block"
+    );
+    assert!(
+        queried.orchard_tree.is_some(),
+        "orchard tree should be stored for every block"
+    );
+    assert!(
+        queried.ironwood_tree.is_some(),
+        "ironwood tree should be stored for every block"
+    );
 
-    let expected_orchard = read_state
-        .clone()
-        .oneshot(ReadRequest::OrchardTree(hash.into()))
-        .await
-        .expect("request should succeed");
-    let ReadResponse::OrchardTree(expected_orchard) = expected_orchard else {
-        unreachable!("wrong response to OrchardTree request")
-    };
-    assert_eq!(queried.orchard_tree, expected_orchard);
-
-    let expected_ironwood = read_state
-        .clone()
-        .oneshot(ReadRequest::IronwoodTree(hash.into()))
-        .await
-        .expect("request should succeed");
-    let ReadResponse::IronwoodTree(expected_ironwood) = expected_ironwood else {
-        unreachable!("wrong response to IronwoodTree request")
-    };
-    assert_eq!(queried.ironwood_tree, expected_ironwood);
+    // Orchard and Ironwood trees are both empty Orchard-type trees here.
+    assert_eq!(queried.orchard_tree, queried.ironwood_tree);
 
     // A query for a subset of fields returns exactly those fields, by height too.
     let response = read_state
@@ -663,20 +678,14 @@ async fn generic_queries_test() -> Result<()> {
     let transaction = block.transactions[0].clone();
     let transaction_hash = transaction.hash();
 
-    // A best-chain TransactionQuery matches the legacy Transaction response.
-    let legacy = read_state
-        .clone()
-        .oneshot(ReadRequest::Transaction(transaction_hash))
-        .await
-        .expect("request should succeed");
-    let ReadResponse::Transaction(expected_mined) = legacy else {
-        unreachable!("wrong response to Transaction request")
-    };
-    assert!(
-        expected_mined.is_some(),
-        "transaction should be in the populated state"
-    );
+    let tip_height = Height(blocks.len() as u32 - 1);
+    let tip_hash = blocks
+        .last()
+        .expect("populated state has at least one block")
+        .hash();
+    let height = block.coinbase_height().unwrap();
 
+    // A best-chain TransactionQuery returns the mined transaction.
     let response = read_state
         .clone()
         .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
@@ -687,7 +696,13 @@ async fn generic_queries_test() -> Result<()> {
         .expect("request should succeed");
     assert_eq!(
         response,
-        ReadResponse::TransactionQuery(expected_mined.map(AnyTx::Mined))
+        ReadResponse::TransactionQuery(Some(AnyTx::Mined(MinedTx::new(
+            transaction.clone(),
+            height,
+            1 + tip_height.0 - height.0,
+            block.header.time,
+            tip_hash,
+        ))))
     );
 
     // For these finalized blocks, the any-chain selector finds the same mined result.
@@ -721,20 +736,8 @@ async fn generic_queries_test() -> Result<()> {
         assert_eq!(response, ReadResponse::TransactionQuery(None));
     }
 
-    // A best-chain UtxoQuery matches the legacy UnspentBestChainUtxo response.
+    // A best-chain UtxoQuery returns the unspent coinbase output.
     let outpoint = transparent::OutPoint::from_usize(transaction_hash, 0);
-    let legacy = read_state
-        .clone()
-        .oneshot(ReadRequest::UnspentBestChainUtxo(outpoint))
-        .await
-        .expect("request should succeed");
-    let ReadResponse::UnspentBestChainUtxo(expected_utxo) = legacy else {
-        unreachable!("wrong response to UnspentBestChainUtxo request")
-    };
-    assert!(
-        expected_utxo.is_some(),
-        "coinbase output should be unspent in this chain"
-    );
 
     let response = read_state
         .clone()
@@ -744,7 +747,14 @@ async fn generic_queries_test() -> Result<()> {
         }))
         .await
         .expect("request should succeed");
-    assert_eq!(response, ReadResponse::UtxoQuery(expected_utxo));
+    assert_eq!(
+        response,
+        ReadResponse::UtxoQuery(Some(transparent::Utxo {
+            output: transaction.outputs()[0].clone(),
+            height,
+            from_coinbase: true,
+        }))
+    );
 
     // The any-chain selector finds the created UTXO too (informationally).
     let response = read_state
@@ -861,7 +871,11 @@ async fn any_chain_block_test() -> Result<()> {
 
     // Test: AnyChainBlock should find blocks by hash (same as Block)
     for block in &blocks {
-        let request = ReadRequest::AnyChainBlock(block.hash().into());
+        let request = ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block.hash().into(),
+            chain: ChainSelector::Any,
+            fields: [BlockField::Block].into(),
+        });
         let response = read_state
             .clone()
             .oneshot(request)
@@ -870,7 +884,8 @@ async fn any_chain_block_test() -> Result<()> {
         assert!(
             matches!(
                 response,
-                ReadResponse::Block(Some(found_block)) if found_block.hash() == block.hash()
+                ReadResponse::BlockQuery(Some(queried))
+                    if queried.block.as_ref().expect("block was requested").hash() == block.hash()
             ),
             "AnyChainBlock should find block by hash"
         );
@@ -879,7 +894,11 @@ async fn any_chain_block_test() -> Result<()> {
     // Test: AnyChainBlock should find blocks by height (same as Block)
     for block in &blocks {
         let height = block.coinbase_height().unwrap();
-        let request = ReadRequest::AnyChainBlock(height.into());
+        let request = ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: height.into(),
+            chain: ChainSelector::Any,
+            fields: [BlockField::Block].into(),
+        });
         let response = read_state
             .clone()
             .oneshot(request)
@@ -888,7 +907,8 @@ async fn any_chain_block_test() -> Result<()> {
         assert!(
             matches!(
                 response,
-                ReadResponse::Block(Some(found_block)) if found_block.hash() == block.hash()
+                ReadResponse::BlockQuery(Some(queried))
+                    if queried.block.as_ref().expect("block was requested").hash() == block.hash()
             ),
             "AnyChainBlock should find block by height"
         );
@@ -896,14 +916,18 @@ async fn any_chain_block_test() -> Result<()> {
 
     // Test: Non-existent block should return None
     let fake_hash = zebra_chain::block::Hash([0xff; 32]);
-    let request = ReadRequest::AnyChainBlock(fake_hash.into());
+    let request = ReadRequest::BlockQuery(BlockQuery {
+        hash_or_height: fake_hash.into(),
+        chain: ChainSelector::Any,
+        fields: [BlockField::Block].into(),
+    });
     let response = read_state
         .clone()
         .oneshot(request)
         .await
         .expect("request should succeed");
     assert!(
-        matches!(response, ReadResponse::Block(None)),
+        matches!(response, ReadResponse::BlockQuery(None)),
         "AnyChainBlock should return None for non-existent block"
     );
 

@@ -1173,106 +1173,6 @@ pub enum ReadRequest {
     /// with the pool values of the current best chain tip.
     TipPoolValues,
 
-    /// Looks up the block info after a block by hash or height in the current best chain.
-    ///
-    /// * [`ReadResponse::BlockInfo(Some(pool_values))`](ReadResponse::BlockInfo) if the block is in the best chain;
-    /// * [`ReadResponse::BlockInfo(None)`](ReadResponse::BlockInfo) otherwise.
-    BlockInfo(HashOrHeight),
-
-    /// Computes the depth in the current best chain of the block identified by the given hash.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::Depth(Some(depth))`](ReadResponse::Depth) if the block is in the best chain;
-    /// * [`ReadResponse::Depth(None)`](ReadResponse::Depth) otherwise.
-    Depth(block::Hash),
-
-    /// Looks up a block by hash or height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
-    /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    Block(HashOrHeight),
-
-    /// Looks up a block by hash in any current chain or by height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block hash is in any chain, or
-    ///   if the block height is in any chain, checking the best chain first
-    ///   followed by side chains in order from most to least work.
-    /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    AnyChainBlock(HashOrHeight),
-
-    //// Same as Block, but also returns serialized block size.
-    ////
-    /// Returns
-    ///
-    /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
-    /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
-    BlockAndSize(HashOrHeight),
-
-    /// Looks up a block header by hash or height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// [`ReadResponse::BlockHeader`](ReadResponse::BlockHeader).
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    BlockHeader(HashOrHeight),
-
-    /// Looks up a transaction by hash in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
-    /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
-    Transaction(transaction::Hash),
-
-    /// Looks up a transaction by hash in any chain.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::AnyChainTransaction(Some(AnyTx))`](ReadResponse::AnyChainTransaction)
-    ///   if the transaction is in any chain;
-    /// * [`ReadResponse::AnyChainTransaction(None)`](ReadResponse::AnyChainTransaction)
-    ///   otherwise.
-    AnyChainTransaction(transaction::Hash),
-
-    /// Looks up the transaction IDs for a block, using a block hash or height.
-    ///
-    /// Returns
-    ///
-    /// * An ordered list of transaction hashes, or
-    /// * `None` if the block was not found.
-    ///
-    /// Note: Each block has at least one transaction: the coinbase transaction.
-    ///
-    /// Returned txids are in the order they appear in the block.
-    TransactionIdsForBlock(HashOrHeight),
-
-    /// Looks up the transaction IDs for a block, using a block hash or height,
-    /// for any chain.
-    ///
-    /// Returns
-    ///
-    /// * An ordered list of transaction hashes and a flag indicating whether
-    ///   the block is in the best chain, or
-    /// * `None` if the block was not found.
-    ///
-    /// Note: Each block has at least one transaction: the coinbase transaction.
-    ///
-    /// Returned txids are in the order they appear in the block.
-    AnyChainTransactionIdsForBlock(HashOrHeight),
-
     /// Looks up selected fields of a block in the current best chain.
     ///
     /// Only the requested [`BlockField`]s are read and returned: fields that
@@ -1292,21 +1192,6 @@ pub enum ReadRequest {
     /// location information, or `None` if it was not found.
     /// See [`TransactionQuery`] for details.
     TransactionQuery(TransactionQuery),
-
-    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
-    /// returning `None` immediately if it is unknown.
-    ///
-    /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
-    UnspentBestChainUtxo(transparent::OutPoint),
-
-    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
-    /// returning `None` immediately if it is unknown.
-    ///
-    /// Checks verified blocks in the finalized chain and _all_ non-finalized chains.
-    ///
-    /// This request is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    AnyChainUtxo(transparent::OutPoint),
 
     /// Looks up a UTXO by outpoint in the selected chain(s).
     ///
@@ -1398,75 +1283,6 @@ pub enum ReadRequest {
         known_blocks: Vec<block::Hash>,
     },
 
-    /// Looks up a Sapling note commitment tree either by a hash or height.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::SaplingTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
-    ///   if the corresponding block contains a Sapling note commitment tree.
-    /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
-    SaplingTree(HashOrHeight),
-
-    /// Looks up an Orchard note commitment tree either by a hash or height.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::OrchardTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::OrchardTree)
-    ///   if the corresponding block contains a Sapling note commitment tree.
-    /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
-    OrchardTree(HashOrHeight),
-
-    /// Looks up an Ironwood note commitment tree either by a hash or height.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::IronwoodTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::IronwoodTree)
-    ///   if the corresponding block contains an Ironwood note commitment tree.
-    /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
-    IronwoodTree(HashOrHeight),
-
-    /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
-    /// `start_index`, and returning up to `limit` subtrees.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::SaplingSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::SaplingSubtrees)
-    /// * An empty list if there is no subtree at `start_index`.
-    SaplingSubtrees {
-        /// The index of the first 2^16-leaf subtree to return.
-        start_index: NoteCommitmentSubtreeIndex,
-        /// The maximum number of subtree values to return.
-        limit: Option<NoteCommitmentSubtreeIndex>,
-    },
-
-    /// Returns a list of Orchard note commitment subtrees by their indexes, starting at
-    /// `start_index`, and returning up to `limit` subtrees.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::OrchardSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::OrchardSubtrees)
-    /// * An empty list if there is no subtree at `start_index`.
-    OrchardSubtrees {
-        /// The index of the first 2^16-leaf subtree to return.
-        start_index: NoteCommitmentSubtreeIndex,
-        /// The maximum number of subtree values to return.
-        limit: Option<NoteCommitmentSubtreeIndex>,
-    },
-
-    /// Returns a list of Ironwood note commitment subtrees by their indexes, starting at
-    /// `start_index`, and returning up to `limit` subtrees.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::IronwoodSubtree(BTreeMap<_, NoteCommitmentSubtreeData<_>>))`](crate::ReadResponse::IronwoodSubtrees)
-    /// * An empty list if there is no subtree at `start_index`.
-    IronwoodSubtrees {
-        /// The index of the first 2^16-leaf subtree to return.
-        start_index: NoteCommitmentSubtreeIndex,
-        /// The maximum number of subtree values to return.
-        limit: Option<NoteCommitmentSubtreeIndex>,
-    },
-
     /// Returns a list of note commitment subtrees of the given tree kind, by their
     /// indexes, starting at `start_index`, and returning up to `limit` subtrees.
     ///
@@ -1483,42 +1299,12 @@ pub enum ReadRequest {
         limit: Option<NoteCommitmentSubtreeIndex>,
     },
 
-    /// Looks up the balance of a set of transparent addresses.
-    ///
-    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
-    /// balance of the set of addresses.
-    AddressBalance(HashSet<transparent::Address>),
-
-    /// Looks up transaction hashes that were sent or received from addresses,
-    /// in an inclusive blockchain height range.
-    ///
-    /// Returns
-    ///
-    /// * An ordered, unique map of transaction locations and hashes.
-    /// * An empty map if no transactions were found for the given arguments.
-    ///
-    /// Returned txids are in the order they appear in blocks,
-    /// which ensures that they are topologically sorted
-    /// (i.e. parent txids will appear before child txids).
-    TransactionIdsByAddresses {
-        /// The requested addresses.
-        addresses: HashSet<transparent::Address>,
-
-        /// The blocks to be queried for transactions.
-        height_range: RangeInclusive<block::Height>,
-    },
-
     /// Looks up a spending transaction id by its spent transparent input.
     ///
     /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
     /// that spent the output at the provided [`transparent::OutPoint`].
     #[cfg(feature = "indexer")]
     SpendingTransactionId(Spend),
-
-    /// Looks up utxos for the provided addresses.
-    ///
-    /// Returns a type with found utxos and transaction information.
-    UtxosByAddresses(HashSet<transparent::Address>),
 
     /// Looks up selected data about a set of transparent addresses.
     ///
@@ -1535,14 +1321,6 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::BestChainNextMedianTimePast`] when successful.
     BestChainNextMedianTimePast,
-
-    /// Looks up a block hash by height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::BlockHash(Some(hash))`](ReadResponse::BlockHash) if the block is in the best chain;
-    /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
-    BestChainBlockHash(block::Height),
 
     /// Get state information from the best block chain.
     ///
@@ -1599,41 +1377,19 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
-            ReadRequest::BlockInfo(_) => "block_info",
-            ReadRequest::Depth(_) => "depth",
-            ReadRequest::Block(_) => "block",
-            ReadRequest::AnyChainBlock(_) => "any_chain_block",
-            ReadRequest::BlockAndSize(_) => "block_and_size",
-            ReadRequest::BlockHeader(_) => "block_header",
-            ReadRequest::Transaction(_) => "transaction",
-            ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
-            ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
-            ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::BlockQuery(_) => "block_query",
             ReadRequest::TransactionQuery(_) => "transaction_query",
-            ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
-            ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::UtxoQuery(_) => "utxo_query",
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
-            ReadRequest::SaplingTree { .. } => "sapling_tree",
-            ReadRequest::OrchardTree { .. } => "orchard_tree",
-            ReadRequest::IronwoodTree { .. } => "ironwood_tree",
-            ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
-            ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
-            ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
             ReadRequest::NoteCommitmentSubtrees { .. } => "note_commitment_subtrees",
-            ReadRequest::AddressBalance { .. } => "address_balance",
-            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
-            ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
             ReadRequest::AddressQuery(_) => "address_query",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
-            ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",

@@ -27,8 +27,9 @@ use crate::{
     init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, Config, MinedTx, ReadRequest, ReadResponse, Request,
-    Response, SemanticallyVerifiedBlock,
+    AnyTx, BlockField, BlockQuery, BoxError, ChainSelector, CheckpointVerifiedBlock, Config,
+    MinedTx, QueriedBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    TransactionQuery,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -55,9 +56,16 @@ async fn test_populated_state_responds_correctly(
         let hash = block.hash();
 
         transcript.push((
-            Request::Read(ReadRequest::Depth(block.hash())),
-            Ok(Response::Read(ReadResponse::Depth(Some(
-                LAST_BLOCK_HEIGHT - height.0,
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.hash().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Confirmations].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(Some(
+                QueriedBlock {
+                    confirmations: Some(LAST_BLOCK_HEIGHT - height.0 + 1),
+                    ..QueriedBlock::default()
+                },
             )))),
         ));
 
@@ -89,28 +97,49 @@ async fn test_populated_state_responds_correctly(
                 let transaction_hash = transaction.hash();
 
                 transcript.push((
-                    Request::Read(ReadRequest::Transaction(transaction_hash)),
-                    Ok(Response::Read(ReadResponse::Transaction(Some(
-                        MinedTx::new(
+                    Request::Read(ReadRequest::TransactionQuery(TransactionQuery {
+                        hash: transaction_hash,
+                        chain: ChainSelector::Best,
+                    })),
+                    Ok(Response::Read(ReadResponse::TransactionQuery(Some(
+                        AnyTx::Mined(MinedTx::new(
                             transaction.clone(),
                             height,
                             1 + LAST_BLOCK_HEIGHT - height.0,
                             block.header.time,
                             block_hashes[LAST_BLOCK_HEIGHT as usize],
-                        ),
+                        )),
                     )))),
                 ));
             }
         }
 
         transcript.push((
-            Request::Read(ReadRequest::Block(hash.into())),
-            Ok(Response::Read(ReadResponse::Block(Some(block.clone())))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(Some(
+                QueriedBlock {
+                    block: Some(block.clone()),
+                    ..QueriedBlock::default()
+                },
+            )))),
         ));
 
         transcript.push((
-            Request::Read(ReadRequest::Block(height.into())),
-            Ok(Response::Read(ReadResponse::Block(Some(block.clone())))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: height.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(Some(
+                QueriedBlock {
+                    block: Some(block.clone()),
+                    ..QueriedBlock::default()
+                },
+            )))),
         ));
 
         // Spec: transactions in the genesis block are ignored.
@@ -245,8 +274,12 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
         // No checks for SemanticallyVerifiedBlock or CommitCheckpointVerifiedBlock because empty state
         // precondition doesn't matter to them
         (
-            Request::Read(ReadRequest::Depth(block.hash())),
-            Ok(Response::Read(ReadResponse::Depth(None))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.hash().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Confirmations].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(None))),
         ),
         (
             Request::Read(ReadRequest::Tip),
@@ -257,16 +290,27 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
             Ok(Response::Read(ReadResponse::BlockLocator(vec![]))),
         ),
         (
-            Request::Read(ReadRequest::Transaction(transaction::Hash([0; 32]))),
-            Ok(Response::Read(ReadResponse::Transaction(None))),
+            Request::Read(ReadRequest::TransactionQuery(TransactionQuery {
+                hash: transaction::Hash([0; 32]),
+                chain: ChainSelector::Best,
+            })),
+            Ok(Response::Read(ReadResponse::TransactionQuery(None))),
         ),
         (
-            Request::Read(ReadRequest::Block(block.hash().into())),
-            Ok(Response::Read(ReadResponse::Block(None))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.hash().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(None))),
         ),
         (
-            Request::Read(ReadRequest::Block(block.coinbase_height().unwrap().into())),
-            Ok(Response::Read(ReadResponse::Block(None))),
+            Request::Read(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: block.coinbase_height().unwrap().into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            })),
+            Ok(Response::Read(ReadResponse::BlockQuery(None))),
         ),
         // No check for AwaitUTXO because it will wait if the UTXO isn't present
         (
