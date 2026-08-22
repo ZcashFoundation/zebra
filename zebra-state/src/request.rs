@@ -1340,6 +1340,34 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
 
+    /// Looks up a Sapling note commitment tree by hash in any current chain, or by
+    /// height in the current best chain.
+    ///
+    /// Unlike [`SaplingTree`](Self::SaplingTree), a lookup by hash checks every
+    /// non-finalized chain (and the finalized state), so it is immune to reorgs that
+    /// move a block from the best chain onto a still-retained side chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SaplingTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
+    AnyChainSaplingTree(HashOrHeight),
+
+    /// Looks up an Orchard note commitment tree by hash in any current chain, or by
+    /// height in the current best chain.
+    ///
+    /// Unlike [`OrchardTree`](Self::OrchardTree), a lookup by hash checks every
+    /// non-finalized chain (and the finalized state), so it is immune to reorgs that
+    /// move a block from the best chain onto a still-retained side chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::OrchardTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::OrchardTree)
+    ///   if the corresponding block contains an Orchard note commitment tree.
+    /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
+    AnyChainOrchardTree(HashOrHeight),
+
     /// Looks up an Ironwood note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1348,6 +1376,20 @@ pub enum ReadRequest {
     ///   if the corresponding block contains an Ironwood note commitment tree.
     /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
     IronwoodTree(HashOrHeight),
+
+    /// Looks up an Ironwood note commitment tree by hash in any current chain, or by
+    /// height in the current best chain.
+    ///
+    /// Unlike [`IronwoodTree`](Self::IronwoodTree), a lookup by hash checks every
+    /// non-finalized chain (and the finalized state), so it is immune to reorgs that
+    /// move a block from the best chain onto a still-retained side chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::IronwoodTree)
+    ///   if the corresponding block contains an Ironwood note commitment tree.
+    /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
+    AnyChainIronwoodTree(HashOrHeight),
 
     /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
     /// `start_index`, and returning up to `limit` subtrees.
@@ -1519,7 +1561,10 @@ impl ReadRequest {
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
+            ReadRequest::AnyChainSaplingTree { .. } => "any_chain_sapling_tree",
+            ReadRequest::AnyChainOrchardTree { .. } => "any_chain_orchard_tree",
             ReadRequest::IronwoodTree { .. } => "ironwood_tree",
+            ReadRequest::AnyChainIronwoodTree { .. } => "any_chain_ironwood_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
