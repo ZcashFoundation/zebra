@@ -326,8 +326,11 @@ fn broadcast_all_queued_removes_banned_peers() {
             .build();
 
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
-        bans_map.insert(banned_ip, std::time::Instant::now());
+        let mut bans_map: IndexMap<crate::peer_book::BanKey, std::time::Instant> = IndexMap::new();
+        bans_map.insert(
+            crate::peer_book::BanKey::from(banned_ip),
+            std::time::Instant::now(),
+        );
 
         let (bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
         let _ = bans_tx;
@@ -375,8 +378,11 @@ fn remove_unready_peer_clears_cancel_handle_and_updates_counts() {
         // Prepare a banned IP map (not strictly required for remove(), but keeps
         // the test's setup similar to real-world conditions).
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
-        bans_map.insert(banned_ip, std::time::Instant::now());
+        let mut bans_map: IndexMap<crate::peer_book::BanKey, std::time::Instant> = IndexMap::new();
+        bans_map.insert(
+            crate::peer_book::BanKey::from(banned_ip),
+            std::time::Instant::now(),
+        );
         let (_bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
         peer_set.bans_receiver = bans_rx;
 

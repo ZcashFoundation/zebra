@@ -14,13 +14,13 @@ use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
 };
 
-use super::super::{crawl::validate_addrs, crawl_once, crawler_services};
+use super::super::{crawl_once, crawler_services};
+use crate::peer_book::{intake::validate_addrs, PeerBookHandle};
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
 #[test]
@@ -145,16 +145,10 @@ fn candidate_set_updates_are_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let (
-        _address_book,
-        _bans_receiver,
-        _change_sender,
-        address_book_service,
-        _address_metrics,
-        _updater_guard,
-    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
-    let (_next_peer_service, mut crawl_service) =
-        crawler_services(address_book_service, peer_service.clone());
+    let (_next_peer_service, mut crawl_service) = crawler_services(
+        PeerBookHandle::spawn_for_book(address_book).0,
+        peer_service.clone(),
+    );
 
     runtime.block_on(async move {
         time::pause();
@@ -195,16 +189,10 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let (
-        _address_book,
-        _bans_receiver,
-        _change_sender,
-        address_book_service,
-        _address_metrics,
-        _updater_guard,
-    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
-    let (_next_peer_service, mut crawl_service) =
-        crawler_services(address_book_service, peer_service.clone());
+    let (_next_peer_service, mut crawl_service) = crawler_services(
+        PeerBookHandle::spawn_for_book(address_book).0,
+        peer_service.clone(),
+    );
 
     runtime.block_on(async move {
         time::pause();

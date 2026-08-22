@@ -3,7 +3,9 @@
 //! Zebra parses received IPv4 and IPv6 addresses in the [`AddrV2`] format.
 //! But it ignores all other address types.
 //!
-//! Zebra never sends `addrv2` messages, because peers still accept `addr` (v1) messages.
+//! Zebra never sends `addrv2` messages on the legacy protocol, because peers
+//! still accept `addr` (v1) messages. The version 2 protocol uses the
+//! `addrv2` encoding exclusively, in both directions.
 
 use std::{
     io::Read,
@@ -25,11 +27,8 @@ use super::canonical_peer_addr;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[cfg(test)]
 use byteorder::WriteBytesExt;
-#[cfg(test)]
 use std::io::Write;
-#[cfg(test)]
 use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
 
 /// The maximum permitted size of the `addr` field in `addrv2` messages.
@@ -79,7 +78,7 @@ pub const ADDR_V2_IPV6_ADDR_SIZE: usize = 16;
 /// [ZIP 155](https://zips.z.cash/zip-0155#specification)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub(in super::super) enum AddrV2 {
+pub(crate) enum AddrV2 {
     /// An IPv4 or IPv6 node address, in `addrv2` format.
     IpAddr {
         /// The unverified "last seen time" gossiped by the remote peer that sent us
@@ -114,15 +113,11 @@ pub(in super::super) enum AddrV2 {
     Unsupported,
 }
 
-// Just serialize in the tests for now.
-//
-// We can't guarantee that peers support addrv2 until it activates,
-// and outdated peers are excluded from the network by a network upgrade.
-// (Likely NU5 on mainnet, and NU6 on testnet.)
+// The legacy protocol never sends `addrv2` messages, because Zebra doesn't
+// use different codecs for different peer versions:
 // https://zips.z.cash/zip-0155#deployment
 //
-// And Zebra doesn't use different codecs for different peer versions.
-#[cfg(test)]
+// The version 2 protocol serializes all addresses in the `addrv2` encoding.
 impl From<MetaAddr> for AddrV2 {
     fn from(meta_addr: MetaAddr) -> Self {
         let untrusted_services = meta_addr.services.expect(
@@ -205,10 +200,8 @@ impl AddrV2 {
     }
 }
 
-// Just serialize in the tests for now.
-//
-// See the detailed note about ZIP-155 activation above.
-#[cfg(test)]
+// Serialization is used by the version 2 protocol, and by tests.
+// The legacy protocol only deserializes `addrv2`; see the note above.
 impl ZcashSerialize for AddrV2 {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         if let AddrV2::IpAddr {

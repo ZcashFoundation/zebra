@@ -250,7 +250,6 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
-    let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
     // The push path only touches the mempool; the state and block verifier are
     // wired up because `Inbound` requires them, but are never driven here.
@@ -283,7 +282,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
-        address_book,
+        peer_book_handle: zebra_network::PeerBookHandle::spawn_for_book(address_book).0,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
         mempool: buffered_mempool,
@@ -856,8 +855,12 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-/// Checks that Zebra won't give out its entire address book over a short duration.
-async fn caches_getaddr_response() {
+/// Checks that Zebra won't give out its entire address book in one request:
+/// every `Peers` response is bounded to a fraction of the address book.
+//
+// TODO: when the peer book actor serves its rotated response cache, also
+//       check that repeated requests are answered from the same snapshot.
+async fn bounds_getaddr_response() {
     const NUM_ADDRESSES: usize = 20;
     const NUM_REQUESTS: usize = 10;
     const EXPECTED_NUM_RESULTS: usize = NUM_ADDRESSES / ADDR_RESPONSE_LIMIT_DENOMINATOR;
@@ -886,8 +889,6 @@ async fn caches_getaddr_response() {
             Span::none(),
             addrs,
         );
-
-        let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         // UTXO verification doesn't matter for these tests.
         let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
@@ -925,7 +926,7 @@ async fn caches_getaddr_response() {
         let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
 
         let setup_data = InboundSetupData {
-            address_book: address_book.clone(),
+            peer_book_handle: zebra_network::PeerBookHandle::spawn_for_book(address_book).0,
             block_download_peer_set: buffered_peer_set,
             block_verifier,
             mempool: buffered_mempool_service.clone(),
@@ -940,18 +941,6 @@ async fn caches_getaddr_response() {
         inbound_service
     };
 
-    let Ok(zebra_network::Response::Peers(first_result)) =
-        inbound.clone().oneshot(zebra_network::Request::Peers).await
-    else {
-        panic!("result should match Ok(Peers(_))")
-    };
-
-    assert_eq!(
-        first_result.len(),
-        EXPECTED_NUM_RESULTS,
-        "inbound service should respond with expected number of peer addresses",
-    );
-
     for _ in 0..NUM_REQUESTS {
         let Ok(zebra_network::Response::Peers(peers)) =
             inbound.clone().oneshot(zebra_network::Request::Peers).await
@@ -960,8 +949,9 @@ async fn caches_getaddr_response() {
         };
 
         assert_eq!(
-            peers, first_result,
-            "inbound service should return the same result for every Peers request until the refresh time",
+            peers.len(),
+            EXPECTED_NUM_RESULTS,
+            "every response should be bounded to a fraction of the address book",
         );
     }
 }
@@ -1005,7 +995,6 @@ async fn setup(
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
-    let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
     // UTXO verification doesn't matter for these tests.
@@ -1154,7 +1143,7 @@ async fn setup(
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
-        address_book,
+        peer_book_handle: zebra_network::PeerBookHandle::spawn_for_book(address_book).0,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
         mempool: mempool_service.clone(),
@@ -1235,7 +1224,6 @@ async fn setup_gossiped_block_misbehavior(
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
-    let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
     // An empty state, so gossiped blocks are always unknown, and the lookahead limit is
     // measured from the genesis height.
@@ -1262,7 +1250,7 @@ async fn setup_gossiped_block_misbehavior(
     let (misbehavior_sender, misbehavior_rx) = tokio::sync::mpsc::channel(10);
 
     let setup_data = InboundSetupData {
-        address_book,
+        peer_book_handle: zebra_network::PeerBookHandle::spawn_for_book(address_book).0,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
         mempool: buffered_mempool,

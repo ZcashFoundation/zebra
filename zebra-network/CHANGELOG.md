@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Requires `zebra-chain` 12.0.0, whose block and transaction types appear in public protocol
   request, response, and inventory APIs.
 
+### Breaking Changes
+
+- `init()` and `init_with_block_gossip_peer_ips()` no longer return the shared
+  `Arc<Mutex<AddressBook>>`: the address book is owned by a single peer book actor
+  (#1976). They now return a lock-free `PeerBookReader` (which implements
+  `AddressBookPeers` and reports the bound local listener address) and a
+  `PeerBookHandle` tower service for requests that need an answer from the book
+  (sanitized addresses, cache snapshots, candidate selection, gossip intake).
+- Misbehavior scores and bans are keyed by the new `BanKey` type (an IPv4
+  address, or an IPv6 /64 prefix), persist across connections for about the
+  ban duration, and are owned by the peer book actor instead of the address
+  book. Bans now expire after `constants::DEFAULT_BAN_DURATION` (24 hours),
+  and `PeerBookReader::bans()` returns the `BanKey`-keyed map.
+
 ### Added
 
 - `seeder.zec.rocks` and `seeder.testnet.zec.rocks` are now default DNS seeders in

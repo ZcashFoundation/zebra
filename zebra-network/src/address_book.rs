@@ -5,12 +5,11 @@ use std::{
     cmp::Reverse,
     collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
     time::Instant,
 };
 
 use chrono::Utc;
-use indexmap::IndexMap;
+
 use ordered_map::OrderedMap;
 use tokio::sync::watch;
 use tracing::Span;
@@ -81,9 +80,6 @@ pub struct AddressBook {
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
     // TODO: Replace with `by_ip: HashMap<IpAddr, BTreeMap<DateTime32, MetaAddr>>` to support configured `max_connections_per_ip` greater than 1
     most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
-
-    /// A list of banned addresses, with the time they were banned.
-    bans_by_ip: Arc<IndexMap<IpAddr, Instant>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -167,7 +163,6 @@ impl AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: should_limit_outbound_conns_per_ip.then(HashMap::new),
-            bans_by_ip: Default::default(),
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -428,19 +423,12 @@ impl AddressBook {
     /// # Correctness
     ///
     /// Callers must call [`AddressBook::update_metrics`] once they have finished applying
-    /// changes, and only once: a refresh walks the address book several times, under the
-    /// mutex, so refreshing per change makes a batch quadratic.
+    /// changes, and only once: a refresh walks the address book several times, so
+    /// refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
     fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
-        if self.bans_by_ip.contains_key(&change.addr().ip()) {
-            // Remote peers control how often this fires, so keep it below `warn` (#11134).
-            tracing::debug!(
-                ?change,
-                "attempted to add a banned peer addr to address book"
-            );
-            return None;
-        }
-
+        // Banned addresses are filtered out by the peer book actor before
+        // they reach the address book, so changes here are never banned.
         let previous = self.get(change.addr());
 
         let _guard = self.span.enter();
@@ -460,46 +448,6 @@ impl AddressBook {
         );
 
         if let Some(ref updated) = updated {
-            if updated.misbehavior() >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
-                // Ban and skip outbound connections with excessively misbehaving peers.
-                let banned_ip = updated.addr.ip();
-                let bans_by_ip = Arc::make_mut(&mut self.bans_by_ip);
-
-                bans_by_ip.insert(banned_ip, Instant::now());
-                if bans_by_ip.len() > constants::MAX_BANNED_IPS {
-                    // Remove the oldest banned IP from the address book.
-                    bans_by_ip.shift_remove_index(0);
-                }
-
-                // `most_recent_by_ip` is only populated when
-                // `max_connections_per_ip == 1`. The ban path runs for any
-                // configured value, so we must guard the optional cache rather
-                // than unwrap it.
-                if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                    most_recent_by_ip.remove(&banned_ip);
-                }
-
-                let banned_addrs: Vec<_> = self
-                    .by_addr
-                    .descending_keys()
-                    .filter(|addr| addr.ip() == banned_ip)
-                    .cloned()
-                    .collect();
-
-                for addr in banned_addrs {
-                    self.by_addr.remove(&addr);
-                }
-
-                warn!(
-                    ?updated,
-                    total_peers = self.by_addr.len(),
-                    recent_peers = self.recently_live_peers(chrono_now).len(),
-                    "banned ip and removed banned peer addresses from address book",
-                );
-
-                return None;
-            }
-
             // Ignore invalid outbound addresses.
             // (Inbound connections can be monitored via Zebra's metrics.)
             if !updated.address_is_valid_for_outbound(&self.network) {
@@ -576,54 +524,6 @@ impl AddressBook {
         updated
     }
 
-    /// Removes the entry with `addr`, returning it if it exists
-    ///
-    /// # Note
-    ///
-    /// All address removals should go through `take`, so that the address
-    /// book metrics are accurate.
-    #[allow(dead_code)]
-    fn take(&mut self, removed_addr: PeerSocketAddr) -> Option<MetaAddr> {
-        let _guard = self.span.enter();
-
-        let instant_now = Instant::now();
-        let chrono_now = Utc::now();
-
-        trace!(
-            ?removed_addr,
-            total_peers = self.by_addr.len(),
-            recent_peers = self.recently_live_peers(chrono_now).len(),
-        );
-
-        if let Some(entry) = self.by_addr.remove(&removed_addr) {
-            // Check if this surplus peer's addr matches that in `most_recent_by_ip`
-            // for this the surplus peer's ip to remove it there as well.
-            if self.should_remove_most_recent_by_ip(entry.addr) {
-                if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                    most_recent_by_ip.remove(&entry.addr.ip());
-                }
-            }
-
-            std::mem::drop(_guard);
-            self.update_metrics(instant_now, chrono_now);
-            Some(entry)
-        } else {
-            None
-        }
-    }
-
-    /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
-    /// attempt.
-    pub fn pending_reconnection_addr(&mut self, addr: PeerSocketAddr) -> bool {
-        let meta_addr = self.get(addr);
-
-        let _guard = self.span.enter();
-        match meta_addr {
-            None => false,
-            Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
-        }
-    }
-
     /// Return an iterator over all peers.
     ///
     /// Returns peers in reconnection attempt order, including recently connected peers.
@@ -661,13 +561,15 @@ impl AddressBook {
     ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        // Skip live peers, banned peers, and peers pending a reconnect attempt.
+        // Skip live peers and peers pending a reconnect attempt. Banned
+        // peers are removed from the book by the peer book actor when the
+        // ban fires, and cannot re-enter it while banned, so they are never
+        // candidates (#11173).
         // The peers are already stored in sorted order.
         self.by_addr
             .descending_values()
             .filter(move |peer| {
-                !self.bans_by_ip.contains_key(&peer.addr.ip())
-                    && peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
+                peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
                     && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
             .cloned()
@@ -687,26 +589,67 @@ impl AddressBook {
             .cloned()
     }
 
-    /// Return an iterator over peers that might be connected,
-    /// in reconnection attempt order.
-    pub fn maybe_connected_peers(
-        &'_ self,
-        instant_now: Instant,
-        chrono_now: chrono::DateTime<Utc>,
-    ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
-        let _guard = self.span.enter();
-
-        self.by_addr
-            .descending_values()
-            .filter(move |peer| {
-                !peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
-            })
-            .cloned()
+    /// Removes the entry for `addr`, and its per-IP bookkeeping.
+    ///
+    /// Used by the peer book actor when a gossiped entry is evicted by
+    /// bucket replacement.
+    pub(crate) fn remove(&mut self, addr: PeerSocketAddr) {
+        if self.remove_without_metrics(addr) {
+            self.update_metrics(Instant::now(), Utc::now());
+        }
     }
 
-    /// Returns banned IP addresses.
-    pub fn bans(&self) -> Arc<IndexMap<IpAddr, Instant>> {
-        self.bans_by_ip.clone()
+    /// Removes the entry for `addr`, returning whether it was present.
+    ///
+    /// The caller must refresh the metrics watch once it has finished
+    /// removing, so a bulk removal does not walk the book per entry.
+    fn remove_without_metrics(&mut self, addr: PeerSocketAddr) -> bool {
+        // Only clear the per-IP cache when this entry is the one it holds:
+        // another entry with the same IP may have replaced it.
+        let clear_most_recent = self.should_remove_most_recent_by_ip(addr);
+
+        if self.by_addr.remove(&addr).is_none() {
+            return false;
+        }
+
+        if clear_most_recent {
+            // `most_recent_by_ip` is only populated when
+            // `max_connections_per_ip == 1`, so the optional cache must be
+            // guarded, not unwrapped.
+            if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
+                most_recent_by_ip.remove(&addr.ip());
+            }
+        }
+
+        true
+    }
+
+    /// Removes every entry whose IP address matches `predicate`, along with
+    /// its per-IP bookkeeping.
+    ///
+    /// Used by the peer book actor when a peer is banned, so its addresses
+    /// cannot be selected or gossiped.
+    pub(crate) fn remove_if_key_matches(&mut self, predicate: impl Fn(IpAddr) -> bool) {
+        let matching: Vec<_> = self
+            .by_addr
+            .descending_keys()
+            .filter(|addr| predicate(addr.ip()))
+            .cloned()
+            .collect();
+
+        for addr in &matching {
+            self.remove_without_metrics(*addr);
+        }
+
+        if !matching.is_empty() {
+            self.update_metrics(Instant::now(), Utc::now());
+
+            warn!(
+                removed = matching.len(),
+                total_peers = self.by_addr.len(),
+                "removed banned peer addresses from address book",
+            );
+        }
     }
 
     /// Returns the number of entries in this address book.
@@ -853,20 +796,6 @@ impl AddressBookPeers for AddressBook {
     }
 }
 
-impl AddressBookPeers for Arc<Mutex<AddressBook>> {
-    fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
-        self.lock()
-            .expect("panic in a previous thread that was holding the mutex")
-            .recently_live_peers(now)
-    }
-
-    fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
-        self.lock()
-            .expect("panic in a previous thread that was holding the mutex")
-            .add_peer(peer)
-    }
-}
-
 impl Extend<MetaAddrChange> for AddressBook {
     fn extend<T>(&mut self, iter: T)
     where
@@ -905,7 +834,6 @@ impl Clone for AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: self.most_recent_by_ip.clone(),
-            bans_by_ip: self.bans_by_ip.clone(),
         }
     }
 }

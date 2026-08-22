@@ -1,13 +1,15 @@
 //! Rate-limiting middleware for candidate peer selection and crawling.
 
 use std::{
-    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Duration,
 };
 
 use futures::{future, future::BoxFuture, FutureExt};
-use tokio::time::{sleep_until, Instant};
+use tokio::{
+    sync::watch,
+    time::{sleep_until, Instant},
+};
 use tower::Service;
 
 /// A middleware that limits how often the inner service is called.
@@ -30,12 +32,13 @@ pub struct RateLimitBySkipping<S> {
     /// The minimum interval between inner calls.
     interval: Duration,
 
-    /// The next time the inner service is allowed to be called,
-    /// shared between clones of this middleware.
+    /// The next time the inner service is allowed to be called, in a watch
+    /// cell shared between clones of this middleware. The cell's closures
+    /// make each claim and recharge atomic.
     ///
     /// `None` while a call is in flight, so calls are skipped until it
     /// finishes, even if it runs for longer than `interval`.
-    next_allowed: Arc<Mutex<Option<Instant>>>,
+    next_allowed: watch::Sender<Option<Instant>>,
 }
 
 impl<S> RateLimitBySkipping<S> {
@@ -45,7 +48,7 @@ impl<S> RateLimitBySkipping<S> {
         Self {
             inner,
             interval,
-            next_allowed: Arc::new(Mutex::new(Some(Instant::now()))),
+            next_allowed: watch::Sender::new(Some(Instant::now())),
         }
     }
 }
@@ -68,25 +71,26 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        {
-            let mut next_allowed = self
-                .next_allowed
-                .lock()
-                .expect("mutex should be unpoisoned");
-
-            // While rate-limited, or while another call is in flight, skip the
-            // call and return the default response immediately.
+        let mut claimed = false;
+        self.next_allowed.send_if_modified(|next_allowed| {
             match *next_allowed {
-                None => return future::ready(Ok(S::Response::default())).boxed(),
-                Some(allowed_at) if Instant::now() < allowed_at => {
-                    return future::ready(Ok(S::Response::default())).boxed()
+                // While rate-limited, or while another call is in flight,
+                // skip the call and return the default response immediately.
+                None => false,
+                Some(allowed_at) if Instant::now() < allowed_at => false,
+                // Claim the rate limit for as long as the call runs, so
+                // concurrent calls are skipped even if it takes longer than
+                // `interval`.
+                Some(_) => {
+                    *next_allowed = None;
+                    claimed = true;
+                    true
                 }
-                Some(_) => {}
             }
+        });
 
-            // Claim the rate limit for as long as the call runs, so concurrent
-            // calls are skipped even if it takes longer than `interval`.
-            *next_allowed = None;
+        if !claimed {
+            return future::ready(Ok(S::Response::default())).boxed();
         }
 
         let call = self.inner.call(request);
@@ -104,8 +108,8 @@ where
             // This must also happen when the call fails: the claim above is
             // an open-ended `None`, so leaving it in place after an error
             // would skip every later call for the lifetime of the process.
-            *next_allowed.lock().expect("mutex should be unpoisoned") =
-                Some(Instant::now() + interval);
+            next_allowed
+                .send_modify(|next_allowed| *next_allowed = Some(Instant::now() + interval));
 
             result
         }
@@ -136,8 +140,10 @@ pub struct RateLimitOnYield<S, Response> {
     /// consuming rate-limit budget.
     charges: fn(&Response) -> bool,
 
-    /// The next free pacing slot, shared between clones of this middleware.
-    next_allowed: Arc<Mutex<Instant>>,
+    /// The next free pacing slot, in a watch cell shared between clones of
+    /// this middleware. The cell's closures make each slot reservation and
+    /// recharge atomic.
+    next_allowed: watch::Sender<Instant>,
 }
 
 impl<S, Response> RateLimitOnYield<S, Response> {
@@ -148,7 +154,7 @@ impl<S, Response> RateLimitOnYield<S, Response> {
             inner,
             interval,
             charges,
-            next_allowed: Arc::new(Mutex::new(Instant::now())),
+            next_allowed: watch::Sender::new(Instant::now()),
         }
     }
 }
@@ -181,17 +187,13 @@ where
                 // Reserve the earliest free pacing slot, then sleep until the
                 // slot's time. Reserving before sleeping means concurrent
                 // yields wake at least `interval` apart.
-                let slot = {
-                    let mut next_allowed = next_allowed.lock().expect("mutex should be unpoisoned");
-                    let now = Instant::now();
-                    let slot = if *next_allowed > now {
-                        *next_allowed
-                    } else {
-                        now
-                    };
+                let mut slot = Instant::now();
+                next_allowed.send_modify(|next_allowed| {
+                    if *next_allowed > slot {
+                        slot = *next_allowed;
+                    }
                     *next_allowed = slot + interval;
-                    slot
-                };
+                });
 
                 sleep_until(slot).await;
 
@@ -199,13 +201,12 @@ where
                 // manual timer, so scheduler wake-up latency doesn't
                 // accumulate as a pacing deficit. Only ever extend the shared
                 // time, so concurrent slot reservations are never undone.
-                {
-                    let mut next_allowed = next_allowed.lock().expect("mutex should be unpoisoned");
+                next_allowed.send_modify(|next_allowed| {
                     let recharge = Instant::now() + interval;
                     if recharge > *next_allowed {
                         *next_allowed = recharge;
                     }
-                }
+                });
             }
 
             Ok(response)
@@ -216,7 +217,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     use tower::{service_fn, ServiceExt};
 

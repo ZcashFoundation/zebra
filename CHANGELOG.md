@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Chain synchronization now downloads a peer's only unknown block hash from a short
   `FindBlocks` response, allowing nodes near the chain tip to continue advancing
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
+- The peer address book is now owned by a single peer book actor instead of being
+  shared behind a mutex ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+  Gossiped addresses are bucketed by a secret-keyed address group and rate-limited per
+  connection, and misbehaviour bans are keyed by IPv4 address or IPv6 /64 prefix and
+  expire after 24 hours.
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
   and Testnet values no longer overwrite each other in processes that run both networks
   ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).

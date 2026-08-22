@@ -1,7 +1,7 @@
 //! Crawling the network for more peer addresses.
 //!
 //! The crawler asks live [`Responded`] peers for more peers, validates the
-//! responses, and sends the new addresses to the address book. Candidate
+//! responses, and sends the new addresses to the peer book actor. Candidate
 //! selection for outbound connections lives in the
 //! [parent module](super).
 //!
@@ -20,12 +20,9 @@ use futures::{
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::serialization::DateTime32;
-
 use crate::{
-    address_book_updater::{AddressBookRequest, AddressBookService},
     constants,
-    meta_addr::MetaAddrChange,
+    peer_book::{PeerBookHandle, PeerBookRequest},
     peer_set::set::MorePeers,
     types::MetaAddr,
     BoxError, Request, Response,
@@ -75,6 +72,7 @@ pub(crate) type CrawlService<S> = RateLimitBySkipping<CrawlFanout<S>>;
 /// than [`MIN_PEER_GET_ADDR_INTERVAL`][constants::MIN_PEER_GET_ADDR_INTERVAL] has passed since
 /// the last crawl. Otherwise, the crawl is skipped.
 ///
+/// [`next_reconnect_peer`]: super::next_reconnect_peer
 /// [`Responded`]: crate::PeerAddrState::Responded
 /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
 /// [`Failed`]: crate::PeerAddrState::Failed
@@ -97,8 +95,8 @@ where
 
 /// A service that crawls the network for more peer addresses.
 ///
-/// It fans out `GetPeers` requests to the peer set, validates the responses,
-/// and sends the validated addresses to the address book updater.
+/// It fans out `GetPeers` requests to the peer set, and sends the returned
+/// addresses to the peer book actor, which validates them before storing.
 ///
 /// The request is an optional fanout limit, and the response is
 /// `Some(MorePeers)` if the crawl received any new peers.
@@ -111,8 +109,9 @@ where
     /// The peer set used to crawl the network for peers.
     peer_service: S,
 
-    /// The buffered service handle to the address book updater task.
-    address_book_service: AddressBookService,
+    /// A handle to the peer book actor, which validates and stores the
+    /// crawled addresses.
+    peer_book_handle: PeerBookHandle,
 }
 
 impl<S> CrawlFanout<S>
@@ -121,15 +120,12 @@ where
     S::Future: Send + 'static,
 {
     /// Returns a rate-limited [`CrawlService`] that crawls using `peer_service`,
-    /// and stores the addresses it finds using `address_book_service`.
-    pub(super) fn service(
-        peer_service: S,
-        address_book_service: AddressBookService,
-    ) -> CrawlService<S> {
+    /// and stores the addresses it finds using `peer_book_handle`.
+    pub(super) fn service(peer_service: S, peer_book_handle: PeerBookHandle) -> CrawlService<S> {
         RateLimitBySkipping::new(
             Self {
                 peer_service,
-                address_book_service,
+                peer_book_handle,
             },
             constants::MIN_PEER_GET_ADDR_INTERVAL,
         )
@@ -153,7 +149,7 @@ where
 
     fn call(&mut self, fanout_limit: Option<usize>) -> Self::Future {
         let peer_service = self.peer_service.clone();
-        let address_book_service = self.address_book_service.clone();
+        let peer_book_handle = self.peer_book_handle.clone();
 
         async move {
             // CORRECTNESS
@@ -165,7 +161,7 @@ where
             //   to complete.
             match timeout(
                 constants::PEER_GET_ADDR_TIMEOUT,
-                crawl_fanout(peer_service, address_book_service, fanout_limit),
+                crawl_fanout(peer_service, peer_book_handle, fanout_limit),
             )
             .await
             {
@@ -199,7 +195,7 @@ where
 /// Use the [`CrawlFanout`] service instead.
 async fn crawl_fanout<S>(
     mut peer_service: S,
-    address_book_service: AddressBookService,
+    peer_book_handle: PeerBookHandle,
     fanout_limit: Option<usize>,
 ) -> Result<Option<MorePeers>, BoxError>
 where
@@ -227,7 +223,7 @@ where
         responses.push(peer_service.call(Request::Peers));
     }
 
-    let mut address_book_updates = FuturesUnordered::new();
+    let mut peer_book_updates = FuturesUnordered::new();
 
     // Process responses
     while let Some(rsp) = responses.next().await {
@@ -238,8 +234,7 @@ where
                     ?addrs,
                     "got response to GetPeers"
                 );
-                let addrs = validate_addrs(addrs, DateTime32::now());
-                address_book_updates.push(send_addrs(address_book_service.clone(), addrs));
+                peer_book_updates.push(send_addrs(peer_book_handle.clone(), addrs));
                 more_peers = Some(MorePeers);
             }
             Err(e) => {
@@ -251,125 +246,43 @@ where
         }
     }
 
-    // Wait until all the address book updates have finished
-    while let Some(()) = address_book_updates.next().await {}
+    // Wait until all the peer book updates have finished
+    while let Some(()) = peer_book_updates.next().await {}
 
     Ok(more_peers)
 }
 
-/// Add new `addrs` to the address book.
-async fn send_addrs(
-    address_book_service: AddressBookService,
-    addrs: impl IntoIterator<Item = MetaAddr>,
-) {
+/// Add new gossiped `addrs` to the peer book.
+async fn send_addrs(peer_book_handle: PeerBookHandle, addrs: Vec<MetaAddr>) {
     // # Security
     //
     // New gossiped peers are rate-limited because:
     // - Zebra initiates requests for new gossiped peers
     // - the fanout is limited
     // - the number of addresses per peer is limited
-    let addrs: Vec<MetaAddrChange> = addrs
-        .into_iter()
-        .map(MetaAddr::new_gossiped_change)
-        .map(|maybe_addr| maybe_addr.expect("Received gossiped peers always have services set"))
-        .collect();
-
-    debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
+    //
+    // The peer book actor validates the addresses before storing them.
+    debug!(count = ?addrs.len(), "sending gossiped addresses to the peer book");
 
     // Don't bother making a request if there are no addresses left.
     if addrs.is_empty() {
         return;
     }
 
-    // Extend handles duplicate addresses internally.
+    // The actor handles duplicate addresses internally.
     //
     // Correctness: box the request future, so its captured types don't
     // leak into generic callers (rustc's async Send inference struggles
     // with boxed trait objects inside generic spawned tasks).
-    let result = address_book_service
-        .oneshot(AddressBookRequest::ExtendGossiped(addrs))
+    let result = peer_book_handle
+        .oneshot(PeerBookRequest::GossipedAddrs { addrs })
         .boxed()
         .await;
 
     if let Err(error) = result {
         debug!(
             ?error,
-            "error sending gossiped addresses to the address book, is Zebra shutting down?"
+            "error sending gossiped addresses to the peer book, is Zebra shutting down?"
         );
-    }
-}
-
-/// Check new `addrs` before adding them to the address book.
-///
-/// `last_seen_limit` is the maximum permitted last seen time, typically
-/// [`Utc::now`](chrono::Utc::now).
-///
-/// If the data in an address is invalid, this function can:
-/// - modify the address data, or
-/// - delete the address.
-///
-/// # Security
-///
-/// Adjusts untrusted last seen times so they are not in the future. This stops
-/// malicious peers keeping all their addresses at the front of the connection
-/// queue. Honest peers with future clock skew also get adjusted.
-///
-/// Rejects all addresses if any calculated times overflow or underflow.
-pub(super) fn validate_addrs(
-    addrs: impl IntoIterator<Item = MetaAddr>,
-    last_seen_limit: DateTime32,
-) -> impl Iterator<Item = MetaAddr> {
-    // Note: The address book handles duplicate addresses internally,
-    // so we don't need to de-duplicate addresses here.
-
-    // TODO:
-    // We should eventually implement these checks in this function:
-    // - Zebra should ignore peers that are older than 3 weeks (part of #1865)
-    // - Zebra should count back 3 weeks from the newest peer timestamp sent
-    //   by the other peer, to compensate for clock skew
-
-    let mut addrs: Vec<_> = addrs.into_iter().collect();
-
-    limit_last_seen_times(&mut addrs, last_seen_limit);
-
-    addrs.into_iter()
-}
-
-/// Ensure all reported `last_seen` times are less than or equal to `last_seen_limit`.
-///
-/// This will consider all addresses as invalid if trying to offset their
-/// `last_seen` times to be before the limit causes an underflow.
-fn limit_last_seen_times(addrs: &mut Vec<MetaAddr>, last_seen_limit: DateTime32) {
-    let last_seen_times = addrs.iter().map(|meta_addr| {
-        meta_addr
-            .untrusted_last_seen()
-            .expect("unexpected missing last seen: should be provided by deserialization")
-    });
-    let oldest_seen = last_seen_times.clone().min().unwrap_or(DateTime32::MIN);
-    let newest_seen = last_seen_times.max().unwrap_or(DateTime32::MAX);
-
-    // If any time is in the future, adjust all times, to compensate for clock skew on honest peers
-    if newest_seen > last_seen_limit {
-        let offset = newest_seen
-            .checked_duration_since(last_seen_limit)
-            .expect("unexpected underflow: just checked newest_seen is greater");
-
-        // Check for underflow
-        if oldest_seen.checked_sub(offset).is_some() {
-            // No underflow is possible, so apply offset to all addresses
-            for addr in addrs {
-                let last_seen = addr
-                    .untrusted_last_seen()
-                    .expect("unexpected missing last seen: should be provided by deserialization");
-                let last_seen = last_seen
-                    .checked_sub(offset)
-                    .expect("unexpected underflow: just checked oldest_seen");
-
-                addr.set_untrusted_last_seen(last_seen);
-            }
-        } else {
-            // An underflow will occur, so reject all gossiped peers
-            addrs.clear();
-        }
     }
 }

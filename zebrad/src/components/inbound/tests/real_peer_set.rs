@@ -668,7 +668,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book, _) = zebra_network::init(
+    let (mut peer_set, peer_book_reader, _, peer_book_handle) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -677,7 +677,7 @@ async fn setup(
     .await;
 
     // Inbound listener
-    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+    let listen_addr = peer_book_reader.local_listener_socket_addr();
 
     assert_ne!(
         listen_addr.port(),
@@ -730,7 +730,7 @@ async fn setup(
     // Initialize the inbound service
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
-        address_book,
+        peer_book_handle,
         block_download_peer_set: peer_set.clone(),
         block_verifier: buffered_block_verifier,
         mempool: mempool_service.clone(),
@@ -873,13 +873,14 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
-            network_config,
-            inbound_service.clone(),
-            latest_chain_tip.clone(),
-            "Zebra user agent".to_string(),
-        )
-        .await;
+        let (peer_set, _peer_book_reader, _misbehavior_tx, _peer_book_handle) =
+            zebra_network::init(
+                network_config,
+                inbound_service.clone(),
+                latest_chain_tip.clone(),
+                "Zebra user agent".to_string(),
+            )
+            .await;
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();

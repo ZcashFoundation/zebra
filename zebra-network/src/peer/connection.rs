@@ -174,7 +174,7 @@ impl Handler {
                 // Security: This method performs security-sensitive operations, see its comments
                 // for details.
                 let response_addrs =
-                    Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
+                    update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
 
                 debug!(
                     new_addrs = new_addrs.len(),
@@ -430,52 +430,62 @@ impl Handler {
 
         ignored_msg
     }
+}
 
-    /// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns `response_size`
-    /// addresses from that cache.
-    ///
-    /// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
-    /// there are no new addresses. `response_size` can be zero or `None` if there is no response
-    /// needed.
-    fn update_addr_cache<'new>(
-        cached_addrs: &mut Vec<MetaAddr>,
-        new_addrs: impl IntoIterator<Item = &'new MetaAddr>,
-        response_size: impl Into<Option<usize>>,
-    ) -> Vec<MetaAddr> {
-        // # Peer Set Reliability
-        //
-        // Newly received peers are added to the cache, so that we can use them if the connection
-        // doesn't respond to our getaddr requests.
-        //
-        // Add the new addresses to the end of the cache.
-        cached_addrs.extend(new_addrs.into_iter().cloned());
+/// Adds `new_addrs` to the `cached_addrs` cache, then takes and returns `response_size`
+/// addresses from that cache.
+///
+/// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
+/// there are no new addresses. `response_size` can be zero or `None` if there is no response
+/// needed.
+///
+/// Shared between the legacy and v2 connections, so both apply the same
+/// address intake policy.
+pub(super) fn update_addr_cache<'new>(
+    cached_addrs: &mut Vec<MetaAddr>,
+    new_addrs: impl IntoIterator<Item = &'new MetaAddr>,
+    response_size: impl Into<Option<usize>>,
+) -> Vec<MetaAddr> {
+    // # Peer Set Reliability
+    //
+    // Newly received peers are added to the cache, so that we can use them if the connection
+    // doesn't respond to our getaddr requests.
+    //
+    // Add the new addresses to the end of the cache.
+    cached_addrs.extend(new_addrs.into_iter().cloned());
 
-        // # Security
-        //
-        // We limit how many peer addresses we take from each peer, so that our address book
-        // and outbound connections aren't controlled by a single peer (#1869). We randomly select
-        // peers, so the remote peer can't control which addresses we choose by changing the order
-        // in the messages they send.
-        let response_size = response_size.into().unwrap_or_default();
+    // # Security
+    //
+    // We limit how many peer addresses we take from each peer, so that our address book
+    // and outbound connections aren't controlled by a single peer (#1869). We randomly select
+    // peers, so the remote peer can't control which addresses we choose by changing the order
+    // in the messages they send.
+    let response_size = response_size.into().unwrap_or_default();
 
-        let mut temp_cache = Vec::new();
-        std::mem::swap(cached_addrs, &mut temp_cache);
-
-        // The response is fully shuffled, remaining is partially shuffled.
-        let (response, remaining) = temp_cache.partial_shuffle(&mut thread_rng(), response_size);
-
-        // # Security
-        //
-        // The cache size is limited to avoid memory denial of service.
-        //
-        // It's ok to just partially shuffle the cache, because it doesn't actually matter which
-        // peers we drop. Having excess peers is rare, because most peers only send one large
-        // unsolicited peer message when they first connect.
-        *cached_addrs = remaining.to_vec();
+    // Selecting nothing needs no shuffle: just bound the cache size, without
+    // cloning the whole cache.
+    if response_size == 0 {
         cached_addrs.truncate(MAX_ADDRS_IN_MESSAGE);
-
-        response.to_vec()
+        return Vec::new();
     }
+
+    let mut temp_cache = Vec::new();
+    std::mem::swap(cached_addrs, &mut temp_cache);
+
+    // The response is fully shuffled, remaining is partially shuffled.
+    let (response, remaining) = temp_cache.partial_shuffle(&mut thread_rng(), response_size);
+
+    // # Security
+    //
+    // The cache size is limited to avoid memory denial of service.
+    //
+    // It's ok to just partially shuffle the cache, because it doesn't actually matter which
+    // peers we drop. Having excess peers is rare, because most peers only send one large
+    // unsolicited peer message when they first connect.
+    *cached_addrs = remaining.to_vec();
+    cached_addrs.truncate(MAX_ADDRS_IN_MESSAGE);
+
+    response.to_vec()
 }
 
 #[derive(Debug)]
@@ -1030,7 +1040,7 @@ where
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
                 // Security: This method performs security-sensitive operations, see its comments
                 // for details.
-                let response_addrs = Handler::update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
+                let response_addrs = update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
 
                 debug!(
                     response_addrs = response_addrs.len(),
@@ -1259,8 +1269,7 @@ where
                 //
                 // We keep a list of the unused peer addresses sent by each connection, to work
                 // around `zcashd`'s `getaddr` response rate-limit.
-                let no_response =
-                    Handler::update_addr_cache(&mut self.cached_addrs, new_addrs, None);
+                let no_response = update_addr_cache(&mut self.cached_addrs, new_addrs, None);
                 assert_eq!(
                     no_response,
                     Vec::new(),

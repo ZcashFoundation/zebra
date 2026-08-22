@@ -7493,6 +7493,7 @@ dependencies = [
  "regex",
  "schemars 1.2.1",
  "serde",
+ "sha2 0.10.9",
  "static_assertions",
  "tempfile",
  "thiserror 2.0.18",

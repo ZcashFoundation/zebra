@@ -1,23 +1,21 @@
-//! An async task that regularly updates the peer cache on disk from the current address book.
+//! An async task that regularly updates the peer cache on disk from the current peer book.
 
 use std::io;
 
-use futures::FutureExt;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::{
-    address_book_updater::{AddressBookRequest, AddressBookResponse, AddressBookService},
     constants::{DNS_LOOKUP_TIMEOUT, PEER_DISK_CACHE_UPDATE_INTERVAL},
-    meta_addr::MetaAddr,
+    peer_book::{PeerBookHandle, PeerBookRequest, PeerBookResponse},
     BoxError, Config,
 };
 
-/// An ongoing task that regularly caches the current peers to disk, based on `config`.
-#[instrument(skip(config, address_book_service))]
+/// An ongoing task that regularly caches the current peer book to disk, based on `config`.
+#[instrument(skip(config, peer_book_handle))]
 pub async fn peer_cache_updater(
     config: Config,
-    mut address_book_service: AddressBookService,
+    peer_book_handle: PeerBookHandle,
 ) -> Result<(), BoxError> {
     // Wait until we've queried DNS and (hopefully) sent peers to the address book.
     // Ideally we'd wait for at least one peer crawl, but that makes tests very slow.
@@ -31,7 +29,7 @@ pub async fn peer_cache_updater(
     loop {
         // Ignore errors because updating the cache is optional.
         // Errors are already logged by the functions we're calling.
-        wrote_cache |= update_peer_cache_once(&config, &mut address_book_service)
+        wrote_cache |= update_peer_cache_once(&config, peer_book_handle.clone())
             .await
             .unwrap_or(false);
 
@@ -48,42 +46,27 @@ pub async fn peer_cache_updater(
     }
 }
 
-/// Caches the current cacheable peers to disk, based on `config`.
+/// Caches the peer book's cacheable peers to disk, based on `config`.
 ///
 /// Returns `true` if the cache was written, and `false` if the cacheable peer list was empty,
 /// keeping any previous cache.
 pub async fn update_peer_cache_once(
     config: &Config,
-    address_book_service: &mut AddressBookService,
+    peer_book_handle: PeerBookHandle,
 ) -> io::Result<bool> {
-    let peer_list: std::collections::HashSet<_> = cacheable_peers(address_book_service)
-        .await?
-        .iter()
-        .map(|meta_addr| meta_addr.addr)
-        .collect();
+    let response = peer_book_handle
+        .oneshot(PeerBookRequest::CacheSnapshot)
+        .await
+        .map_err(io::Error::other)?;
+    let PeerBookResponse::Addrs(cacheable) = response else {
+        return Err(io::Error::other("unexpected peer book response variant"));
+    };
+
+    let peer_list: std::collections::HashSet<_> =
+        cacheable.iter().map(|meta_addr| meta_addr.addr).collect();
     let has_peers = !peer_list.is_empty();
 
     config.update_peer_cache(peer_list).await?;
 
     Ok(has_peers)
-}
-
-/// Returns a list of cacheable peers from the address book updater task.
-async fn cacheable_peers(
-    address_book_service: &mut AddressBookService,
-) -> io::Result<Vec<MetaAddr>> {
-    // Correctness: box the request future, so its captured types don't leak
-    // into generic callers (rustc's async Send inference struggles with
-    // boxed trait objects inside generic spawned tasks).
-    match address_book_service
-        .oneshot(AddressBookRequest::CacheablePeers)
-        .boxed()
-        .await
-    {
-        Ok(AddressBookResponse::Peers(peers)) => Ok(peers),
-        Ok(_) => unreachable!("CacheablePeers requests always return Peers"),
-        Err(error) => Err(io::Error::other(format!(
-            "error requesting cacheable peers, is Zebra shutting down? {error}"
-        ))),
-    }
 }

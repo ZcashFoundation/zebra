@@ -10,7 +10,6 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::{
         DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_RECENT_PEER_AGE,
         MIN_PEER_RECONNECTION_DELAY,
@@ -342,11 +341,11 @@ proptest! {
             Span::none(),
             addrs,
         );
-        let (address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
-            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
+        let (peer_book_handle, change_sender) =
+            crate::peer_book::PeerBookHandle::spawn_for_book(address_book);
         let (mut next_peer_service, _crawl_service) =
-            crawler_services(address_book_service, peer_service);
+            crawler_services(peer_book_handle, peer_service);
 
         runtime.block_on(async move {
             tokio::time::pause();
@@ -386,7 +385,10 @@ proptest! {
                 // If `change` is invalid for the current MetaAddr state,
                 // multiple intervals will elapse between actual changes to
                 // the MetaAddr in the AddressBook.
-                address_book.clone().lock().unwrap().update(change);
+                change_sender
+                    .send(change)
+                    .await
+                    .expect("the peer book actor is running");
 
                 tokio::time::advance(peer_change_interval).await;
                 if tokio::time::Instant::now() >= earliest_next_attempt {

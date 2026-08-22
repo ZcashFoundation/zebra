@@ -151,6 +151,20 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
+
+        /// NODE_TREE_ROOTS means that the node maintains a per-block note
+        /// commitment tree root index, and serves the v2 protocol's
+        /// `get-tree-roots` requests.
+        const NODE_TREE_ROOTS = 1 << 3;
+
+        /// NODE_SYNC_ARTIFACTS means that the node serves content-addressed
+        /// synchronization artifacts via the v2 protocol's `get-object`
+        /// requests.
+        const NODE_SYNC_ARTIFACTS = 1 << 4;
+
+        /// NODE_NETWORK_LIMITED means that the node is capable of serving at
+        /// least the most recent 2,304 blocks of its best chain.
+        const NODE_NETWORK_LIMITED = 1 << 10;
     }
 }
 

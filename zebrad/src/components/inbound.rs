@@ -30,7 +30,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
-use zebra_network::{AddressBook, InventoryResponse};
+use zebra_network::InventoryResponse;
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -40,10 +40,7 @@ use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
 use InventoryResponse::*;
 
-mod cached_peer_addr_response;
 pub(crate) mod downloads;
-
-use cached_peer_addr_response::CachedPeerAddrResponse;
 
 #[cfg(test)]
 mod tests;
@@ -88,8 +85,8 @@ type GossipedBlockDownloads =
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
-    /// A shared list of peer addresses.
-    pub address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// A handle to the peer book actor, which answers peer address requests.
+    pub peer_book_handle: zn::PeerBookHandle,
 
     /// A service that can be used to download gossiped blocks.
     pub block_download_peer_set: BlockDownloadPeerSet,
@@ -104,6 +101,8 @@ pub struct InboundSetupData {
 
     /// A service that manages cached blockchain state.
     pub state: State,
+
+    /// A service that answers read-only state requests concurrently.
 
     /// Allows efficient access to the best tip of the blockchain.
     pub latest_chain_tip: zs::LatestChainTip,
@@ -137,12 +136,9 @@ pub enum Setup {
     Initialized {
         // Services
         //
-        /// An owned partial list of peer addresses used as a `GetAddr` response, and
-        /// a shared list of peer addresses used to periodically refresh the partial list.
-        ///
-        /// Refreshed from the address book in `poll_ready` method
-        /// after [`CACHED_ADDRS_REFRESH_INTERVAL`](cached_peer_addr_response::CACHED_ADDRS_REFRESH_INTERVAL).
-        cached_peer_addr_response: CachedPeerAddrResponse,
+        /// A handle to the peer book actor, which answers `GetAddr` requests
+        /// with a bounded, sanitized list of peer addresses.
+        peer_book_handle: zn::PeerBookHandle,
 
         /// A `futures::Stream` that downloads and verifies gossiped blocks.
         block_downloads: Pin<Box<GossipedBlockDownloads>>,
@@ -152,6 +148,8 @@ pub enum Setup {
 
         /// A service that manages cached blockchain state.
         state: State,
+
+        /// A service that answers read-only state requests concurrently.
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
         misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
@@ -262,7 +260,7 @@ impl Service<zn::Request> for Inbound {
             } => match setup.try_recv() {
                 Ok(setup_data) => {
                     let InboundSetupData {
-                        address_book,
+                        peer_book_handle,
                         block_download_peer_set,
                         block_verifier,
                         mempool,
@@ -270,8 +268,6 @@ impl Service<zn::Request> for Inbound {
                         latest_chain_tip,
                         misbehavior_sender,
                     } = setup_data;
-
-                    let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 
                     let block_downloads = Box::pin(BlockDownloads::new(
                         full_verify_concurrency_limit,
@@ -283,7 +279,7 @@ impl Service<zn::Request> for Inbound {
 
                     result = Ok(());
                     Setup::Initialized {
-                        cached_peer_addr_response,
+                        peer_book_handle,
                         block_downloads,
                         mempool,
                         state,
@@ -319,7 +315,7 @@ impl Service<zn::Request> for Inbound {
             }
             // Clean up completed download tasks, ignoring their results
             Setup::Initialized {
-                cached_peer_addr_response,
+                peer_book_handle,
                 mut block_downloads,
                 mempool,
                 state,
@@ -364,7 +360,7 @@ impl Service<zn::Request> for Inbound {
                 result = Ok(());
 
                 Setup::Initialized {
-                    cached_peer_addr_response,
+                    peer_book_handle,
                     block_downloads,
                     mempool,
                     state,
@@ -396,14 +392,14 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
-        let (cached_peer_addr_response, block_downloads, mempool, state) = match &mut self.setup {
+        let (peer_book_handle, block_downloads, mempool, state) = match &mut self.setup {
             Setup::Initialized {
-                cached_peer_addr_response,
+                peer_book_handle,
                 block_downloads,
                 mempool,
                 state,
                 misbehavior_sender: _,
-            } => (cached_peer_addr_response, block_downloads, mempool, state),
+            } => (peer_book_handle, block_downloads, mempool, state),
             _ => {
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
@@ -414,20 +410,27 @@ impl Service<zn::Request> for Inbound {
             zn::Request::Peers => {
                 // # Security
                 //
-                // We truncate the list to not reveal our entire peer set in one call.
-                // But we don't monitor repeated requests and the results are shuffled,
-                // a crawler could just send repeated queries and get the full list.
-                //
-                // # Correctness
-                //
-                // If the address book is busy, try again inside the future. If it can't be locked
-                // twice, ignore the request.
-                cached_peer_addr_response.try_refresh();
-                let response = cached_peer_addr_response.value();
+                // The peer book bounds and sanitizes this response, so a single
+                // request cannot reveal the entire peer set. But we don't
+                // monitor repeated requests, and the results are shuffled, so
+                // a crawler could send repeated queries to get the full list.
+                let peer_book_handle = peer_book_handle.clone();
 
                 async move {
-                    Ok(response)
-                }.boxed()
+                    let response = peer_book_handle
+                        .oneshot(zn::PeerBookRequest::SanitizedAddrs)
+                        .await?;
+                    let zn::PeerBookResponse::Addrs(addrs) = response else {
+                        return Err("unexpected peer book response variant".into());
+                    };
+
+                    if addrs.is_empty() {
+                        Ok(zn::Response::Nil)
+                    } else {
+                        Ok(zn::Response::Peers(addrs))
+                    }
+                }
+                .boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
                 // We return an available or missing response to each inventory request,
@@ -600,7 +603,7 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
         }
     }
 }

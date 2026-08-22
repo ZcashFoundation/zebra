@@ -17,14 +17,14 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
     AddressBook,
 };
 
-use super::super::{crawl::validate_addrs, crawler_services, next_reconnect_peer, NextPeerService};
+use super::super::{crawler_services, next_reconnect_peer, NextPeerService};
+use crate::peer_book::{intake::validate_addrs, PeerBookHandle};
 
 /// The maximum number of candidates for a "next peer" test.
 const MAX_TEST_CANDIDATES: u32 = 4;
@@ -73,10 +73,8 @@ proptest! {
         // Since the address book is empty, there won't be any available peers
         let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
-        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
-            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
         let (mut next_peer_service, _crawl_service) =
-            crawler_services(address_book_service, peer_service);
+            crawler_services(PeerBookHandle::spawn_for_book(address_book).0, peer_service);
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
@@ -119,10 +117,8 @@ proptest! {
         let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
-        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
-            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
         let (mut next_peer_service, _crawl_service) =
-            crawler_services(address_book_service, peer_service);
+            crawler_services(PeerBookHandle::spawn_for_book(address_book).0, peer_service);
 
         let checks = async move {
             // Check rate limiting for initial peers

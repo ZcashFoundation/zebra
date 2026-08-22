@@ -1,7 +1,8 @@
-//! Tests for the address book updater service.
+//! Tests for the peer book actor's request handling.
 
 use std::{collections::HashSet, net::SocketAddr, str::FromStr};
 
+use chrono::Utc;
 use futures::future;
 use tower::ServiceExt;
 use tracing::Span;
@@ -9,10 +10,10 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::Mainnet, serialization::DateTime32};
 
 use crate::{
-    address_book_updater::{
-        AddressBookRequest, AddressBookResponse, AddressBookUpdater, MIN_CHANNEL_SIZE,
-    },
+    address_book_peers::AddressBookPeers,
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::DEFAULT_MAX_CONNS_PER_IP,
+    peer_book::{PeerBookRequest, PeerBookResponse},
     protocol::types::PeerServices,
     types::MetaAddr,
     AddressBook,
@@ -21,109 +22,114 @@ use crate::{
 /// The number of candidate peers used in the concurrency test.
 const TEST_PEER_COUNT: usize = 8;
 
-/// Test that the address book service serves each request variant,
+/// Test that the peer book actor serves each request variant,
 /// with the matching response variant.
 #[tokio::test]
-async fn address_book_service_serves_all_request_variants() {
+async fn peer_book_actor_serves_all_request_variants() {
     let _init_guard = zebra_test::init();
 
+    let local_listener = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let address_book = AddressBook::new(
-        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        local_listener,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
 
-    let (
-        _address_book,
-        _bans_receiver,
-        _change_sender,
-        address_book_service,
-        _address_metrics,
-        _updater_guard,
-    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let handles =
+        AddressBookUpdater::spawn_with_book(address_book, local_listener, MIN_CHANNEL_SIZE);
 
     let gossiped_addr = |address_number: usize| {
         SocketAddr::from_str(&format!("127.1.1.{address_number}:1")).unwrap()
     };
 
-    let gossiped_change = |address_number: usize| {
+    let gossiped_meta_addr = |address_number: usize| {
         MetaAddr::new_gossiped_meta_addr(
             gossiped_addr(address_number).into(),
             PeerServices::NODE_NETWORK,
             DateTime32::now(),
         )
-        .new_gossiped_change()
-        .expect("gossiped peers always have services set")
     };
 
-    // A `Change` request inserts a new gossiped peer, and returns the updated entry.
-    let response = address_book_service
-        .clone()
-        .oneshot(AddressBookRequest::Change(gossiped_change(0)))
+    // A change event inserts a new gossiped peer. Changes are fire-and-forget,
+    // and the actor applies its message channel in order, so a later call
+    // observes the applied change.
+    handles
+        .change_sender
+        .send(
+            gossiped_meta_addr(0)
+                .new_gossiped_change()
+                .expect("gossiped peers always have services set"),
+        )
         .await
-        .expect("service should be running");
+        .expect("the peer book actor is running");
+
+    let response = handles
+        .handle
+        .clone()
+        .oneshot(PeerBookRequest::TestPeerEntry(gossiped_addr(0).into()))
+        .await
+        .expect("actor should be running");
     match response {
-        AddressBookResponse::Updated(Some(updated)) => assert_eq!(
-            updated.addr,
+        PeerBookResponse::PeerEntry(Some(entry)) => assert_eq!(
+            entry.addr,
             gossiped_addr(0).into(),
-            "the updated entry should be the peer that was just gossiped",
+            "the stored entry should be the peer that was just gossiped",
         ),
-        other => panic!("a new gossiped change should update the address book: {other:?}"),
+        other => panic!("a new gossiped change should update the peer book: {other:?}"),
     }
 
-    // An `ExtendGossiped` request inserts a batch of gossiped peers.
-    let response = address_book_service
+    // A `GossipedAddrs` request inserts a batch of gossiped peers.
+    let response = handles
+        .handle
         .clone()
-        .oneshot(AddressBookRequest::ExtendGossiped(vec![
-            gossiped_change(1),
-            gossiped_change(2),
-        ]))
+        .oneshot(PeerBookRequest::GossipedAddrs {
+            addrs: vec![gossiped_meta_addr(1), gossiped_meta_addr(2)],
+        })
         .await
-        .expect("service should be running");
-    assert!(matches!(response, AddressBookResponse::Extended));
+        .expect("actor should be running");
+    assert!(matches!(response, PeerBookResponse::Done));
 
     // All the gossiped peers are ready for a connection attempt.
-    let response = address_book_service
+    let response = handles
+        .handle
         .clone()
-        .oneshot(AddressBookRequest::ReadyPeerCount)
+        .oneshot(PeerBookRequest::ReadyCandidateCount)
         .await
-        .expect("service should be running");
+        .expect("actor should be running");
     assert!(
-        matches!(response, AddressBookResponse::ReadyPeerCount(3)),
+        matches!(response, PeerBookResponse::ReadyCandidateCount(3)),
         "all gossiped peers should be ready for a connection attempt: {response:?}",
     );
 
     // Recently gossiped peers are cacheable.
-    let response = address_book_service
+    let response = handles
+        .handle
         .clone()
-        .oneshot(AddressBookRequest::CacheablePeers)
+        .oneshot(PeerBookRequest::CacheSnapshot)
         .await
-        .expect("service should be running");
+        .expect("actor should be running");
     match response {
-        AddressBookResponse::Peers(peers) => assert_eq!(peers.len(), 3),
+        PeerBookResponse::Addrs(peers) => assert_eq!(peers.len(), 3),
         other => panic!("unexpected response variant: {other:?}"),
     }
 
     // Gossiped peers have never responded, so they are not recently live.
-    let response = address_book_service
-        .clone()
-        .oneshot(AddressBookRequest::RecentlyLivePeers)
-        .await
-        .expect("service should be running");
-    match response {
-        AddressBookResponse::Peers(peers) => assert_eq!(peers, vec![]),
-        other => panic!("unexpected response variant: {other:?}"),
-    }
+    assert_eq!(
+        handles.reader.recently_live_peers(Utc::now()),
+        vec![],
+        "gossiped peers should not be recently live",
+    );
 
-    // A `NextReconnectPeer` request returns one of the gossiped peers.
-    let response = address_book_service
+    // A `SelectCandidate` request returns one of the gossiped peers.
+    let response = handles
+        .handle
         .clone()
-        .oneshot(AddressBookRequest::NextReconnectPeer)
+        .oneshot(PeerBookRequest::SelectCandidate)
         .await
-        .expect("service should be running");
+        .expect("actor should be running");
     match response {
-        AddressBookResponse::NextReconnectPeer(Some(peer)) => {
+        PeerBookResponse::Candidate(Some(peer)) => {
             let gossiped: Vec<_> = (0..3).map(|number| gossiped_addr(number).into()).collect();
             assert!(
                 gossiped.contains(&peer.addr),
@@ -134,16 +140,18 @@ async fn address_book_service_serves_all_request_variants() {
     }
 }
 
-/// Test that concurrent `NextReconnectPeer` requests never return the same peer.
+/// Test that concurrent `SelectCandidate` requests never return the same peer.
 ///
-/// Requests are served from a single ordered queue, so each request marks its
-/// candidate as `AttemptPending` before the next request chooses a candidate.
+/// The actor picks the candidate and marks it as `AttemptPending` in the same
+/// actor turn, so each request marks its candidate before the next request
+/// chooses one.
 #[tokio::test]
-async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
+async fn concurrent_select_candidate_requests_return_distinct_peers() {
     let _init_guard = zebra_test::init();
 
+    let local_listener = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let mut address_book = AddressBook::new(
-        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        local_listener,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -165,20 +173,15 @@ async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
         address_book.update(change);
     }
 
-    let (
-        _address_book,
-        _bans_receiver,
-        _change_sender,
-        address_book_service,
-        _address_metrics,
-        _updater_guard,
-    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let handles =
+        AddressBookUpdater::spawn_with_book(address_book, local_listener, MIN_CHANNEL_SIZE);
 
-    // Make all the requests concurrently, using independent service handles.
+    // Make all the requests concurrently, using independent handles.
     let requests = (0..TEST_PEER_COUNT).map(|_| {
-        address_book_service
+        handles
+            .handle
             .clone()
-            .oneshot(AddressBookRequest::NextReconnectPeer)
+            .oneshot(PeerBookRequest::SelectCandidate)
     });
 
     let responses = future::join_all(requests).await;
@@ -186,9 +189,9 @@ async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
     let unique_peers: HashSet<_> = responses
         .into_iter()
         .map(|response| {
-            match response.expect("address book service should serve concurrent requests") {
-                AddressBookResponse::NextReconnectPeer(Some(peer)) => peer.addr,
-                AddressBookResponse::NextReconnectPeer(None) => {
+            match response.expect("the peer book actor should serve concurrent requests") {
+                PeerBookResponse::Candidate(Some(peer)) => peer.addr,
+                PeerBookResponse::Candidate(None) => {
                     panic!("every request should return a candidate peer")
                 }
                 other => panic!("unexpected response variant: {other:?}"),
@@ -199,6 +202,6 @@ async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
     assert_eq!(
         unique_peers.len(),
         TEST_PEER_COUNT,
-        "concurrent NextReconnectPeer requests must never return the same peer",
+        "concurrent SelectCandidate requests must never return the same peer",
     );
 }

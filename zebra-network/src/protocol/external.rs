@@ -1,7 +1,7 @@
 //! Network protocol types and serialization for the Zcash wire format.
 
 /// Node address wire formats.
-mod addr;
+pub(crate) mod addr;
 /// A Tokio codec that transforms an `AsyncRead` into a `Stream` of `Message`s.
 pub mod codec;
 /// Inventory items.
@@ -20,6 +20,7 @@ pub use addr::{canonical_peer_addr, canonical_socket_addr, AddrInVersion};
 pub use codec::Codec;
 pub use inv::{InventoryHash, MAX_TX_INV_IN_SENT_MESSAGE};
 pub use message::{Message, VersionMessage};
+
 pub use types::{Nonce, Version};
 
 pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;

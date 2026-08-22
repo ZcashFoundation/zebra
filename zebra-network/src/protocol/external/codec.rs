@@ -512,6 +512,30 @@ impl Decoder for Codec {
     }
 }
 
+/// Deserializes a length-prefixed user agent string, checking the byte count
+/// against [`MAX_USER_AGENT_LENGTH`] before allocating.
+///
+/// Shared between the legacy `version` message and the v2 `init` record.
+///
+/// # Security
+///
+/// Limit peer set memory usage, Zebra stores an `Arc<VersionMessage>` per
+/// connected peer.
+///
+/// Without this check, we can use `200 peers * 2 MB message size limit = 400 MB`.
+pub(crate) fn zcash_deserialize_user_agent<R: Read>(mut reader: R) -> Result<String, Error> {
+    let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+    let byte_count: usize = byte_count.into();
+
+    if byte_count > MAX_USER_AGENT_LENGTH {
+        return Err(Error::Parse(
+            "user agent too long: must be 256 bytes or less",
+        ));
+    }
+
+    zcash_deserialize_string_external_count(byte_count, &mut reader)
+}
+
 impl Codec {
     /// Deserializes a version message.
     ///
@@ -533,24 +557,7 @@ impl Codec {
             address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
             address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
-            user_agent: {
-                let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
-                let byte_count: usize = byte_count.into();
-
-                // # Security
-                //
-                // Limit peer set memory usage, Zebra stores an `Arc<VersionMessage>` per
-                // connected peer.
-                //
-                // Without this check, we can use `200 peers * 2 MB message size limit = 400 MB`.
-                if byte_count > MAX_USER_AGENT_LENGTH {
-                    return Err(Error::Parse(
-                        "user agent too long: must be 256 bytes or less",
-                    ));
-                }
-
-                zcash_deserialize_string_external_count(byte_count, &mut reader)?
-            },
+            user_agent: zcash_deserialize_user_agent(&mut reader)?,
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8() {
                 Ok(val @ 0..=1) => val == 1,
