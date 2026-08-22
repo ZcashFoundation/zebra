@@ -25,7 +25,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::{BlockField, BlockQuery},
+    request::{BlockField, BlockQuery, ChainSelector, TransactionQuery, UtxoQuery},
     response::{AnyTx, MinedTx, QueriedBlock},
     service::{
         finalized_state::ZebraDb,
@@ -36,7 +36,7 @@ use crate::{
             tree::{ironwood_tree, orchard_tree, sapling_tree},
         },
     },
-    HashOrHeight,
+    BoxError, ContextuallyVerifiedBlock, HashOrHeight,
 };
 
 #[cfg(feature = "indexer")]
@@ -377,23 +377,56 @@ where
 }
 
 /// Returns the [`QueriedBlock`] with the requested [`BlockField`]s of the block
-/// with `hash_or_height`, if it exists in the non-finalized `chain` or finalized `db`.
+/// with `hash_or_height`, if it exists in the selected chain(s).
 ///
 /// Only the requested fields are read: fields that are stored separately from
 /// the block's full transaction data are read without deserializing the whole
 /// block, and the full block is only read when [`BlockField::Block`] or
 /// [`BlockField::AuthDataRoot`] is requested (once, even if both are requested).
-pub fn queried_block<C>(chain: Option<C>, db: &ZebraDb, query: BlockQuery) -> Option<QueriedBlock>
+///
+/// With [`ChainSelector::Best`], all fields are available, resolved against the
+/// best chain. With [`ChainSelector::Any`], only a subset of fields is available
+/// (see [`BlockQuery`]); requesting any other field is an error.
+pub fn queried_block(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    query: BlockQuery,
+) -> Result<Option<QueriedBlock>, BoxError> {
+    let BlockQuery {
+        hash_or_height,
+        chain,
+        fields,
+    } = query;
+
+    match chain {
+        ChainSelector::Best => Ok(queried_best_chain_block(
+            non_finalized_state.best_chain(),
+            db,
+            hash_or_height,
+            &fields,
+        )),
+
+        ChainSelector::Any => {
+            queried_any_chain_block(non_finalized_state, db, hash_or_height, &fields)
+        }
+    }
+}
+
+/// Returns the [`QueriedBlock`] with the requested [`BlockField`]s of the block
+/// with `hash_or_height` in the best non-finalized `chain` or finalized `db`,
+/// or `None` if the block was not found.
+fn queried_best_chain_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+    fields: &std::collections::HashSet<BlockField>,
+) -> Option<QueriedBlock>
 where
     C: AsRef<Chain>,
 {
     // `Option<&C>` is `Copy`, and `&C: AsRef<Chain>` forwards to `C: AsRef<Chain>`,
     // so this can be passed to every field lookup below.
     let chain = chain.as_ref();
-    let BlockQuery {
-        hash_or_height,
-        fields,
-    } = query;
 
     // # Correctness
     //
@@ -468,4 +501,134 @@ where
     }
 
     Some(queried_block)
+}
+
+/// Returns the [`QueriedBlock`] with the requested [`BlockField`]s of the block
+/// with `hash_or_height` in any chain in `non_finalized_state`, or in the finalized `db`.
+///
+/// Returns an error if `fields` contains fields that only have meaning on the
+/// best chain; see [`BlockQuery`] for the fields available with
+/// [`ChainSelector::Any`].
+fn queried_any_chain_block(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+    fields: &std::collections::HashSet<BlockField>,
+) -> Result<Option<QueriedBlock>, BoxError> {
+    const ANY_CHAIN_FIELDS: &[BlockField] = &[
+        BlockField::Hash,
+        BlockField::Height,
+        BlockField::Header,
+        BlockField::Block,
+        BlockField::TransactionIds,
+    ];
+
+    if let Some(unsupported) = fields
+        .iter()
+        .find(|field| !ANY_CHAIN_FIELDS.contains(field))
+    {
+        return Err(format!(
+            "BlockField::{unsupported:?} is not available with ChainSelector::Any"
+        )
+        .into());
+    }
+
+    // Find the block, checking the best chain first, then side chains in order
+    // from most to least work, then the finalized state. Blocks in the finalized
+    // state are always on the best chain.
+    let mut contextual: Option<(ContextuallyVerifiedBlock, bool)> = None;
+
+    for (index, chain) in non_finalized_state.chain_iter().enumerate() {
+        if let Some(block) = chain.block(hash_or_height) {
+            contextual = Some((block.clone(), index == 0));
+            break;
+        }
+    }
+
+    let (hash, height, contextual, in_best_chain) = match contextual {
+        Some((contextual, in_best_chain)) => {
+            let (hash, height) = (contextual.hash, contextual.height);
+            (hash, height, Some(contextual), in_best_chain)
+        }
+        None => {
+            let Some(height) = hash_or_height.height_or_else(|hash| db.height(hash)) else {
+                return Ok(None);
+            };
+            let Some(hash) = hash_or_height.hash_or_else(|height| db.hash(height)) else {
+                return Ok(None);
+            };
+            (hash, height, None, true)
+        }
+    };
+
+    let mut queried_block = QueriedBlock {
+        in_best_chain: Some(in_best_chain),
+        ..QueriedBlock::default()
+    };
+
+    if fields.contains(&BlockField::Hash) {
+        queried_block.hash = Some(hash);
+    }
+
+    if fields.contains(&BlockField::Height) {
+        queried_block.height = Some(height);
+    }
+
+    if fields.contains(&BlockField::Header) {
+        queried_block.header = contextual
+            .as_ref()
+            .map(|contextual| contextual.block.header.clone())
+            .or_else(|| db.block_header(hash.into()));
+    }
+
+    if fields.contains(&BlockField::TransactionIds) {
+        queried_block.transaction_ids = contextual
+            .as_ref()
+            .map(|contextual| contextual.transaction_hashes.clone())
+            .or_else(|| db.transaction_hashes_for_block(hash.into()));
+    }
+
+    if fields.contains(&BlockField::Block) {
+        queried_block.block = contextual
+            .map(|contextual| contextual.block.clone())
+            .or_else(|| db.block(hash.into()));
+    }
+
+    Ok(Some(queried_block))
+}
+
+/// Returns the [`AnyTx`] for the transaction with `hash` in the selected chain(s),
+/// if it exists in the non-finalized state or finalized `db`.
+///
+/// With [`ChainSelector::Best`], the result is always [`AnyTx::Mined`] when found.
+pub fn transaction_query(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    query: TransactionQuery,
+) -> Option<AnyTx> {
+    let TransactionQuery { hash, chain } = query;
+
+    match chain {
+        ChainSelector::Best => {
+            mined_transaction(non_finalized_state.best_chain(), db, hash).map(AnyTx::Mined)
+        }
+        ChainSelector::Any => any_transaction(non_finalized_state.chain_iter(), db, hash),
+    }
+}
+
+/// Returns the [`Utxo`] for the outpoint in the selected chain(s), if it exists
+/// in the non-finalized state or finalized `db`.
+///
+/// See [`UtxoQuery`] for the exact semantics of each chain selector.
+pub fn utxo_query(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    query: UtxoQuery,
+) -> Option<Utxo> {
+    let UtxoQuery { outpoint, chain } = query;
+
+    match chain {
+        ChainSelector::Best => unspent_utxo(non_finalized_state.best_chain(), db, outpoint),
+        ChainSelector::Any => any_utxo(non_finalized_state.clone(), db, outpoint),
+    }
 }

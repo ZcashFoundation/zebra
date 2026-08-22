@@ -1,15 +1,19 @@
 //! Fixed test vectors for the ReadStateService.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use tower::ServiceExt;
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{Block, Hash, Height, MAX_BLOCK_LOCATOR_LENGTH},
     orchard,
     parameters::Network::*,
     serialization::ZcashDeserializeInto,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction,
+    transaction, transparent,
 };
 
 use zebra_test::{
@@ -26,7 +30,9 @@ use crate::{
         non_finalized_state::Chain,
         read::{orchard_subtrees, sapling_subtrees},
     },
-    BlockField, BlockQuery, Config, QueriedBlock, ReadRequest, ReadResponse,
+    AddressField, AddressQuery, AnyTx, BlockField, BlockQuery, ChainSelector, Config,
+    NoteCommitmentSubtrees, NoteCommitmentTreeKind, QueriedAddresses, QueriedBlock, ReadRequest,
+    ReadResponse, TransactionQuery, UtxoQuery,
 };
 
 /// Test that ReadStateService responds correctly when empty.
@@ -476,6 +482,7 @@ async fn block_query_test() -> Result<()> {
         .clone()
         .oneshot(ReadRequest::BlockQuery(BlockQuery {
             hash_or_height: hash.into(),
+            chain: ChainSelector::Best,
             fields: all_fields.clone(),
         }))
         .await
@@ -543,6 +550,7 @@ async fn block_query_test() -> Result<()> {
         .clone()
         .oneshot(ReadRequest::BlockQuery(BlockQuery {
             hash_or_height: height.into(),
+            chain: ChainSelector::Best,
             fields: HashSet::from([BlockField::Header, BlockField::TransactionIds]),
         }))
         .await
@@ -552,7 +560,7 @@ async fn block_query_test() -> Result<()> {
         response,
         ReadResponse::BlockQuery(Some(QueriedBlock {
             header: Some(block.header.clone()),
-            transaction_ids: Some(expected_tx_ids),
+            transaction_ids: Some(expected_tx_ids.clone()),
             ..QueriedBlock::default()
         })),
     );
@@ -562,6 +570,7 @@ async fn block_query_test() -> Result<()> {
         .clone()
         .oneshot(ReadRequest::BlockQuery(BlockQuery {
             hash_or_height: hash.into(),
+            chain: ChainSelector::Best,
             fields: HashSet::new(),
         }))
         .await
@@ -577,12 +586,261 @@ async fn block_query_test() -> Result<()> {
         .clone()
         .oneshot(ReadRequest::BlockQuery(BlockQuery {
             hash_or_height: Hash([0xff; 32]).into(),
+            chain: ChainSelector::Best,
             fields: all_fields,
         }))
         .await
         .expect("request should succeed");
 
     assert_eq!(response, ReadResponse::BlockQuery(None));
+
+    // An any-chain query returns the fields that are available for any chain,
+    // and says whether the block is on the best chain. These blocks are
+    // finalized, so they are always on the best chain.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: hash.into(),
+            chain: ChainSelector::Any,
+            fields: HashSet::from([
+                BlockField::Hash,
+                BlockField::Height,
+                BlockField::Header,
+                BlockField::TransactionIds,
+                BlockField::Block,
+            ]),
+        }))
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(
+        response,
+        ReadResponse::BlockQuery(Some(QueriedBlock {
+            hash: Some(hash),
+            height: Some(height),
+            header: Some(block.header.clone()),
+            transaction_ids: Some(expected_tx_ids),
+            block: Some(block.clone()),
+            in_best_chain: Some(true),
+            ..QueriedBlock::default()
+        })),
+    );
+
+    // Requesting a best-chain-only field with the any-chain selector is an error.
+    let result = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: hash.into(),
+            chain: ChainSelector::Any,
+            fields: HashSet::from([BlockField::Confirmations]),
+        }))
+        .await;
+
+    assert!(
+        matches!(&result, Err(error) if error.to_string().contains("ChainSelector::Any")),
+        "expected an unsupported-field error, got {result:?}"
+    );
+
+    Ok(())
+}
+
+/// Test the generic transaction, UTXO, address, and note commitment subtree queries.
+#[tokio::test(flavor = "multi_thread")]
+async fn generic_queries_test() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        populated_state(blocks.clone(), &Mainnet).await;
+
+    let mid_index = blocks.len() / 2;
+    let block = blocks[mid_index].clone();
+    let transaction = block.transactions[0].clone();
+    let transaction_hash = transaction.hash();
+
+    // A best-chain TransactionQuery matches the legacy Transaction response.
+    let legacy = read_state
+        .clone()
+        .oneshot(ReadRequest::Transaction(transaction_hash))
+        .await
+        .expect("request should succeed");
+    let ReadResponse::Transaction(expected_mined) = legacy else {
+        unreachable!("wrong response to Transaction request")
+    };
+    assert!(
+        expected_mined.is_some(),
+        "transaction should be in the populated state"
+    );
+
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+            hash: transaction_hash,
+            chain: ChainSelector::Best,
+        }))
+        .await
+        .expect("request should succeed");
+    assert_eq!(
+        response,
+        ReadResponse::TransactionQuery(expected_mined.map(AnyTx::Mined))
+    );
+
+    // For these finalized blocks, the any-chain selector finds the same mined result.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+            hash: transaction_hash,
+            chain: ChainSelector::Any,
+        }))
+        .await
+        .expect("request should succeed");
+    assert!(
+        matches!(
+            response,
+            ReadResponse::TransactionQuery(Some(AnyTx::Mined(_)))
+        ),
+        "expected AnyTx::Mined, got {response:?}"
+    );
+
+    // An unknown transaction is not found with either selector.
+    let unknown_hash = transaction::Hash([0xff; 32]);
+    for chain in [ChainSelector::Best, ChainSelector::Any] {
+        let response = read_state
+            .clone()
+            .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+                hash: unknown_hash,
+                chain,
+            }))
+            .await
+            .expect("request should succeed");
+        assert_eq!(response, ReadResponse::TransactionQuery(None));
+    }
+
+    // A best-chain UtxoQuery matches the legacy UnspentBestChainUtxo response.
+    let outpoint = transparent::OutPoint::from_usize(transaction_hash, 0);
+    let legacy = read_state
+        .clone()
+        .oneshot(ReadRequest::UnspentBestChainUtxo(outpoint))
+        .await
+        .expect("request should succeed");
+    let ReadResponse::UnspentBestChainUtxo(expected_utxo) = legacy else {
+        unreachable!("wrong response to UnspentBestChainUtxo request")
+    };
+    assert!(
+        expected_utxo.is_some(),
+        "coinbase output should be unspent in this chain"
+    );
+
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::UtxoQuery(UtxoQuery {
+            outpoint,
+            chain: ChainSelector::Best,
+        }))
+        .await
+        .expect("request should succeed");
+    assert_eq!(response, ReadResponse::UtxoQuery(expected_utxo));
+
+    // The any-chain selector finds the created UTXO too (informationally).
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::UtxoQuery(UtxoQuery {
+            outpoint,
+            chain: ChainSelector::Any,
+        }))
+        .await
+        .expect("request should succeed");
+    assert!(
+        matches!(response, ReadResponse::UtxoQuery(Some(_))),
+        "expected the created UTXO, got {response:?}"
+    );
+
+    // An AddressQuery returns exactly the requested fields.
+    let address: transparent::Address = "t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW"
+        .parse()
+        .expect("test vector address should be valid");
+
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::AddressQuery(AddressQuery {
+            addresses: HashSet::from([address]),
+            height_range: None,
+            fields: HashSet::from([
+                AddressField::Balance,
+                AddressField::TransactionIds,
+                AddressField::Utxos,
+            ]),
+        }))
+        .await
+        .expect("request should succeed");
+
+    // This address has no transactions in the test chain.
+    let ReadResponse::AddressQuery(queried) = response else {
+        unreachable!("wrong response to AddressQuery request")
+    };
+    assert_eq!(queried.balance, Some(Amount::<NonNegative>::zero()));
+    assert_eq!(queried.received, Some(0));
+    assert_eq!(queried.transaction_ids, Some(BTreeMap::new()));
+    assert!(queried.utxos.is_some());
+
+    // A subset query returns only the requested fields.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::AddressQuery(AddressQuery {
+            addresses: HashSet::from([address]),
+            height_range: None,
+            fields: HashSet::from([AddressField::Balance]),
+        }))
+        .await
+        .expect("request should succeed");
+    assert_eq!(
+        response,
+        ReadResponse::AddressQuery(QueriedAddresses {
+            balance: Some(Amount::<NonNegative>::zero()),
+            received: Some(0),
+            ..QueriedAddresses::default()
+        })
+    );
+
+    // NoteCommitmentSubtrees returns the per-kind subtrees (all empty in this
+    // chain of transparent-only blocks). Ironwood reuses the Orchard variant.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::NoteCommitmentSubtrees {
+            kind: NoteCommitmentTreeKind::Sapling,
+            start_index: 0.into(),
+            limit: None,
+        })
+        .await
+        .expect("request should succeed");
+    assert_eq!(
+        response,
+        ReadResponse::NoteCommitmentSubtrees(NoteCommitmentSubtrees::Sapling(BTreeMap::new()))
+    );
+
+    for kind in [
+        NoteCommitmentTreeKind::Orchard,
+        NoteCommitmentTreeKind::Ironwood,
+    ] {
+        let response = read_state
+            .clone()
+            .oneshot(ReadRequest::NoteCommitmentSubtrees {
+                kind,
+                start_index: 0.into(),
+                limit: None,
+            })
+            .await
+            .expect("request should succeed");
+        assert_eq!(
+            response,
+            ReadResponse::NoteCommitmentSubtrees(NoteCommitmentSubtrees::Orchard(BTreeMap::new()))
+        );
+    }
 
     Ok(())
 }

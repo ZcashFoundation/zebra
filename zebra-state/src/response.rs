@@ -388,6 +388,15 @@ pub enum ReadResponse {
     /// or `None` if the block was not found.
     BlockQuery(Option<QueriedBlock>),
 
+    /// Response to [`ReadRequest::TransactionQuery`] with the transaction and its
+    /// location information, or `None` if it was not found.
+    TransactionQuery(Option<AnyTx>),
+
+    /// Response to [`ReadRequest::UtxoQuery`] with the UTXO, or `None` if it was
+    /// not found. See [`UtxoQuery`](crate::request::UtxoQuery) for the exact
+    /// semantics of each chain selector.
+    UtxoQuery(Option<transparent::Utxo>),
+
     /// Response to [`ReadRequest::SpendingTransactionId`],
     /// with an list of transaction hashes in block order,
     /// or `None` if the block was not found.
@@ -446,6 +455,10 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
+    /// Response to [`ReadRequest::NoteCommitmentSubtrees`] with the subtrees of the
+    /// requested tree kind.
+    NoteCommitmentSubtrees(NoteCommitmentSubtrees),
+
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
     /// and the total received funds, including change.
     AddressBalance {
@@ -461,6 +474,9 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
+
+    /// Response to [`ReadRequest::AddressQuery`] with the requested address fields.
+    AddressQuery(QueriedAddresses),
 
     /// Response to [`ReadRequest::CheckBestChainTipNullifiersAndAnchors`].
     ///
@@ -552,6 +568,52 @@ pub struct QueriedBlock {
     /// The block's authorizing data Merkle root, if
     /// [`BlockField::AuthDataRoot`](crate::request::BlockField::AuthDataRoot) was requested.
     pub auth_data_root: Option<block::merkle::AuthDataRoot>,
+
+    /// Whether the block is on the best chain. Always `Some` when the query used
+    /// [`ChainSelector::Any`](crate::request::ChainSelector::Any), and `None`
+    /// otherwise. Blocks in the finalized state are always on the best chain.
+    pub in_best_chain: Option<bool>,
+}
+
+/// Note commitment subtrees of a single tree kind, returned in response to a
+/// [`ReadRequest::NoteCommitmentSubtrees`].
+///
+/// Ironwood reuses the Orchard note type, so Ironwood subtrees are returned in
+/// the `Orchard` variant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoteCommitmentSubtrees {
+    /// Sapling note commitment subtrees.
+    Sapling(BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>),
+
+    /// Orchard or Ironwood note commitment subtrees. Ironwood reuses the Orchard
+    /// note type.
+    Orchard(BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>),
+}
+
+/// Selected data about a set of transparent addresses, returned in response to a
+/// [`ReadRequest::AddressQuery`].
+///
+/// Exactly the fields requested in the query's [`AddressField`](crate::request::AddressField)
+/// set are `Some`; every other field is `None`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QueriedAddresses {
+    /// The total balance of the addresses, if
+    /// [`AddressField::Balance`](crate::request::AddressField::Balance) was requested.
+    pub balance: Option<Amount<NonNegative>>,
+
+    /// The total received funds in zatoshis, including change, if
+    /// [`AddressField::Balance`](crate::request::AddressField::Balance) was requested.
+    pub received: Option<u64>,
+
+    /// The hashes of transactions sent or received by the addresses, in the order
+    /// they appear in blocks, if
+    /// [`AddressField::TransactionIds`](crate::request::AddressField::TransactionIds)
+    /// was requested.
+    pub transaction_ids: Option<BTreeMap<TransactionLocation, transaction::Hash>>,
+
+    /// The UTXOs of the addresses, with their transaction data, if
+    /// [`AddressField::Utxos`](crate::request::AddressField::Utxos) was requested.
+    pub utxos: Option<AddressUtxos>,
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.

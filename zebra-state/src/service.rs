@@ -1516,10 +1516,15 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Generic block field query: reads only the requested fields.
             ReadRequest::BlockQuery(query) => Ok(ReadResponse::BlockQuery(read::queried_block(
-                state.latest_best_chain(),
+                &state.latest_non_finalized_state(),
                 &state.db,
                 query,
-            ))),
+            )?)),
+
+            // Generic transaction query.
+            ReadRequest::TransactionQuery(query) => Ok(ReadResponse::TransactionQuery(
+                read::transaction_query(&state.latest_non_finalized_state(), &state.db, query),
+            )),
 
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(spend) => Ok(ReadResponse::TransactionId(
@@ -1535,6 +1540,13 @@ impl Service<ReadRequest> for ReadStateService {
                 state.latest_non_finalized_state(),
                 &state.db,
                 outpoint,
+            ))),
+
+            // Generic UTXO query.
+            ReadRequest::UtxoQuery(query) => Ok(ReadResponse::UtxoQuery(read::utxo_query(
+                &state.latest_non_finalized_state(),
+                &state.db,
+                query,
             ))),
 
             // Used by the StateService.
@@ -1658,6 +1670,21 @@ impl Service<ReadRequest> for ReadStateService {
                 Ok(ReadResponse::IronwoodSubtrees(ironwood_subtrees))
             }
 
+            // Generic note commitment subtree query.
+            ReadRequest::NoteCommitmentSubtrees {
+                kind,
+                start_index,
+                limit,
+            } => Ok(ReadResponse::NoteCommitmentSubtrees(
+                read::note_commitment_subtrees(
+                    state.latest_best_chain(),
+                    &state.db,
+                    kind,
+                    start_index,
+                    limit,
+                ),
+            )),
+
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
                 let (balance, received) =
@@ -1685,6 +1712,12 @@ impl Service<ReadRequest> for ReadStateService {
                 addresses,
             )
             .map(ReadResponse::AddressUtxos),
+
+            // Generic address query: reads only the requested fields.
+            ReadRequest::AddressQuery(query) => {
+                read::address_query(&state.network, state.latest_best_chain(), &state.db, query)
+                    .map(ReadResponse::AddressQuery)
+            }
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
                 let latest_non_finalized_best_chain = state.latest_best_chain();

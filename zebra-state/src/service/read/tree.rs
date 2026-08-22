@@ -19,6 +19,8 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::NoteCommitmentTreeKind,
+    response::NoteCommitmentSubtrees,
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
     HashOrHeight,
 };
@@ -156,6 +158,52 @@ where
         |chain, range| chain.ironwood_subtrees_in_range(range),
         |range| db.ironwood_subtree_list_by_index_range(range),
     )
+}
+
+/// Returns a list of note commitment subtrees of the requested `kind`, starting at
+/// `start_index`, and returning up to `limit` subtrees.
+///
+/// If there is no `limit`, or the end index would overflow, returns all the
+/// subtrees from `start_index`. If there is no subtree at `start_index`, the
+/// returned list is empty. Otherwise, subtrees are continuous up to the
+/// finalized tip.
+///
+/// Ironwood reuses the Orchard note type, so Ironwood subtrees are returned in
+/// the [`NoteCommitmentSubtrees::Orchard`] variant.
+pub fn note_commitment_subtrees<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    kind: NoteCommitmentTreeKind,
+    start_index: NoteCommitmentSubtreeIndex,
+    limit: Option<NoteCommitmentSubtreeIndex>,
+) -> NoteCommitmentSubtrees
+where
+    C: AsRef<Chain>,
+{
+    let end_index = limit
+        .and_then(|limit| start_index.0.checked_add(limit.0))
+        .map(NoteCommitmentSubtreeIndex);
+
+    match (kind, end_index) {
+        (NoteCommitmentTreeKind::Sapling, Some(end_index)) => {
+            NoteCommitmentSubtrees::Sapling(sapling_subtrees(chain, db, start_index..end_index))
+        }
+        (NoteCommitmentTreeKind::Sapling, None) => {
+            NoteCommitmentSubtrees::Sapling(sapling_subtrees(chain, db, start_index..))
+        }
+        (NoteCommitmentTreeKind::Orchard, Some(end_index)) => {
+            NoteCommitmentSubtrees::Orchard(orchard_subtrees(chain, db, start_index..end_index))
+        }
+        (NoteCommitmentTreeKind::Orchard, None) => {
+            NoteCommitmentSubtrees::Orchard(orchard_subtrees(chain, db, start_index..))
+        }
+        (NoteCommitmentTreeKind::Ironwood, Some(end_index)) => {
+            NoteCommitmentSubtrees::Orchard(ironwood_subtrees(chain, db, start_index..end_index))
+        }
+        (NoteCommitmentTreeKind::Ironwood, None) => {
+            NoteCommitmentSubtrees::Orchard(ironwood_subtrees(chain, db, start_index..))
+        }
+    }
 }
 
 /// Returns a list of [`NoteCommitmentSubtree`]s in the provided range.

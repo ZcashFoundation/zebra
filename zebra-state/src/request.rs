@@ -949,6 +949,28 @@ impl Request {
     }
 }
 
+/// Which chain(s) a read-only query should look at.
+///
+/// The non-finalized state can hold multiple competing chains. `Best` reads only
+/// the best chain; `Any` checks the best chain first, then side chains in order
+/// from most to least work, then the finalized state.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ChainSelector {
+    /// Read from the best chain (and the finalized state it builds on) only.
+    #[default]
+    Best,
+
+    /// Read from any chain: the best chain first, then side chains by decreasing
+    /// work, then the finalized state.
+    ///
+    /// This is useful for reorg-immune reads: a read-only consumer following the
+    /// tip can capture a hash and read its data without spuriously getting `None`
+    /// when a reorg moves that block onto a still-retained side chain. Note that
+    /// fields that only have meaning on the best chain (like confirmations) are
+    /// not available with this selector; see the query type for details.
+    Any,
+}
+
 /// A query for selected fields of a block in the best chain.
 ///
 /// Instead of adding a new [`ReadRequest`] variant for every combination of block
@@ -957,8 +979,15 @@ impl Request {
 /// fields, so queries that don't need a block's full transaction data never pay
 /// for it. See [`BlockField`] for which fields require reading the full block.
 ///
+/// With [`ChainSelector::Best`], all fields are available. With
+/// [`ChainSelector::Any`], only [`BlockField::Hash`], [`BlockField::Height`],
+/// [`BlockField::Header`], [`BlockField::Block`], and [`BlockField::TransactionIds`]
+/// are available, and the returned [`QueriedBlock`](crate::response::QueriedBlock)
+/// has its `in_best_chain` field set; requesting any other field with
+/// [`ChainSelector::Any`] is an error.
+///
 /// Returns [`ReadResponse::BlockQuery(Some(queried_block))`](ReadResponse::BlockQuery)
-/// if the block is in the best chain, with each requested field `Some` in the
+/// if the block is in the chain(s), with each requested field `Some` in the
 /// returned [`QueriedBlock`](crate::response::QueriedBlock), or
 /// [`ReadResponse::BlockQuery(None)`](ReadResponse::BlockQuery) if the block was
 /// not found.
@@ -969,6 +998,9 @@ pub struct BlockQuery {
     /// The [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     pub hash_or_height: HashOrHeight,
+
+    /// The chain(s) to look up the block in.
+    pub chain: ChainSelector,
 
     /// The block data fields to return.
     pub fields: HashSet<BlockField>,
@@ -1029,6 +1061,100 @@ pub enum BlockField {
     /// Requires reading and deserializing all of the block's transaction data.
     /// If [`BlockField::Block`] is also requested, the block data is only read once.
     AuthDataRoot,
+}
+
+/// A query for a transaction by hash.
+///
+/// With [`ChainSelector::Best`], the response is always
+/// [`AnyTx::Mined`](crate::AnyTx) (when found). With [`ChainSelector::Any`], side
+/// chains are checked too, and the response may be [`AnyTx::Side`](crate::AnyTx).
+///
+/// Returns [`ReadResponse::TransactionQuery(Some(tx))`](ReadResponse::TransactionQuery)
+/// if the transaction is in the chain(s), or
+/// [`ReadResponse::TransactionQuery(None)`](ReadResponse::TransactionQuery) otherwise.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TransactionQuery {
+    /// The hash of the transaction to look up.
+    pub hash: transaction::Hash,
+
+    /// The chain(s) to look up the transaction in.
+    pub chain: ChainSelector,
+}
+
+/// A query for a UTXO by outpoint.
+///
+/// With [`ChainSelector::Best`], returns the UTXO only if it is unspent in the
+/// best chain. With [`ChainSelector::Any`], returns the UTXO if it was created in
+/// any chain, regardless of whether it has since been spent; this is purely
+/// informational, there is no guarantee that the UTXO remains unspent in the
+/// best chain.
+///
+/// Returns [`ReadResponse::UtxoQuery(Some(utxo))`](ReadResponse::UtxoQuery) if
+/// the UTXO was found, or [`ReadResponse::UtxoQuery(None)`](ReadResponse::UtxoQuery)
+/// otherwise.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UtxoQuery {
+    /// The outpoint identifying the UTXO to look up.
+    pub outpoint: transparent::OutPoint,
+
+    /// The chain(s) to look up the UTXO in.
+    pub chain: ChainSelector,
+}
+
+/// A query for selected data about a set of transparent addresses.
+///
+/// Like [`BlockQuery`], this lets the caller ask for exactly the data it is
+/// interested in, in a single request: fields that share index scans are only
+/// read once, and fields that were not requested are never computed.
+///
+/// Returns [`ReadResponse::AddressQuery`] with each requested field `Some` in
+/// the returned [`QueriedAddresses`](crate::response::QueriedAddresses).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddressQuery {
+    /// The addresses to query.
+    pub addresses: HashSet<transparent::Address>,
+
+    /// The blocks to search for transactions involving the addresses.
+    ///
+    /// Only used by [`AddressField::TransactionIds`]; defaults to the full
+    /// chain height range when `None`.
+    pub height_range: Option<RangeInclusive<block::Height>>,
+
+    /// The address data fields to return.
+    pub fields: HashSet<AddressField>,
+}
+
+/// An address data field that can be requested in an [`AddressQuery`].
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum AddressField {
+    /// The total balance of the addresses, and the total received funds in
+    /// zatoshis, including change.
+    Balance,
+
+    /// The hashes of transactions sent or received by the addresses, in the
+    /// order they appear in blocks (which ensures they are topologically sorted).
+    TransactionIds,
+
+    /// The UTXOs of the addresses, with their transaction data.
+    Utxos,
+}
+
+/// A note commitment tree kind that can be requested in
+/// [`ReadRequest::NoteCommitmentSubtrees`].
+///
+/// Ironwood reuses the Orchard note type, so its subtrees are returned in the
+/// [`NoteCommitmentSubtrees::Orchard`](crate::response::NoteCommitmentSubtrees)
+/// response variant.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum NoteCommitmentTreeKind {
+    /// The Sapling note commitment tree.
+    Sapling,
+
+    /// The Orchard note commitment tree.
+    Orchard,
+
+    /// The Ironwood note commitment tree. Ironwood reuses the Orchard note type.
+    Ironwood,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1160,6 +1286,13 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockQuery(None)`](ReadResponse::BlockQuery) otherwise.
     BlockQuery(BlockQuery),
 
+    /// Looks up a transaction by hash in the selected chain(s).
+    ///
+    /// Returns [`ReadResponse::TransactionQuery`] with the transaction and its
+    /// location information, or `None` if it was not found.
+    /// See [`TransactionQuery`] for details.
+    TransactionQuery(TransactionQuery),
+
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
     ///
@@ -1174,6 +1307,12 @@ pub enum ReadRequest {
     /// This request is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
     AnyChainUtxo(transparent::OutPoint),
+
+    /// Looks up a UTXO by outpoint in the selected chain(s).
+    ///
+    /// Returns [`ReadResponse::UtxoQuery`] with the UTXO if found, or `None`.
+    /// See [`UtxoQuery`] for the exact semantics of each chain selector.
+    UtxoQuery(UtxoQuery),
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -1328,6 +1467,22 @@ pub enum ReadRequest {
         limit: Option<NoteCommitmentSubtreeIndex>,
     },
 
+    /// Returns a list of note commitment subtrees of the given tree kind, by their
+    /// indexes, starting at `start_index`, and returning up to `limit` subtrees.
+    ///
+    /// Returns [`ReadResponse::NoteCommitmentSubtrees`] with the subtrees for the
+    /// requested [`NoteCommitmentTreeKind`], or an empty list if there is no
+    /// subtree at `start_index`. Ironwood subtrees reuse the Orchard note type
+    /// and are returned in the Orchard response variant.
+    NoteCommitmentSubtrees {
+        /// Which note commitment tree to read subtrees from.
+        kind: NoteCommitmentTreeKind,
+        /// The index of the first 2^16-leaf subtree to return.
+        start_index: NoteCommitmentSubtreeIndex,
+        /// The maximum number of subtree values to return.
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    },
+
     /// Looks up the balance of a set of transparent addresses.
     ///
     /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
@@ -1364,6 +1519,12 @@ pub enum ReadRequest {
     ///
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
+
+    /// Looks up selected data about a set of transparent addresses.
+    ///
+    /// Returns [`ReadResponse::AddressQuery`] with each requested field `Some`.
+    /// See [`AddressQuery`] for details.
+    AddressQuery(AddressQuery),
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
@@ -1449,8 +1610,10 @@ impl ReadRequest {
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::BlockQuery(_) => "block_query",
+            ReadRequest::TransactionQuery(_) => "transaction_query",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
+            ReadRequest::UtxoQuery(_) => "utxo_query",
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
@@ -1461,9 +1624,11 @@ impl ReadRequest {
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
+            ReadRequest::NoteCommitmentSubtrees { .. } => "note_commitment_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
+            ReadRequest::AddressQuery(_) => "address_query",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
