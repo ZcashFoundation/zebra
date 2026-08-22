@@ -426,14 +426,18 @@ Remove the highest height block of the non-finalized portion of a chain.
 
 The `Chain` type implements `Ord` for reorganizing chains. First chains are
 compared by their `partial_cumulative_work`. Ties are then broken by
-comparing `block::Hash`es of the tips of each chain. (This tie-breaker means
-that all `Chain`s in the `NonFinalizedState` must have at least one block.)
+preferring the chain whose tip block was received first (the lowest tip
+receipt sequence, like `zcashd`'s `nSequenceId`), implementing the protocol
+rule that a node prefers the first block it received. The tip `block::Hash`
+remains as a final tie-breaker for blocks without a receipt sequence
+(test-constructed chains). (These tie-breakers mean that all `Chain`s in the
+`NonFinalizedState` must have at least one block.)
 
-**Note**: Unlike `zcashd`, Zebra does not use block arrival times as a
-tie-breaker for the best tip. Since Zebra downloads blocks in parallel,
-download times are not guaranteed to be unique. Using the `block::Hash`
-provides a consistent tip order. (As a side-effect, the tip order is also
-consistent after a node restart, and between nodes.)
+**Note**: Receipt sequences are assigned when a full block is committed to
+the non-finalized state, are node-local, and are not persisted: blocks
+restored from the non-finalized backup after a restart are re-stamped in
+replay order, like `zcashd`'s disk-loaded blocks, which all share
+`nSequenceId` 0.
 
 #### `Default`
 
