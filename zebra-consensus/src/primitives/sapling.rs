@@ -75,19 +75,27 @@ impl fmt::Debug for Verifier {
 impl Drop for Verifier {
     // Flush the current batch in case there are still any pending futures.
     //
-    // Flushing the batch means we need to validate it. This function fires off the validation and
-    // returns immediately, usually before the validation finishes.
+    // Flushing validates the batch, blocking until validation completes so any pending futures
+    // receive their result before the verifier is dropped.
     fn drop(&mut self) {
         let batch = mem::take(&mut self.batch);
         let tx = mem::take(&mut self.tx);
 
-        // The validation is CPU-intensive; do it on a dedicated thread so it does not block.
-        rayon::spawn_fifo(move || {
-            let (spend_vk, output_vk) = SAPLING.verifying_keys();
+        // The validation is CPU-intensive; do it on a dedicated thread. Use `rayon::scope` rather
+        // than `spawn_fifo` so this blocks until validation finishes and the result is sent —
+        // otherwise pending verification could be abandoned when the verifier is dropped on
+        // shutdown. Unlike the other batch verifiers this doesn't wrap the scope in
+        // `block_in_place`: sapling's single-item fallback (`verify_single`) drops a verifier per
+        // item, and the batch is already emptied there, so the flush is a no-op that shouldn't pay
+        // `block_in_place`'s cost or require a multi-threaded runtime. See #10598.
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
-            // Validate the batch and send the result through the channel.
-            let res = batch.validate(&spend_vk, &output_vk, thread_rng());
-            let _ = tx.send(Some(res));
+                // Validate the batch and send the result through the channel.
+                let res = batch.validate(&spend_vk, &output_vk, thread_rng());
+                let _ = tx.send(Some(res));
+            });
         });
     }
 }
