@@ -122,10 +122,13 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -206,11 +209,14 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -275,7 +281,10 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
+/// Tests that `obtain_tips` downloads a singleton unknown hash.
+///
+/// Unknown hashes make a response useful, while a response containing only
+/// known hashes must preserve the responding peer's stall.
 #[tokio::test]
 async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     let (
@@ -331,13 +340,18 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::BlockLocator(vec![block0_hash]));
 
+    let (response_feedback, response_feedback_observer) = zn::FindResponseFeedback::new_for_test();
+
     peer_set
         .expect_request(zn::Request::FindBlocks {
             known_blocks: vec![block0_hash],
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![block1_hash]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block1_hash],
+            feedback: Some(response_feedback),
+        });
 
     // Find the first unknown hash in this peer response.
     state_service
@@ -345,7 +359,26 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    for _ in 1..sync::FANOUT {
+    let (known_response_feedback, known_response_feedback_observer) =
+        zn::FindResponseFeedback::new_for_test();
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block0_hash],
+            feedback: Some(known_response_feedback),
+        });
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    for _ in 2..sync::FANOUT {
         peer_set
             .expect_request(zn::Request::FindBlocks {
                 known_blocks: vec![block0_hash],
@@ -364,6 +397,12 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
+    assert_eq!(
+        known_response_feedback_observer.outcome(),
+        Some(false),
+        "a response containing only known hashes is not useful",
+    );
+
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
         .await
@@ -371,6 +410,12 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
             block1.clone(),
             None,
         ))]));
+
+    assert_eq!(
+        response_feedback_observer.outcome(),
+        Some(true),
+        "an unknown block hash is a useful find blocks response",
+    );
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block1))
@@ -386,9 +431,44 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
+/// Tests that `extend_tips` downloads a singleton unknown hash.
+///
+/// A response is useful only when its expected overlap is followed by an
+/// unknown hash; a mismatched response must preserve the responding peer's stall.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(RejectedExtendTipsResponse::SingleMismatch)
+        .await
+}
+
+/// Tests that `extend_tips` rejects a response containing multiple mismatched hashes.
+#[tokio::test]
+async fn sync_singleton_extend_tips_multiple_mismatches_stall() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(
+        RejectedExtendTipsResponse::MultipleMismatches,
+    )
+    .await
+}
+
+/// Tests that `extend_tips` rejects an expected overlap without a continuation.
+#[tokio::test]
+async fn sync_singleton_extend_tips_no_continuation_stalls() -> Result<(), crate::BoxError> {
+    sync_singleton_extend_tips_with_rejected_response(RejectedExtendTipsResponse::NoContinuation)
+        .await
+}
+
+/// A rejected `extend_tips` response shape used by feedback tests.
+#[derive(Copy, Clone, Debug)]
+enum RejectedExtendTipsResponse {
+    SingleMismatch,
+    MultipleMismatches,
+    NoContinuation,
+}
+
+/// Runs the singleton `extend_tips` test with `rejected_response`.
+async fn sync_singleton_extend_tips_with_rejected_response(
+    rejected_response: RejectedExtendTipsResponse,
+) -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
         _sync_status,
@@ -454,7 +534,10 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![block1_hash, block2_hash]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![block1_hash, block2_hash],
+            feedback: None,
+        });
 
     // Find the first unknown hash in this peer response.
     state_service
@@ -526,18 +609,43 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // ChainSync::extend_tips
 
+    let (response_feedback, response_feedback_observer) = zn::FindResponseFeedback::new_for_test();
+
     peer_set
         .expect_request(zn::Request::FindBlocks {
             known_blocks: vec![block1_hash],
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // expected overlap
-            block3_hash, // singleton unknown hash
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // expected overlap
+                block3_hash, // singleton unknown hash
+            ],
+            feedback: Some(response_feedback),
+        });
 
-    for _ in 1..sync::FANOUT {
+    let (rejected_response_feedback, rejected_response_feedback_observer) =
+        zn::FindResponseFeedback::new_for_test();
+
+    let rejected_hashes = match rejected_response {
+        RejectedExtendTipsResponse::SingleMismatch => vec![block0_hash],
+        RejectedExtendTipsResponse::MultipleMismatches => vec![block0_hash, block1_hash],
+        RejectedExtendTipsResponse::NoContinuation => vec![block2_hash],
+    };
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block1_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes {
+            hashes: rejected_hashes,
+            feedback: Some(rejected_response_feedback),
+        });
+
+    for _ in 2..sync::FANOUT {
         peer_set
             .expect_request(zn::Request::FindBlocks {
                 known_blocks: vec![block1_hash],
@@ -557,6 +665,18 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
             block3.clone(),
             None,
         ))]));
+
+    assert_eq!(
+        rejected_response_feedback_observer.outcome(),
+        Some(false),
+        "a {rejected_response:?} response is not useful",
+    );
+
+    assert_eq!(
+        response_feedback_observer.outcome(),
+        Some(true),
+        "a matching unknown block hash is a useful find blocks response",
+    );
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block3))
@@ -656,12 +776,15 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash,
-            block1_hash,
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash,
+                block1_hash,
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -742,13 +865,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block3_hash,
-            block4_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+                block3_hash,
+                block4_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -951,11 +1077,14 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block982k_hash,
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block982k_hash,
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 982k)
     state_service
@@ -1120,10 +1249,13 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block1_hash, // tip
-            block2_hash, // expected_next
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block1_hash, // tip
+                block2_hash, // expected_next
+            ],
+            feedback: None,
+        });
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -1204,12 +1336,15 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block982k_hash,
-        ]));
+        .respond(zn::Response::BlockHashes {
+            hashes: vec![
+                block2_hash, // tip (discarded - already fetched)
+                block3_hash, // expected_next
+                block4_hash,
+                block982k_hash,
+            ],
+            feedback: None,
+        });
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {

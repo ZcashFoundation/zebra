@@ -12,8 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Requires `zebra-chain` 12.0.0, whose block and transaction types appear in public protocol
   request, response, and inventory APIs.
 
+### Breaking Changes
+
+- `Response::BlockHashes` is now a struct variant with `hashes` and `feedback` fields instead of a
+  tuple variant ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).
+
 ### Added
 
+- `FindResponseFeedback`, an opaque capability that lets response consumers report whether a
+  `FindBlocks` response was useful without exposing the responding peer's identity
+  ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).
 - `seeder.zec.rocks` and `seeder.testnet.zec.rocks` are now default DNS seeders in
   `Config::default()`, for Mainnet and Testnet respectively
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
