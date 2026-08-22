@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: 'Zebra can now serve Zcash light clients directly: a new experimental gRPC server implements the lightwalletd `CompactTxStreamer` interface, enabled by setting `rpc.lightwalletd_listen_addr` in the config ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).'
-time: 2026-08-17T21:14:21.000000000Z

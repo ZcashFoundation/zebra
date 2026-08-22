@@ -5,12 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-### Added
+## [14.0.0] - 2026-08-22
 
-- Added the concrete error type `AwaitUtxoError` for handling failed `AwaitUtxo` state requests
-  [#11205](https://github.com/ZcashFoundation/zebra/pull/11205).
-- Added `MappedRequest` for `AwaitUtxoRequest`
-  [#11205](https://github.com/ZcashFoundation/zebra/pull/11205).
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed the `UpdateWith` implementations for Sprout, Sapling, Orchard and Ironwood shielded data. Nullifier bookkeeping happens directly in `Chain::update_chain_tip_with_block_except_trees` and its revert path, so those implementations were an unused second copy ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+
+### Fixed
+
+- `NonFinalizedBlocksListener` no longer sends blocks that several non-finalized chains share once per chain. Forks share every block below their fork point, so an initial send could queue up to `MAX_NON_FINALIZED_CHAIN_FORKS` copies of a chain up to `MAX_BLOCK_REORG_HEIGHT` blocks long, overflowing the channel buffer ([#11265](https://github.com/ZcashFoundation/zebra/issues/11265)).
 
 ## [13.0.0] - 2026-08-10
 
