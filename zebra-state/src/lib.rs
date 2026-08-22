@@ -47,8 +47,9 @@ pub use error::{
     CommitSemanticallyVerifiedError, DuplicateNullifierError, StateInitError, ValidateContextError,
 };
 pub use request::{
-    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, ReadRequest, Request, SemanticallyVerifiedBlock,
+    AwaitUtxoRequest, BlockField, BlockQuery, CheckpointVerifiedBlock,
+    CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest, ReadRequest, Request,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
@@ -56,7 +57,7 @@ pub use request::Spend;
 
 pub use response::{
     AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, NonFinalizedBlocksListener,
-    ReadResponse, Response,
+    QueriedBlock, ReadResponse, Response,
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},

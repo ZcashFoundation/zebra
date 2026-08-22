@@ -949,6 +949,88 @@ impl Request {
     }
 }
 
+/// A query for selected fields of a block in the best chain.
+///
+/// Instead of adding a new [`ReadRequest`] variant for every combination of block
+/// data a caller might want, `BlockQuery` lets the caller ask for exactly the
+/// fields it is interested in. The state only reads and computes the requested
+/// fields, so queries that don't need a block's full transaction data never pay
+/// for it. See [`BlockField`] for which fields require reading the full block.
+///
+/// Returns [`ReadResponse::BlockQuery(Some(queried_block))`](ReadResponse::BlockQuery)
+/// if the block is in the best chain, with each requested field `Some` in the
+/// returned [`QueriedBlock`](crate::response::QueriedBlock), or
+/// [`ReadResponse::BlockQuery(None)`](ReadResponse::BlockQuery) if the block was
+/// not found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockQuery {
+    /// The block to query, by hash or height.
+    ///
+    /// The [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    pub hash_or_height: HashOrHeight,
+
+    /// The block data fields to return.
+    pub fields: HashSet<BlockField>,
+}
+
+/// A block data field that can be requested in a [`BlockQuery`].
+///
+/// The field granularity matches Zebra's database structure and format: block
+/// headers, transaction IDs, note commitment trees, and block info are each
+/// stored separately from the full transaction data, so they can be read without
+/// deserializing the whole block. Fields that require the full transaction data
+/// say so in their documentation.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum BlockField {
+    /// The hash of the block.
+    Hash,
+
+    /// The height of the block.
+    Height,
+
+    /// The full header of the block. Individual header fields (version, previous
+    /// block hash, merkle root, block commitments, time, nonce, solution, bits)
+    /// are stored as a single blob, so they are queried together via this field.
+    Header,
+
+    /// The hash of the next block after the queried block, if it is on the best chain.
+    NextBlockHash,
+
+    /// The number of confirmations of the block: one plus the depth of the block
+    /// in the best chain.
+    Confirmations,
+
+    /// The hashes of the transactions in the block, in block order. Read from the
+    /// transaction index, without reading the transactions themselves.
+    TransactionIds,
+
+    /// The [`BlockInfo`](zebra_chain::block_info::BlockInfo) after the block:
+    /// chain value pools and the block's serialized size.
+    BlockInfo,
+
+    /// The Sapling note commitment tree as of the block.
+    SaplingTree,
+
+    /// The Orchard note commitment tree as of the block.
+    OrchardTree,
+
+    /// The Ironwood note commitment tree as of the block.
+    IronwoodTree,
+
+    /// The full block, with all its transactions.
+    ///
+    /// Requires reading and deserializing all of the block's transaction data.
+    Block,
+
+    /// The block's authorizing data Merkle root, as defined in
+    /// [ZIP-244](https://zips.z.cash/zip-0244).
+    ///
+    /// Requires reading and deserializing all of the block's transaction data.
+    /// If [`BlockField::Block`] is also requested, the block data is only read once.
+    AuthDataRoot,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
@@ -1064,6 +1146,19 @@ pub enum ReadRequest {
     ///
     /// Returned txids are in the order they appear in the block.
     AnyChainTransactionIdsForBlock(HashOrHeight),
+
+    /// Looks up selected fields of a block in the current best chain.
+    ///
+    /// Only the requested [`BlockField`]s are read and returned: fields that
+    /// don't need the block's full transaction data never pay for reading it.
+    /// See [`BlockQuery`] for details.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::BlockQuery(Some(queried_block))`](ReadResponse::BlockQuery)
+    ///   with each requested field `Some`, if the block is in the best chain;
+    /// * [`ReadResponse::BlockQuery(None)`](ReadResponse::BlockQuery) otherwise.
+    BlockQuery(BlockQuery),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
@@ -1353,6 +1448,7 @@ impl ReadRequest {
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
+            ReadRequest::BlockQuery(_) => "block_query",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",

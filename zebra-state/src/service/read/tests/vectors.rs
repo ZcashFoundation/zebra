@@ -1,6 +1,6 @@
 //! Fixed test vectors for the ReadStateService.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use tower::ServiceExt;
 use zebra_chain::{
@@ -26,7 +26,7 @@ use crate::{
         non_finalized_state::Chain,
         read::{orchard_subtrees, sapling_subtrees},
     },
-    Config, ReadRequest, ReadResponse,
+    BlockField, BlockQuery, Config, QueriedBlock, ReadRequest, ReadResponse,
 };
 
 /// Test that ReadStateService responds correctly when empty.
@@ -431,6 +431,160 @@ fn new_ephemeral_db() -> ZebraDb {
         false,
     )
     .expect("opening an ephemeral database should succeed")
+}
+
+/// Test that `BlockQuery` returns exactly the requested fields, and that the
+/// field values match the equivalent dedicated read requests.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_query_test() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        populated_state(blocks.clone(), &Mainnet).await;
+
+    let tip_height = Height(blocks.len() as u32 - 1);
+
+    let all_fields = HashSet::from([
+        BlockField::Hash,
+        BlockField::Height,
+        BlockField::Header,
+        BlockField::NextBlockHash,
+        BlockField::Confirmations,
+        BlockField::TransactionIds,
+        BlockField::BlockInfo,
+        BlockField::SaplingTree,
+        BlockField::OrchardTree,
+        BlockField::IronwoodTree,
+        BlockField::Block,
+        BlockField::AuthDataRoot,
+    ]);
+
+    // Query every field for a mid-chain block, so `next_block_hash` exists.
+    let mid_index = blocks.len() / 2;
+    let block = blocks[mid_index].clone();
+    let next_block_hash = blocks[mid_index + 1].hash();
+    let height = block.coinbase_height().unwrap();
+    let hash = block.hash();
+
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: hash.into(),
+            fields: all_fields.clone(),
+        }))
+        .await
+        .expect("request should succeed");
+
+    let ReadResponse::BlockQuery(Some(queried)) = response else {
+        panic!("expected BlockQuery(Some(_)), got {response:?}");
+    };
+
+    let expected_tx_ids: Arc<[transaction::Hash]> =
+        block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    assert_eq!(queried.hash, Some(hash));
+    assert_eq!(queried.height, Some(height));
+    assert_eq!(queried.header, Some(block.header.clone()));
+    assert_eq!(queried.next_block_hash, Some(next_block_hash));
+    assert_eq!(queried.confirmations, Some(1 + tip_height.0 - height.0));
+    assert_eq!(
+        queried.transaction_ids,
+        Some(expected_tx_ids.clone()),
+        "transaction IDs should be in block order"
+    );
+    assert!(
+        queried.block_info.is_some(),
+        "block info should exist for a committed block"
+    );
+    assert_eq!(queried.block, Some(block.clone()));
+    assert_eq!(queried.auth_data_root, Some(block.auth_data_root()));
+
+    // These mainnet test blocks are before Sapling activation, but Zebra stores
+    // (empty) note commitment trees for every block. Check the queried trees
+    // against the dedicated tree requests instead of hardcoding them.
+    let expected_sapling = read_state
+        .clone()
+        .oneshot(ReadRequest::SaplingTree(hash.into()))
+        .await
+        .expect("request should succeed");
+    let ReadResponse::SaplingTree(expected_sapling) = expected_sapling else {
+        unreachable!("wrong response to SaplingTree request")
+    };
+    assert_eq!(queried.sapling_tree, expected_sapling);
+
+    let expected_orchard = read_state
+        .clone()
+        .oneshot(ReadRequest::OrchardTree(hash.into()))
+        .await
+        .expect("request should succeed");
+    let ReadResponse::OrchardTree(expected_orchard) = expected_orchard else {
+        unreachable!("wrong response to OrchardTree request")
+    };
+    assert_eq!(queried.orchard_tree, expected_orchard);
+
+    let expected_ironwood = read_state
+        .clone()
+        .oneshot(ReadRequest::IronwoodTree(hash.into()))
+        .await
+        .expect("request should succeed");
+    let ReadResponse::IronwoodTree(expected_ironwood) = expected_ironwood else {
+        unreachable!("wrong response to IronwoodTree request")
+    };
+    assert_eq!(queried.ironwood_tree, expected_ironwood);
+
+    // A query for a subset of fields returns exactly those fields, by height too.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: height.into(),
+            fields: HashSet::from([BlockField::Header, BlockField::TransactionIds]),
+        }))
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(
+        response,
+        ReadResponse::BlockQuery(Some(QueriedBlock {
+            header: Some(block.header.clone()),
+            transaction_ids: Some(expected_tx_ids),
+            ..QueriedBlock::default()
+        })),
+    );
+
+    // A query with no fields only checks that the block exists, and resolves it.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: hash.into(),
+            fields: HashSet::new(),
+        }))
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(
+        response,
+        ReadResponse::BlockQuery(Some(QueriedBlock::default()))
+    );
+
+    // A query for an unknown block returns None.
+    let response = read_state
+        .clone()
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: Hash([0xff; 32]).into(),
+            fields: all_fields,
+        }))
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response, ReadResponse::BlockQuery(None));
+
+    Ok(())
 }
 
 /// Test that AnyChainBlock can find blocks by hash and height.

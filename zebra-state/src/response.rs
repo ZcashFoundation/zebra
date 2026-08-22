@@ -384,6 +384,10 @@ pub enum ReadResponse {
     /// in the best chain, or `None` if the block was not found.
     AnyChainTransactionIdsForBlock(Option<(Arc<[transaction::Hash]>, bool)>),
 
+    /// Response to [`ReadRequest::BlockQuery`] with the requested block fields,
+    /// or `None` if the block was not found.
+    BlockQuery(Option<QueriedBlock>),
+
     /// Response to [`ReadRequest::SpendingTransactionId`],
     /// with an list of transaction hashes in block order,
     /// or `None` if the block was not found.
@@ -488,6 +492,66 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::IsTransparentOutputSpent`]
     IsTransparentOutputSpent(bool),
+}
+
+/// Selected fields of a block in the best chain, returned in response to a
+/// [`ReadRequest::BlockQuery`].
+///
+/// Exactly the fields requested in the query's [`BlockField`](crate::request::BlockField)
+/// set are `Some`; every other field is `None`. The field granularity matches
+/// Zebra's database structure: fields that are stored separately from the full
+/// transaction data are read without deserializing the whole block.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QueriedBlock {
+    /// The hash of the block, if [`BlockField::Hash`](crate::request::BlockField::Hash)
+    /// was requested.
+    pub hash: Option<block::Hash>,
+
+    /// The height of the block, if [`BlockField::Height`](crate::request::BlockField::Height)
+    /// was requested.
+    pub height: Option<block::Height>,
+
+    /// The header of the block, if [`BlockField::Header`](crate::request::BlockField::Header)
+    /// was requested.
+    pub header: Option<Arc<block::Header>>,
+
+    /// The hash of the next block on the best chain, if
+    /// [`BlockField::NextBlockHash`](crate::request::BlockField::NextBlockHash) was requested.
+    /// `None` if the queried block is the best chain tip.
+    pub next_block_hash: Option<block::Hash>,
+
+    /// The number of confirmations of the block, if
+    /// [`BlockField::Confirmations`](crate::request::BlockField::Confirmations) was requested.
+    pub confirmations: Option<u32>,
+
+    /// The hashes of the transactions in the block, in block order, if
+    /// [`BlockField::TransactionIds`](crate::request::BlockField::TransactionIds) was requested.
+    pub transaction_ids: Option<Arc<[transaction::Hash]>>,
+
+    /// The [`BlockInfo`] after the block, if
+    /// [`BlockField::BlockInfo`](crate::request::BlockField::BlockInfo) was requested.
+    pub block_info: Option<BlockInfo>,
+
+    /// The Sapling note commitment tree as of the block, if
+    /// [`BlockField::SaplingTree`](crate::request::BlockField::SaplingTree) was requested.
+    pub sapling_tree: Option<Arc<sapling::tree::NoteCommitmentTree>>,
+
+    /// The Orchard note commitment tree as of the block, if
+    /// [`BlockField::OrchardTree`](crate::request::BlockField::OrchardTree) was requested.
+    pub orchard_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+
+    /// The Ironwood note commitment tree as of the block, if
+    /// [`BlockField::IronwoodTree`](crate::request::BlockField::IronwoodTree) was requested.
+    /// Ironwood reuses the Orchard note type.
+    pub ironwood_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+
+    /// The full block with all its transactions, if
+    /// [`BlockField::Block`](crate::request::BlockField::Block) was requested.
+    pub block: Option<Arc<Block>>,
+
+    /// The block's authorizing data Merkle root, if
+    /// [`BlockField::AuthDataRoot`](crate::request::BlockField::AuthDataRoot) was requested.
+    pub auth_data_root: Option<block::merkle::AuthDataRoot>,
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.

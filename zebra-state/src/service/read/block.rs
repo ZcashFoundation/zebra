@@ -25,11 +25,16 @@ use zebra_chain::{
 };
 
 use crate::{
-    response::{AnyTx, MinedTx},
+    request::{BlockField, BlockQuery},
+    response::{AnyTx, MinedTx, QueriedBlock},
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::tip,
+        read::{
+            find::{hash_by_height, height_by_hash},
+            tip,
+            tree::{ironwood_tree, orchard_tree, sapling_tree},
+        },
     },
     HashOrHeight,
 };
@@ -369,4 +374,98 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().block_info(hash_or_height))
         .or_else(|| db.block_info(hash_or_height))
+}
+
+/// Returns the [`QueriedBlock`] with the requested [`BlockField`]s of the block
+/// with `hash_or_height`, if it exists in the non-finalized `chain` or finalized `db`.
+///
+/// Only the requested fields are read: fields that are stored separately from
+/// the block's full transaction data are read without deserializing the whole
+/// block, and the full block is only read when [`BlockField::Block`] or
+/// [`BlockField::AuthDataRoot`] is requested (once, even if both are requested).
+pub fn queried_block<C>(chain: Option<C>, db: &ZebraDb, query: BlockQuery) -> Option<QueriedBlock>
+where
+    C: AsRef<Chain>,
+{
+    // `Option<&C>` is `Copy`, and `&C: AsRef<Chain>` forwards to `C: AsRef<Chain>`,
+    // so this can be passed to every field lookup below.
+    let chain = chain.as_ref();
+    let BlockQuery {
+        hash_or_height,
+        fields,
+    } = query;
+
+    // # Correctness
+    //
+    // Resolve the block's hash and height before reading any fields: every field
+    // is keyed by one of them, and this also checks that the block is in the
+    // chain at all. Resolving both up front also means every field below is read
+    // for the same block, even if `hash_or_height` is a height and a reorg
+    // happens between the field reads.
+    let height = hash_or_height.height_or_else(|hash| height_by_hash(chain, db, hash))?;
+    let hash = hash_or_height.hash_or_else(|height| hash_by_height(chain, db, height))?;
+
+    let mut queried_block = QueriedBlock::default();
+
+    if fields.contains(&BlockField::Hash) {
+        queried_block.hash = Some(hash);
+    }
+
+    if fields.contains(&BlockField::Height) {
+        queried_block.height = Some(height);
+    }
+
+    if fields.contains(&BlockField::Header) {
+        queried_block.header = block_header(chain, db, hash.into());
+    }
+
+    if fields.contains(&BlockField::NextBlockHash) {
+        queried_block.next_block_hash = height
+            .next()
+            .ok()
+            .and_then(|next_height| hash_by_height(chain, db, next_height));
+    }
+
+    if fields.contains(&BlockField::Confirmations) {
+        queried_block.confirmations =
+            tip(chain, db).map(|(tip_height, _tip_hash)| 1 + tip_height.0 - height.0);
+    }
+
+    if fields.contains(&BlockField::TransactionIds) {
+        queried_block.transaction_ids = transaction_hashes_for_block(chain, db, hash.into());
+    }
+
+    if fields.contains(&BlockField::BlockInfo) {
+        queried_block.block_info = block_info(chain, db, hash.into());
+    }
+
+    if fields.contains(&BlockField::SaplingTree) {
+        queried_block.sapling_tree = sapling_tree(chain, db, hash.into());
+    }
+
+    if fields.contains(&BlockField::OrchardTree) {
+        queried_block.orchard_tree = orchard_tree(chain, db, hash.into());
+    }
+
+    if fields.contains(&BlockField::IronwoodTree) {
+        queried_block.ironwood_tree = ironwood_tree(chain, db, hash.into());
+    }
+
+    // # Performance
+    //
+    // Read the full block data from disk at most once, even if multiple fields
+    // that need it were requested.
+    if fields.contains(&BlockField::Block) || fields.contains(&BlockField::AuthDataRoot) {
+        if let Some(full_block) = block(chain, db, hash.into()) {
+            if fields.contains(&BlockField::AuthDataRoot) {
+                queried_block.auth_data_root = Some(full_block.auth_data_root());
+            }
+
+            if fields.contains(&BlockField::Block) {
+                queried_block.block = Some(full_block);
+            }
+        }
+    }
+
+    Some(queried_block)
 }

@@ -1514,6 +1514,13 @@ impl Service<ReadRequest> for ReadStateService {
                 ))
             }
 
+            // Generic block field query: reads only the requested fields.
+            ReadRequest::BlockQuery(query) => Ok(ReadResponse::BlockQuery(read::queried_block(
+                state.latest_best_chain(),
+                &state.db,
+                query,
+            ))),
+
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(spend) => Ok(ReadResponse::TransactionId(
                 read::spending_transaction_hash(state.latest_best_chain(), &state.db, spend),

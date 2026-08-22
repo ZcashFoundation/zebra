@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Add `ReadRequest::BlockQuery`, a generic block query that lets callers select exactly the block data they need via a `HashSet<BlockField>`: hash, height, header, next block hash, confirmations, transaction IDs, block info, note commitment trees, the full block, and the auth data root. The state only reads and computes the requested fields — block headers, transaction IDs, trees, and block info are each stored separately from the full transaction data, so queries that don''t ask for `BlockField::Block` or `BlockField::AuthDataRoot` never pay for deserializing the whole block. Requested fields are returned in a `QueriedBlock` via `ReadResponse::BlockQuery`, with exactly the requested fields set to `Some` ([#8390](https://github.com/ZcashFoundation/zebra/issues/8390)).'
+time: 2026-08-22T00:51:03.000000000Z
