@@ -14,6 +14,7 @@
 
 use core::fmt;
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -301,20 +302,29 @@ where
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
                 let checkpoint_state_service = checkpoint_state_service.clone();
-                let request = zebra_state::Request::Read(
-                    zebra_state::ReadRequest::BestChainBlockHash(*height),
-                );
+                let request = zebra_state::Request::Read(zebra_state::ReadRequest::BlockQuery(
+                    zebra_state::BlockQuery {
+                        hash_or_height: (*height).into(),
+                        chain: zebra_state::ChainSelector::Best,
+                        fields: HashSet::from([zebra_state::BlockField::Hash]),
+                    },
+                ));
 
                 match checkpoint_state_service.oneshot(request).await {
-                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockHash(
-                        Some(state_hash),
+                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockQuery(
+                        Some(queried_block),
                     ))) => assert_eq!(
-                        *checkpoint_hash, state_hash,
+                        *checkpoint_hash,
+                        queried_block
+                            .hash
+                            .expect("the Hash field was requested in the block query"),
                         "invalid block in state: a previous Zebra instance followed an \
                          incorrect chain. Delete and re-sync your state to use the best chain"
                     ),
 
-                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockHash(None))) => {
+                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockQuery(
+                        None,
+                    ))) => {
                         if checkpoint_sync {
                             tracing::info!(
                                 "state is not fully synced yet, remaining checkpoints will be \

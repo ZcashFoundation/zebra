@@ -154,16 +154,25 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 
     // We hold the real parent, block 1, so the body's real height is 2, not the 1 it claims.
     state
-        .expect_request(zs::ReadRequest::BlockHeader(
-            block.header.previous_block_hash.into(),
-        ))
+        .expect_request(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+            hash_or_height: block.header.previous_block_hash.into(),
+            chain: zs::ChainSelector::Best,
+            fields: [
+                zs::BlockField::Header,
+                zs::BlockField::Hash,
+                zs::BlockField::Height,
+                zs::BlockField::NextBlockHash,
+            ]
+            .into(),
+        }))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
-            header: block_1.header.clone(),
-            hash: block_1.hash(),
-            height: Height(1),
+        .respond(zs::ReadResponse::BlockQuery(Some(zs::QueriedBlock {
+            header: Some(block_1.header.clone()),
+            hash: Some(block_1.hash()),
+            height: Some(Height(1)),
             next_block_hash: Some(hash),
-        });
+            ..Default::default()
+        })));
 
     let error = downloads
         .next()
@@ -226,16 +235,25 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
         "block 1's parent is genesis"
     );
     state
-        .expect_request(zs::ReadRequest::BlockHeader(
-            block.header.previous_block_hash.into(),
-        ))
+        .expect_request(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+            hash_or_height: block.header.previous_block_hash.into(),
+            chain: zs::ChainSelector::Best,
+            fields: [
+                zs::BlockField::Header,
+                zs::BlockField::Hash,
+                zs::BlockField::Height,
+                zs::BlockField::NextBlockHash,
+            ]
+            .into(),
+        }))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
-            header: genesis.header.clone(),
-            hash: genesis.hash(),
-            height: Height(0),
+        .respond(zs::ReadResponse::BlockQuery(Some(zs::QueriedBlock {
+            header: Some(genesis.header.clone()),
+            hash: Some(genesis.hash()),
+            height: Some(Height(0)),
             next_block_hash: Some(hash),
-        });
+            ..Default::default()
+        })));
 
     let error = downloads
         .next()
@@ -284,9 +302,17 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
         ))]));
 
     state
-        .expect_request(zs::ReadRequest::BlockHeader(
-            block.header.previous_block_hash.into(),
-        ))
+        .expect_request(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+            hash_or_height: block.header.previous_block_hash.into(),
+            chain: zs::ChainSelector::Best,
+            fields: [
+                zs::BlockField::Header,
+                zs::BlockField::Hash,
+                zs::BlockField::Height,
+                zs::BlockField::NextBlockHash,
+            ]
+            .into(),
+        }))
         .await
         .respond(Err(zn::BoxError::from("block not found in any chain")));
 

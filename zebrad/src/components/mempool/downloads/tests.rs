@@ -98,8 +98,8 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         })),
         BoxCloneService::new(service_fn(|request| async move {
             match request {
-                zs::Request::Read(zs::ReadRequest::Transaction(_)) => {
-                    Ok(zs::Response::Read(zs::ReadResponse::Transaction(None)))
+                zs::Request::Read(zs::ReadRequest::TransactionQuery(_)) => {
+                    Ok(zs::Response::Read(zs::ReadResponse::TransactionQuery(None)))
                 }
                 zs::Request::Read(zs::ReadRequest::Tip) => {
                     Ok(zs::Response::Read(zs::ReadResponse::Tip(None)))

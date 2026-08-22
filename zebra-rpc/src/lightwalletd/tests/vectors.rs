@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool::{self, MempoolChange, MempoolTxSubscriber};
-use zebra_state::{ReadRequest, ReadResponse};
+use zebra_state::{BlockField, QueriedBlock, ReadRequest, ReadResponse};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
@@ -67,9 +67,17 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
     });
 
     read_state
-        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                ReadRequest::BlockQuery(query) if query.fields.contains(&BlockField::Block)
+            )
+        })
         .await
-        .respond(ReadResponse::Block(Some(block)));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block: Some(block),
+            ..QueriedBlock::default()
+        })));
 
     // The trees are read concurrently, so answer whichever arrives first. Both are
     // missing here. This block is pre-NU6.3, so no Ironwood read is issued.
@@ -78,17 +86,14 @@ async fn get_block_errors_when_a_commitment_tree_is_missing() -> Result<()> {
             .expect_request_that(|request| {
                 matches!(
                     request,
-                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                    ReadRequest::BlockQuery(query)
+                        if query.fields.contains(&BlockField::SaplingTree)
+                            || query.fields.contains(&BlockField::OrchardTree)
                 )
             })
             .await;
 
-        let response = match handler.request() {
-            ReadRequest::SaplingTree(_) => ReadResponse::SaplingTree(None),
-            _ => ReadResponse::OrchardTree(None),
-        };
-
-        handler.respond(response);
+        handler.respond(ReadResponse::BlockQuery(None));
     }
 
     let status = request_task
@@ -128,9 +133,17 @@ async fn get_block_nullifiers_does_not_read_the_commitment_trees() -> Result<()>
     });
 
     read_state
-        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                ReadRequest::BlockQuery(query) if query.fields.contains(&BlockField::Block)
+            )
+        })
         .await
-        .respond(ReadResponse::Block(Some(block)));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block: Some(block),
+            ..QueriedBlock::default()
+        })));
 
     // Only the block was answered: if the trees were still read, this would hang.
     let compact_block = request_task
@@ -178,9 +191,17 @@ async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<
     });
 
     read_state
-        .expect_request_that(|request| matches!(request, ReadRequest::Block(_)))
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                ReadRequest::BlockQuery(query) if query.fields.contains(&BlockField::Block)
+            )
+        })
         .await
-        .respond(ReadResponse::Block(Some(block)));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block: Some(block),
+            ..QueriedBlock::default()
+        })));
 
     // Sapling and Orchard have trees at this height; Ironwood does not exist yet, so
     // only two reads arrive. If an Ironwood read were still issued, this would hang.
@@ -189,16 +210,24 @@ async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<
             .expect_request_that(|request| {
                 matches!(
                     request,
-                    ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                    ReadRequest::BlockQuery(query)
+                        if query.fields.contains(&BlockField::SaplingTree)
+                            || query.fields.contains(&BlockField::OrchardTree)
                 )
             })
             .await;
 
         let response = match handler.request() {
-            ReadRequest::SaplingTree(_) => {
-                ReadResponse::SaplingTree(Some(Arc::new(Default::default())))
+            ReadRequest::BlockQuery(query) if query.fields.contains(&BlockField::SaplingTree) => {
+                ReadResponse::BlockQuery(Some(QueriedBlock {
+                    sapling_tree: Some(Arc::new(Default::default())),
+                    ..QueriedBlock::default()
+                }))
             }
-            _ => ReadResponse::OrchardTree(Some(Arc::new(Default::default()))),
+            _ => ReadResponse::BlockQuery(Some(QueriedBlock {
+                orchard_tree: Some(Arc::new(Default::default())),
+                ..QueriedBlock::default()
+            })),
         };
 
         handler.respond(response);

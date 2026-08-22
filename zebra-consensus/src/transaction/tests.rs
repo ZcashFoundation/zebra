@@ -496,11 +496,14 @@ async fn mempool_request_with_missing_input_is_rejected() {
 
         let state_req = state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .map(|responder| {
                 responder.respond(zebra_state::Response::Read(
-                    zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+                    zebra_state::ReadResponse::UtxoQuery(None),
                 ))
             });
 
@@ -549,12 +552,15 @@ async fn mempool_request_with_present_input_is_accepted() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -636,12 +642,15 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
 
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -713,12 +722,15 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -791,12 +803,15 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -876,12 +891,15 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -967,12 +985,15 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+                zebra_state::ReadResponse::UtxoQuery(None),
             ));
 
         state
@@ -1103,12 +1124,15 @@ async fn block_verification_does_not_use_mempool_verified_state() {
 
         state_clone
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+                zebra_state::ReadResponse::UtxoQuery(None),
             ));
 
         state_clone
@@ -1291,19 +1315,22 @@ async fn mempool_request_with_immature_spend_is_rejected() {
 
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
-                    known_utxos.get(&input_outpoint).map(|utxo| {
+                zebra_state::ReadResponse::UtxoQuery(known_utxos.get(&input_outpoint).map(
+                    |utxo| {
                         let mut utxo = utxo.utxo.clone();
                         utxo.height = coinbase_spend_height;
                         utxo.from_coinbase = true;
                         utxo
-                    }),
-                ),
+                    },
+                )),
             ));
 
         state
@@ -1417,11 +1444,14 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
 
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(Some(utxo)),
+                zebra_state::ReadResponse::UtxoQuery(Some(utxo)),
             ));
 
         state
@@ -1489,12 +1519,15 @@ async fn state_error_converted_correctly() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -3336,12 +3369,15 @@ async fn orchard_disabling_soft_fork_accepts_non_orchard_transactions() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -3589,11 +3625,14 @@ async fn v5_consensus_branch_ids() {
             let state_req = async {
                 state
                     .expect_request(zebra_state::Request::Read(
-                        zebra_state::ReadRequest::UnspentBestChainUtxo(outpoint),
+                        zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                            outpoint,
+                            chain: zebra_state::ChainSelector::Best,
+                        }),
                     ))
                     .map(|r| {
                         r.respond(zebra_state::Response::Read(
-                            zebra_state::ReadResponse::UnspentBestChainUtxo(
+                            zebra_state::ReadResponse::UtxoQuery(
                                 known_utxos.get(&outpoint).map(|utxo| utxo.utxo.clone()),
                             ),
                         ))
@@ -4268,12 +4307,15 @@ async fn mempool_zip317_error() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),
@@ -4336,12 +4378,15 @@ async fn mempool_zip317_ok() {
     tokio::spawn(async move {
         state
             .expect_request(zebra_state::Request::Read(
-                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+                zebra_state::ReadRequest::UtxoQuery(zebra_state::UtxoQuery {
+                    outpoint: input_outpoint,
+                    chain: zebra_state::ChainSelector::Best,
+                }),
             ))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::Read(
-                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                zebra_state::ReadResponse::UtxoQuery(
                     known_utxos
                         .get(&input_outpoint)
                         .map(|utxo| utxo.utxo.clone()),

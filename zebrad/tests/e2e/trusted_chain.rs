@@ -13,7 +13,7 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{methods::GetBlockHashResponse, server::OPENED_RPC_ENDPOINT_MSG};
-use zebra_state::{ReadResponse, Response};
+use zebra_state::{BlockField, BlockQuery, ChainSelector, ReadResponse, Response};
 use zebra_test::{args, net::random_known_port, prelude::*};
 
 use crate::common::{
@@ -109,9 +109,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             "Zebra should have the same block"
         );
 
-        let ReadResponse::Block(read_state_block) = read_state
+        let ReadResponse::BlockQuery(read_state_block) = read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .oneshot(zebra_state::ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: height.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            }))
             .await
             .map_err(|err| eyre!(err))?
         else {
@@ -120,7 +124,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         assert_eq!(
             zebra_block,
-            read_state_block.expect("read state should have the block"),
+            read_state_block
+                .and_then(|queried_block| queried_block.block)
+                .expect("read state should have the block"),
             "read state should have the same block"
         );
     }
@@ -242,9 +248,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             "Zebra should have the same block"
         );
 
-        let ReadResponse::Block(read_state_block) = read_state
+        let ReadResponse::BlockQuery(read_state_block) = read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .oneshot(zebra_state::ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: height.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            }))
             .await
             .map_err(|err| eyre!(err))?
         else {
@@ -253,7 +263,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         assert_eq!(
             zebra_block,
-            read_state_block.expect("read state should have the block"),
+            read_state_block
+                .and_then(|queried_block| queried_block.block)
+                .expect("read state should have the block"),
             "read state should have the same block"
         );
     }

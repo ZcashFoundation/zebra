@@ -219,38 +219,103 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
     }
 
     fn call(&mut self, req: zebra_state::ReadRequest) -> Self::Future {
+        use std::collections::HashSet;
         use zebra_chain::amount::Amount;
         use zebra_state::ReadRequest as R;
         use zebra_state::ReadResponse as Resp;
+        use zebra_state::{
+            AddressField, AddressQuery, BlockField, BlockQuery, ChainSelector, QueriedAddresses,
+            TransactionQuery, UtxoQuery,
+        };
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
-            R::Block(_) => Ok(Resp::Block(None)),
-            R::AnyChainBlock(_) => Ok(Resp::Block(None)),
-            R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
-            R::Transaction(_) => Ok(Resp::Transaction(None)),
-            R::AnyChainTransaction(_) => Ok(Resp::AnyChainTransaction(None)),
-            R::TransactionIdsForBlock(_) => Ok(Resp::TransactionIdsForBlock(None)),
-            R::AnyChainTransactionIdsForBlock(_) => {
-                Ok(Resp::AnyChainTransactionIdsForBlock(None))
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Any,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block, BlockField::BlockInfo]) => {
+                Ok(Resp::BlockQuery(None))
             }
-            R::UnspentBestChainUtxo(_) => Ok(Resp::UnspentBestChainUtxo(None)),
-            R::AnyChainUtxo(_) => Ok(Resp::AnyChainUtxo(None)),
-            R::Depth(_) => Ok(Resp::Depth(None)),
+            R::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Best,
+                ..
+            }) => Ok(Resp::TransactionQuery(None)),
+            R::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Any,
+                ..
+            }) => Ok(Resp::TransactionQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::TransactionIds]) => {
+                Ok(Resp::BlockQuery(None))
+            }
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Any,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::TransactionIds]) => {
+                Ok(Resp::BlockQuery(None))
+            }
+            R::UtxoQuery(UtxoQuery {
+                chain: ChainSelector::Best,
+                ..
+            }) => Ok(Resp::UtxoQuery(None)),
+            R::UtxoQuery(UtxoQuery {
+                chain: ChainSelector::Any,
+                ..
+            }) => Ok(Resp::UtxoQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Confirmations]) => {
+                Ok(Resp::BlockQuery(None))
+            }
             R::BlockLocator => Ok(Resp::BlockLocator(Vec::new())),
             R::FindBlockHashes { .. } => Ok(Resp::BlockHashes(Vec::new())),
             R::FindBlockHeaders { .. } => Ok(Resp::BlockHeaders(Vec::new())),
-            R::AddressBalance(_) => Ok(Resp::AddressBalance {
-                balance: Amount::zero(),
-                received: 0,
-            }),
-            R::TransactionIdsByAddresses { .. } => {
-                Ok(Resp::AddressesTransactionIds(Default::default()))
+            R::AddressQuery(AddressQuery { fields, .. })
+                if fields == HashSet::from([AddressField::Balance]) =>
+            {
+                Ok(Resp::AddressQuery(QueriedAddresses {
+                    balance: Some(Amount::zero()),
+                    received: Some(0),
+                    ..Default::default()
+                }))
+            }
+            R::AddressQuery(AddressQuery { fields, .. })
+                if fields == HashSet::from([AddressField::TransactionIds]) =>
+            {
+                Ok(Resp::AddressQuery(QueriedAddresses {
+                    transaction_ids: Some(Default::default()),
+                    ..Default::default()
+                }))
             }
             R::UsageInfo => Ok(Resp::UsageInfo(0)),
             R::SolutionRate { .. } => Ok(Resp::SolutionRate(None)),
             R::TipBlockSize => Ok(Resp::TipBlockSize(None)),
-            R::BestChainBlockHash(_) => Ok(Resp::BlockHash(None)),
-            R::BlockInfo(_) => Ok(Resp::BlockInfo(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Hash]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::BlockInfo]) => Ok(Resp::BlockQuery(None)),
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),
         };
         Box::pin(async move { resp })
@@ -274,19 +339,35 @@ impl Service<zebra_state::Request> for MockState {
     }
 
     fn call(&mut self, req: zebra_state::Request) -> Self::Future {
+        use std::collections::HashSet;
         use zebra_state::Request as R;
         use zebra_state::Response as Resp;
-        use zebra_state::{ReadRequest, ReadResponse};
+        use zebra_state::{
+            BlockField, BlockQuery, ChainSelector, ReadRequest, ReadResponse, TransactionQuery,
+        };
         let resp: Result<Resp, BoxError> = match req {
             R::Read(ReadRequest::Tip) => Ok(Resp::Read(ReadResponse::Tip(Some((
                 block::Height(0),
                 block::Hash([0u8; 32]),
             ))))),
-            R::Read(ReadRequest::Block(_)) => Ok(Resp::Read(ReadResponse::Block(None))),
-            R::Read(ReadRequest::Transaction(_)) => {
-                Ok(Resp::Read(ReadResponse::Transaction(None)))
+            R::Read(ReadRequest::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            })) if fields == HashSet::from([BlockField::Block]) => {
+                Ok(Resp::Read(ReadResponse::BlockQuery(None)))
             }
-            R::Read(ReadRequest::Depth(_)) => Ok(Resp::Read(ReadResponse::Depth(None))),
+            R::Read(ReadRequest::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Best,
+                ..
+            })) => Ok(Resp::Read(ReadResponse::TransactionQuery(None))),
+            R::Read(ReadRequest::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            })) if fields == HashSet::from([BlockField::Confirmations]) => {
+                Ok(Resp::Read(ReadResponse::BlockQuery(None)))
+            }
             R::Read(ReadRequest::BlockLocator) => {
                 Ok(Resp::Read(ReadResponse::BlockLocator(Vec::new())))
             }

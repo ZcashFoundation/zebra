@@ -12,7 +12,10 @@ use zebra_chain::{
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
-use zebra_state::{HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse};
+use zebra_state::{
+    BlockField, BlockQuery, ChainSelector, HashOrHeight, NonFinalizedBlocksListener, QueriedBlock,
+    ReadRequest, ReadResponse,
+};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
@@ -159,9 +162,16 @@ async fn test_get_block(
     });
 
     mock_read_service
-        .expect_request(ReadRequest::Block(HashOrHeight::Height(height)))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: HashOrHeight::Height(height),
+            chain: ChainSelector::Best,
+            fields: [BlockField::Block].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::Block(Some(block.clone())));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block: Some(block.clone()),
+            ..QueriedBlock::default()
+        })));
 
     let response = request_task
         .await?

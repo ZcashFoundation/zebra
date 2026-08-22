@@ -563,16 +563,33 @@ where
                     let advertiser_addr = match advertiser_addr {
                         Some(advertiser_addr) => match timeout(
                             PARENT_LOOKUP_TIMEOUT,
-                            read_state.oneshot(zs::ReadRequest::BlockHeader(
-                                block.header.previous_block_hash.into(),
-                            )),
+                            read_state
+                                .oneshot(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+                                    hash_or_height: block.header.previous_block_hash.into(),
+                                    chain: zs::ChainSelector::Best,
+                                    fields: [
+                                        zs::BlockField::Header,
+                                        zs::BlockField::Hash,
+                                        zs::BlockField::Height,
+                                        zs::BlockField::NextBlockHash,
+                                    ]
+                                    .into(),
+                                }))
+                                // The old `BlockHeader` request errored when the block was
+                                // missing; keep that behavior with the generic query.
+                                .map(|result| match result {
+                                    Ok(zs::ReadResponse::BlockQuery(None)) => Err(BoxError::from(
+                                        "block hash or height not found",
+                                    )),
+                                    result => result,
+                                }),
                         )
                         .await
                         {
-                            Ok(Ok(zs::ReadResponse::BlockHeader {
-                                height: parent_height,
+                            Ok(Ok(zs::ReadResponse::BlockQuery(Some(zs::QueriedBlock {
+                                height: Some(parent_height),
                                 ..
-                            })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
+                            })))) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
                             // Parent unknown, height consistent with it, or the lookup failed or
                             // timed out: there is no proof of misbehaviour, so the peer is not
                             // scored.

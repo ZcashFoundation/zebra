@@ -87,8 +87,9 @@ use zebra_consensus::{
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
-    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
-    State as StateService, TransactionLocation,
+    AddressField, AddressQuery, AnyTx, BlockField, BlockQuery, ChainSelector, HashOrHeight,
+    NoteCommitmentSubtrees, NoteCommitmentTreeKind, OutputLocation, ReadRequest, ReadResponse,
+    ReadState as ReadStateService, State as StateService, TransactionLocation, TransactionQuery,
 };
 
 use crate::{
@@ -1251,7 +1252,11 @@ where
     ) -> Result<GetAddressBalanceResponse> {
         let valid_addresses = address_strings.valid_addresses()?;
 
-        let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
+        let request = ReadRequest::AddressQuery(AddressQuery {
+            addresses: valid_addresses,
+            height_range: None,
+            fields: [AddressField::Balance].into_iter().collect(),
+        });
         let response = self
             .read_state
             .clone()
@@ -1260,7 +1265,13 @@ where
             .map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance { balance, received } => {
+            ReadResponse::AddressQuery(queried_addresses) => {
+                let balance = queried_addresses
+                    .balance
+                    .expect("balance was requested in the address query");
+                let received = queried_addresses
+                    .received
+                    .expect("received was requested in the address query");
                 Ok(GetAddressBalanceResponse {
                     balance: u64::from(balance),
                     received,
@@ -1348,7 +1359,11 @@ where
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
-            let request = zebra_state::ReadRequest::Block(hash_or_height);
+            let request = ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height,
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into_iter().collect(),
+            });
             let response = self
                 .read_state
                 .clone()
@@ -1357,10 +1372,13 @@ where
                 .map_misc_error()?;
 
             match response {
-                zebra_state::ReadResponse::Block(Some(block)) => {
+                ReadResponse::BlockQuery(Some(queried_block)) => {
+                    let block = queried_block
+                        .block
+                        .expect("block was requested in the block query");
                     Ok(GetBlockResponse::Raw(block.into()))
                 }
-                zebra_state::ReadResponse::Block(None) => {
+                ReadResponse::BlockQuery(None) => {
                     Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
                 }
                 _ => unreachable!("unmatched response to a block request"),
@@ -1407,8 +1425,18 @@ where
             // contents. See issue #10550.
             let hash_or_height = hash.into();
             let transactions_request = match verbosity {
-                1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
-                2 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
+                1 => ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::TransactionIds].into_iter().collect(),
+                }),
+                2 => ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Block, BlockField::BlockInfo]
+                        .into_iter()
+                        .collect(),
+                }),
                 _other => panic!("get_block_header_fut should be none"),
             };
 
@@ -1427,12 +1455,28 @@ where
                 // including getting transaction IDs from any chain fork.
                 transactions_request,
                 // Orchard trees
-                zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::OrchardTree].into_iter().collect(),
+                }),
                 // Ironwood trees
-                zebra_state::ReadRequest::IronwoodTree(hash_or_height),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::IronwoodTree].into_iter().collect(),
+                }),
                 // Block info
-                zebra_state::ReadRequest::BlockInfo(previous_block_hash.into()),
-                zebra_state::ReadRequest::BlockInfo(hash_or_height),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: previous_block_hash.into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::BlockInfo].into_iter().collect(),
+                }),
+                ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::BlockInfo].into_iter().collect(),
+                }),
             ];
 
             let mut futs = FuturesOrdered::new();
@@ -1443,16 +1487,28 @@ where
 
             let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
             let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response.map_misc_error()? {
-                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
-                    tx_ids
+                ReadResponse::BlockQuery(queried_block) if verbosity == 1 => {
+                    let tx_ids = queried_block
                         .ok_or_misc_error("block not found")?
-                        .iter()
-                        .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
-                        .collect(),
-                    None,
-                ),
-                zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
-                    let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
+                        .transaction_ids
+                        .expect("transaction IDs were requested in the block query");
+                    (
+                        tx_ids
+                            .iter()
+                            .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
+                            .collect(),
+                        None,
+                    )
+                }
+                ReadResponse::BlockQuery(queried_block) => {
+                    let queried_block = queried_block.ok_or_misc_error("Block not found")?;
+                    let block = queried_block
+                        .block
+                        .expect("block was requested in the block query");
+                    let block_info = queried_block
+                        .block_info
+                        .expect("block info was requested in the block query");
+                    let size = block_info.size() as usize;
                     let block_time = block.header.time;
                     let transactions = block
                         .transactions
@@ -1478,8 +1534,7 @@ where
             };
 
             let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::OrchardTree(orchard_tree) =
-                orchard_tree_response.map_misc_error()?
+            let ReadResponse::BlockQuery(orchard_tree) = orchard_tree_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a OrchardTree request");
             };
@@ -1487,7 +1542,10 @@ where
             let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
             // This could be `None` if there's a chain reorg between state queries.
-            let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
+            let orchard_tree = orchard_tree
+                .ok_or_misc_error("missing Orchard tree")?
+                .orchard_tree
+                .ok_or_misc_error("missing Orchard tree")?;
 
             let final_orchard_root = match nu5_activation {
                 Some(activation_height) if height >= activation_height => {
@@ -1506,7 +1564,7 @@ where
             };
 
             let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
+            let ReadResponse::BlockQuery(ironwood_tree) =
                 ironwood_tree_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to an IronwoodTree request");
@@ -1514,7 +1572,10 @@ where
 
             // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
             // Ironwood tree is empty (size 0).
-            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
+            let ironwood_tree = ironwood_tree
+                .ok_or_misc_error("missing Ironwood tree")?
+                .ironwood_tree
+                .ok_or_misc_error("missing Ironwood tree")?;
             let ironwood = IronwoodTrees {
                 size: ironwood_tree.count(),
             };
@@ -1526,17 +1587,18 @@ where
             };
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
-                block_info_response.map_misc_error()?
+            let ReadResponse::BlockQuery(prev_block_info) = block_info_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a BlockInfo request");
             };
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockInfo(block_info) =
-                block_info_response.map_misc_error()?
-            else {
+            let ReadResponse::BlockQuery(block_info) = block_info_response.map_misc_error()? else {
                 unreachable!("unmatched response to a BlockInfo request");
             };
+
+            let prev_block_info =
+                prev_block_info.and_then(|queried_block| queried_block.block_info);
+            let block_info = block_info.and_then(|queried_block| queried_block.block_info);
 
             let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
@@ -1592,15 +1654,21 @@ where
                 // Reference for the legacy error code:
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
-        let zebra_state::ReadResponse::BlockHeader {
-            header,
-            hash,
-            height,
-            next_block_hash,
-        } = self
+        let queried_block_response = self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
+            .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height,
+                chain: ChainSelector::Best,
+                fields: [
+                    BlockField::Header,
+                    BlockField::Hash,
+                    BlockField::Height,
+                    BlockField::NextBlockHash,
+                ]
+                .into_iter()
+                .collect(),
+            }))
             .await
             .map_err(|_| "block height not in best chain")
             .map_error(
@@ -1613,10 +1681,33 @@ where
                 } else {
                     server::error::LegacyCode::InvalidParameter
                 },
-            )?
-        else {
+            )?;
+
+        let ReadResponse::BlockQuery(queried_block) = queried_block_response else {
             panic!("unexpected response to BlockHeader request")
         };
+
+        // Like the old `ReadRequest::BlockHeader`, a missing block is an error.
+        let Some(queried_block) = queried_block else {
+            return Err("block height not in best chain").map_error(
+                if hash_or_height.hash().is_some() {
+                    server::error::LegacyCode::InvalidAddressOrKey
+                } else {
+                    server::error::LegacyCode::InvalidParameter
+                },
+            );
+        };
+
+        let header = queried_block
+            .header
+            .expect("header was requested in the block query");
+        let hash = queried_block
+            .hash
+            .expect("hash was requested in the block query");
+        let height = queried_block
+            .height
+            .expect("height was requested in the block query");
+        let next_block_hash = queried_block.next_block_hash;
 
         let response = if !verbose {
             GetBlockHeaderResponse::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
@@ -1626,10 +1717,14 @@ where
             // Using the caller-supplied `hash_or_height` here would re-sample the
             // best chain and could mix a header from block A with a Sapling tree
             // from block B at the same height. See issue #10550.
-            let zebra_state::ReadResponse::SaplingTree(sapling_tree) = self
+            let ReadResponse::BlockQuery(sapling_tree) = self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::SaplingTree(hash.into()))
+                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: hash.into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::SaplingTree].into_iter().collect(),
+                }))
                 .await
                 .map_misc_error()?
             else {
@@ -1637,17 +1732,32 @@ where
             };
 
             // This could be `None` if there's a chain reorg between state queries.
-            let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
+            let sapling_tree = sapling_tree
+                .ok_or_misc_error("missing Sapling tree")?
+                .sapling_tree
+                .ok_or_misc_error("missing Sapling tree")?;
 
-            let zebra_state::ReadResponse::Depth(depth) = self
+            let ReadResponse::BlockQuery(queried_block) = self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::Depth(hash))
+                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: hash.into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Confirmations].into_iter().collect(),
+                }))
                 .await
                 .map_misc_error()?
             else {
                 panic!("unexpected response to SaplingTree request")
             };
+
+            // Depth is one less than the number of confirmations.
+            let depth = queried_block.map(|queried_block| {
+                queried_block
+                    .confirmations
+                    .expect("confirmations were requested in the block query")
+                    - 1
+            });
 
             // From <https://zcash.github.io/rpc/getblock.html>
             // TODO: Deduplicate const definition, consider refactoring this to avoid duplicate logic
@@ -1894,17 +2004,25 @@ where
             match self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::AnyChainTransactionIdsForBlock(
-                    block_hash.into(),
-                ))
+                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: block_hash.into(),
+                    chain: ChainSelector::Any,
+                    fields: [BlockField::TransactionIds].into_iter().collect(),
+                }))
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => {
-                    let (ids, in_best_chain) = tx_ids.ok_or_error(
+                ReadResponse::BlockQuery(queried_block) => {
+                    let queried_block = queried_block.ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "block not found",
                     )?;
+                    let ids = queried_block
+                        .transaction_ids
+                        .expect("transaction IDs were requested in the block query");
+                    let in_best_chain = queried_block
+                        .in_best_chain
+                        .expect("an any-chain block query always sets `in_best_chain`");
 
                     ids.iter().find(|id| **id == txid).ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
@@ -1914,7 +2032,9 @@ where
                     Some((block_hash, in_best_chain))
                 }
                 _ => {
-                    unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
+                    unreachable!(
+                        "unmatched response to a `AnyChainTransactionIdsForBlock` block query"
+                    )
                 }
             }
         } else {
@@ -1925,11 +2045,14 @@ where
         match self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
+            .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+                hash: txid,
+                chain: ChainSelector::Any,
+            }))
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
+            ReadResponse::TransactionQuery(Some(tx)) => Ok(if verbose {
                 if let Some((caller_block_hash, in_best_chain)) = caller_block_context {
                     // Use the caller-provided block context to avoid TOCTOU races
                     // between the validation query and the transaction fetch.
@@ -1964,14 +2087,20 @@ where
                             let block_hash = match self
                                 .read_state
                                 .clone()
-                                .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                                    hash_or_height: tx.height.into(),
+                                    chain: ChainSelector::Best,
+                                    fields: [BlockField::Hash].into_iter().collect(),
+                                }))
                                 .await
                                 .map_misc_error()?
                             {
-                                zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                                ReadResponse::BlockQuery(queried_block) => {
+                                    queried_block.and_then(|queried_block| queried_block.hash)
+                                }
                                 _ => {
                                     unreachable!(
-                                        "unmatched response to a `BestChainBlockHash` request"
+                                        "unmatched response to a `BestChainBlockHash` block query"
                                     )
                                 }
                             };
@@ -2011,7 +2140,7 @@ where
                 GetRawTransactionResponse::Raw(hex)
             }),
 
-            zebra_state::ReadResponse::AnyChainTransaction(None) => {
+            ReadResponse::TransactionQuery(None) => {
                 Err("Transaction not found in mempool or best chain")
                     .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             }
@@ -2040,12 +2169,20 @@ where
         // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
         let block = match read_state
             .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
+            .and_then(|service| {
+                service.call(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height,
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Block].into_iter().collect(),
+                }))
+            })
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::Block(Some(block)) => block,
-            zebra_state::ReadResponse::Block(None) => {
+            ReadResponse::BlockQuery(Some(queried_block)) => queried_block
+                .block
+                .expect("block was requested in the block query"),
+            ReadResponse::BlockQuery(None) => {
                 // Reference for the legacy error code:
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 return Err("the requested block is not in the main chain")
@@ -2069,14 +2206,18 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
+                    service.call(ReadRequest::BlockQuery(BlockQuery {
+                        hash_or_height: hash.into(),
+                        chain: ChainSelector::Best,
+                        fields: [BlockField::SaplingTree].into_iter().collect(),
+                    }))
                 })
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::SaplingTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
+                ReadResponse::BlockQuery(queried_block) => queried_block
+                    .and_then(|queried_block| queried_block.sapling_tree)
+                    .map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec())),
                 _ => unreachable!("unmatched response to a Sapling tree request"),
             }
         } else {
@@ -2089,14 +2230,18 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
+                    service.call(ReadRequest::BlockQuery(BlockQuery {
+                        hash_or_height: hash.into(),
+                        chain: ChainSelector::Best,
+                        fields: [BlockField::OrchardTree].into_iter().collect(),
+                    }))
                 })
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::OrchardTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
+                ReadResponse::BlockQuery(queried_block) => queried_block
+                    .and_then(|queried_block| queried_block.orchard_tree)
+                    .map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec())),
                 _ => unreachable!("unmatched response to an Orchard tree request"),
             }
         } else {
@@ -2109,14 +2254,18 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::IronwoodTree(hash.into()))
+                    service.call(ReadRequest::BlockQuery(BlockQuery {
+                        hash_or_height: hash.into(),
+                        chain: ChainSelector::Best,
+                        fields: [BlockField::IronwoodTree].into_iter().collect(),
+                    }))
                 })
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::IronwoodTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
+                ReadResponse::BlockQuery(queried_block) => queried_block
+                    .and_then(|queried_block| queried_block.ironwood_tree)
+                    .map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec())),
                 _ => unreachable!("unmatched response to an Ironwood tree request"),
             }
         } else {
@@ -2150,7 +2299,11 @@ where
         const POOL_LIST: &[&str] = &["sapling", "orchard", "ironwood"];
 
         if pool == "sapling" {
-            let request = zebra_state::ReadRequest::SaplingSubtrees { start_index, limit };
+            let request = ReadRequest::NoteCommitmentSubtrees {
+                kind: NoteCommitmentTreeKind::Sapling,
+                start_index,
+                limit,
+            };
             let response = read_state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -2158,7 +2311,9 @@ where
                 .map_misc_error()?;
 
             let subtrees = match response {
-                zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
+                ReadResponse::NoteCommitmentSubtrees(NoteCommitmentSubtrees::Sapling(subtrees)) => {
+                    subtrees
+                }
                 _ => unreachable!("unmatched response to a subtrees request"),
             };
 
@@ -2176,7 +2331,11 @@ where
                 subtrees,
             })
         } else if pool == "orchard" {
-            let request = zebra_state::ReadRequest::OrchardSubtrees { start_index, limit };
+            let request = ReadRequest::NoteCommitmentSubtrees {
+                kind: NoteCommitmentTreeKind::Orchard,
+                start_index,
+                limit,
+            };
             let response = read_state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -2184,7 +2343,9 @@ where
                 .map_misc_error()?;
 
             let subtrees = match response {
-                zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
+                ReadResponse::NoteCommitmentSubtrees(NoteCommitmentSubtrees::Orchard(subtrees)) => {
+                    subtrees
+                }
                 _ => unreachable!("unmatched response to a subtrees request"),
             };
 
@@ -2202,15 +2363,23 @@ where
                 subtrees,
             })
         } else if pool == "ironwood" {
-            let request = zebra_state::ReadRequest::IronwoodSubtrees { start_index, limit };
+            let request = ReadRequest::NoteCommitmentSubtrees {
+                kind: NoteCommitmentTreeKind::Ironwood,
+                start_index,
+                limit,
+            };
             let response = read_state
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
                 .map_misc_error()?;
 
+            // Ironwood reuses the Orchard note type, so its subtrees arrive in the
+            // `Orchard` response variant.
             let subtrees = match response {
-                zebra_state::ReadResponse::IronwoodSubtrees(subtrees) => subtrees,
+                ReadResponse::NoteCommitmentSubtrees(NoteCommitmentSubtrees::Orchard(subtrees)) => {
+                    subtrees
+                }
                 _ => unreachable!("unmatched response to a subtrees request"),
             };
 
@@ -2249,10 +2418,11 @@ where
 
         let valid_addresses = request.valid_addresses()?;
 
-        let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
+        let request = ReadRequest::AddressQuery(AddressQuery {
             addresses: valid_addresses,
-            height_range,
-        };
+            height_range: Some(height_range),
+            fields: [AddressField::TransactionIds].into_iter().collect(),
+        });
         let response = read_state
             .ready()
             .and_then(|service| service.call(request))
@@ -2260,7 +2430,10 @@ where
             .map_misc_error()?;
 
         let hashes = match response {
-            zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
+            ReadResponse::AddressQuery(queried_addresses) => {
+                let hashes = queried_addresses
+                    .transaction_ids
+                    .expect("transaction IDs were requested in the address query");
                 let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
 
                 hashes
@@ -2296,14 +2469,20 @@ where
         let valid_addresses = utxos_request.valid_addresses()?;
 
         // get utxos data for addresses
-        let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
+        let request = ReadRequest::AddressQuery(AddressQuery {
+            addresses: valid_addresses,
+            height_range: None,
+            fields: [AddressField::Utxos].into_iter().collect(),
+        });
         let response = read_state
             .ready()
             .and_then(|service| service.call(request))
             .await
             .map_misc_error()?;
         let utxos = match response {
-            zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
+            ReadResponse::AddressQuery(queried_addresses) => queried_addresses
+                .utxos
+                .expect("UTXOs were requested in the address query"),
             _ => unreachable!("unmatched response to a UtxosByAddresses request"),
         };
 
@@ -2395,7 +2574,11 @@ where
 
         let height = height_from_signed_int(index, tip_height)?;
 
-        let request = zebra_state::ReadRequest::BestChainBlockHash(height);
+        let request = ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: height.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::Hash].into_iter().collect(),
+        });
         let response = read_state
             .ready()
             .and_then(|service| service.call(request))
@@ -2403,8 +2586,12 @@ where
             .map_error(server::error::LegacyCode::default())?;
 
         match response {
-            zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHashResponse(hash)),
-            zebra_state::ReadResponse::BlockHash(None) => Err(ErrorObject::borrowed(
+            ReadResponse::BlockQuery(Some(queried_block)) => Ok(GetBlockHashResponse(
+                queried_block
+                    .hash
+                    .expect("hash was requested in the block query"),
+            )),
+            ReadResponse::BlockQuery(None) => Err(ErrorObject::borrowed(
                 server::error::LegacyCode::InvalidParameter.into(),
                 "Block not found",
                 None,
@@ -3352,12 +3539,15 @@ where
         let rsp = self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+                hash: txid,
+                chain: ChainSelector::Best,
+            }))
             .await
             .map_misc_error()?;
 
         match rsp {
-            zebra_state::ReadResponse::Transaction(Some(tx)) => {
+            ReadResponse::TransactionQuery(Some(AnyTx::Mined(tx))) => {
                 let best_block_hash = tx.best_chain_tip_hash;
                 let outputs = tx.tx.outputs();
                 let index: usize = n.try_into().expect("u32 always fits in usize");
@@ -3399,7 +3589,7 @@ where
                     ),
                 )))
             }
-            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
+            ReadResponse::TransactionQuery(None) => Ok(GetTxOutResponse(None)),
             _ => unreachable!("unmatched response to a `Transaction` request"),
         }
     }

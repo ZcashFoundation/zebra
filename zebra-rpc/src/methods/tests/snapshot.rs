@@ -46,7 +46,10 @@ use zebra_network::{
     types::{MetaAddr, PeerServices},
 };
 use zebra_node_services::{mempool, BoxError};
-use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
+use zebra_state::{
+    GetBlockTemplateChainInfo, NoteCommitmentSubtrees, NoteCommitmentTreeKind, ReadRequest,
+    ReadResponse, MAX_ON_DISK_HEIGHT,
+};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     vectors::BLOCK_MAINNET_1_BYTES,
@@ -661,8 +664,20 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Prepare the response.
     let rsp = read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::SaplingSubtrees { .. }))
-        .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
+        .expect_request_that(|req| {
+            matches!(
+                req,
+                ReadRequest::NoteCommitmentSubtrees {
+                    kind: NoteCommitmentTreeKind::Sapling,
+                    ..
+                }
+            )
+        })
+        .map(|responder| {
+            responder.respond(ReadResponse::NoteCommitmentSubtrees(
+                NoteCommitmentSubtrees::Sapling(subtrees),
+            ))
+        });
 
     // Make the request.
     let req = rpc.z_get_subtrees_by_index(String::from("sapling"), 0u16.into(), Some(2u16.into()));
@@ -689,8 +704,20 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Prepare the response.
     let rsp = read_state
-        .expect_request_that(|req| matches!(req, ReadRequest::OrchardSubtrees { .. }))
-        .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
+        .expect_request_that(|req| {
+            matches!(
+                req,
+                ReadRequest::NoteCommitmentSubtrees {
+                    kind: NoteCommitmentTreeKind::Orchard,
+                    ..
+                }
+            )
+        })
+        .map(|responder| {
+            responder.respond(ReadResponse::NoteCommitmentSubtrees(
+                NoteCommitmentSubtrees::Orchard(subtrees),
+            ))
+        });
 
     // Make the request.
     let req = rpc.z_get_subtrees_by_index(String::from("orchard"), 0u16.into(), Some(2u16.into()));

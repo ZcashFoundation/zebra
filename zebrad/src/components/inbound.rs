@@ -451,14 +451,29 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Read(zs::ReadRequest::Block(hash.into()))).await?;
+                        let response = state
+                            .clone()
+                            .ready()
+                            .await?
+                            .call(zs::Request::Read(zs::ReadRequest::BlockQuery(
+                                zs::BlockQuery {
+                                    hash_or_height: hash.into(),
+                                    chain: zs::ChainSelector::Best,
+                                    fields: [zs::BlockField::Block].into(),
+                                },
+                            )))
+                            .await?;
 
                         // Add the block responses to the list, while updating the size limit.
                         //
                         // If there was a database error, return the error,
                         // and stop processing further chunks.
                         match response {
-                            zs::Response::Read(zs::ReadResponse::Block(Some(block))) => {
+                            zs::Response::Read(zs::ReadResponse::BlockQuery(Some(queried_block))) => {
+                                let block = queried_block.block.expect(
+                                    "block exists because the Block field was requested and the block was found",
+                                );
+
                                 // If checking the serialized size of the block performs badly,
                                 // return the size from the state using a wrapper type.
                                 total_size += block.zcash_serialized_size();
@@ -468,7 +483,7 @@ impl Service<zn::Request> for Inbound {
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request
                             // sent by the peer. (Their content and encodings are the same.)
-                            zs::Response::Read(zs::ReadResponse::Block(None)) => blocks.push(Missing(hash)),
+                            zs::Response::Read(zs::ReadResponse::BlockQuery(None)) => blocks.push(Missing(hash)),
                             _ => unreachable!("wrong response from state"),
                         }
 

@@ -33,13 +33,14 @@
 //! * `ReadRequest::Tip` → `Ok(ReadResponse::Tip(Some((Height(0), [0u8; 32]))))`
 //!   — drives every `getinfo` / `getblockchaininfo` / `getbestblockhash` etc.
 //!   handler that gates on a real tip.
-//! * `ReadRequest::Block(_)` → `Ok(ReadResponse::Block(None))` — drives the
+//! * `ReadRequest::BlockQuery(_)` (fields: `[Block]`) →
+//!   `Ok(ReadResponse::BlockQuery(None))` — drives the
 //!   `getblock` "block not found" formatter, including the verbosity=2 branch
 //!   that walks each tx (which is decode-light when the block is None).
-//! * `ReadRequest::Transaction(_)` → `Ok(ReadResponse::Transaction(None))` —
+//! * `ReadRequest::TransactionQuery(_)` → `Ok(ReadResponse::TransactionQuery(None))` —
 //!   drives `getrawtransaction` None-branch.
-//! * `ReadRequest::AddressBalance(_)` → constructed zero balance to walk the
-//!   formatter for `getaddressbalance`.
+//! * `ReadRequest::AddressQuery(_)` (fields: `[Balance]`) → constructed zero
+//!   balance to walk the formatter for `getaddressbalance`.
 //! * `Request::Read(ReadRequest::Tip)` (rw) → same as the ReadRequest::Tip
 //!   variant — used by writes that consult the tip before mutating.
 //! * `Request::InvalidateBlock(_)` → `Ok(Response::Invalidated([0u8; 32]))` to
@@ -384,34 +385,93 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
     }
 
     fn call(&mut self, req: zebra_state::ReadRequest) -> Self::Future {
+        use std::collections::HashSet;
         use zebra_chain::amount::Amount;
         use zebra_state::ReadRequest as R;
         use zebra_state::ReadResponse as Resp;
+        use zebra_state::{
+            AddressField, AddressQuery, BlockField, BlockQuery, ChainSelector,
+            NoteCommitmentTreeKind, QueriedAddresses, TransactionQuery, UtxoQuery,
+        };
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
-            R::Block(_) => Ok(Resp::Block(None)),
-            R::AnyChainBlock(_) => Ok(Resp::Block(None)),
-            R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
-            R::Transaction(_) => Ok(Resp::Transaction(None)),
-            R::AnyChainTransaction(_) => Ok(Resp::AnyChainTransaction(None)),
-            R::TransactionIdsForBlock(_) => Ok(Resp::TransactionIdsForBlock(None)),
-            R::AnyChainTransactionIdsForBlock(_) => {
-                Ok(Resp::AnyChainTransactionIdsForBlock(None))
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Any,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Block, BlockField::BlockInfo]) => {
+                Ok(Resp::BlockQuery(None))
             }
-            R::UnspentBestChainUtxo(_) => Ok(Resp::UnspentBestChainUtxo(None)),
-            R::AnyChainUtxo(_) => Ok(Resp::AnyChainUtxo(None)),
-            R::Depth(_) => Ok(Resp::Depth(None)),
+            R::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Best,
+                ..
+            }) => Ok(Resp::TransactionQuery(None)),
+            R::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Any,
+                ..
+            }) => Ok(Resp::TransactionQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::TransactionIds]) => {
+                Ok(Resp::BlockQuery(None))
+            }
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Any,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::TransactionIds]) => {
+                Ok(Resp::BlockQuery(None))
+            }
+            R::UtxoQuery(UtxoQuery {
+                chain: ChainSelector::Best,
+                ..
+            }) => Ok(Resp::UtxoQuery(None)),
+            R::UtxoQuery(UtxoQuery {
+                chain: ChainSelector::Any,
+                ..
+            }) => Ok(Resp::UtxoQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Confirmations]) => {
+                Ok(Resp::BlockQuery(None))
+            }
             R::BlockLocator => Ok(Resp::BlockLocator(Vec::new())),
             R::FindBlockHashes { .. } => Ok(Resp::BlockHashes(Vec::new())),
             R::FindBlockHeaders { .. } => Ok(Resp::BlockHeaders(Vec::new())),
-            R::AddressBalance(_) => Ok(Resp::AddressBalance {
-                balance: Amount::zero(),
-                received: 0,
-            }),
-            R::TransactionIdsByAddresses { .. } => {
-                Ok(Resp::AddressesTransactionIds(Default::default()))
+            R::AddressQuery(AddressQuery { fields, .. })
+                if fields == HashSet::from([AddressField::Balance]) =>
+            {
+                Ok(Resp::AddressQuery(QueriedAddresses {
+                    balance: Some(Amount::zero()),
+                    received: Some(0),
+                    ..Default::default()
+                }))
             }
-            R::UtxosByAddresses(_) => {
+            R::AddressQuery(AddressQuery { fields, .. })
+                if fields == HashSet::from([AddressField::TransactionIds]) =>
+            {
+                Ok(Resp::AddressQuery(QueriedAddresses {
+                    transaction_ids: Some(Default::default()),
+                    ..Default::default()
+                }))
+            }
+            R::AddressQuery(AddressQuery { fields, .. })
+                if fields == HashSet::from([AddressField::Utxos]) =>
+            {
                 // AddressUtxos requires an `AddressUtxos` struct; the field is
                 // private to zebra-state so we cannot construct it without a
                 // public constructor. Fall back to Err for this variant.
@@ -420,22 +480,41 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::UsageInfo => Ok(Resp::UsageInfo(0)),
             R::SolutionRate { .. } => Ok(Resp::SolutionRate(None)),
             R::TipBlockSize => Ok(Resp::TipBlockSize(None)),
-            R::BestChainBlockHash(_) => Ok(Resp::BlockHash(None)),
-            R::BlockInfo(_) => Ok(Resp::BlockInfo(None)),
-            // `z_getsubtreesbyindex` issues these directly (no Block(_) gate),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::Hash]) => Ok(Resp::BlockQuery(None)),
+            R::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            }) if fields == HashSet::from([BlockField::BlockInfo]) => Ok(Resp::BlockQuery(None)),
+            // `z_getsubtreesbyindex` issues these directly (no BlockQuery gate),
             // so an empty subtree map is a realistic "no subtrees at this index"
             // response that lets the `GetSubtreesByIndexResponse` builder run.
             // Returning Err here short-circuits before that formatter.
-            R::SaplingSubtrees { .. } => Ok(Resp::SaplingSubtrees(Default::default())),
-            R::OrchardSubtrees { .. } => Ok(Resp::OrchardSubtrees(Default::default())),
+            R::NoteCommitmentSubtrees {
+                kind: NoteCommitmentTreeKind::Sapling,
+                ..
+            } => Ok(Resp::NoteCommitmentSubtrees(
+                zebra_state::NoteCommitmentSubtrees::Sapling(Default::default()),
+            )),
+            R::NoteCommitmentSubtrees {
+                kind: NoteCommitmentTreeKind::Orchard,
+                ..
+            } => Ok(Resp::NoteCommitmentSubtrees(
+                zebra_state::NoteCommitmentSubtrees::Orchard(Default::default()),
+            )),
             // Fall through for variants that need non-trivial Ok payloads.
             // NOTE: TipPoolValues / ChainInfo are deliberately NOT mocked Ok —
             // `get_blockchain_info` already falls back to genesis defaults on
             // their Err (methods.rs Err arm) and `chain_tip_difficulty` returns
             // Ok by default, so the formatter is already fully covered; a mock
             // Ok there would only swap which trivial arm runs. SaplingTree /
-            // BlockHeader need a `Block(Some(..))` first (the handler gates on a
-            // block lookup), which would require fabricating an internally
+            // BlockHeader field queries need a `BlockQuery(Some(..))` with the
+            // block field set first (the handler gates on a block lookup),
+            // which would require fabricating an internally
             // consistent Arc<Block> across every Block-consuming handler — high
             // false-positive risk, deferred rather than feeding a fake shell.
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),
@@ -463,19 +542,35 @@ impl Service<zebra_state::Request> for MockState {
     }
 
     fn call(&mut self, req: zebra_state::Request) -> Self::Future {
+        use std::collections::HashSet;
         use zebra_state::Request as R;
         use zebra_state::Response as Resp;
-        use zebra_state::{ReadRequest, ReadResponse};
+        use zebra_state::{
+            BlockField, BlockQuery, ChainSelector, ReadRequest, ReadResponse, TransactionQuery,
+        };
         let resp: Result<Resp, BoxError> = match req {
             R::Read(ReadRequest::Tip) => Ok(Resp::Read(ReadResponse::Tip(Some((
                 block::Height(0),
                 block::Hash([0u8; 32]),
             ))))),
-            R::Read(ReadRequest::Block(_)) => Ok(Resp::Read(ReadResponse::Block(None))),
-            R::Read(ReadRequest::Transaction(_)) => {
-                Ok(Resp::Read(ReadResponse::Transaction(None)))
+            R::Read(ReadRequest::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            })) if fields == HashSet::from([BlockField::Block]) => {
+                Ok(Resp::Read(ReadResponse::BlockQuery(None)))
             }
-            R::Read(ReadRequest::Depth(_)) => Ok(Resp::Read(ReadResponse::Depth(None))),
+            R::Read(ReadRequest::TransactionQuery(TransactionQuery {
+                chain: ChainSelector::Best,
+                ..
+            })) => Ok(Resp::Read(ReadResponse::TransactionQuery(None))),
+            R::Read(ReadRequest::BlockQuery(BlockQuery {
+                chain: ChainSelector::Best,
+                fields,
+                ..
+            })) if fields == HashSet::from([BlockField::Confirmations]) => {
+                Ok(Resp::Read(ReadResponse::BlockQuery(None)))
+            }
             R::Read(ReadRequest::BlockLocator) => {
                 Ok(Resp::Read(ReadResponse::BlockLocator(Vec::new())))
             }

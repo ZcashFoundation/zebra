@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
@@ -105,8 +105,12 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
     let hash = block.hash();
 
     vec![(
-        zs::Request::Read(zs::ReadRequest::Block(hash.into())),
-        Ok(zs::Response::Read(zs::ReadResponse::Block(None))),
+        zs::Request::Read(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+            hash_or_height: hash.into(),
+            chain: zs::ChainSelector::Best,
+            fields: HashSet::from([zs::BlockField::Block]),
+        })),
+        Ok(zs::Response::Read(zs::ReadResponse::BlockQuery(None))),
     )]
 });
 
@@ -120,8 +124,17 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
     let hash = block.hash();
 
     vec![(
-        zs::Request::Read(zs::ReadRequest::Block(hash.into())),
-        Ok(zs::Response::Read(zs::ReadResponse::Block(Some(block)))),
+        zs::Request::Read(zs::ReadRequest::BlockQuery(zs::BlockQuery {
+            hash_or_height: hash.into(),
+            chain: zs::ChainSelector::Best,
+            fields: HashSet::from([zs::BlockField::Block]),
+        })),
+        Ok(zs::Response::Read(zs::ReadResponse::BlockQuery(Some(
+            zs::QueriedBlock {
+                block: Some(block),
+                ..zs::QueriedBlock::default()
+            },
+        )))),
     )]
 });
 

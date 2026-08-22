@@ -14,7 +14,7 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx},
 };
 use zebra_node_services::mempool::{Gossip, Request, Response};
-use zebra_state::{BoxError, ReadRequest, ReadResponse};
+use zebra_state::{BoxError, ChainSelector, ReadRequest, ReadResponse, TransactionQuery};
 use zebra_test::mock_service::MockService;
 
 use crate::queue::{Queue, Runner, CHANNEL_AND_QUEUE_CAPACITY};
@@ -260,8 +260,11 @@ proptest! {
 
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set.clone()));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(None);
+            let expected_request = ReadRequest::TransactionQuery(TransactionQuery {
+                hash: transaction.hash(),
+                chain: ChainSelector::Best,
+            });
+            let response = ReadResponse::TransactionQuery(None);
 
             read_state
                 .expect_request(expected_request)
@@ -293,8 +296,11 @@ proptest! {
             // check the state again
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(Some(zebra_state::MinedTx::new(Arc::new(transaction), Height(1), 1, block.header.time, block.hash())));
+            let expected_request = ReadRequest::TransactionQuery(TransactionQuery {
+                hash: transaction.hash(),
+                chain: ChainSelector::Best,
+            });
+            let response = ReadResponse::TransactionQuery(Some(zebra_state::AnyTx::Mined(zebra_state::MinedTx::new(Arc::new(transaction), Height(1), 1, block.header.time, block.hash()))));
 
             read_state
                 .expect_request(expected_request)

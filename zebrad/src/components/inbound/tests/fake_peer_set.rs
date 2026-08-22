@@ -830,13 +830,17 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 
     let response = state_service
         .clone()
-        .oneshot(zebra_state::Request::Read(zebra_state::ReadRequest::Depth(
-            block_hash,
-        )))
+        .oneshot(zebra_state::Request::Read(
+            zebra_state::ReadRequest::BlockQuery(zebra_state::BlockQuery {
+                hash_or_height: block_hash.into(),
+                chain: zebra_state::ChainSelector::Best,
+                fields: [zebra_state::BlockField::Confirmations].into(),
+            }),
+        ))
         .await?;
     assert_eq!(
         response,
-        zebra_state::Response::Read(zebra_state::ReadResponse::Depth(None))
+        zebra_state::Response::Read(zebra_state::ReadResponse::BlockQuery(None))
     );
 
     // TODO: check that the block is not queued in the checkpoint verifier or non-finalized state

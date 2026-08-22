@@ -212,19 +212,26 @@ impl CopyStateCmd {
             let source_block = source_read_only_state_service
                 .ready()
                 .await?
-                .call(old_zs::ReadRequest::Block(Height(height).into()))
+                .call(old_zs::ReadRequest::BlockQuery(old_zs::BlockQuery {
+                    hash_or_height: Height(height).into(),
+                    chain: old_zs::ChainSelector::Best,
+                    fields: [old_zs::BlockField::Block].into(),
+                }))
                 .await?;
             let source_block = match source_block {
-                old_zs::ReadResponse::Block(Some(source_block)) => {
+                old_zs::ReadResponse::BlockQuery(Some(queried_block)) => {
+                    let source_block = queried_block.block.expect(
+                        "block exists because the Block field was requested and the block was found",
+                    );
                     trace!(?height, %source_block, "read source block");
                     source_block
                 }
-                old_zs::ReadResponse::Block(None) => {
+                old_zs::ReadResponse::BlockQuery(None) => {
                     Err(format!("unexpected missing source block, height: {height}",))?
                 }
 
                 response => Err(format!(
-                    "unexpected response to Block request, height: {height}, \n \
+                    "unexpected response to BlockQuery request, height: {height}, \n \
                      response: {response:?}",
                 ))?,
             };
@@ -253,21 +260,28 @@ impl CopyStateCmd {
             let target_block = target_state
                 .ready()
                 .await?
-                .call(new_zs::Request::Read(new_zs::ReadRequest::Block(
-                    Height(height).into(),
+                .call(new_zs::Request::Read(new_zs::ReadRequest::BlockQuery(
+                    new_zs::BlockQuery {
+                        hash_or_height: Height(height).into(),
+                        chain: new_zs::ChainSelector::Best,
+                        fields: [new_zs::BlockField::Block].into(),
+                    },
                 )))
                 .await?;
             let target_block = match target_block {
-                new_zs::Response::Read(new_zs::ReadResponse::Block(Some(target_block))) => {
+                new_zs::Response::Read(new_zs::ReadResponse::BlockQuery(Some(queried_block))) => {
+                    let target_block = queried_block.block.expect(
+                        "block exists because the Block field was requested and the block was found",
+                    );
                     trace!(?height, %target_block, "read target block");
                     target_block
                 }
-                new_zs::Response::Read(new_zs::ReadResponse::Block(None)) => {
+                new_zs::Response::Read(new_zs::ReadResponse::BlockQuery(None)) => {
                     Err(format!("unexpected missing target block, height: {height}",))?
                 }
 
                 response => Err(format!(
-                    "unexpected response to Block request, height: {height},\n \
+                    "unexpected response to BlockQuery request, height: {height},\n \
                      response: {response:?}",
                 ))?,
             };
@@ -334,13 +348,20 @@ impl CopyStateCmd {
         let target_tip_source_depth = source_read_only_state_service
             .ready()
             .await?
-            .call(old_zs::ReadRequest::Depth(final_target_tip_hash))
+            .call(old_zs::ReadRequest::BlockQuery(old_zs::BlockQuery {
+                hash_or_height: final_target_tip_hash.into(),
+                chain: old_zs::ChainSelector::Best,
+                fields: [old_zs::BlockField::Confirmations].into(),
+            }))
             .await?;
         let target_tip_source_depth = match target_tip_source_depth {
-            old_zs::ReadResponse::Depth(source_depth) => source_depth,
+            // A block's depth is its number of confirmations minus one.
+            old_zs::ReadResponse::BlockQuery(queried_block) => queried_block
+                .and_then(|queried_block| queried_block.confirmations)
+                .map(|confirmations| confirmations - 1),
 
             response => Err(format!(
-                "unexpected response to Depth request: {response:?}",
+                "unexpected response to BlockQuery request: {response:?}",
             ))?,
         };
 

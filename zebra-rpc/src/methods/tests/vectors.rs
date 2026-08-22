@@ -32,8 +32,8 @@ use zebra_network::{
 };
 use zebra_node_services::BoxError;
 use zebra_state::{
-    GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadRequest, ReadResponse,
-    ReadStateService,
+    BlockField, BlockQuery, ChainSelector, GetBlockTemplateChainInfo, IntoDisk, LatestChainTip,
+    QueriedBlock, ReadRequest, ReadResponse, ReadStateService,
 };
 use zebra_test::mock_service::MockService;
 
@@ -313,11 +313,13 @@ async fn get_block_data(
     Option<BlockInfo>,
     Option<ValueBalance<NegativeAllowed>>,
 ) {
-    let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
+    let zebra_state::ReadResponse::BlockQuery(sapling_tree) = read_state
         .clone()
-        .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
-            (height as u32).try_into().unwrap(),
-        )))
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: HashOrHeight::Height((height as u32).try_into().unwrap()),
+            chain: ChainSelector::Best,
+            fields: [BlockField::SaplingTree].into_iter().collect(),
+        }))
         .await
         .expect("should have sapling tree for block hash")
     else {
@@ -326,7 +328,9 @@ async fn get_block_data(
 
     let mut expected_nonce = *block.header.nonce;
     expected_nonce.reverse();
-    let sapling_tree = sapling_tree.expect("should always have sapling root");
+    let sapling_tree = sapling_tree
+        .and_then(|queried_block| queried_block.sapling_tree)
+        .expect("should always have sapling root");
     let expected_final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
         let mut root: [u8; 32] = sapling_tree.root().into();
         root.reverse();
@@ -346,16 +350,20 @@ async fn get_block_data(
         Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
     };
 
-    let zebra_state::ReadResponse::BlockInfo(block_info) = read_state
+    let zebra_state::ReadResponse::BlockQuery(block_info) = read_state
         .clone()
-        .oneshot(zebra_state::ReadRequest::BlockInfo(HashOrHeight::Height(
-            (height as u32).try_into().unwrap(),
-        )))
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: HashOrHeight::Height((height as u32).try_into().unwrap()),
+            chain: ChainSelector::Best,
+            fields: [BlockField::BlockInfo].into_iter().collect(),
+        }))
         .await
         .expect("should have block info for block hash")
     else {
         panic!("unexpected response to BlockInfo request")
     };
+
+    let block_info = block_info.and_then(|queried_block| queried_block.block_info);
 
     let delta = block_info.as_ref().and_then(|d| {
         let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
@@ -990,9 +998,13 @@ async fn rpc_getblock_missing_error() {
 
     // Make the mock service respond with no block
     let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: Height(0).into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::Block].into_iter().collect(),
+        }))
         .await;
-    response_handler.respond(zebra_state::ReadResponse::Block(None));
+    response_handler.respond(ReadResponse::BlockQuery(None));
 
     let block_response = block_future.await.expect("block future should not panic");
     let block_response =
@@ -1070,46 +1082,107 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     let hash_str = block_hash.to_string();
     let block_future = tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
 
-    // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
+    // get_block_header: header fields, SaplingTree, Confirmations (None = side chain)
     read_state
-        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [
+                BlockField::Header,
+                BlockField::Hash,
+                BlockField::Height,
+                BlockField::NextBlockHash,
+            ]
+            .into_iter()
+            .collect(),
+        }))
         .await
-        .respond(ReadResponse::BlockHeader {
-            header: block_header,
-            hash: block_hash,
-            height: zebra_chain::block::Height(0),
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            header: Some(block_header),
+            hash: Some(block_hash),
+            height: Some(zebra_chain::block::Height(0)),
             next_block_hash: None,
-        });
+            ..QueriedBlock::default()
+        })));
     read_state
-        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::SaplingTree].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            sapling_tree: Some(Default::default()),
+            ..QueriedBlock::default()
+        })));
     read_state
-        .expect_request(ReadRequest::Depth(block_hash))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::Confirmations].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::Depth(None));
+        .respond(ReadResponse::BlockQuery(None));
 
-    // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
+    // get_block: block and block info, OrchardTree, IronwoodTree, BlockInfo x2
     read_state
-        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::Block, BlockField::BlockInfo]
+                .into_iter()
+                .collect(),
+        }))
         .await
-        .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block: Some(block),
+            block_info: Some(BlockInfo::new(
+                Default::default(),
+                u32::try_from(block_size).expect("test block size fits in u32"),
+            )),
+            ..QueriedBlock::default()
+        })));
     read_state
-        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::OrchardTree].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            orchard_tree: Some(Default::default()),
+            ..QueriedBlock::default()
+        })));
     read_state
-        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::IronwoodTree].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            ironwood_tree: Some(Default::default()),
+            ..QueriedBlock::default()
+        })));
     read_state
-        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: previous_block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::BlockInfo].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::BlockInfo(None));
+        .respond(ReadResponse::BlockQuery(None));
     read_state
-        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height: block_hash.into(),
+            chain: ChainSelector::Best,
+            fields: [BlockField::BlockInfo].into_iter().collect(),
+        }))
         .await
-        .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
+        .respond(ReadResponse::BlockQuery(Some(QueriedBlock {
+            block_info: Some(BlockInfo::default()),
+            ..QueriedBlock::default()
+        })));
 
     let block_response = block_future
         .await
@@ -1189,9 +1262,13 @@ async fn rpc_getblockheader() {
             assert_eq!(get_block_header, expected_result);
         }
 
-        let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
+        let zebra_state::ReadResponse::BlockQuery(sapling_tree) = read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::SaplingTree(height.into()))
+            .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: height.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::SaplingTree].into_iter().collect(),
+            }))
             .await
             .expect("should have sapling tree for block hash")
         else {
@@ -1200,7 +1277,9 @@ async fn rpc_getblockheader() {
 
         let mut expected_nonce = *block.header.nonce;
         expected_nonce.reverse();
-        let sapling_tree = sapling_tree.expect("should always have sapling root");
+        let sapling_tree = sapling_tree
+            .and_then(|queried_block| queried_block.sapling_tree)
+            .expect("should always have sapling root");
         let expected_final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
             let mut root: [u8; 32] = sapling_tree.root().into();
             root.reverse();
@@ -1443,15 +1522,22 @@ async fn rpc_getrawtransaction() {
             assert_eq!(height, block_idx as i32);
 
             let depth_response = read_state
-                .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
+                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: block.hash().into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Confirmations].into_iter().collect(),
+                }))
                 .await
                 .expect("state request should succeed");
 
-            let zebra_state::ReadResponse::Depth(depth) = depth_response else {
+            let zebra_state::ReadResponse::BlockQuery(queried_block) = depth_response else {
                 panic!("unexpected response to Depth request");
             };
 
-            let expected_confirmations: i64 = (1 + depth.expect("depth should be Some")).into();
+            let expected_confirmations: i64 = queried_block
+                .and_then(|queried_block| queried_block.confirmations)
+                .expect("confirmations should be Some")
+                .into();
 
             (confirmations, expected_confirmations)
         }
@@ -3472,15 +3558,21 @@ async fn rpc_gettxout() {
                 tx.outputs()[0].lock_script.as_raw_bytes()
             );
             let depth_response = read_state
-                .oneshot(zebra_state::ReadRequest::Depth(_block.hash()))
+                .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: _block.hash().into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::Confirmations].into_iter().collect(),
+                }))
                 .await
                 .expect("state request should succeed");
 
-            let zebra_state::ReadResponse::Depth(depth) = depth_response else {
+            let zebra_state::ReadResponse::BlockQuery(queried_block) = depth_response else {
                 panic!("unexpected response to Depth request");
             };
 
-            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            let expected_confirmations = queried_block
+                .and_then(|queried_block| queried_block.confirmations)
+                .expect("confirmations should be Some");
             assert_eq!(output_object.confirmations(), expected_confirmations);
         }
     };

@@ -695,17 +695,20 @@ where
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
 
-                let query = state.clone().oneshot(zs::Request::Read(
-                    zs::ReadRequest::UnspentBestChainUtxo(*outpoint),
-                ));
+                let query = state
+                    .clone()
+                    .oneshot(zs::Request::Read(zs::ReadRequest::UtxoQuery(
+                        zs::UtxoQuery {
+                            outpoint: *outpoint,
+                            chain: zs::ChainSelector::Best,
+                        },
+                    )));
 
-                let zebra_state::Response::Read(zebra_state::ReadResponse::UnspentBestChainUtxo(
-                    utxo,
-                )) = query
+                let zebra_state::Response::Read(zebra_state::ReadResponse::UtxoQuery(utxo)) = query
                     .await
                     .map_err(|_| TransactionError::TransparentInputNotFound)?
                 else {
-                    unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
+                    unreachable!("UtxoQuery always responds with Option<Utxo>")
                 };
 
                 let Some(utxo) = utxo else {

@@ -657,13 +657,14 @@ fn mock_state_service(
         async move {
             let response = match request {
                 // The mempool verifier looks up spent outputs in the best chain.
-                zs::Request::Read(zs::ReadRequest::UnspentBestChainUtxo(outpoint)) => {
-                    zs::Response::Read(zs::ReadResponse::UnspentBestChainUtxo(
-                        known_utxos
-                            .get(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo.clone()),
-                    ))
-                }
+                zs::Request::Read(zs::ReadRequest::UtxoQuery(zs::UtxoQuery {
+                    outpoint,
+                    chain: zs::ChainSelector::Best,
+                })) => zs::Response::Read(zs::ReadResponse::UtxoQuery(
+                    known_utxos
+                        .get(&outpoint)
+                        .map(|ordered_utxo| ordered_utxo.utxo.clone()),
+                )),
                 // The block verifier only reaches the state for outputs that are not in the
                 // request's `known_utxos`.
                 zs::Request::AwaitUtxo(outpoint) => zs::Response::Utxo(

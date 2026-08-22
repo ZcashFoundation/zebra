@@ -11,7 +11,10 @@ async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::{Service, ServiceExt};
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
+    use zebra_state::{
+        BlockField, BlockQuery, ChainSelector, ReadRequest, ReadResponse,
+        SemanticallyVerifiedBlock, Spend,
+    };
 
     use crate::common::cached_state::future_blocks;
 
@@ -65,18 +68,24 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let num_blocks_to_check = 500;
     let mut is_failure = false;
     for i in 0..num_blocks_to_check {
-        let ReadResponse::Block(block) = read_state
+        let ReadResponse::BlockQuery(queried_block) = read_state
             .ready()
             .await
             .map_err(|err| eyre!(err))?
-            .call(ReadRequest::Block(tip_hash.into()))
+            .call(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: tip_hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into(),
+            }))
             .await
             .map_err(|err| eyre!(err))?
         else {
-            panic!("unexpected response to Block request");
+            panic!("unexpected response to BlockQuery request");
         };
 
-        let block = block.expect("should have block with latest_chain_tip hash");
+        let block = queried_block
+            .and_then(|queried_block| queried_block.block)
+            .expect("should have block with latest_chain_tip hash");
 
         let spends_with_spending_tx_hashes = block.transactions.iter().cloned().flat_map(|tx| {
             let tx_hash = tx.hash();

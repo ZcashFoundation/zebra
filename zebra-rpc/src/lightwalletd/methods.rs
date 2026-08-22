@@ -19,7 +19,10 @@ use zebra_chain::{
     transaction, transparent,
 };
 use zebra_node_services::mempool::{self, MempoolService};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
+use zebra_state::{
+    BlockField, BlockQuery, ChainSelector, HashOrHeight, ReadRequest, ReadResponse, ReadState,
+    TransactionQuery,
+};
 
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
@@ -169,19 +172,20 @@ where
         let side_chain_tx = match self
             .read_state
             .clone()
-            .oneshot(ReadRequest::AnyChainTransaction(hash))
+            .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+                hash,
+                chain: ChainSelector::Any,
+            }))
             .await
         {
-            Ok(ReadResponse::AnyChainTransaction(Some(zebra_state::AnyTx::Mined(mined_tx)))) => {
+            Ok(ReadResponse::TransactionQuery(Some(zebra_state::AnyTx::Mined(mined_tx)))) => {
                 return Ok(Response::new(RawTransaction {
                     data: serialize_transaction(&mined_tx.tx)?,
                     height: mined_tx.height.0.into(),
                 }));
             }
-            Ok(ReadResponse::AnyChainTransaction(Some(zebra_state::AnyTx::Side((tx, _))))) => {
-                Some(tx)
-            }
-            Ok(ReadResponse::AnyChainTransaction(None)) => None,
+            Ok(ReadResponse::TransactionQuery(Some(zebra_state::AnyTx::Side((tx, _))))) => Some(tx),
+            Ok(ReadResponse::TransactionQuery(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -501,11 +505,17 @@ where
 
                 let completing_block_hash = match read_state
                     .clone()
-                    .oneshot(ReadRequest::BestChainBlockHash(subtree.end_height))
+                    .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                        hash_or_height: subtree.end_height.into(),
+                        chain: ChainSelector::Best,
+                        fields: [BlockField::Hash].into_iter().collect(),
+                    }))
                     .await
                 {
-                    Ok(ReadResponse::BlockHash(Some(hash))) => hash,
-                    Ok(ReadResponse::BlockHash(None)) => {
+                    Ok(ReadResponse::BlockQuery(Some(queried_block))) => queried_block
+                        .hash
+                        .expect("hash was requested in the block query"),
+                    Ok(ReadResponse::BlockQuery(None)) => {
                         let _ = send_bounded(
                             &response_sender,
                             Err(Status::not_found("completing block not found")),
@@ -647,11 +657,17 @@ async fn compact_block<ReadStateService: ReadState>(
 ) -> Result<CompactBlock, Status> {
     let block = match read_state
         .clone()
-        .oneshot(ReadRequest::Block(hash_or_height))
+        .oneshot(ReadRequest::BlockQuery(BlockQuery {
+            hash_or_height,
+            chain: ChainSelector::Best,
+            fields: [BlockField::Block].into_iter().collect(),
+        }))
         .await
     {
-        Ok(ReadResponse::Block(Some(block))) => block,
-        Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
+        Ok(ReadResponse::BlockQuery(Some(queried_block))) => queried_block
+            .block
+            .expect("block was requested in the block query"),
+        Ok(ReadResponse::BlockQuery(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => {
             return Err(Status::internal(format!("failed to read block: {error}")));
@@ -677,12 +693,26 @@ async fn compact_block<ReadStateService: ReadState>(
         // so a concurrent reorg can't make the tree sizes inconsistent with the block.
         let sapling_request = read_state
             .clone()
-            .oneshot(ReadRequest::SaplingTree(hash.into()));
+            .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::SaplingTree].into_iter().collect(),
+            }));
         let orchard_request = read_state
             .clone()
-            .oneshot(ReadRequest::OrchardTree(hash.into()));
+            .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height: hash.into(),
+                chain: ChainSelector::Best,
+                fields: [BlockField::OrchardTree].into_iter().collect(),
+            }));
         let ironwood_request: OptionFuture<_> = is_ironwood_active
-            .then(|| read_state.oneshot(ReadRequest::IronwoodTree(hash.into())))
+            .then(|| {
+                read_state.oneshot(ReadRequest::BlockQuery(BlockQuery {
+                    hash_or_height: hash.into(),
+                    chain: ChainSelector::Best,
+                    fields: [BlockField::IronwoodTree].into_iter().collect(),
+                }))
+            })
             .into();
 
         let (sapling_response, orchard_response, ironwood_response) =
@@ -691,12 +721,14 @@ async fn compact_block<ReadStateService: ReadState>(
         // A missing tree is not an empty tree: serving zero would tell the client no
         // notes exist as of this block, corrupting every position derived from it.
         let sapling_tree_size = match sapling_response {
-            Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::SaplingTree(None)) => {
-                return Err(Status::aborted(
-                    "sapling tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::BlockQuery(queried_block)) => queried_block
+                .and_then(|queried_block| queried_block.sapling_tree)
+                .map(|tree| tree.count())
+                .ok_or_else(|| {
+                    Status::aborted(
+                        "sapling tree not found for this block, it may have been reorged",
+                    )
+                })?,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -706,12 +738,14 @@ async fn compact_block<ReadStateService: ReadState>(
         };
 
         let orchard_tree_size = match orchard_response {
-            Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::OrchardTree(None)) => {
-                return Err(Status::aborted(
-                    "orchard tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::BlockQuery(queried_block)) => queried_block
+                .and_then(|queried_block| queried_block.orchard_tree)
+                .map(|tree| tree.count())
+                .ok_or_else(|| {
+                    Status::aborted(
+                        "orchard tree not found for this block, it may have been reorged",
+                    )
+                })?,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -723,12 +757,14 @@ async fn compact_block<ReadStateService: ReadState>(
         let ironwood_tree_size = match ironwood_response {
             // The read is only skipped before NU6.3, where zero is the correct size.
             None => 0,
-            Some(Ok(ReadResponse::IronwoodTree(Some(tree)))) => tree.count(),
-            Some(Ok(ReadResponse::IronwoodTree(None))) => {
-                return Err(Status::aborted(
-                    "ironwood tree not found for this block, it may have been reorged",
-                ));
-            }
+            Some(Ok(ReadResponse::BlockQuery(queried_block))) => queried_block
+                .and_then(|queried_block| queried_block.ironwood_tree)
+                .map(|tree| tree.count())
+                .ok_or_else(|| {
+                    Status::aborted(
+                        "ironwood tree not found for this block, it may have been reorged",
+                    )
+                })?,
             Some(Ok(_)) => unreachable!("unexpected response type from ReadStateService"),
             Some(Err(error)) => {
                 return Err(Status::internal(format!(
@@ -874,14 +910,19 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
 ) -> Result<RawTransaction, Status> {
     match read_state
         .clone()
-        .oneshot(ReadRequest::Transaction(txid))
+        .oneshot(ReadRequest::TransactionQuery(TransactionQuery {
+            hash: txid,
+            chain: ChainSelector::Best,
+        }))
         .await
     {
-        Ok(ReadResponse::Transaction(Some(mined_tx))) => Ok(RawTransaction {
-            data: serialize_transaction(&mined_tx.tx)?,
-            height: mined_tx.height.0.into(),
-        }),
-        Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
+        Ok(ReadResponse::TransactionQuery(Some(zebra_state::AnyTx::Mined(mined_tx)))) => {
+            Ok(RawTransaction {
+                data: serialize_transaction(&mined_tx.tx)?,
+                height: mined_tx.height.0.into(),
+            })
+        }
+        Ok(ReadResponse::TransactionQuery(None)) => Err(Status::not_found("transaction not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
         Err(error) => Err(Status::internal(format!(
             "failed to read transaction: {error}"

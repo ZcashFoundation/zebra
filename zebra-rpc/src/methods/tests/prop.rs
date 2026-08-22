@@ -355,8 +355,13 @@ proptest! {
                 .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
 
             let state_query = state
-                .expect_request(zebra_state::ReadRequest::AnyChainTransaction(unknown_txid))
-                .map_ok(|r| r.respond(zebra_state::ReadResponse::AnyChainTransaction(None)));
+                .expect_request(zebra_state::ReadRequest::TransactionQuery(
+                    zebra_state::TransactionQuery {
+                        hash: unknown_txid,
+                        chain: zebra_state::ChainSelector::Any,
+                    },
+                ))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::TransactionQuery(None)));
 
             let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1), None);
 
@@ -653,9 +658,17 @@ proptest! {
 
             // The RPC should perform a state query
             let state_query = state
-                .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
+                .expect_request(zebra_state::ReadRequest::AddressQuery(zebra_state::AddressQuery {
+                    addresses,
+                    height_range: None,
+                    fields: [zebra_state::AddressField::Balance].into_iter().collect(),
+                }))
                 .map_ok(|responder| {
-                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: balance.into() })
+                    responder.respond(zebra_state::ReadResponse::AddressQuery(zebra_state::QueriedAddresses {
+                        balance: Some(balance),
+                        received: Some(balance.into()),
+                        ..zebra_state::QueriedAddresses::default()
+                    }))
                 });
 
             // Await the RPC call and the state query
@@ -769,8 +782,11 @@ proptest! {
                 .respond(response);
 
             // the runner will also query the state again for the transaction
-            let expected_request = zebra_state::ReadRequest::Transaction(transaction_hash);
-            let response = zebra_state::ReadResponse::Transaction(None);
+            let expected_request = zebra_state::ReadRequest::TransactionQuery(zebra_state::TransactionQuery {
+                hash: transaction_hash,
+                chain: zebra_state::ChainSelector::Best,
+            });
+            let response = zebra_state::ReadResponse::TransactionQuery(None);
 
             state
                 .expect_request(expected_request)
@@ -853,12 +869,12 @@ proptest! {
 
             // the runner will also query the state again for each transaction
             for _tx in txs.clone() {
-                let response = zebra_state::ReadResponse::Transaction(None);
+                let response = zebra_state::ReadResponse::TransactionQuery(None);
 
                 // we use `expect_request_that` because we can't guarantee the state request order
                 state
                     .expect_request_that(|request| {
-                        matches!(request, zebra_state::ReadRequest::Transaction(_))
+                        matches!(request, zebra_state::ReadRequest::TransactionQuery(_))
                     })
                     .await?
                     .respond(response);

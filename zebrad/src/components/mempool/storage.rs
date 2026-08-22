@@ -861,7 +861,7 @@ impl Storage {
             //
             // TODO: revisit after reviewing the rejected list cleanup criteria?
             // TODO: if we decide to reject it, then we need to pass the block hash
-            // to State::Confirmed. This would require the zs::ReadResponse::Transaction
+            // to State::Confirmed. This would require the zs::ReadResponse::TransactionQuery
             // to include the hash, which would need to be implemented.
             TransactionDownloadVerifyError::InState |
             // An unknown error in the state service, better do nothing

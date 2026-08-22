@@ -10,7 +10,10 @@ use tower::util::ServiceExt;
 use tracing::Span;
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS};
+use zebra_state::{
+    BlockField, BlockQuery, ChainSelector, ReadRequest, ReadResponse, ReadState,
+    MAX_NON_FINALIZED_CHAIN_FORKS,
+};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, BlockRequest,
@@ -268,13 +271,20 @@ where
         match self
             .read_state
             .clone()
-            .oneshot(ReadRequest::Block(hash_or_height))
+            .oneshot(ReadRequest::BlockQuery(BlockQuery {
+                hash_or_height,
+                chain: ChainSelector::Best,
+                fields: [BlockField::Block].into_iter().collect(),
+            }))
             .await
         {
-            Ok(ReadResponse::Block(Some(block))) => {
+            Ok(ReadResponse::BlockQuery(Some(queried_block))) => {
+                let block = queried_block
+                    .block
+                    .expect("block was requested in the block query");
                 Ok(Response::new(BlockAndHash::new(block.hash(), block)))
             }
-            Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
+            Ok(ReadResponse::BlockQuery(None)) => Err(Status::not_found("block not found")),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => Err(Status::unavailable(format!(
                 "failed to read block: {error}"
