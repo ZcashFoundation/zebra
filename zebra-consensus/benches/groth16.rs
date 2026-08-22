@@ -15,21 +15,17 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use bellman::groth16::PreparedVerifyingKey;
 use bls12_381::Bls12;
 
-use zebra_chain::{
-    block::Block,
-    primitives::{ed25519, Groth16Proof},
-    serialization::ZcashDeserializeInto,
-    sprout::JoinSplit,
-};
+use zcash_primitives::transaction::components::sprout::JsDescription;
+use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
 
-use zebra_consensus::groth16::{Item, SPROUT};
+use zebra_consensus::groth16::{joinsplit_to_item, Item, SPROUT};
 
 /// A Sprout JoinSplit paired with its transaction's JoinSplit public key,
 /// ready to be converted into a Groth16 verification [`Item`].
 #[derive(Clone)]
 struct JoinSplitSource {
-    joinsplit: JoinSplit<Groth16Proof>,
-    pub_key: ed25519::VerificationKeyBytes,
+    joinsplit: JsDescription,
+    pub_key: [u8; 32],
 }
 
 /// Extracts JoinSplit/pub-key pairs from the mainnet test blocks.
@@ -44,21 +40,14 @@ fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
 
         for tx in &block.transactions {
-            let joinsplits: Vec<&JoinSplit<Groth16Proof>> =
-                tx.sprout_groth16_joinsplits().collect();
-
-            if joinsplits.is_empty() {
+            let Some(sprout_bundle) = tx.sprout_bundle() else {
                 continue;
-            }
+            };
 
-            let pub_key = tx
-                .sprout_joinsplit_pub_key()
-                .expect("pub key must exist since there are joinsplits");
-
-            for joinsplit in joinsplits {
+            for joinsplit in &sprout_bundle.joinsplits {
                 sources.push(JoinSplitSource {
                     joinsplit: joinsplit.clone(),
-                    pub_key,
+                    pub_key: sprout_bundle.joinsplit_pubkey,
                 });
             }
         }
@@ -73,7 +62,7 @@ fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
 
 /// Converts a [`JoinSplitSource`] into a verification [`Item`].
 fn item_from(source: &JoinSplitSource) -> Item {
-    Item::from_joinsplit(&source.joinsplit, &source.pub_key).expect("valid groth16 item")
+    joinsplit_to_item(&source.joinsplit, &source.pub_key).expect("valid groth16 item")
 }
 
 fn bench_groth16_verify(c: &mut Criterion) {

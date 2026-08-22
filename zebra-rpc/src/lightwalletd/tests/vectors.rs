@@ -7,14 +7,12 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, BoxError};
 
 use zebra_chain::{
-    amount::Amount,
     block::Block,
     chain_sync_status::MockSyncStatus,
     chain_tip::{
         mock::{MockChainTip, MockChainTipSender},
         NoChainTip,
     },
-    ironwood,
     parameters::Network::Mainnet,
     serialization::ZcashDeserializeInto,
 };
@@ -228,24 +226,26 @@ async fn get_block_serves_pre_nu6_3_blocks_without_an_ironwood_tree() -> Result<
 #[test]
 fn compact_tx_keeps_ironwood_actions_separate_from_orchard() {
     use zebra_chain::{
-        orchard::{Flags, ShieldedDataV6},
         parameters::NetworkUpgrade,
-        transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction},
+        transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction},
     };
 
     let _init_guard = zebra_test::init();
-    let zero = Amount::try_from(0).expect("zero is a valid amount");
 
-    let orchard = ShieldedDataV6::new(fake_v6_orchard_shielded_data(
-        Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
-        zero,
+    let orchard = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        orchard::ValuePool::Orchard,
         1,
-    ));
-    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
-        Flags::ENABLE_SPENDS,
-        zero,
+        1,
+    )
+    .expect("the Orchard pool is defined at NU6.3");
+    let ironwood = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        orchard::ValuePool::Ironwood,
         2,
-    )));
+        2,
+    )
+    .expect("the Ironwood pool is defined at NU6.3");
 
     let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), Some(ironwood));
     let compact_tx = CompactTx::from_transaction(0, tx.hash(), &tx, false);
@@ -275,19 +275,19 @@ fn compact_tx_keeps_ironwood_actions_separate_from_orchard() {
 #[test]
 fn ironwood_only_transactions_have_compact_data() {
     use zebra_chain::{
-        orchard::{Flags, ShieldedDataV6},
         parameters::NetworkUpgrade,
-        transaction::arbitrary::{fake_v6_orchard_shielded_data, fake_v6_transaction},
+        transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction},
     };
 
     let _init_guard = zebra_test::init();
-    let zero = Amount::try_from(0).expect("zero is a valid amount");
 
-    let ironwood = ironwood::ShieldedData::new(ShieldedDataV6::new(fake_v6_orchard_shielded_data(
-        Flags::ENABLE_SPENDS,
-        zero,
+    let ironwood = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu6_3,
+        orchard::ValuePool::Ironwood,
         1,
-    )));
+        1,
+    )
+    .expect("the Ironwood pool is defined at NU6.3");
 
     let tx = fake_v6_transaction(NetworkUpgrade::Nu6_3, None, Some(ironwood));
 

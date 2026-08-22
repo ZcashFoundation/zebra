@@ -132,21 +132,19 @@ fn remaining_transaction_value_scales_linearly() {
     let one_zatoshi: Amount<zebra_chain::amount::NonNegative> =
         1.try_into().expect("1 zatoshi is valid");
 
-    let coinbase = Arc::new(Transaction::V4 {
-        inputs: vec![transparent::Input::Coinbase {
+    let coinbase = Arc::new(Transaction::test_v4(
+        vec![transparent::Input::Coinbase {
             height: Height(1),
             data: Vec::new(),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: one_zatoshi,
             lock_script: transparent::Script::new(&[]),
         }],
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    });
+        LockTime::min_lock_time_timestamp(),
+        Height(0),
+    ));
 
     let mut transactions = Vec::with_capacity(TX_COUNT + 1);
     let mut spent_utxos = HashMap::with_capacity(TX_COUNT);
@@ -165,18 +163,16 @@ fn remaining_transaction_value_scales_linearly() {
             lock_script: transparent::Script::new(&[]),
         };
 
-        let tx = Transaction::V4 {
-            inputs: vec![transparent::Input::PrevOut {
+        let tx = Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
                 outpoint,
                 unlock_script: transparent::Script::new(&[]),
                 sequence: u32::MAX,
             }],
-            outputs: vec![output.clone()],
-            lock_time: LockTime::min_lock_time_timestamp(),
-            expiry_height: Height(0),
-            joinsplit_data: None,
-            sapling_shielded_data: None,
-        };
+            vec![output.clone()],
+            LockTime::min_lock_time_timestamp(),
+            Height(0),
+        );
 
         spent_utxos.insert(
             outpoint,
@@ -1052,14 +1048,12 @@ fn transaction_v4_with_transparent_data(
     let inputs: Vec<_> = inputs.into_iter().collect();
     let outputs: Vec<_> = outputs.into_iter().collect();
 
-    let mut transaction = Transaction::V4 {
+    let mut transaction = Transaction::test_v4(
         inputs,
         outputs,
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+        LockTime::min_lock_time_timestamp(),
+        Height(0),
+    );
 
     // do required fixups, but ignore any errors,
     // because we're not checking all the consensus rules here

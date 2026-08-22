@@ -39,19 +39,19 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     finalized_state: &ZebraDb,
 ) -> Result<(), ValidateContextError> {
     for nullifier in semantically_verified.block.sprout_nullifiers() {
-        if finalized_state.contains_sprout_nullifier(nullifier) {
+        if finalized_state.contains_sprout_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
     for nullifier in semantically_verified.block.sapling_nullifiers() {
-        if finalized_state.contains_sapling_nullifier(nullifier) {
+        if finalized_state.contains_sapling_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
     for nullifier in semantically_verified.block.orchard_nullifiers() {
-        if finalized_state.contains_orchard_nullifier(nullifier) {
+        if finalized_state.contains_orchard_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
@@ -111,28 +111,28 @@ pub(crate) fn tx_no_duplicates_in_chain(
     non_finalized_chain: Option<&Arc<Chain>>,
     transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
+    // All the nullifier accessors yield owned nullifiers.
     find_duplicate_nullifier(
-        transaction.sprout_nullifiers().copied(),
+        transaction.sprout_nullifiers(),
         |nullifier| finalized_chain.contains_sprout_nullifier(&nullifier),
         non_finalized_chain
             .map(|chain| move |nullifier| chain.sprout_nullifiers.contains_key(&nullifier)),
     )?;
 
     find_duplicate_nullifier(
-        transaction.sapling_nullifiers().copied(),
+        transaction.sapling_nullifiers(),
         |nullifier| finalized_chain.contains_sapling_nullifier(&nullifier),
         non_finalized_chain
             .map(|chain| move |nullifier| chain.sapling_nullifiers.contains_key(&nullifier)),
     )?;
 
     find_duplicate_nullifier(
-        transaction.orchard_nullifiers().copied(),
+        transaction.orchard_nullifiers(),
         |nullifier| finalized_chain.contains_orchard_nullifier(&nullifier),
         non_finalized_chain
             .map(|chain| move |nullifier| chain.orchard_nullifiers.contains_key(&nullifier)),
     )?;
 
-    // `Transaction::ironwood_nullifiers` already yields owned `ironwood::Nullifier`s.
     find_duplicate_nullifier(
         transaction.ironwood_nullifiers(),
         |nullifier| finalized_chain.contains_ironwood_nullifier(&nullifier),

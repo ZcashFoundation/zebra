@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: "Removed the `[patch.crates-io]` overrides that pinned the `librustzcash` crates to a git branch. Zebra builds against the published `zcash_primitives` 0.30 ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

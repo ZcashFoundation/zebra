@@ -158,6 +158,10 @@ impl ZcashDeserialize for Block {
         let limited_reader = &mut reader.take(MAX_BLOCK_BYTES);
         Ok(Block {
             header: limited_reader.zcash_deserialize_into()?,
+            // Note: transactions are parsed with a default `BranchId::Canopy` for V1-V4.
+            // The stored `consensus_branch_id` may be wrong for pre-Canopy transactions.
+            // This field is not used in production (sighash computation provides the
+            // correct branch ID explicitly via the NetworkUpgrade parameter).
             transactions: limited_reader.zcash_deserialize_into()?,
         })
     }

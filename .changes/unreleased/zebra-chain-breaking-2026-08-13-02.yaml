@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: "Transaction and block accessors that returned references to shielded data now return owned values, because that data is owned by `zcash_primitives`. Callers no longer need `.cloned()` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

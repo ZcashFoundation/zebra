@@ -78,7 +78,7 @@ impl ContextuallyVerifiedBlock {
             .iter()
             .map(AsRef::as_ref)
             .flat_map(Transaction::inputs)
-            .flat_map(transparent::Input::outpoint)
+            .flat_map(|input| input.outpoint())
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 

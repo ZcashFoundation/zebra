@@ -17,14 +17,6 @@ use tower::util::ServiceFn;
 use tower_batch_control::RequestWeight;
 use tower_fallback::BoxedError;
 
-use zebra_chain::{
-    primitives::{
-        ed25519::{self, VerificationKeyBytes},
-        Groth16Proof,
-    },
-    sprout::{JoinSplit, Nullifier, RandomSeed},
-};
-
 use crate::BoxError;
 
 use super::spawn_fifo_and_convert;
@@ -110,19 +102,19 @@ pub static JOINSPLIT_VERIFIER: Lazy<
 ///
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
 pub(super) fn h_sig(
-    random_seed: &RandomSeed,
-    nf1: &Nullifier,
-    nf2: &Nullifier,
-    joinsplit_pub_key: &VerificationKeyBytes,
+    random_seed: &[u8; 32],
+    nf1: &[u8; 32],
+    nf2: &[u8; 32],
+    joinsplit_pub_key: &[u8; 32],
 ) -> [u8; 32] {
     let h_sig: [u8; 32] = blake2b_simd::Params::new()
         .hash_length(32)
         .personal(b"ZcashComputehSig")
         .to_state()
-        .update(&(<[u8; 32]>::from(random_seed))[..])
-        .update(&(<[u8; 32]>::from(nf1))[..])
-        .update(&(<[u8; 32]>::from(nf2))[..])
-        .update(joinsplit_pub_key.as_ref())
+        .update(random_seed)
+        .update(nf1)
+        .update(nf2)
+        .update(joinsplit_pub_key)
         .finalize()
         .as_bytes()
         .try_into()
@@ -130,73 +122,54 @@ pub(super) fn h_sig(
     h_sig
 }
 
-impl Item {
-    /// Converts a Sprout JoinSplit description and its associated public key into a
-    /// Groth16 verification [`Item`].
-    ///
-    /// Encodes the primary input for the JoinSplit proof statement as Bls12_381 base
-    /// field elements, to match [`bellman::groth16::verify_proof()`].
-    ///
-    /// NB: [`jubjub::Fq`] is a type alias for [`bls12_381::Scalar`].
-    ///
-    /// `joinsplit_pub_key`: the JoinSplit public validation key for this JoinSplit, from
-    /// the transaction. (All JoinSplits in a transaction share the same validation key.)
-    ///
-    /// This is not yet officially documented; see the reference implementation:
-    /// <https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166>
-    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
-    // The borrows are actually needed to avoid taking ownership
-    #[allow(clippy::needless_borrow)]
-    pub fn from_joinsplit(
-        joinsplit: &JoinSplit<Groth16Proof>,
-        joinsplit_pub_key: &ed25519::VerificationKeyBytes,
-    ) -> Result<Self, TransactionError> {
-        let rt: [u8; 32] = joinsplit.anchor.into();
-        let mac1: [u8; 32] = (&joinsplit.vmacs[0]).into();
-        let mac2: [u8; 32] = (&joinsplit.vmacs[1]).into();
-        let nf1: [u8; 32] = (&joinsplit.nullifiers[0]).into();
-        let nf2: [u8; 32] = (&joinsplit.nullifiers[1]).into();
-        let cm1: [u8; 32] = (&joinsplit.commitments[0]).into();
-        let cm2: [u8; 32] = (&joinsplit.commitments[1]).into();
-        let vpub_old = joinsplit.vpub_old.to_bytes();
-        let vpub_new = joinsplit.vpub_new.to_bytes();
+/// Create a Groth16 verification [`Item`] from a JoinSplit description and public key.
+pub fn joinsplit_to_item(
+    js: &zcash_primitives::transaction::components::sprout::JsDescription,
+    joinsplit_pub_key: &[u8; 32],
+) -> Result<Item, TransactionError> {
+    let rt = js.anchor();
+    let nf1 = &js.nullifiers()[0];
+    let nf2 = &js.nullifiers()[1];
+    let mac1 = &js.macs()[0];
+    let mac2 = &js.macs()[1];
+    let cm1 = &js.commitments()[0];
+    let cm2 = &js.commitments()[1];
 
-        let h_sig = h_sig(
-            &joinsplit.random_seed,
-            &joinsplit.nullifiers[0],
-            &joinsplit.nullifiers[1],
-            joinsplit_pub_key,
-        );
+    let h_sig = h_sig(js.random_seed(), nf1, nf2, joinsplit_pub_key);
 
-        // Prepare the public input for the verifier
-        let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
-        public_input.extend(rt);
-        public_input.extend(h_sig);
-        public_input.extend(nf1);
-        public_input.extend(mac1);
-        public_input.extend(nf2);
-        public_input.extend(mac2);
-        public_input.extend(cm1);
-        public_input.extend(cm2);
-        public_input.extend(vpub_old);
-        public_input.extend(vpub_new);
+    let vpub_old = js.vpub_old().to_i64_le_bytes();
+    let vpub_new = js.vpub_new().to_i64_le_bytes();
 
-        let public_input = multipack::bytes_to_bits(&public_input);
-        let primary_inputs = multipack::compute_multipacking(&public_input);
+    let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
+    public_input.extend(rt);
+    public_input.extend(h_sig);
+    public_input.extend(nf1);
+    public_input.extend(mac1);
+    public_input.extend(nf2);
+    public_input.extend(mac2);
+    public_input.extend(cm1);
+    public_input.extend(cm2);
+    public_input.extend(vpub_old);
+    public_input.extend(vpub_new);
 
-        // # Consensus
-        //
-        // > Elements of a JoinSplit description MUST have the types given above
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-        //
-        // This validates the 𝜋_{ZKJoinSplit} element. In #3179 we plan to validate
-        // during deserialization, see [`JoinSplit::zcash_deserialize`].
-        let proof = bellman::groth16::Proof::read(&joinsplit.zkproof.0[..])
-            .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?;
+    let public_input = multipack::bytes_to_bits(&public_input);
+    let primary_inputs = multipack::compute_multipacking(&public_input);
 
-        Ok(Item::from((proof, primary_inputs)))
-    }
+    // V4 transactions always use Groth16 proofs for JoinSplits (V2/V3 use PHGR13).
+    // The proof type is determined at deserialization time by the transaction version
+    // (see zcash_primitives JsDescription::read), so a V4 sprout bundle will always
+    // contain Groth16 proofs. This function must only be called for V4 transactions.
+    let proof_bytes = js.groth_proof_bytes().ok_or_else(|| {
+        TransactionError::MalformedGroth16(
+            "expected Groth16 proof in JoinSplit but found PHGR13 (wrong transaction version?)"
+                .into(),
+        )
+    })?;
+
+    let proof = bellman::groth16::Proof::read(&proof_bytes[..])
+        .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?;
+
+    Ok(Item::from((proof, primary_inputs)))
 }
 
 /// Groth16 signature verifier implementation
