@@ -1963,6 +1963,95 @@ async fn rpc_getaddressutxos_response() {
     mempool.expect_no_requests().await;
 }
 
+/// Checks that `startHeight` and `maxEntries` select the same UTXOs that filtering the full
+/// response would have, now that the state applies them to the index scan instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getaddressutxos_limits() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // The address that receives the second output of every coinbase transaction,
+    // which is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`.
+    let address = &blocks[1].transactions[0].outputs()[1]
+        .address(&Mainnet)
+        .unwrap();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        state.clone(),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let addresses = vec![address.to_string()];
+
+    macro_rules! utxos {
+        ($start_height:expr, $max_entries:expr) => {{
+            let response = rpc
+                .get_address_utxos(
+                    GetAddressUtxosRequest::new(addresses.clone(), false)
+                        .with_limits($start_height, $max_entries),
+                )
+                .await
+                .expect("address is valid so no error can happen here");
+
+            let GetAddressUtxosResponse::Utxos(utxos) = response else {
+                panic!("expected GetAddressUtxosResponse::ChainInfoFalse variant");
+            };
+
+            utxos
+        }};
+    }
+
+    // Unset limits return everything, exactly as they did before the limits existed.
+    let all = utxos!(0, 0);
+    assert_eq!(all.len(), 10);
+
+    // A limit takes the first entries in chain order, not an arbitrary subset.
+    assert_eq!(utxos!(0, 3), all[..3].to_vec());
+
+    // A start height drops the entries below it, and keeps the rest in the same order.
+    let start_height = all[5].height().0;
+    let from_start_height: Vec<_> = all
+        .iter()
+        .filter(|utxo| utxo.height().0 >= start_height)
+        .cloned()
+        .collect();
+    assert_eq!(utxos!(u64::from(start_height), 0), from_start_height);
+
+    // Together, they take the first entries at or above the start height. A backend that
+    // truncated before filtering by height would return the entries below it instead.
+    assert_eq!(
+        utxos!(u64::from(start_height), 2),
+        from_start_height[..2].to_vec()
+    );
+
+    // A start height past the tip selects nothing, and one past the maximum block height is
+    // clamped rather than rejected.
+    assert!(utxos!(u64::from(u32::MAX), 0).is_empty());
+    assert!(utxos!(u64::from(u32::MAX) + 1, 0).is_empty());
+
+    mempool.expect_no_requests().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount() {
     let _init_guard = zebra_test::init();
