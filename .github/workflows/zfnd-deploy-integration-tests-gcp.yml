@@ -207,7 +207,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
@@ -481,7 +481,7 @@ jobs:
           known_hosts: unnecessary
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
       - name: Authenticate to Google Cloud
         id: auth
@@ -576,7 +576,7 @@ jobs:
 
       - name: Generate public SSH key
         run: |
-          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
