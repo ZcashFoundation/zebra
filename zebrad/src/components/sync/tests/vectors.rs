@@ -111,9 +111,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // State is asked for a block locator.
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     // Network is sent the block locator
     peer_set
@@ -327,9 +329,11 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     // ChainSync::obtain_tips
 
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     peer_set
         .expect_request(zn::Request::FindBlocks {
@@ -444,9 +448,11 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     // ChainSync::obtain_tips
 
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     peer_set
         .expect_request(zn::Request::FindBlocks {
@@ -645,9 +651,11 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // State is asked for a block locator.
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     // Network is sent the block locator
     peer_set
@@ -940,9 +948,11 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // State is asked for a block locator.
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     // Network is sent the block locator
     peer_set
@@ -1109,9 +1119,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // State is asked for a block locator.
     state_service
-        .expect_request(zs::Request::BlockLocator)
+        .expect_request(zs::Request::Read(zs::ReadRequest::BlockLocator))
         .await
-        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+        .respond(zs::Response::Read(zs::ReadResponse::BlockLocator(vec![
+            block0_hash,
+        ])));
 
     // Network is sent the block locator
     peer_set

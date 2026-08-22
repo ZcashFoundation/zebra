@@ -538,12 +538,14 @@ where
 
             let check_anchors_and_revealed_nullifiers_query = state
                 .clone()
-                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
-                    unmined_tx.clone(),
+                .oneshot(zs::Request::Read(
+                    zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx.clone()),
                 ))
                 .map(|res| {
                     assert!(
-                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                        res? == zs::Response::Read(
+                            zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                        ),
                         "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
                     );
                     Ok(())
@@ -643,17 +645,19 @@ where
     async fn mempool_best_chain_next_median_time_past(
         state: Timeout<ZS>,
     ) -> Result<DateTime32, TransactionError> {
-        let query = state
-            .clone()
-            .oneshot(zs::Request::BestChainNextMedianTimePast);
+        let query = state.clone().oneshot(zs::Request::Read(
+            zs::ReadRequest::BestChainNextMedianTimePast,
+        ));
 
-        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = query
+        if let zebra_state::Response::Read(
+            zebra_state::ReadResponse::BestChainNextMedianTimePast(median_time_past),
+        ) = query
             .await
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
         {
             Ok(median_time_past)
         } else {
-            unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
+            unreachable!("ReadRequest::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
     }
 
@@ -691,11 +695,13 @@ where
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
 
-                let query = state
-                    .clone()
-                    .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+                let query = state.clone().oneshot(zs::Request::Read(
+                    zs::ReadRequest::UnspentBestChainUtxo(*outpoint),
+                ));
 
-                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
+                let zebra_state::Response::Read(zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    utxo,
+                )) = query
                     .await
                     .map_err(|_| TransactionError::TransparentInputNotFound)?
                 else {

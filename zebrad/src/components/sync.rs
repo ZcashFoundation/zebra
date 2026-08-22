@@ -769,10 +769,14 @@ where
             .ready()
             .await
             .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::BlockLocator)
+            .call(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BlockLocator,
+            ))
             .await
             .map(|response| match response {
-                zebra_state::Response::BlockLocator(block_locator) => block_locator,
+                zebra_state::Response::Read(zebra_state::ReadResponse::BlockLocator(
+                    block_locator,
+                )) => block_locator,
                 _ => unreachable!(
                     "GetBlockLocator request can only result in Response::BlockLocator"
                 ),

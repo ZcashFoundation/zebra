@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`Request` no longer duplicates the read-only `ReadRequest` variants: read-only queries sent through the `StateService` are now nested in a single `Request::Read(ReadRequest)` variant, and their responses come back nested in `Response::Read(ReadResponse)`. `TryFrom<Request> for ReadRequest` and `TryFrom<ReadResponse> for Response` were removed; `From<ReadRequest> for Request` and `From<ReadResponse> for Response` were added instead. Note that the removed `Response::Transaction` variant carried `Option<Arc<Transaction>>`, while its `ReadResponse::Transaction` replacement carries `Option<MinedTx>`. Code sending read requests through the `StateService` must wrap them in `Request::Read(..)` and match responses on `Response::Read(..)` ([#8390](https://github.com/ZcashFoundation/zebra/issues/8390)).'
+time: 2026-08-21T21:38:59.000000000Z

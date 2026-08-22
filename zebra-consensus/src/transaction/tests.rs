@@ -492,11 +492,17 @@ async fn mempool_request_with_missing_input_is_rejected() {
         };
 
         // The first non-coinbase transaction with transparent inputs in our test vectors
-        // does not use a lock time, so we don't see Request::BestChainNextMedianTimePast here
+        // does not use a lock time, so we don't see ReadRequest::BestChainNextMedianTimePast here
 
         let state_req = state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
-            .map(|responder| responder.respond(zebra_state::Response::UnspentBestChainUtxo(None)));
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
+            .map(|responder| {
+                responder.respond(zebra_state::Response::Read(
+                    zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+                ))
+            });
 
         let verifier_req = verifier.oneshot(MempoolRequest {
             transaction: tx.into(),
@@ -542,25 +548,33 @@ async fn mempool_request_with_present_input_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -609,35 +623,45 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::from(
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::from(
                     u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
-                ),
+                )),
             ));
 
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -688,25 +712,33 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -758,25 +790,33 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -825,33 +865,43 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::MAX),
             ));
 
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -906,29 +956,39 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::MAX),
             ));
 
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+            ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let mut mempool_clone = mempool.clone();
@@ -1032,29 +1092,39 @@ async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state_clone = state.clone();
     tokio::spawn(async move {
         state_clone
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::MAX),
             ));
 
         state_clone
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(None),
+            ));
 
         state_clone
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let utxo = known_utxos
@@ -1210,36 +1280,46 @@ async fn mempool_request_with_immature_spend_is_rejected() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::MAX),
             ));
 
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos.get(&input_outpoint).map(|utxo| {
-                    let mut utxo = utxo.utxo.clone();
-                    utxo.height = coinbase_spend_height;
-                    utxo.from_coinbase = true;
-                    utxo
-                }),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos.get(&input_outpoint).map(|utxo| {
+                        let mut utxo = utxo.utxo.clone();
+                        utxo.height = coinbase_spend_height;
+                        utxo.from_coinbase = true;
+                        utxo
+                    }),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier
@@ -1327,26 +1407,36 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::BestChainNextMedianTimePast,
+            ))
             .await
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::BestChainNextMedianTimePast(DateTime32::MAX),
             ));
 
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
-            .respond(zebra_state::Response::UnspentBestChainUtxo(Some(utxo)));
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(Some(utxo)),
+            ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     verifier
@@ -1398,20 +1488,26 @@ async fn state_error_converted_correctly() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
@@ -3239,25 +3335,33 @@ async fn orchard_disabling_soft_fork_accepts_non_orchard_transactions() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let response = verifier
@@ -3326,12 +3430,16 @@ async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_he
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let accept_response = accept_verifier
@@ -3480,10 +3588,14 @@ async fn v5_consensus_branch_ids() {
 
             let state_req = async {
                 state
-                    .expect_request(zebra_state::Request::UnspentBestChainUtxo(outpoint))
+                    .expect_request(zebra_state::Request::Read(
+                        zebra_state::ReadRequest::UnspentBestChainUtxo(outpoint),
+                    ))
                     .map(|r| {
-                        r.respond(zebra_state::Response::UnspentBestChainUtxo(
-                            known_utxos.get(&outpoint).map(|utxo| utxo.utxo.clone()),
+                        r.respond(zebra_state::Response::Read(
+                            zebra_state::ReadResponse::UnspentBestChainUtxo(
+                                known_utxos.get(&outpoint).map(|utxo| utxo.utxo.clone()),
+                            ),
                         ))
                     })
                     .await;
@@ -3492,11 +3604,15 @@ async fn v5_consensus_branch_ids() {
                     .expect_request_that(|req| {
                         matches!(
                             req,
-                            zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                            zebra_state::Request::Read(
+                                zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                            )
                         )
                     })
                     .map(|r| {
-                        r.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors)
+                        r.respond(zebra_state::Response::Read(
+                            zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+                        ))
                     })
                     .await;
             };
@@ -4151,13 +4267,17 @@ async fn mempool_zip317_error() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         // ZIP-317 policy is checked before expensive cryptographic verification, so the
@@ -4215,25 +4335,33 @@ async fn mempool_zip317_ok() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .expect_request(zebra_state::Request::Read(
+                zebra_state::ReadRequest::UnspentBestChainUtxo(input_outpoint),
+            ))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::UnspentBestChainUtxo(
+                    known_utxos
+                        .get(&input_outpoint)
+                        .map(|utxo| utxo.utxo.clone()),
+                ),
             ));
 
         state
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    zebra_state::Request::Read(
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
                 )
             })
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+            .respond(zebra_state::Response::Read(
+                zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+            ));
     });
 
     let verifier_response = verifier

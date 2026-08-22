@@ -451,14 +451,14 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?;
+                        let response = state.clone().ready().await?.call(zs::Request::Read(zs::ReadRequest::Block(hash.into()))).await?;
 
                         // Add the block responses to the list, while updating the size limit.
                         //
                         // If there was a database error, return the error,
                         // and stop processing further chunks.
                         match response {
-                            zs::Response::Block(Some(block)) => {
+                            zs::Response::Read(zs::ReadResponse::Block(Some(block))) => {
                                 // If checking the serialized size of the block performs badly,
                                 // return the size from the state using a wrapper type.
                                 total_size += block.zcash_serialized_size();
@@ -468,7 +468,7 @@ impl Service<zn::Request> for Inbound {
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request
                             // sent by the peer. (Their content and encodings are the same.)
-                            zs::Response::Block(None) => blocks.push(Missing(hash)),
+                            zs::Response::Read(zs::ReadResponse::Block(None)) => blocks.push(Missing(hash)),
                             _ => unreachable!("wrong response from state"),
                         }
 
@@ -523,16 +523,16 @@ impl Service<zn::Request> for Inbound {
             }
             // Find* responses are already size-limited by the state.
             zn::Request::FindBlocks { known_blocks, stop } => {
-                let request = zs::Request::FindBlockHashes { known_blocks, stop };
+                let request = zs::Request::Read(zs::ReadRequest::FindBlockHashes { known_blocks, stop });
                 state.clone().oneshot(request).map_ok(|resp| match resp {
-                    zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
-                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
+                    zs::Response::Read(zs::ReadResponse::BlockHashes(hashes)) if hashes.is_empty() => zn::Response::Nil,
+                    zs::Response::Read(zs::ReadResponse::BlockHashes(hashes)) => zn::Response::BlockHashes(hashes),
                     _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
                 })
                     .boxed()
             }
             zn::Request::FindHeaders { known_blocks, stop } => {
-                let request = zs::Request::FindBlockHeaders { known_blocks, stop };
+                let request = zs::Request::Read(zs::ReadRequest::FindBlockHeaders { known_blocks, stop });
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     // Always reply with a `headers` message, even when empty: the
                     // `getheaders` protocol requires a `headers` response, and
@@ -540,7 +540,7 @@ impl Service<zn::Request> for Inbound {
                     // `getheaders` request pending forever. A zcashd sidecar
                     // following Zebra defers every later inv-triggered
                     // `getheaders` behind that stuck request and never syncs.
-                    zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
+                    zs::Response::Read(zs::ReadResponse::BlockHeaders(headers)) => zn::Response::BlockHeaders(headers),
                     _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
                 })
                     .boxed()

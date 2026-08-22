@@ -1321,34 +1321,14 @@ impl Service<Request> for StateService {
             }
 
             // Runs concurrently using the ReadStateService
-            Request::Tip
-            | Request::Depth(_)
-            | Request::BestChainNextMedianTimePast
-            | Request::BestChainBlockHash(_)
-            | Request::BlockLocator
-            | Request::Transaction(_)
-            | Request::AnyChainTransaction(_)
-            | Request::UnspentBestChainUtxo(_)
-            | Request::Block(_)
-            | Request::AnyChainBlock(_)
-            | Request::BlockAndSize(_)
-            | Request::BlockHeader(_)
-            | Request::FindBlockHashes { .. }
-            | Request::FindBlockHeaders { .. }
-            | Request::CheckBestChainTipNullifiersAndAnchors(_)
-            | Request::CheckBlockProposalValidity(_) => {
+            Request::Read(read_request) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
+                    let rsp = read_service.oneshot(read_request).await?;
 
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
+                    Ok(Response::Read(rsp))
                 }
                 .boxed()
             }

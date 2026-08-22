@@ -374,11 +374,13 @@ where
                     .ready()
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
-                    .call(zs::Request::CheckBlockProposalValidity(prepared_block))
+                    .call(zs::Request::Read(
+                        zs::ReadRequest::CheckBlockProposalValidity(prepared_block),
+                    ))
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
-                    zs::Response::ValidBlockProposal => Ok(hash),
+                    zs::Response::Read(zs::ReadResponse::ValidBlockProposal) => Ok(hash),
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
                 };
             }

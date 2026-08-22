@@ -27,7 +27,8 @@ use crate::{
     init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, Config, MinedTx, ReadRequest, ReadResponse, Request,
+    Response, SemanticallyVerifiedBlock,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -54,13 +55,18 @@ async fn test_populated_state_responds_correctly(
         let hash = block.hash();
 
         transcript.push((
-            Request::Depth(block.hash()),
-            Ok(Response::Depth(Some(LAST_BLOCK_HEIGHT - height.0))),
+            Request::Read(ReadRequest::Depth(block.hash())),
+            Ok(Response::Read(ReadResponse::Depth(Some(
+                LAST_BLOCK_HEIGHT - height.0,
+            )))),
         ));
 
         // these requests don't have any arguments, so we just do them once
         if ind == LAST_BLOCK_HEIGHT as usize {
-            transcript.push((Request::Tip, Ok(Response::Tip(Some((height, hash))))));
+            transcript.push((
+                Request::Read(ReadRequest::Tip),
+                Ok(Response::Read(ReadResponse::Tip(Some((height, hash))))),
+            ));
 
             let locator_hashes = vec![
                 block_hashes[LAST_BLOCK_HEIGHT as usize],
@@ -72,8 +78,8 @@ async fn test_populated_state_responds_correctly(
             ];
 
             transcript.push((
-                Request::BlockLocator,
-                Ok(Response::BlockLocator(locator_hashes)),
+                Request::Read(ReadRequest::BlockLocator),
+                Ok(Response::Read(ReadResponse::BlockLocator(locator_hashes))),
             ));
         }
 
@@ -83,20 +89,28 @@ async fn test_populated_state_responds_correctly(
                 let transaction_hash = transaction.hash();
 
                 transcript.push((
-                    Request::Transaction(transaction_hash),
-                    Ok(Response::Transaction(Some(transaction.clone()))),
+                    Request::Read(ReadRequest::Transaction(transaction_hash)),
+                    Ok(Response::Read(ReadResponse::Transaction(Some(
+                        MinedTx::new(
+                            transaction.clone(),
+                            height,
+                            1 + LAST_BLOCK_HEIGHT - height.0,
+                            block.header.time,
+                            block_hashes[LAST_BLOCK_HEIGHT as usize],
+                        ),
+                    )))),
                 ));
             }
         }
 
         transcript.push((
-            Request::Block(hash.into()),
-            Ok(Response::Block(Some(block.clone()))),
+            Request::Read(ReadRequest::Block(hash.into())),
+            Ok(Response::Read(ReadResponse::Block(Some(block.clone())))),
         ));
 
         transcript.push((
-            Request::Block(height.into()),
-            Ok(Response::Block(Some(block.clone()))),
+            Request::Read(ReadRequest::Block(height.into())),
+            Ok(Response::Read(ReadResponse::Block(Some(block.clone())))),
         ));
 
         // Spec: transactions in the genesis block are ignored.
@@ -128,58 +142,66 @@ async fn test_populated_state_responds_correctly(
 
             // no stop
             transcript.push((
-                Request::FindBlockHashes {
+                Request::Read(ReadRequest::FindBlockHashes {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: None,
-                },
-                Ok(Response::BlockHashes(next_hashes.to_vec())),
+                }),
+                Ok(Response::Read(ReadResponse::BlockHashes(
+                    next_hashes.to_vec(),
+                ))),
             ));
 
             transcript.push((
-                Request::FindBlockHeaders {
+                Request::Read(ReadRequest::FindBlockHeaders {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: None,
-                },
-                Ok(Response::BlockHeaders(next_headers.to_vec())),
+                }),
+                Ok(Response::Read(ReadResponse::BlockHeaders(
+                    next_headers.to_vec(),
+                ))),
             ));
 
             // stop at the next block
             transcript.push((
-                Request::FindBlockHashes {
+                Request::Read(ReadRequest::FindBlockHashes {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: next_hashes.first().cloned(),
-                },
-                Ok(Response::BlockHashes(
+                }),
+                Ok(Response::Read(ReadResponse::BlockHashes(
                     next_hashes.first().iter().cloned().cloned().collect(),
-                )),
+                ))),
             ));
 
             transcript.push((
-                Request::FindBlockHeaders {
+                Request::Read(ReadRequest::FindBlockHeaders {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: next_hashes.first().cloned(),
-                },
-                Ok(Response::BlockHeaders(
+                }),
+                Ok(Response::Read(ReadResponse::BlockHeaders(
                     next_headers.first().iter().cloned().cloned().collect(),
-                )),
+                ))),
             ));
 
             // stop at a block that isn't actually in the chain
             // tests bug #2789
             transcript.push((
-                Request::FindBlockHashes {
+                Request::Read(ReadRequest::FindBlockHashes {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: Some(block::Hash([0xff; 32])),
-                },
-                Ok(Response::BlockHashes(next_hashes.to_vec())),
+                }),
+                Ok(Response::Read(ReadResponse::BlockHashes(
+                    next_hashes.to_vec(),
+                ))),
             ));
 
             transcript.push((
-                Request::FindBlockHeaders {
+                Request::Read(ReadRequest::FindBlockHeaders {
                     known_blocks: known_hashes.iter().rev().cloned().collect(),
                     stop: Some(block::Hash([0xff; 32])),
-                },
-                Ok(Response::BlockHeaders(next_headers.to_vec())),
+                }),
+                Ok(Response::Read(ReadResponse::BlockHeaders(
+                    next_headers.to_vec(),
+                ))),
             ));
         };
 
@@ -222,35 +244,44 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     let iter = vec![
         // No checks for SemanticallyVerifiedBlock or CommitCheckpointVerifiedBlock because empty state
         // precondition doesn't matter to them
-        (Request::Depth(block.hash()), Ok(Response::Depth(None))),
-        (Request::Tip, Ok(Response::Tip(None))),
-        (Request::BlockLocator, Ok(Response::BlockLocator(vec![]))),
         (
-            Request::Transaction(transaction::Hash([0; 32])),
-            Ok(Response::Transaction(None)),
+            Request::Read(ReadRequest::Depth(block.hash())),
+            Ok(Response::Read(ReadResponse::Depth(None))),
         ),
         (
-            Request::Block(block.hash().into()),
-            Ok(Response::Block(None)),
+            Request::Read(ReadRequest::Tip),
+            Ok(Response::Read(ReadResponse::Tip(None))),
         ),
         (
-            Request::Block(block.coinbase_height().unwrap().into()),
-            Ok(Response::Block(None)),
+            Request::Read(ReadRequest::BlockLocator),
+            Ok(Response::Read(ReadResponse::BlockLocator(vec![]))),
+        ),
+        (
+            Request::Read(ReadRequest::Transaction(transaction::Hash([0; 32]))),
+            Ok(Response::Read(ReadResponse::Transaction(None))),
+        ),
+        (
+            Request::Read(ReadRequest::Block(block.hash().into())),
+            Ok(Response::Read(ReadResponse::Block(None))),
+        ),
+        (
+            Request::Read(ReadRequest::Block(block.coinbase_height().unwrap().into())),
+            Ok(Response::Read(ReadResponse::Block(None))),
         ),
         // No check for AwaitUTXO because it will wait if the UTXO isn't present
         (
-            Request::FindBlockHashes {
+            Request::Read(ReadRequest::FindBlockHashes {
                 known_blocks: vec![block.hash()],
                 stop: None,
-            },
-            Ok(Response::BlockHashes(Vec::new())),
+            }),
+            Ok(Response::Read(ReadResponse::BlockHashes(Vec::new()))),
         ),
         (
-            Request::FindBlockHeaders {
+            Request::Read(ReadRequest::FindBlockHeaders {
                 known_blocks: vec![block.hash()],
                 stop: None,
-            },
-            Ok(Response::BlockHeaders(Vec::new())),
+            }),
+            Ok(Response::Read(ReadResponse::BlockHeaders(Vec::new()))),
         ),
     ]
     .into_iter();

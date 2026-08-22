@@ -657,11 +657,13 @@ fn mock_state_service(
         async move {
             let response = match request {
                 // The mempool verifier looks up spent outputs in the best chain.
-                zs::Request::UnspentBestChainUtxo(outpoint) => zs::Response::UnspentBestChainUtxo(
-                    known_utxos
-                        .get(&outpoint)
-                        .map(|ordered_utxo| ordered_utxo.utxo.clone()),
-                ),
+                zs::Request::Read(zs::ReadRequest::UnspentBestChainUtxo(outpoint)) => {
+                    zs::Response::Read(zs::ReadResponse::UnspentBestChainUtxo(
+                        known_utxos
+                            .get(&outpoint)
+                            .map(|ordered_utxo| ordered_utxo.utxo.clone()),
+                    ))
+                }
                 // The block verifier only reaches the state for outputs that are not in the
                 // request's `known_utxos`.
                 zs::Request::AwaitUtxo(outpoint) => zs::Response::Utxo(
@@ -671,11 +673,13 @@ fn mock_state_service(
                         .utxo
                         .clone(),
                 ),
-                zs::Request::BestChainNextMedianTimePast => {
-                    zs::Response::BestChainNextMedianTimePast(next_median_time_past)
+                zs::Request::Read(zs::ReadRequest::BestChainNextMedianTimePast) => {
+                    zs::Response::Read(zs::ReadResponse::BestChainNextMedianTimePast(
+                        next_median_time_past,
+                    ))
                 }
-                zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
-                    zs::Response::ValidBestChainTipNullifiersAndAnchors
+                zs::Request::Read(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)) => {
+                    zs::Response::Read(zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                 }
                 request => unreachable!("unexpected state request: {request:?}"),
             };

@@ -301,16 +301,20 @@ where
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
                 let checkpoint_state_service = checkpoint_state_service.clone();
-                let request = zebra_state::Request::BestChainBlockHash(*height);
+                let request = zebra_state::Request::Read(
+                    zebra_state::ReadRequest::BestChainBlockHash(*height),
+                );
 
                 match checkpoint_state_service.oneshot(request).await {
-                    Ok(zebra_state::Response::BlockHash(Some(state_hash))) => assert_eq!(
+                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockHash(
+                        Some(state_hash),
+                    ))) => assert_eq!(
                         *checkpoint_hash, state_hash,
                         "invalid block in state: a previous Zebra instance followed an \
                          incorrect chain. Delete and re-sync your state to use the best chain"
                     ),
 
-                    Ok(zebra_state::Response::BlockHash(None)) => {
+                    Ok(zebra_state::Response::Read(zebra_state::ReadResponse::BlockHash(None))) => {
                         if checkpoint_sync {
                             tracing::info!(
                                 "state is not fully synced yet, remaining checkpoints will be \
@@ -366,12 +370,12 @@ where
         .ready()
         .await
         .unwrap()
-        .call(zs::Request::Tip)
+        .call(zs::Request::Read(zs::ReadRequest::Tip))
         .await
         .unwrap()
     {
-        zs::Response::Tip(tip) => tip,
-        _ => unreachable!("wrong response to Request::Tip"),
+        zs::Response::Read(zs::ReadResponse::Tip(tip)) => tip,
+        _ => unreachable!("wrong response to ReadRequest::Tip"),
     };
     tracing::info!(
         ?tip,

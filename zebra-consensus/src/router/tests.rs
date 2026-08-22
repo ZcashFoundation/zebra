@@ -105,8 +105,8 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
     let hash = block.hash();
 
     vec![(
-        zs::Request::Block(hash.into()),
-        Ok(zs::Response::Block(None)),
+        zs::Request::Read(zs::ReadRequest::Block(hash.into())),
+        Ok(zs::Response::Read(zs::ReadResponse::Block(None))),
     )]
 });
 
@@ -120,8 +120,8 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
     let hash = block.hash();
 
     vec![(
-        zs::Request::Block(hash.into()),
-        Ok(zs::Response::Block(Some(block))),
+        zs::Request::Read(zs::ReadRequest::Block(hash.into())),
+        Ok(zs::Response::Read(zs::ReadResponse::Block(Some(block)))),
     )]
 });
 

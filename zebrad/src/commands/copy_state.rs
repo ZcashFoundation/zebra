@@ -168,10 +168,10 @@ impl CopyStateCmd {
         let initial_target_tip = target_state
             .ready()
             .await?
-            .call(new_zs::Request::Tip)
+            .call(new_zs::Request::Read(new_zs::ReadRequest::Tip))
             .await?;
         let initial_target_tip = match initial_target_tip {
-            new_zs::Response::Tip(target_tip) => target_tip,
+            new_zs::Response::Read(new_zs::ReadResponse::Tip(target_tip)) => target_tip,
 
             response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };
@@ -253,14 +253,16 @@ impl CopyStateCmd {
             let target_block = target_state
                 .ready()
                 .await?
-                .call(new_zs::Request::Block(Height(height).into()))
+                .call(new_zs::Request::Read(new_zs::ReadRequest::Block(
+                    Height(height).into(),
+                )))
                 .await?;
             let target_block = match target_block {
-                new_zs::Response::Block(Some(target_block)) => {
+                new_zs::Response::Read(new_zs::ReadResponse::Block(Some(target_block))) => {
                     trace!(?height, %target_block, "read target block");
                     target_block
                 }
-                new_zs::Response::Block(None) => {
+                new_zs::Response::Read(new_zs::ReadResponse::Block(None)) => {
                     Err(format!("unexpected missing target block, height: {height}",))?
                 }
 
@@ -316,11 +318,13 @@ impl CopyStateCmd {
         let final_target_tip = target_state
             .ready()
             .await?
-            .call(new_zs::Request::Tip)
+            .call(new_zs::Request::Read(new_zs::ReadRequest::Tip))
             .await?;
         let final_target_tip = match final_target_tip {
-            new_zs::Response::Tip(Some(target_tip)) => target_tip,
-            new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
+            new_zs::Response::Read(new_zs::ReadResponse::Tip(Some(target_tip))) => target_tip,
+            new_zs::Response::Read(new_zs::ReadResponse::Tip(None)) => {
+                Err("empty target state: expected written blocks")?
+            }
 
             response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };

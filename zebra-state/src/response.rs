@@ -50,72 +50,22 @@ pub enum Response {
     /// of block hashes that were reconsidered in the state and successfully re-committed.
     Reconsidered(Vec<block::Hash>),
 
-    /// Response to [`Request::Depth`] with the depth of the specified block.
-    Depth(Option<u32>),
-
-    /// Response to [`Request::Tip`] with the current best chain tip.
-    //
-    // TODO: remove this request, and replace it with a call to
-    //       `LatestChainTip::best_tip_height_and_hash()`
-    Tip(Option<(block::Height, block::Hash)>),
-
-    /// Response to [`Request::BlockLocator`] with a block locator object.
-    BlockLocator(Vec<block::Hash>),
-
-    /// Response to [`Request::Transaction`] with the specified transaction.
-    Transaction(Option<Arc<Transaction>>),
-
-    /// Response to [`Request::AnyChainTransaction`] with the specified transaction.
-    AnyChainTransaction(Option<AnyTx>),
-
-    /// Response to [`Request::UnspentBestChainUtxo`] with the UTXO
-    UnspentBestChainUtxo(Option<transparent::Utxo>),
-
-    /// Response to [`Request::Block`] with the specified block.
-    Block(Option<Arc<Block>>),
-
-    /// Response to [`Request::BlockAndSize`] with the specified block and size.
-    BlockAndSize(Option<(Arc<Block>, usize)>),
-
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
-
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
 
-    /// The response to a `FindBlockHashes` request.
-    BlockHashes(Vec<block::Hash>),
-
-    /// The response to a `FindBlockHeaders` request.
-    BlockHeaders(Vec<block::CountedHeader>),
-
-    /// Response to [`Request::CheckBestChainTipNullifiersAndAnchors`].
-    ///
-    /// Does not check transparent UTXO inputs
-    ValidBestChainTipNullifiersAndAnchors,
-
-    /// Response to [`Request::BestChainNextMedianTimePast`].
-    /// Contains the median-time-past for the *next* block on the best chain.
-    BestChainNextMedianTimePast(DateTime32),
-
-    /// Response to [`Request::BestChainBlockHash`] with the specified block hash.
-    BlockHash(Option<block::Hash>),
-
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    /// Response to [`Request::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    /// Response to [`Request::Read`], answered concurrently by the
+    /// [`ReadStateService`](crate::service::ReadStateService).
+    Read(ReadResponse),
+}
+
+impl From<ReadResponse> for Response {
+    fn from(read_response: ReadResponse) -> Self {
+        Self::Read(read_response)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -421,7 +371,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<MinedTx>),
 
-    /// Response to [`Request::Transaction`] with the specified transaction.
+    /// Response to [`ReadRequest::AnyChainTransaction`] with the specified transaction.
     AnyChainTransaction(Option<AnyTx>),
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
@@ -575,79 +525,4 @@ pub struct GetBlockTemplateChainInfo {
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: DateTime32,
-}
-
-/// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
-///
-/// Used to return read requests concurrently from the [`StateService`](crate::service::StateService).
-impl TryFrom<ReadResponse> for Response {
-    type Error = &'static str;
-
-    fn try_from(response: ReadResponse) -> Result<Response, Self::Error> {
-        match response {
-            ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
-            ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
-            ReadResponse::BestChainNextMedianTimePast(median_time_past) => Ok(Response::BestChainNextMedianTimePast(median_time_past)),
-            ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
-
-            ReadResponse::Block(block) => Ok(Response::Block(block)),
-            ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
-            ReadResponse::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            } => Ok(Response::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            }),
-            ReadResponse::Transaction(tx_info) => {
-                Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
-            }
-            ReadResponse::AnyChainTransaction(tx) => Ok(Response::AnyChainTransaction(tx)),
-            ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
-
-
-            ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                                                  Manually unwrap the response, and handle pending UTXOs."),
-
-            ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
-            ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
-            ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
-
-            ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
-
-            ReadResponse::UsageInfo(_)
-            | ReadResponse::TipPoolValues { .. }
-            | ReadResponse::BlockInfo(_)
-            | ReadResponse::TransactionIdsForBlock(_)
-            | ReadResponse::AnyChainTransactionIdsForBlock(_)
-            | ReadResponse::SaplingTree(_)
-            | ReadResponse::OrchardTree(_)
-            | ReadResponse::IronwoodTree(_)
-            | ReadResponse::SaplingSubtrees(_)
-            | ReadResponse::OrchardSubtrees(_)
-            | ReadResponse::IronwoodSubtrees(_)
-            | ReadResponse::AddressBalance { .. }
-            | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_)
-            | ReadResponse::ChainInfo(_)
-            | ReadResponse::NonFinalizedBlocksListener(_)
-            | ReadResponse::IsTransparentOutputSpent(_)
-            | ReadResponse::ForkPoint(_) => {
-                Err("there is no corresponding Response for this ReadResponse")
-            }
-
-            #[cfg(feature = "indexer")]
-            ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
-
-            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
-
-            ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
-                Err("there is no corresponding Response for this ReadResponse")
-            }
-        }
-    }
 }

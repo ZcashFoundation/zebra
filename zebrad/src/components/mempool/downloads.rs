@@ -403,9 +403,12 @@ where
 
             trace!(?txid, "transaction is not in best chain");
 
-            let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Ok((None, Height(0))),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+            let (tip_height, next_height) = match state
+                .oneshot(zs::Request::Read(zs::ReadRequest::Tip))
+                .await
+            {
+                Ok(zs::Response::Read(zs::ReadResponse::Tip(None))) => Ok((None, Height(0))),
+                Ok(zs::Response::Read(zs::ReadResponse::Tip(Some((height, _hash))))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
                     Ok((Some(height), next_height))
@@ -638,11 +641,15 @@ where
             .await
             .map_err(CloneError::from)
             .map_err(TransactionDownloadVerifyError::StateError)?
-            .call(zs::Request::Transaction(txid.mined_id()))
+            .call(zs::Request::Read(zs::ReadRequest::Transaction(
+                txid.mined_id(),
+            )))
             .await
         {
-            Ok(zs::Response::Transaction(None)) => Ok(()),
-            Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
+            Ok(zs::Response::Read(zs::ReadResponse::Transaction(None))) => Ok(()),
+            Ok(zs::Response::Read(zs::ReadResponse::Transaction(Some(_)))) => {
+                Err(TransactionDownloadVerifyError::InState)
+            }
             Ok(_) => unreachable!("wrong response"),
             Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
         }?;

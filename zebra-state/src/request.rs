@@ -857,94 +857,6 @@ pub enum Request {
     /// [0]: (crate::error::CommitCheckpointVerifiedError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
-    /// Computes the depth in the current best chain of the block identified by the given hash.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::Depth(Some(depth))`](Response::Depth) if the block is in the best chain;
-    /// * [`Response::Depth(None)`](Response::Depth) otherwise.
-    Depth(block::Hash),
-
-    /// Returns [`Response::Tip(Option<(Height, block::Hash)>)`](Response::Tip)
-    /// with the current best chain tip.
-    Tip,
-
-    /// Computes a block locator object based on the current best chain.
-    ///
-    /// Returns [`Response::BlockLocator`] with hashes starting
-    /// from the best chain tip, and following the chain of previous
-    /// hashes. The first hash is the best chain tip. The last hash is
-    /// the tip of the finalized portion of the state. Block locators
-    /// are not continuous - some intermediate hashes might be skipped.
-    ///
-    /// If the state is empty, the block locator is also empty.
-    BlockLocator,
-
-    /// Looks up a transaction by hash in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
-    /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
-    Transaction(transaction::Hash),
-
-    /// Looks up a transaction by hash in any chain.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::AnyChainTransaction(Some(AnyTx))`](Response::AnyChainTransaction)
-    ///   if the transaction is in any chain;
-    /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction)
-    ///   otherwise.
-    AnyChainTransaction(transaction::Hash),
-
-    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
-    /// returning `None` immediately if it is unknown.
-    ///
-    /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
-    UnspentBestChainUtxo(transparent::OutPoint),
-
-    /// Looks up a block by hash or height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
-    /// * [`Response::Block(None)`](Response::Block) otherwise.
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    Block(HashOrHeight),
-
-    /// Looks up a block by hash in any current chain or by height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block hash is in any chain, or,
-    ///   if the block height is in the best chain;
-    /// * [`Response::Block(None)`](Response::Block) otherwise.
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    AnyChainBlock(HashOrHeight),
-
-    //// Same as Block, but also returns serialized block size.
-    ////
-    /// Returns
-    ///
-    /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
-    /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
-    BlockAndSize(HashOrHeight),
-
-    /// Looks up a block header by hash or height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
-    ///
-    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
-    /// [`block::Height`] using `.into()`.
-    BlockHeader(HashOrHeight),
-
     /// Request a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// waiting until it becomes available if it is unknown.
     ///
@@ -967,70 +879,6 @@ pub enum Request {
     ///
     /// Outdated requests are pruned on a regular basis.
     AwaitUtxo(transparent::OutPoint),
-
-    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
-    /// Returns a list of hashes that follow that intersection, from the best chain.
-    ///
-    /// If there is no matching hash in the best chain, starts from the genesis hash.
-    ///
-    /// Stops the list of hashes after:
-    ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding 500 hashes to the list.
-    ///
-    /// Returns an empty list if the state is empty.
-    ///
-    /// Returns
-    ///
-    /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::BlockHashes).
-    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getblocks>
-    FindBlockHashes {
-        /// Hashes of known blocks, ordered from highest height to lowest height.
-        known_blocks: Vec<block::Hash>,
-        /// Optionally, the last block hash to request.
-        stop: Option<block::Hash>,
-    },
-
-    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
-    /// Returns a list of headers that follow that intersection, from the best chain.
-    ///
-    /// If there is no matching hash in the best chain, starts from the genesis header.
-    ///
-    /// Stops the list of headers after:
-    ///   * adding the best tip,
-    ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS`] headers to the list.
-    ///
-    /// Returns an empty list if the state is empty.
-    ///
-    /// Returns
-    ///
-    /// [`Response::BlockHeaders(Vec<block::Header>)`](Response::BlockHeaders).
-    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getheaders>
-    FindBlockHeaders {
-        /// Hashes of known blocks, ordered from highest height to lowest height.
-        known_blocks: Vec<block::Hash>,
-        /// Optionally, the hash of the last header to request.
-        stop: Option<block::Hash>,
-    },
-
-    /// Contextually validates anchors and nullifiers of a transaction on the best chain
-    ///
-    /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
-    CheckBestChainTipNullifiersAndAnchors(UnminedTx),
-
-    /// Calculates the median-time-past for the *next* block on the best chain.
-    ///
-    /// Returns [`Response::BestChainNextMedianTimePast`] when successful.
-    BestChainNextMedianTimePast,
-
-    /// Looks up a block hash by height in the current best chain.
-    ///
-    /// Returns
-    ///
-    /// * [`Response::BlockHash(Some(hash))`](Response::BlockHash) if the block is in the best chain;
-    /// * [`Response::BlockHash(None)`](Response::BlockHash) otherwise.
-    BestChainBlockHash(block::Height),
 
     /// Checks if a block is present anywhere in the state service.
     /// Looks up `hash` in block queues as well as the finalized chain and all non-finalized chains.
@@ -1058,11 +906,22 @@ pub enum Request {
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
-    /// Performs contextual validation of the given block, but does not commit it to the state.
+    /// A read-only query about the chain state, answered concurrently by the
+    /// [`ReadStateService`](crate::service::ReadStateService).
     ///
-    /// Returns [`Response::ValidBlockProposal`] when successful.
-    /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
-    CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+    /// Any [`ReadRequest`] can be sent through the [`StateService`](crate::service::StateService)
+    /// using this variant, so read-only requests don't need to be duplicated in `Request`.
+    ///
+    /// Returns [`Response::Read`] with the corresponding [`ReadResponse`].
+    //
+    // TODO: move users of read `Request`s to `ReadStateService`, and remove this variant.
+    Read(ReadRequest),
+}
+
+impl From<ReadRequest> for Request {
+    fn from(read_request: ReadRequest) -> Self {
+        Self::Read(read_request)
+    }
 }
 
 impl Request {
@@ -1072,27 +931,10 @@ impl Request {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
-            Request::Depth(_) => "depth",
-            Request::Tip => "tip",
-            Request::BlockLocator => "block_locator",
-            Request::Transaction(_) => "transaction",
-            Request::AnyChainTransaction(_) => "any_chain_transaction",
-            Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
-            Request::Block(_) => "block",
-            Request::AnyChainBlock(_) => "any_chain_block",
-            Request::BlockAndSize(_) => "block_and_size",
-            Request::BlockHeader(_) => "block_header",
-            Request::FindBlockHashes { .. } => "find_block_hashes",
-            Request::FindBlockHeaders { .. } => "find_block_headers",
-            Request::CheckBestChainTipNullifiersAndAnchors(_) => {
-                "best_chain_tip_nullifiers_anchors"
-            }
-            Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
-            Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
-            Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::Read(read_request) => read_request.variant_name(),
         }
     }
 
@@ -1173,7 +1015,7 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
+    /// [`ReadResponse::BlockHeader`](ReadResponse::BlockHeader).
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1550,61 +1392,6 @@ impl ReadRequest {
             "type" => self.variant_name()
         )
         .increment(1);
-    }
-}
-
-/// Conversion from read-write [`Request`]s to read-only [`ReadRequest`]s.
-///
-/// Used to dispatch read requests concurrently from the [`StateService`](crate::service::StateService).
-impl TryFrom<Request> for ReadRequest {
-    type Error = &'static str;
-
-    fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
-        match request {
-            Request::Tip => Ok(ReadRequest::Tip),
-            Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
-            Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
-            Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
-
-            Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
-            Request::AnyChainBlock(hash_or_height) => {
-                Ok(ReadRequest::AnyChainBlock(hash_or_height))
-            }
-            Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
-            Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
-            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
-            Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),
-            Request::UnspentBestChainUtxo(outpoint) => {
-                Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
-            }
-
-            Request::BlockLocator => Ok(ReadRequest::BlockLocator),
-            Request::FindBlockHashes { known_blocks, stop } => {
-                Ok(ReadRequest::FindBlockHashes { known_blocks, stop })
-            }
-            Request::FindBlockHeaders { known_blocks, stop } => {
-                Ok(ReadRequest::FindBlockHeaders { known_blocks, stop })
-            }
-
-            Request::CheckBestChainTipNullifiersAndAnchors(tx) => {
-                Ok(ReadRequest::CheckBestChainTipNullifiersAndAnchors(tx))
-            }
-
-            Request::CommitSemanticallyVerifiedBlock(_)
-            | Request::CommitCheckpointVerifiedBlock(_)
-            | Request::InvalidateBlock(_)
-            | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
-
-            Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                     Manually convert the request to ReadRequest::AnyChainUtxo, \
-                     and handle pending UTXOs"),
-
-            Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
-
-            Request::CheckBlockProposalValidity(semantically_verified) => Ok(
-                ReadRequest::CheckBlockProposalValidity(semantically_verified),
-            ),
-        }
     }
 }
 

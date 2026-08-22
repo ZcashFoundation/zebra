@@ -31,8 +31,8 @@ static COMMIT_FINALIZED_BLOCK_MAINNET: Lazy<
             Ok(Response::Committed(hash)),
         ),
         (
-            Request::Block(hash.into()),
-            Ok(Response::Block(Some(block2))),
+            Request::Read(ReadRequest::Block(hash.into())),
+            Ok(Response::Read(ReadResponse::Block(Some(block2)))),
         ),
     ]
 });
@@ -52,8 +52,8 @@ static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<
             Ok(Response::Committed(hash)),
         ),
         (
-            Request::Block(hash.into()),
-            Ok(Response::Block(Some(block2))),
+            Request::Read(ReadRequest::Block(hash.into())),
+            Ok(Response::Read(ReadResponse::Block(Some(block2)))),
         ),
     ]
 });

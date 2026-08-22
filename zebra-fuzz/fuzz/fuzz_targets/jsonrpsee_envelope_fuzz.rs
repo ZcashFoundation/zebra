@@ -276,12 +276,20 @@ impl Service<zebra_state::Request> for MockState {
     fn call(&mut self, req: zebra_state::Request) -> Self::Future {
         use zebra_state::Request as R;
         use zebra_state::Response as Resp;
+        use zebra_state::{ReadRequest, ReadResponse};
         let resp: Result<Resp, BoxError> = match req {
-            R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
-            R::Block(_) => Ok(Resp::Block(None)),
-            R::Transaction(_) => Ok(Resp::Transaction(None)),
-            R::Depth(_) => Ok(Resp::Depth(None)),
-            R::BlockLocator => Ok(Resp::BlockLocator(Vec::new())),
+            R::Read(ReadRequest::Tip) => Ok(Resp::Read(ReadResponse::Tip(Some((
+                block::Height(0),
+                block::Hash([0u8; 32]),
+            ))))),
+            R::Read(ReadRequest::Block(_)) => Ok(Resp::Read(ReadResponse::Block(None))),
+            R::Read(ReadRequest::Transaction(_)) => {
+                Ok(Resp::Read(ReadResponse::Transaction(None)))
+            }
+            R::Read(ReadRequest::Depth(_)) => Ok(Resp::Read(ReadResponse::Depth(None))),
+            R::Read(ReadRequest::BlockLocator) => {
+                Ok(Resp::Read(ReadResponse::BlockLocator(Vec::new())))
+            }
             R::InvalidateBlock(h) => Ok(Resp::Invalidated(h)),
             R::ReconsiderBlock(_) => Ok(Resp::Reconsidered(Vec::new())),
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),

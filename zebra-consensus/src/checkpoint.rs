@@ -1159,11 +1159,11 @@ where
                 // will be out of sync with the state. In that case, reset
                 // its progress back to the state tip.
                 let tip = match state_service
-                    .oneshot(zs::Request::Tip)
+                    .oneshot(zs::Request::Read(zs::ReadRequest::Tip))
                     .await
                     .map_err(VerifyCheckpointError::Tip)?
                 {
-                    zs::Response::Tip(tip) => tip,
+                    zs::Response::Read(zs::ReadResponse::Tip(tip)) => tip,
                     _ => unreachable!("wrong response for Tip"),
                 };
                 // Ignore errors since send() can fail only when the verifier
