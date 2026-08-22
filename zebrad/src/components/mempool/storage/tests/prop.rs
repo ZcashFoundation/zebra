@@ -1185,14 +1185,17 @@ proptest! {
         prop_assert_eq!(e.len(), 0);
     }
 
-    /// Check if EvictionList panics if entries are added multiple times.
+    /// Check that `EvictionList` re-inserts a still-live key gracefully instead
+    /// of panicking, keeping a single entry (see #10690).
     #[test]
-    #[should_panic]
     fn eviction_list_refresh(
         txid in any::<UnminedTxId>()
     ) {
         let mut e = EvictionList::new(2, EVICTION_MEMORY_TIME);
         e.insert(txid.mined_id());
         e.insert(txid.mined_id());
+
+        prop_assert!(e.contains_key(&txid.mined_id()));
+        prop_assert_eq!(e.len(), 1);
     }
 }
