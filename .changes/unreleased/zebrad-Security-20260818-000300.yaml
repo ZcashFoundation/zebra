@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: 'Score misbehavior for peers that advertise a block containing duplicate transactions, matching the treatment of the other definitive block-validity violations ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).'
+time: 2026-08-18T00:03:00.000000000Z
