@@ -6,3 +6,5 @@ pub mod external;
 pub mod internal;
 /// Newtype wrappers giving semantic meaning to primitive datatypes.
 pub mod types;
+/// The version 2 Zcash P2P network protocol.
+pub mod v2;

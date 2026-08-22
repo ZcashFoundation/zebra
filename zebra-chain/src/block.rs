@@ -27,6 +27,7 @@ mod serialize;
 
 pub mod genesis;
 pub mod merkle;
+pub mod sync_metadata;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -41,6 +42,7 @@ pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header, ZCASH_BLOCK_VERSION};
 pub use height::{Height, HeightDiff, TryIntoHeight};
 pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
+pub use sync_metadata::{SyncHashEntry, TreeRootsEntry};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use arbitrary::LedgerState;
