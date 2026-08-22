@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `AddressBookPeers` and reports the bound local listener address) and a
   `PeerBookHandle` tower service for requests that need an answer from the book
   (sanitized addresses, cache snapshots, candidate selection, gossip intake).
+- `RemoteHandshake` replaces the legacy `VersionMessage` in `ConnectionInfo`: it
+  stores the remote peer's actual handshake data per transport protocol, with
+  accessors for the shared fields.
 - Misbehavior scores and bans are keyed by the new `BanKey` type (an IPv4
   address, or an IPv6 /64 prefix), persist across connections for about the
   ban duration, and are owned by the peer book actor instead of the address

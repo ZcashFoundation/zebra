@@ -28,7 +28,11 @@ use tokio::{
 };
 use tokio_stream::wrappers::IntervalStream;
 use tower::{
-    buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
+    buffer::Buffer,
+    discover::Change,
+    layer::Layer,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
 };
 use tracing_futures::Instrument;
 
@@ -62,6 +66,12 @@ mod tests;
 
 mod inbound_admission;
 mod recent_by_ip;
+mod v2_transport;
+
+/// The version 2 outbound connector, type-erased so the crawler does not
+/// carry the inbound service and chain tip types.
+type V2OutboundConnector =
+    BoxCloneService<OutboundConnectorRequest, (PeerSocketAddr, peer::Client), BoxError>;
 
 /// A successful outbound peer connection attempt or inbound connection handshake.
 ///
@@ -217,8 +227,43 @@ where
     // (The block syncer and mempool crawler handle bulk fetches of blocks and transactions.)
     let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
 
-    let advertised_services = crate::protocol::external::types::PeerServices::NODE_NETWORK;
+    // The identity this node advertises to its peers, shared by the legacy
+    // and v2 handshakes.
+    // NODE_TREE_ROOTS: this Zebra version maintains the per-block sync
+    // metadata index (backfilled by a state format upgrade), and serves
+    // `get-tree-roots` requests; requests that arrive before the backfill
+    // completes are refused.
+    let mut advertised_services = crate::protocol::external::types::PeerServices::NODE_NETWORK
+        | crate::protocol::external::types::PeerServices::NODE_TREE_ROOTS;
+    // NODE_SYNC_ARTIFACTS: advertised when the node has an artifact
+    // directory to serve `get-object` requests from.
+    if config
+        .cache_dir
+        .artifact_dir_path(&config.network)
+        .is_some()
+    {
+        advertised_services |= crate::protocol::external::types::PeerServices::NODE_SYNC_ARTIFACTS;
+    }
     let want_transactions = true;
+
+    // The v2 (QUIC) transport, if enabled: it shares the
+    // inbound service, address book, and inventory collector with the
+    // legacy transport, and delivers ordinary peer clients to the peer set.
+    let v2_enabled = config.v2_listen || !config.initial_v2_peers.is_empty();
+    let v2_handshaker = v2_enabled.then(|| {
+        peer::v2::V2Handshaker::new(
+            config.clone(),
+            user_agent.clone(),
+            advertised_services,
+            want_transactions,
+            inbound_service.clone(),
+            address_book_updater.clone(),
+            misbehavior_tx.clone(),
+            inv_sender.clone(),
+            MinimumPeerVersion::new(latest_chain_tip.clone(), &config.network),
+            listen_addr,
+        )
+    });
 
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
@@ -279,6 +324,9 @@ where
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
+    // The legacy and v2 transports open connections from separate tasks, but
+    // their connections share the configured limits, so they share these
+    // counters.
     let active_inbound_connections = SharedConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
@@ -302,6 +350,59 @@ where
         active_inbound_connections.clone(),
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
+
+    // 1b. Version 2 protocol (QUIC) connections, if enabled: inbound
+    // connections on the UDP port of the listen address, the configured
+    // initial v2 peers, and crawler dials to peers known to accept QUIC.
+    // The endpoint is shared: the task below accepts on it, and the
+    // crawler dials outbound connections through it. A failure to open it
+    // is logged by the endpoint, and the node continues on the legacy
+    // transport alone.
+    let v2 = v2_handshaker.and_then(|handshaker| {
+        let endpoint = v2_transport::new_v2_endpoint(&config, listen_addr).ok()?;
+
+        Some((handshaker, endpoint))
+    });
+
+    let (v2_connector, v2_guard) = match v2 {
+        Some((v2_handshaker, endpoint)) => {
+            // Boxed so the crawler carries neither the inbound service type
+            // nor a `Sync` bound on it.
+            let connector: V2OutboundConnector = BoxCloneService::new(peer::V2Connector::new(
+                endpoint.clone(),
+                config.network.clone(),
+                v2_handshaker.clone(),
+            ));
+
+            let v2_fut = v2_transport::run_v2_endpoint(
+                config.clone(),
+                endpoint,
+                v2_handshaker,
+                peerset_tx.clone(),
+                bans_receiver,
+                active_inbound_connections,
+            );
+
+            (
+                Some(connector),
+                Some(tokio::spawn(v2_fut.in_current_span())),
+            )
+        }
+        None => (None, None),
+    };
+
+    // Dial the configured version 2 peers, and add them to the book so the
+    // legacy crawler redials them if the version 2 connection drops.
+    if let Some(connector) = v2_connector.clone() {
+        let dial_fut = add_initial_v2_peers(
+            config.clone(),
+            connector,
+            peerset_tx.clone(),
+            address_book_updater.clone(),
+            active_outbound_connections.clone(),
+        );
+        tokio::spawn(dial_fut.in_current_span());
+    }
 
     // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
@@ -365,12 +466,17 @@ where
     let peer_cache_updater_fut = peer_cache_updater(config, peer_book_handle.clone());
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
 
-    let guards = vec![
+    let mut guards = vec![
         listen_guard,
         crawl_guard,
         address_book_updater_guard,
         peer_cache_updater_guard,
     ];
+    // The v2 endpoint is only spawned when the v2 transport is
+    // configured. Its guard is sent with the others, so a bind failure or
+    // panic surfaces instead of silently disabling the transport.
+    guards.extend(v2_guard);
+
     handle_tx.send(guards).unwrap();
 
     (peer_set, peer_book_reader, misbehavior_tx, peer_book_handle)
@@ -1344,6 +1450,55 @@ where
     }
 
     Ok(())
+}
+
+/// Dials the configured version 2 peers, and adds them to the address book.
+///
+/// The configured peers are the only ones dialed over version 2: a relayed
+/// address carries no indication of the transports its peer accepts, so
+/// this node cannot tell which of them would answer a QUIC dial.
+#[instrument(skip(
+    connector,
+    peerset_tx,
+    address_book_updater,
+    active_outbound_connections
+))]
+async fn add_initial_v2_peers(
+    config: Config,
+    mut connector: V2OutboundConnector,
+    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    address_book_updater: crate::peer_book::ChangeSender,
+    active_outbound_connections: SharedConnectionCounter,
+) {
+    for addr in config.initial_v2_peers().await {
+        // The book keeps the peer as a reconnection candidate for the
+        // legacy crawler if the version 2 connection drops.
+        let _ = address_book_updater
+            .send(MetaAddr::new_initial_peer(addr))
+            .await;
+
+        let request = OutboundConnectorRequest {
+            addr,
+            connection_tracker: active_outbound_connections.track_connection(),
+        };
+
+        let Ok(connector) = connector.ready().await else {
+            return;
+        };
+
+        match connector.call(request).await {
+            Ok((addr, client)) => {
+                debug!(?addr, "connected to configured v2 peer");
+
+                if peerset_tx.send((addr, client)).await.is_err() {
+                    return;
+                }
+            }
+            Err(error) => {
+                info!(?error, ?addr, "failed to connect to configured v2 peer");
+            }
+        }
+    }
 }
 
 /// Mark `addr` as a failed peer to `address_book_updater`.

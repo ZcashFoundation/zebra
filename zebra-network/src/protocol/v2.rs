@@ -19,16 +19,13 @@
 //! - long-lived unidirectional *announcement streams* (types `0x10`–`0x12`)
 //!   carrying length-prefixed announcement records.
 //!
-//! This module contains the wire encodings and their limits. The QUIC
-//! transport that carries them, and the peer connection logic that uses
-//! them, are added by the commits that follow this one.
-// Every item here is reached through the transport and connection layers,
-// which land in later commits; the tests below exercise them meanwhile.
-#![allow(dead_code)]
+//! This module contains the wire encodings and their limits, and the QUIC
+//! transport that carries them; the peer connection logic lives elsewhere.
 
 pub mod compact_block;
 pub mod constants;
 pub mod init;
+pub mod quic;
 pub mod record;
 pub mod request;
 pub mod response;

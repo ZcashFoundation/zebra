@@ -74,7 +74,7 @@ fn new_test_connection<A>() -> (
 
     let connection_info = ConnectionInfo {
         connected_addr: ConnectedAddr::Isolated,
-        remote,
+        remote: crate::peer::RemoteHandshake::Version(remote),
         negotiated_version: fake_version,
     };
 

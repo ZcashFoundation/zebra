@@ -52,7 +52,7 @@ impl From<Client> for LoadTrackedClient {
 impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
-        self.connection_info.remote.version
+        self.connection_info.remote.version()
     }
 
     /// Returns true if this peer connected directly to us from `ip`.

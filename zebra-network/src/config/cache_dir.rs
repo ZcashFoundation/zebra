@@ -56,6 +56,23 @@ impl CacheDir {
         }
     }
 
+    /// Returns the synchronization artifact directory for `network`, if the
+    /// directory exists.
+    ///
+    /// Artifacts are content-addressed files named by the lowercase hex
+    /// SHA-256 hash of their contents, served by the v2 protocol's
+    /// `get-object` requests. The directory is only used when it already
+    /// exists, so nodes without artifacts refuse `get-object` instead.
+    pub fn artifact_dir_path(&self, network: &Network) -> Option<PathBuf> {
+        let dir = self
+            .cache_dir()?
+            .join("network")
+            .join("artifacts")
+            .join(network.lowercase_name());
+
+        dir.is_dir().then_some(dir)
+    }
+
     /// Returns the peer cache file path for `network`, if enabled.
     pub fn peer_cache_file_path(&self, network: &Network) -> Option<PathBuf> {
         Some(

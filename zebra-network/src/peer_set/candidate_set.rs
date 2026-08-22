@@ -187,6 +187,10 @@ where
 /// apart. If a peer was recently provided, then this future will sleep
 /// until the rate-limit has passed.
 ///
+/// The returned candidate records which transports the peer is known to
+/// accept, so the dialer can reach version 2 peers over QUIC and
+/// everything else over TCP.
+///
 /// [`Responded`]: crate::PeerAddrState::Responded
 pub(crate) async fn next_reconnect_peer(
     next_peer_service: &mut NextPeerService,
