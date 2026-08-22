@@ -2623,17 +2623,20 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
 impl Ord for Chain {
     /// Chain order for the [`NonFinalizedState`][1]'s `chain_set`.
     ///
-    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`],
-    /// breaking ties using the tip block hash.
+    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`].
+    /// Ties are broken by preferring the chain whose tip block was received
+    /// first (the earlier `received_time` stamped by the block verifier),
+    /// implementing the consensus rule quoted below. Sibling blocks on Zcash
+    /// always have equal work (`nBits` is fully determined by their
+    /// ancestors), so without first-received preference, an already-adopted
+    /// tip could be displaced by an equal-work sibling arriving arbitrarily
+    /// later.
     ///
-    /// Despite the consensus rules, Zebra uses the tip block hash as a
-    /// tie-breaker. Zebra blocks are downloaded in parallel, so download
-    /// timestamps may not be unique. (And Zebra currently doesn't track
-    /// download times, because [`Block`](block::Block)s are immutable.)
-    ///
-    /// This departure from the consensus rules may delay network convergence,
-    /// for as long as the greater hash belongs to the later mined block.
-    /// But Zebra nodes should converge as soon as the tied work is broken.
+    /// The tip block hash remains as a final tie-breaker when receipt times
+    /// are equal, so that the order is total. Chains whose tip has no receipt
+    /// stamp (checkpoint sync, backup restore) compare as if received before
+    /// any stamped block, like `zcashd`'s disk-loaded blocks, which all share
+    /// `nSequenceId` 0.
     ///
     /// "At a given point in time, each full validator is aware of a set of candidate blocks.
     /// These form a tree rooted at the genesis block, where each node in the tree
@@ -2658,14 +2661,16 @@ impl Ord for Chain {
     /// # Correctness
     ///
     /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
-    /// interior mutability.
+    /// interior mutability. The receipt time is stamped by the block verifier, before the
+    /// block is pushed onto a chain, and never modified afterwards.
     ///
     /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
-    /// the tip hash match. The [`NonFinalizedState::chain_set`][2] is a
-    /// `BTreeSet<Arc<Chain>>`, so an attempt to insert a chain that compares
-    /// equal to an existing entry is a no-op rather than a process-fatal panic.
-    /// Callers that need to replace such a chain must remove the existing entry
-    /// first.
+    /// the tip hash match. Two chains with the same tip hash share the stored tip
+    /// block (and therefore its receipt time), so they always compare equal. The
+    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
+    /// attempt to insert a chain that compares equal to an existing entry is a
+    /// no-op rather than a process-fatal panic. Callers that need to replace
+    /// such a chain must remove the existing entry first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
@@ -2674,23 +2679,36 @@ impl Ord for Chain {
             self.partial_cumulative_work
                 .cmp(&other.partial_cumulative_work)
         } else {
-            let self_hash = self
+            let self_tip = self
                 .blocks
                 .values()
                 .last()
-                .expect("always at least 1 element")
-                .hash;
+                .expect("always at least 1 element");
 
-            let other_hash = other
+            let other_tip = other
                 .blocks
                 .values()
                 .last()
-                .expect("always at least 1 element")
-                .hash;
+                .expect("always at least 1 element");
 
-            // This comparison is a tie-breaker within the local node, so it does not need to
-            // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
-            self_hash.0.cmp(&other_hash.0)
+            // Same tip block: the chains are equal regardless of receipt time, so that
+            // re-committing an already-tracked tip stays a `BTreeSet::insert` no-op.
+            if self_tip.hash == other_tip.hash {
+                return Ordering::Equal;
+            }
+
+            // Prefer the first-received tip: an EARLIER receipt time is a BETTER chain,
+            // so it must compare `Greater` (the best chain is the greatest in the set).
+            match self_tip
+                .received_time
+                .cmp(&other_tip.received_time)
+                .reverse()
+            {
+                // This comparison is a tie-breaker within the local node, so it does not need to
+                // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
+                Ordering::Equal => self_tip.hash.0.cmp(&other_tip.hash.0),
+                ordering => ordering,
+            }
         }
     }
 }
@@ -2703,7 +2721,7 @@ impl PartialOrd for Chain {
 
 impl PartialEq for Chain {
     /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
-    /// work, then the tip block hash as a tie-breaker.
+    /// work, then the tip block's receipt time, then the tip block hash.
     ///
     /// Two chains with the same cumulative work and tip hash are equal; the
     /// `chain_set` uses this to keep tip hashes unique.

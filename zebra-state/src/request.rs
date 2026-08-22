@@ -5,6 +5,7 @@ use std::{
     ops::{Add, Deref, DerefMut, RangeInclusive},
     pin::Pin,
     sync::Arc,
+    time::Instant,
 };
 
 use tower::{BoxError, Service, ServiceExt};
@@ -269,6 +270,22 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// The local time at which the block verifier received this block, if it passed
+    /// through the block verifier.
+    ///
+    /// Used by `Chain::cmp` to prefer the first-received chain when cumulative works
+    /// are equal, per the protocol specification:
+    ///
+    /// > To break ties between leaf blocks, a node will prefer the block that it received first.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
+    ///
+    /// This is node-local, in-memory metadata, not consensus data. It is `None` for
+    /// blocks constructed outside the block verifier (checkpoint sync, backup restore,
+    /// tests); `Chain::cmp` treats unstamped blocks as received before any stamped
+    /// block, like `zcashd`'s disk-loaded blocks, which all share `nSequenceId` 0.
+    pub received_time: Option<Instant>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -329,6 +346,11 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    /// The local time at which the block verifier received this block, if it passed
+    /// through the block verifier, copied from the [`SemanticallyVerifiedBlock`] it was
+    /// built from. See that type's `received_time` field for details.
+    pub(crate) received_time: Option<Instant>,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -507,6 +529,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -526,6 +549,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
             )?,
+            received_time,
         })
     }
 }
@@ -561,6 +585,7 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time: None,
         }
     }
 }
@@ -586,6 +611,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time: None,
         }
     }
 }
@@ -598,6 +624,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
+            received_time: valid.received_time,
         }
     }
 }
@@ -610,6 +637,8 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             height: finalized.height,
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
+            // The finalized state does not track receipt times, so there is no stamp.
+            received_time: None,
         }
     }
 }
