@@ -113,6 +113,26 @@ impl FromDisk for () {
     }
 }
 
+impl IntoDisk for u32 {
+    type Bytes = [u8; 4];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        // Big-endian so that RocksDB's lexicographic key ordering matches the
+        // numeric ordering of the index.
+        self.to_be_bytes()
+    }
+}
+
+impl FromDisk for u32 {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes
+            .as_ref()
+            .try_into()
+            .expect("u32 disk keys are always written as exactly 4 bytes by IntoDisk");
+        u32::from_be_bytes(array)
+    }
+}
+
 /// Access database keys or values as raw bytes.
 /// Mainly for use in tests, runtime checks, or format compatibility code.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

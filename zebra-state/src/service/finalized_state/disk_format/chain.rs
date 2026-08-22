@@ -12,7 +12,7 @@ use serde_big_array::BigArray;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::Height,
+    block::{Height, MAX_BLOCK_BYTES},
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
     parameters::{Network, NetworkKind},
@@ -200,6 +200,144 @@ impl FromDisk for BlockInfo {
                 BlockInfo::new(value_pools, size)
             }
             _ => panic!("invalid format"),
+        }
+    }
+}
+
+/// The unit of a block's *size value*: the maximum serialized block size
+/// divided by 255 and rounded up, so a block's size value is a 1-byte
+/// quantity, and `size value × unit` is always an upper bound on the
+/// block's serialized size.
+///
+/// The size value is a network protocol encoding, so this index stores each
+/// block's raw serialized size, and the quantization is applied when the
+/// metadata is served.
+pub const BLOCK_SIZE_VALUE_UNIT: u64 = MAX_BLOCK_BYTES.div_ceil(255);
+
+/// Per-block synchronization metadata, served in the v2 network protocol's
+/// `get-hashes` span aggregates and `get-tree-roots` entries.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SyncMetadata {
+    /// The block's serialized size, in bytes.
+    pub size: u32,
+
+    /// The number of transactions in the block, including the coinbase.
+    pub tx_count: u32,
+
+    /// The number of note commitments added by the block: two per JoinSplit
+    /// description, one per Sapling output description, and one per Orchard
+    /// or Ironwood action description.
+    pub note_count: u32,
+
+    /// The number of transactions with Sapling components, as counted by the
+    /// block's ZIP 221 chain history tree leaf.
+    pub sapling_tx_count: u32,
+
+    /// The number of transactions with Orchard-pool components.
+    pub orchard_tx_count: u32,
+
+    /// The number of transactions with Ironwood-pool components.
+    pub ironwood_tx_count: u32,
+
+    /// The block's ZIP 244 authorizing data commitment, `hashAuthDataRoot`.
+    pub auth_data_root: [u8; 32],
+
+    /// The number of transparent outputs created by this block and every block
+    /// below it in the chain.
+    ///
+    /// This count assigns each transparent output a global ordinal: the parent
+    /// block's cumulative count, plus the output's index among this block's
+    /// outputs in transaction order. Genesis outputs count toward the ordinal:
+    /// the SwiftSync spentness bitmap indexes every transparent output created
+    /// at or below its checkpoint in canonical order, and the genesis coinbase
+    /// creates outputs even though Zebra never indexes them as spendable.
+    pub cumulative_transparent_outputs: u64,
+}
+
+impl SyncMetadata {
+    /// Computes the synchronization metadata of `block`, whose serialized
+    /// size is `serialized_size`, and whose parent block's cumulative
+    /// transparent output count is `prev_cumulative_transparent_outputs`
+    /// (zero for the genesis block).
+    pub fn for_block(
+        block: &zebra_chain::block::Block,
+        serialized_size: usize,
+        prev_cumulative_transparent_outputs: u64,
+    ) -> SyncMetadata {
+        // Counted through the block's own note commitment iterators, so
+        // this count follows the pools zebra-chain knows about.
+        let note_count = block.sprout_note_commitments().count()
+            + block.sapling_note_commitments().count()
+            + block.orchard_note_commitments().count()
+            + block.ironwood_note_commitments().count();
+
+        let transparent_output_count: usize =
+            block.transactions.iter().map(|tx| tx.outputs().len()).sum();
+
+        let cumulative_transparent_outputs = prev_cumulative_transparent_outputs
+            // The cast is safe: the per-block count is bounded by
+            // `MAX_BLOCK_BYTES` over the minimum output encoding, far below
+            // u64. The sum can't overflow, because every counted output
+            // takes tens of bytes in a chain whose length fits in u32.
+            .checked_add(transparent_output_count as u64)
+            .expect(
+                "a u32-height chain of MAX_BLOCK_BYTES blocks of minimal outputs stays below u64::MAX outputs",
+            );
+
+        SyncMetadata {
+            // The casts below are safe: consensus-valid blocks are at most
+            // `MAX_BLOCK_BYTES`, and each count is bounded by that size
+            // over the minimum encoding of a counted item, far below u32.
+            size: serialized_size as u32,
+            tx_count: block.transactions.len() as u32,
+            note_count: note_count as u32,
+            sapling_tx_count: block.sapling_transactions_count() as u32,
+            orchard_tx_count: block.orchard_transactions_count() as u32,
+            ironwood_tx_count: block.ironwood_transactions_count() as u32,
+            auth_data_root: block.auth_data_root().into(),
+            cumulative_transparent_outputs,
+        }
+    }
+}
+
+impl IntoDisk for SyncMetadata {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let mut bytes = Vec::with_capacity(64);
+        bytes.extend_from_slice(&self.size.to_le_bytes());
+        bytes.extend_from_slice(&self.tx_count.to_le_bytes());
+        bytes.extend_from_slice(&self.note_count.to_le_bytes());
+        bytes.extend_from_slice(&self.sapling_tx_count.to_le_bytes());
+        bytes.extend_from_slice(&self.orchard_tx_count.to_le_bytes());
+        bytes.extend_from_slice(&self.ironwood_tx_count.to_le_bytes());
+        bytes.extend_from_slice(&self.auth_data_root);
+        bytes.extend_from_slice(&self.cumulative_transparent_outputs.to_le_bytes());
+        bytes
+    }
+}
+
+impl FromDisk for SyncMetadata {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
+        // Records are exactly 64 bytes; reading the known prefix and
+        // ignoring unexpected trailing bytes stays forward-compatible.
+        assert!(bytes.len() >= 64, "invalid format");
+
+        let word =
+            |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("must be 4 bytes"));
+
+        SyncMetadata {
+            size: word(0),
+            tx_count: word(4),
+            note_count: word(8),
+            sapling_tx_count: word(12),
+            orchard_tx_count: word(16),
+            ironwood_tx_count: word(20),
+            auth_data_root: bytes[24..56].try_into().expect("must be 32 bytes"),
+            cumulative_transparent_outputs: u64::from_le_bytes(
+                bytes[56..64].try_into().expect("must be 8 bytes"),
+            ),
         }
     }
 }

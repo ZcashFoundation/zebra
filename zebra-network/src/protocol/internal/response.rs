@@ -64,6 +64,20 @@ pub enum Response {
     // TODO: make this into a HashSet - a unique list (#2244)
     TransactionIds(Vec<UnminedTxId>),
 
+    /// A list of best-chain block hashes with aggregated synchronization
+    /// metadata, in response to [`Request::SyncHashes`](super::Request::SyncHashes).
+    ///
+    /// The list may be shorter than requested; truncation is always a
+    /// prefix.
+    SyncHashes(Vec<block::SyncHashEntry>),
+
+    /// Per-block note commitment tree roots and counts, in response to
+    /// [`Request::TreeRoots`](super::Request::TreeRoots).
+    ///
+    /// `None` when the request's anchor is not in the best chain, or the
+    /// serving index is unavailable: the request must be refused.
+    TreeRoots(Option<Vec<block::TreeRootsEntry>>),
+
     /// A list of found blocks, and missing block hashes.
     ///
     /// Each list contains zero or more entries.
@@ -97,6 +111,13 @@ impl fmt::Display for Response {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
             }
             Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
+            Response::SyncHashes(entries) => format!("SyncHashes({})", entries.len()),
+            Response::TreeRoots(entries) => format!(
+                "TreeRoots({})",
+                entries
+                    .as_ref()
+                    .map_or_else(|| "refused".to_string(), |e| e.len().to_string()),
+            ),
 
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks) if blocks.len() == 1 => {
@@ -141,6 +162,8 @@ impl Response {
             Response::BlockHashes(_) => "BlockHashes",
             Response::BlockHeaders(_) => "BlockHeaders",
             Response::TransactionIds(_) => "TransactionIds",
+            Response::SyncHashes(_) => "SyncHashes",
+            Response::TreeRoots(_) => "TreeRoots",
 
             Response::Blocks(_) => "Blocks",
             Response::Transactions(_) => "Transactions",

@@ -253,7 +253,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     // The push path only touches the mempool; the state and block verifier are
     // wired up because `Inbound` requires them, but are never driven here.
-    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -287,6 +287,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
         block_verifier,
         mempool: buffered_mempool,
         state: state_service,
+        read_state: read_only_state_service,
         latest_chain_tip,
         misbehavior_sender,
     };
@@ -891,7 +892,7 @@ async fn bounds_getaddr_response() {
         );
 
         // UTXO verification doesn't matter for these tests.
-        let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
             zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -931,6 +932,7 @@ async fn bounds_getaddr_response() {
             block_verifier,
             mempool: buffered_mempool_service.clone(),
             state: state_service.clone(),
+            read_state: read_only_state_service.clone(),
             latest_chain_tip,
             misbehavior_sender,
         };
@@ -998,7 +1000,7 @@ async fn setup(
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
     // UTXO verification doesn't matter for these tests.
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -1148,6 +1150,7 @@ async fn setup(
         block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),
+        read_state: read_only_state_service.clone(),
         latest_chain_tip,
         misbehavior_sender,
     };

@@ -46,5 +46,34 @@ fn verification_errors_have_high_misbehavior_score() {
         TransactionError::RedPallas(zebra_chain::primitives::reddsa::Error::InvalidSignature),
     ] {
         assert_eq!(error.mempool_misbehavior_score(), 100, "{error:?}");
+        assert_eq!(error.block_misbehavior_score(), 100, "{error:?}");
+    }
+}
+
+/// Rejections that are evaluated against this node's own chain tip — coinbase
+/// maturity and lock times — must not be penalized for mempool transactions,
+/// because an honest peer one block ahead or behind can relay a transaction
+/// that is valid in its view and not in ours. The same failures in a block
+/// prove the block invalid, because the block fixes the height and time they
+/// are evaluated at, so they keep their score there.
+#[test]
+fn chain_view_dependent_errors_are_not_scored_for_mempool_transactions() {
+    for error in [
+        TransactionError::ImmatureTransparentCoinbaseSpend {
+            outpoint: zebra_chain::transparent::OutPoint {
+                hash: zebra_chain::transaction::Hash([0; 32]),
+                index: 0,
+            },
+            spend_height: block::Height(110),
+            min_spend_height: block::Height(200),
+            created_height: block::Height(100),
+        },
+        TransactionError::LockedUntilAfterBlockHeight(block::Height(1_000_000)),
+        TransactionError::LockedUntilAfterBlockTime(
+            chrono::DateTime::from_timestamp(2_000_000_000, 0).expect("valid timestamp"),
+        ),
+    ] {
+        assert_eq!(error.mempool_misbehavior_score(), 0, "{error:?}");
+        assert_eq!(error.block_misbehavior_score(), 100, "{error:?}");
     }
 }

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- The state database format is bumped to 28.1.0 for a per-block synchronization
+  metadata index, which serves the version 2 `get-hashes` and `get-tree-roots`
+  requests. Existing databases backfill the index on the next start, which reads
+  the chain once; the node stays usable while it runs.
 - Added `seeder.zec.rocks` and `seeder.testnet.zec.rocks` as default DNS seeders
   ([#11096](https://github.com/ZcashFoundation/zebra/pull/11096)).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,

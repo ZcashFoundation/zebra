@@ -103,6 +103,7 @@ pub struct InboundSetupData {
     pub state: State,
 
     /// A service that answers read-only state requests concurrently.
+    pub read_state: zs::ReadStateService,
 
     /// Allows efficient access to the best tip of the blockchain.
     pub latest_chain_tip: zs::LatestChainTip,
@@ -150,6 +151,7 @@ pub enum Setup {
         state: State,
 
         /// A service that answers read-only state requests concurrently.
+        read_state: zs::ReadStateService,
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
         misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
@@ -265,6 +267,7 @@ impl Service<zn::Request> for Inbound {
                         block_verifier,
                         mempool,
                         state,
+                        read_state,
                         latest_chain_tip,
                         misbehavior_sender,
                     } = setup_data;
@@ -283,6 +286,7 @@ impl Service<zn::Request> for Inbound {
                         block_downloads,
                         mempool,
                         state,
+                        read_state,
                         misbehavior_sender,
                     }
                 }
@@ -319,6 +323,7 @@ impl Service<zn::Request> for Inbound {
                 mut block_downloads,
                 mempool,
                 state,
+                read_state,
                 misbehavior_sender,
             } => {
                 // # Correctness
@@ -364,6 +369,7 @@ impl Service<zn::Request> for Inbound {
                     block_downloads,
                     mempool,
                     state,
+                    read_state,
                     misbehavior_sender,
                 }
             }
@@ -392,14 +398,22 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
-        let (peer_book_handle, block_downloads, mempool, state) = match &mut self.setup {
+        let (peer_book_handle, block_downloads, mempool, state, read_state) = match &mut self.setup
+        {
             Setup::Initialized {
                 peer_book_handle,
                 block_downloads,
                 mempool,
                 state,
+                read_state,
                 misbehavior_sender: _,
-            } => (peer_book_handle, block_downloads, mempool, state),
+            } => (
+                peer_book_handle,
+                block_downloads,
+                mempool,
+                state,
+                read_state,
+            ),
             _ => {
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
@@ -590,6 +604,20 @@ impl Service<zn::Request> for Inbound {
                 block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
+            zn::Request::SyncHashes { start_height, stride, count } => {
+                let request = zs::ReadRequest::SyncHashes { start_height, stride, count };
+                read_state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::ReadResponse::SyncHashes(entries) => zn::Response::SyncHashes(entries),
+                    _ => unreachable!("zebra-state should always respond to a `SyncHashes` request with a `SyncHashes` response"),
+                }).boxed()
+            }
+            zn::Request::TreeRoots { start_height, final_hash, count } => {
+                let request = zs::ReadRequest::TreeRoots { start_height, final_hash, count };
+                read_state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::ReadResponse::TreeRoots(entries) => zn::Response::TreeRoots(entries),
+                    _ => unreachable!("zebra-state should always respond to a `TreeRoots` request with a `TreeRoots` response"),
+                }).boxed()
+            }
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
@@ -604,6 +632,8 @@ impl Service<zn::Request> for Inbound {
             }
 
             zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+
+            zn::Request::BlockRange { .. } => unreachable!("block range requests are sent to peers, not the inbound service")
         }
     }
 }

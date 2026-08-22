@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, Block, ChainHistoryMmrRootHash, SyncHashEntry, TreeRootsEntry},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
@@ -396,6 +396,16 @@ pub enum ReadResponse {
     /// the block info after the specified block.
     BlockInfo(Option<BlockInfo>),
 
+    /// Response to [`ReadRequest::SyncHashes`]: best-chain block hashes and
+    /// aggregated span metadata, one entry per requested height, truncated
+    /// to a prefix at the reorg safety margin below the tip.
+    SyncHashes(Vec<SyncHashEntry>),
+
+    /// Response to [`ReadRequest::TreeRoots`]: per-block tree roots and
+    /// counts, or `None` when the request's anchor is not in the best chain
+    /// or the metadata index is incomplete, and must be refused.
+    TreeRoots(Option<Vec<TreeRootsEntry>>),
+
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
 
@@ -622,6 +632,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
+            | ReadResponse::SyncHashes(_)
+            | ReadResponse::TreeRoots(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)

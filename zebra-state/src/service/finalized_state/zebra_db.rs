@@ -33,6 +33,7 @@ use super::disk_format::upgrade::restorable_db_versions;
 
 pub mod block;
 pub mod chain;
+pub mod known_hash;
 pub mod metrics;
 pub mod shielded;
 pub mod transparent;

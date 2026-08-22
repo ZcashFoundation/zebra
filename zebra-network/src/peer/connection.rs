@@ -1067,6 +1067,16 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
+            // The v2 synchronization primitives have no legacy wire
+            // mapping. Answering with fabricated empty data would make a
+            // mis-routed request look like a peer with nothing to offer, so
+            // the caller is told instead; the connection stays usable.
+            (AwaitingRequest, request @ (BlockRange { .. } | SyncHashes { .. } | TreeRoots { .. })) => {
+                Ok(Handler::Finished(Err(PeerError::LocalOnlyRequest(
+                    request.command(),
+                ))))
+            }
+
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx
@@ -1484,6 +1494,9 @@ where
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
+            // The v2 synchronization primitives are answered by the local
+            // inbound service, so there is nothing to send to a peer.
+            Response::SyncHashes(_) | Response::TreeRoots(_) => {}
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
