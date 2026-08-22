@@ -49,6 +49,20 @@ fn gossiped_change(
         .expect("gossiped MetaAddr should produce a NewGossiped change")
 }
 
+fn assert_address_book_invariants(address_book: &AddressBook) {
+    assert!(
+        address_book.by_addr.values().is_sorted(),
+        "address book values must remain sorted in ascending MetaAddr reconnection-attempt order",
+    );
+
+    for (addr, meta_addr) in &address_book.by_addr {
+        assert_eq!(
+            *addr, meta_addr.addr,
+            "address book keys must match their stored MetaAddr addresses",
+        );
+    }
+}
+
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
 ///
 /// Applying a ban-threshold misbehavior update with
@@ -128,6 +142,7 @@ fn address_book_peer_order() {
         Span::current(),
         addrs,
     );
+    assert_address_book_invariants(&address_book);
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -145,6 +160,7 @@ fn address_book_peer_order() {
         Span::current(),
         addrs,
     );
+    assert_address_book_invariants(&address_book);
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -165,6 +181,7 @@ fn address_book_peer_order() {
         Span::current(),
         addrs,
     );
+    assert_address_book_invariants(&address_book);
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
@@ -182,12 +199,146 @@ fn address_book_peer_order() {
         Span::current(),
         addrs,
     );
+    assert_address_book_invariants(&address_book);
     assert_eq!(
         address_book
             .reconnection_peers(Instant::now(), Utc::now())
             .next(),
         Some(meta_addr2),
     );
+}
+
+#[test]
+fn address_book_mutations_preserve_peer_order() {
+    let addr1 = "127.0.0.1:8233".parse().unwrap();
+    let addr2 = "127.0.0.2:8233".parse().unwrap();
+    let addr3 = "127.0.0.3:8233".parse().unwrap();
+
+    let meta_addr1 =
+        MetaAddr::new_gossiped_meta_addr(addr1, PeerServices::NODE_NETWORK, DateTime32::MIN);
+    let meta_addr2 = MetaAddr::new_gossiped_meta_addr(
+        addr2,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
+    );
+    let meta_addr3 = MetaAddr::new_gossiped_meta_addr(
+        addr3,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(2)),
+    );
+
+    let mut address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        [meta_addr2.clone(), meta_addr1.clone(), meta_addr3.clone()],
+    );
+    assert_address_book_invariants(&address_book);
+    assert_eq!(
+        address_book.peers().collect::<Vec<_>>(),
+        vec![meta_addr3.clone(), meta_addr2.clone(), meta_addr1.clone()],
+    );
+
+    let reprioritized_addr1 = MetaAddr::new_gossiped_meta_addr(
+        addr1,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(3)),
+    );
+    assert_eq!(
+        address_book.insert_meta_addr(reprioritized_addr1.clone()),
+        Some(meta_addr1),
+    );
+    assert_address_book_invariants(&address_book);
+    assert_eq!(
+        address_book.peers().collect::<Vec<_>>(),
+        vec![
+            reprioritized_addr1.clone(),
+            meta_addr3.clone(),
+            meta_addr2.clone(),
+        ],
+    );
+
+    assert_eq!(address_book.take(addr1), Some(reprioritized_addr1));
+    assert_address_book_invariants(&address_book);
+    assert_eq!(
+        address_book.peers().collect::<Vec<_>>(),
+        vec![meta_addr3, meta_addr2],
+    );
+}
+
+#[test]
+fn address_book_insert_canonicalizes_key_and_value() {
+    let canonical_addr = "127.0.0.4:8233".parse().unwrap();
+    let noncanonical_addr = "[::ffff:127.0.0.4]:8233".parse().unwrap();
+    let mut meta_addr = MetaAddr::new_gossiped_meta_addr(
+        canonical_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    );
+    meta_addr.addr = noncanonical_addr;
+
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    assert_eq!(address_book.insert_meta_addr(meta_addr), None);
+    assert!(!address_book.by_addr.contains_key(&noncanonical_addr));
+    assert_eq!(
+        address_book
+            .by_addr
+            .get(&canonical_addr)
+            .expect("the canonical address was inserted")
+            .addr,
+        canonical_addr,
+    );
+    assert_address_book_invariants(&address_book);
+}
+
+#[test]
+fn address_book_evicts_lowest_priority_peer() {
+    let addr1 = "127.0.0.1:8233".parse().unwrap();
+    let addr2 = "127.0.0.2:8233".parse().unwrap();
+    let addr3 = "127.0.0.3:8233".parse().unwrap();
+
+    let mut address_book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        2,
+        Span::current(),
+        [],
+    );
+
+    for (addr, last_seen) in [
+        (addr1, DateTime32::MIN),
+        (
+            addr2,
+            DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
+        ),
+        (
+            addr3,
+            DateTime32::MIN.saturating_add(Duration32::from_seconds(2)),
+        ),
+    ] {
+        assert!(address_book
+            .update(gossiped_change(addr, PeerServices::NODE_NETWORK, last_seen,))
+            .is_some(),);
+        assert_address_book_invariants(&address_book);
+    }
+
+    assert_eq!(
+        address_book
+            .peers()
+            .map(|meta_addr| meta_addr.addr)
+            .collect::<Vec<_>>(),
+        vec![addr3, addr2],
+    );
+    assert!(address_book.get(addr1).is_none());
 }
 
 /// Check that `reconnection_peers` skips addresses with IPs for which
@@ -284,7 +435,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
     // Without this ordering the test would also pass before the fix, because a contiguous scan
     // removes contiguous entries correctly.
     assert_eq!(
-        address_book.by_addr.descending_keys().collect::<Vec<_>>(),
+        address_book.by_addr.keys().collect::<Vec<_>>(),
         vec![&banned_addr, &unrelated_addr, &zombie_addr],
         "test setup: the unrelated IP must sort between the two entries for the banned IP",
     );
@@ -299,7 +450,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
         "ban-threshold misbehavior should ban the peer IP",
     );
     assert_eq!(
-        address_book.by_addr.descending_keys().collect::<Vec<_>>(),
+        address_book.by_addr.keys().collect::<Vec<_>>(),
         vec![&unrelated_addr],
         "the ban should remove every entry for the banned IP, including the one that does not \
          sort next to the banned address",
