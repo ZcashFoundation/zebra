@@ -292,6 +292,35 @@ pub enum Request {
     },
 }
 
+/// What a peer must support to answer a [`Request`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PeerCapability {
+    /// Any connected peer can answer.
+    Any,
+
+    /// Only version 2 peers can answer: the request has no legacy protocol
+    /// encoding.
+    V2,
+}
+
+impl Request {
+    /// Returns what a peer must support to answer this request.
+    pub fn peer_capability(&self) -> PeerCapability {
+        match self {
+            // Bulk block streaming is a version 2 request stream, with no
+            // legacy equivalent: the legacy locator walk is used instead.
+            Request::BlockRange { .. } => PeerCapability::V2,
+
+            // Answered by the local inbound service, never routed to a
+            // peer; the peer set treats them as unroutable rather than
+            // sending them anywhere.
+            Request::SyncHashes { .. } | Request::TreeRoots { .. } => PeerCapability::V2,
+
+            _ => PeerCapability::Any,
+        }
+    }
+}
+
 impl fmt::Display for Request {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&match self {

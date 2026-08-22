@@ -426,7 +426,7 @@ impl AddressBook {
     /// changes, and only once: a refresh walks the address book several times, so
     /// refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
-    fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+    pub(crate) fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         // Banned addresses are filtered out by the peer book actor before
         // they reach the address book, so changes here are never banned.
         let previous = self.get(change.addr());
@@ -524,6 +524,54 @@ impl AddressBook {
         updated
     }
 
+    /// Removes the entry with `addr`, returning it if it exists
+    ///
+    /// # Note
+    ///
+    /// All address removals should go through `take`, so that the address
+    /// book metrics are accurate.
+    #[allow(dead_code)]
+    fn take(&mut self, removed_addr: PeerSocketAddr) -> Option<MetaAddr> {
+        let _guard = self.span.enter();
+
+        let instant_now = Instant::now();
+        let chrono_now = Utc::now();
+
+        trace!(
+            ?removed_addr,
+            total_peers = self.by_addr.len(),
+            recent_peers = self.recently_live_peers(chrono_now).len(),
+        );
+
+        if let Some(entry) = self.by_addr.remove(&removed_addr) {
+            // Check if this surplus peer's addr matches that in `most_recent_by_ip`
+            // for this the surplus peer's ip to remove it there as well.
+            if self.should_remove_most_recent_by_ip(entry.addr) {
+                if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
+                    most_recent_by_ip.remove(&entry.addr.ip());
+                }
+            }
+
+            std::mem::drop(_guard);
+            self.update_metrics(instant_now, chrono_now);
+            Some(entry)
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
+    /// attempt.
+    pub fn pending_reconnection_addr(&mut self, addr: PeerSocketAddr) -> bool {
+        let meta_addr = self.get(addr);
+
+        let _guard = self.span.enter();
+        match meta_addr {
+            None => false,
+            Some(peer) => peer.last_connection_state == PeerAddrState::AttemptPending,
+        }
+    }
+
     /// Return an iterator over all peers.
     ///
     /// Returns peers in reconnection attempt order, including recently connected peers.
@@ -589,39 +637,45 @@ impl AddressBook {
             .cloned()
     }
 
+    /// Return an iterator over peers that might be connected,
+    /// in reconnection attempt order.
+    pub fn maybe_connected_peers(
+        &'_ self,
+        instant_now: Instant,
+        chrono_now: chrono::DateTime<Utc>,
+    ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
+        let _guard = self.span.enter();
+
+        self.by_addr
+            .descending_values()
+            .filter(move |peer| {
+                !peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
+            })
+            .cloned()
+    }
+
+    /// Refreshes the address metrics, after a batch of
+    /// [`update_without_metrics`](Self::update_without_metrics) calls.
+    pub(crate) fn refresh_metrics(&mut self) {
+        self.update_metrics(Instant::now(), Utc::now());
+    }
+
     /// Removes the entry for `addr`, and its per-IP bookkeeping.
     ///
     /// Used by the peer book actor when a gossiped entry is evicted by
     /// bucket replacement.
     pub(crate) fn remove(&mut self, addr: PeerSocketAddr) {
-        if self.remove_without_metrics(addr) {
-            self.update_metrics(Instant::now(), Utc::now());
-        }
-    }
-
-    /// Removes the entry for `addr`, returning whether it was present.
-    ///
-    /// The caller must refresh the metrics watch once it has finished
-    /// removing, so a bulk removal does not walk the book per entry.
-    fn remove_without_metrics(&mut self, addr: PeerSocketAddr) -> bool {
-        // Only clear the per-IP cache when this entry is the one it holds:
-        // another entry with the same IP may have replaced it.
-        let clear_most_recent = self.should_remove_most_recent_by_ip(addr);
-
-        if self.by_addr.remove(&addr).is_none() {
-            return false;
-        }
-
-        if clear_most_recent {
-            // `most_recent_by_ip` is only populated when
-            // `max_connections_per_ip == 1`, so the optional cache must be
-            // guarded, not unwrapped.
-            if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                most_recent_by_ip.remove(&addr.ip());
+        if self.by_addr.remove(&addr).is_some() {
+            // Only clear the per-IP most-recent cache when the removed
+            // entry is the cached one: another peer on the same IP may
+            // still be the most recent responder.
+            if self.should_remove_most_recent_by_ip(addr) {
+                self.most_recent_by_ip
+                    .as_mut()
+                    .expect("should be some when should_remove_most_recent_by_ip is true")
+                    .remove(&addr.ip());
             }
         }
-
-        true
     }
 
     /// Removes every entry whose IP address matches `predicate`, along with
@@ -638,12 +692,10 @@ impl AddressBook {
             .collect();
 
         for addr in &matching {
-            self.remove_without_metrics(*addr);
+            self.remove(*addr);
         }
 
         if !matching.is_empty() {
-            self.update_metrics(Instant::now(), Utc::now());
-
             warn!(
                 removed = matching.len(),
                 total_peers = self.by_addr.len(),

@@ -10,6 +10,7 @@ use tower::Service;
 
 use crate::{
     meta_addr::{MetaAddr, MetaAddrChange},
+    peer_book::transports::AddrTransports,
     BoxError,
 };
 
@@ -25,6 +26,18 @@ pub(crate) enum Message {
 
     /// A request that needs an answer from the book.
     Call(Call),
+
+    /// A learned transport reachability report, applied in channel order.
+    Transport {
+        /// The peer's address.
+        addr: crate::PeerSocketAddr,
+
+        /// The transport the dial used.
+        transport: AddrTransports,
+
+        /// Whether the handshake completed.
+        reachable: bool,
+    },
 }
 
 /// Sends peer status changes to the peer book actor.
@@ -57,6 +70,25 @@ impl ChangeSender {
             })
     }
 
+    /// Reports that a dial to `addr` over `transport` completed its
+    /// handshake, or was refused.
+    ///
+    /// Reports are best-effort: a full channel means the actor is busy
+    /// applying connection events, and reachability is re-learned on the
+    /// next dial.
+    pub fn record_transport(
+        &self,
+        addr: crate::PeerSocketAddr,
+        transport: AddrTransports,
+        reachable: bool,
+    ) {
+        let _ = self.tx.try_send(Message::Transport {
+            addr,
+            transport,
+            reachable,
+        });
+    }
+
     /// Sends `change` to the actor without waiting.
     ///
     /// Returns an error if the channel is full or the actor has exited.
@@ -83,10 +115,13 @@ pub enum PeerBookRequest {
     /// Requests the addresses worth writing to the peer cache on disk.
     CacheSnapshot,
 
-    /// Selects a peer for an outbound connection attempt, marking it as
-    /// attempted in the same actor turn, so concurrent selections cannot
-    /// return the same peer.
-    SelectCandidate,
+    /// Selects up to `max` peers for outbound connection attempts, marking
+    /// them as attempted in the same actor turn, so concurrent selections
+    /// cannot return the same peer.
+    SelectCandidates {
+        /// The maximum number of candidates to select.
+        max: usize,
+    },
 
     /// Requests the number of peers currently ready for an outbound
     /// connection attempt.
@@ -119,8 +154,9 @@ pub enum PeerBookResponse {
     /// The requested addresses.
     Addrs(Vec<MetaAddr>),
 
-    /// The selected outbound connection candidate, marked as attempted.
-    Candidate(Option<MetaAddr>),
+    /// The selected outbound connection candidates, marked as attempted,
+    /// each with the transports it is known to accept.
+    Candidates(Vec<(MetaAddr, AddrTransports)>),
 
     /// The number of peers ready for an outbound connection attempt.
     ReadyCandidateCount(usize),

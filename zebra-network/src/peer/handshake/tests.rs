@@ -14,6 +14,6 @@ where
 {
     /// Returns a count of how many connection nonces are stored in this [`Handshake`]
     pub async fn nonce_count(&self) -> usize {
-        self.nonces.len().await
+        self.nonces.len()
     }
 }

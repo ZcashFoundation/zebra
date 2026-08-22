@@ -58,23 +58,6 @@ pub enum StreamType {
 }
 
 impl StreamType {
-    /// Every stream type the draft defines, in wire byte order.
-    pub const ALL: [StreamType; 13] = [
-        StreamType::Handshake,
-        StreamType::GetHeaders,
-        StreamType::GetBlocks,
-        StreamType::GetTx,
-        StreamType::GetAddr,
-        StreamType::GetMempool,
-        StreamType::GetHashes,
-        StreamType::GetBlockRange,
-        StreamType::GetTreeRoots,
-        StreamType::GetObject,
-        StreamType::BlockAnnouncements,
-        StreamType::TransactionAnnouncements,
-        StreamType::AddressAnnouncements,
-    ];
-
     /// Returns the stream type for `byte`, or `None` if the byte is not a
     /// recognized stream type.
     ///
@@ -82,7 +65,22 @@ impl StreamType {
     /// [`ErrorCode::UnsupportedStreamType`], without treating it as a
     /// connection error or assigning a misbehavior penalty.
     pub fn from_byte(byte: u8) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.byte() == byte)
+        match byte {
+            0x00 => Some(StreamType::Handshake),
+            0x01 => Some(StreamType::GetHeaders),
+            0x02 => Some(StreamType::GetBlocks),
+            0x03 => Some(StreamType::GetTx),
+            0x04 => Some(StreamType::GetAddr),
+            0x05 => Some(StreamType::GetMempool),
+            0x06 => Some(StreamType::GetHashes),
+            0x07 => Some(StreamType::GetBlockRange),
+            0x08 => Some(StreamType::GetTreeRoots),
+            0x09 => Some(StreamType::GetObject),
+            0x10 => Some(StreamType::BlockAnnouncements),
+            0x11 => Some(StreamType::TransactionAnnouncements),
+            0x12 => Some(StreamType::AddressAnnouncements),
+            _ => None,
+        }
     }
 
     /// Returns the wire byte for this stream type.
@@ -91,16 +89,29 @@ impl StreamType {
     }
 
     /// Returns true if this is a request stream type.
-    ///
-    /// The draft assigns request streams the byte range `0x01`-`0x0F`, and
-    /// announcement streams `0x10`-`0x1F`.
     pub fn is_request(self) -> bool {
-        (0x01..=0x0F).contains(&self.byte())
+        matches!(
+            self,
+            StreamType::GetHeaders
+                | StreamType::GetBlocks
+                | StreamType::GetTx
+                | StreamType::GetAddr
+                | StreamType::GetMempool
+                | StreamType::GetHashes
+                | StreamType::GetBlockRange
+                | StreamType::GetTreeRoots
+                | StreamType::GetObject
+        )
     }
 
     /// Returns true if this is an announcement stream type.
     pub fn is_announcement(self) -> bool {
-        (0x10..=0x1F).contains(&self.byte())
+        matches!(
+            self,
+            StreamType::BlockAnnouncements
+                | StreamType::TransactionAnnouncements
+                | StreamType::AddressAnnouncements
+        )
     }
 }
 

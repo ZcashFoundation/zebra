@@ -200,62 +200,154 @@ impl Drop for ActiveConnectionCounter {
     }
 }
 
-/// An [`ActiveConnectionCounter`] shared by the tasks that open connections
-/// of the same kind.
+/// A connection counter shared by the tasks that open connections of the
+/// same kind, counting with atomic slots instead of a single owner.
 ///
 /// The legacy and version 2 transports accept and dial connections from
 /// separate tasks, but their connections share one limit, so they must share
 /// one counter: separate counters would let each transport fill the limit on
 /// its own, doubling the connections an operator configured.
 #[derive(Clone, Debug)]
-pub struct SharedConnectionCounter(Arc<std::sync::Mutex<ActiveConnectionCounter>>);
+pub struct SharedConnectionCounter {
+    /// The reserved and open connection slots currently held.
+    slots: SlotCounter,
+
+    /// The number of slots whose trackers have been marked open, for
+    /// diagnostics.
+    open: Arc<AtomicUsize>,
+
+    /// The limit for this type of connection, for diagnostics only.
+    /// The caller must enforce the limit by ignoring, delaying, or dropping
+    /// connections, or by reserving slots with
+    /// [`try_track_connection`](Self::try_track_connection).
+    limit: usize,
+
+    /// The label for this connection counter, typically its type.
+    label: Arc<str>,
+
+    /// Active connection count progress bar, closed when the last clone of
+    /// this counter is dropped.
+    #[cfg(feature = "progress-bar")]
+    connection_bar: Arc<ConnectionBar>,
+}
+
+/// Closes the progress bar of a [`SharedConnectionCounter`] when its last
+/// clone is dropped.
+#[cfg(feature = "progress-bar")]
+struct ConnectionBar(howudoin::Tx);
+
+// `howudoin::Tx` does not implement `Debug`, so it cannot be derived.
+#[cfg(feature = "progress-bar")]
+impl fmt::Debug for ConnectionBar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ConnectionBar").finish()
+    }
+}
+
+#[cfg(feature = "progress-bar")]
+impl Drop for ConnectionBar {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
 
 impl SharedConnectionCounter {
     /// Create and return a new shared connection counter with `limit` and
     /// `label`. The caller must check and enforce limits using
-    /// [`update_count()`](Self::update_count).
+    /// [`update_count()`](Self::update_count), or reserve slots atomically
+    /// with [`try_track_connection`](Self::try_track_connection).
     pub fn new_counter_with<S: ToString>(limit: usize, label: S) -> Self {
-        Self(Arc::new(std::sync::Mutex::new(
-            ActiveConnectionCounter::new_counter_with(limit, label),
-        )))
+        let label = label.to_string();
+
+        #[cfg(feature = "progress-bar")]
+        let connection_bar = Arc::new(ConnectionBar(howudoin::new_root().label(label.clone())));
+
+        Self {
+            slots: SlotCounter::default(),
+            open: Arc::new(AtomicUsize::new(0)),
+            limit,
+            label: label.into(),
+            #[cfg(feature = "progress-bar")]
+            connection_bar,
+        }
     }
 
-    /// Check for closed connection notifications, and return the current connection count.
+    /// Returns the current connection count, including reserved slots for
+    /// connection attempts.
     pub fn update_count(&self) -> usize {
-        self.lock().update_count()
+        let count = self.slots.count();
+
+        trace!(
+            open_connections = ?count,
+            limit = ?self.limit,
+            label = ?self.label,
+            "updated active connection count",
+        );
+
+        #[cfg(feature = "progress-bar")]
+        self.connection_bar
+            .0
+            .set_pos(u64::try_from(self.open.load(Ordering::Acquire)).expect("fits in u64"));
+
+        count
     }
 
     /// Create and return a new [`ConnectionTracker`], and add 1 to this counter.
     ///
-    /// When the returned tracker is dropped, this counter will be notified, and decreased by 1.
+    /// When the returned tracker is dropped, this counter is decreased by 1.
     pub fn track_connection(&self) -> ConnectionTracker {
-        self.lock().track_connection()
+        ConnectionTracker::new_shared(self, self.slots.claim())
     }
 
-    /// Locks the counter.
+    /// Atomically checks the current connection count against `limit`, and
+    /// creates and returns a new [`ConnectionTracker`] if the count is below
+    /// the limit.
     ///
-    /// The lock is only held for the duration of a counter update, and is
-    /// never held across an await point.
-    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveConnectionCounter> {
-        self.0.lock().expect("mutex is not poisoned")
+    /// # Security
+    ///
+    /// The check and the reservation are one atomic update, so tasks sharing
+    /// this counter cannot both pass the check at the last free slot and
+    /// overshoot the limit.
+    pub fn try_track_connection(&self, limit: usize) -> Option<ConnectionTracker> {
+        let slot = self.slots.try_claim(limit)?;
+        Some(ConnectionTracker::new_shared(self, slot))
     }
 }
 
 /// A per-connection tracker.
 ///
-/// [`ActiveConnectionCounter`] creates a tracker instance for each active connection.
-/// When these trackers are dropped, the counter gets notified.
+/// [`ActiveConnectionCounter`] and [`SharedConnectionCounter`] create a
+/// tracker instance for each active connection. When these trackers are
+/// dropped, the counter is notified or decreased.
 pub struct ConnectionTracker {
-    /// The channel used to send open connection status notifications on first response or
-    /// closed connection notifications on drop.
-    status_notification_tx: mpsc::UnboundedSender<ConnectionStatus>,
+    /// The counter this tracker reports to.
+    counter: TrackerCounter,
 
-    /// A flag indicating whether this connection tracker has sent a notification that the
-    /// connection has been opened and that another notification should not be sent on drop.
+    /// A flag indicating whether this connection tracker has already counted the
+    /// connection as opened, so it is not double-counted.
     has_marked_open: bool,
 
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
+}
+
+/// The counter a [`ConnectionTracker`] reports to.
+enum TrackerCounter {
+    /// A single-owner [`ActiveConnectionCounter`], notified over its channel.
+    Channel {
+        /// The channel used to send open connection status notifications on first response or
+        /// closed connection notifications on drop.
+        status_notification_tx: mpsc::UnboundedSender<ConnectionStatus>,
+    },
+
+    /// A [`SharedConnectionCounter`], holding one of its atomic slots.
+    Shared {
+        /// The held slot; dropping it decreases the shared count.
+        _slot: SlotGuard,
+
+        /// The shared counter's open-connection diagnostic count.
+        open: Arc<AtomicUsize>,
+    },
 }
 
 impl fmt::Debug for ConnectionTracker {
@@ -267,12 +359,23 @@ impl fmt::Debug for ConnectionTracker {
 }
 
 impl ConnectionTracker {
-    /// Sends a notification to the status notification channel to count the connection as open, and
-    /// marks this [`ConnectionTracker`] as having sent that open notification to avoid double-counting.
+    /// Counts the connection as open, exactly once: later calls and the
+    /// implicit call on drop are ignored.
     pub fn mark_open(&mut self) {
         if !self.has_marked_open {
-            let _ = self.status_notification_tx.send(ConnectionStatus::Opened);
             self.has_marked_open = true;
+
+            match &self.counter {
+                TrackerCounter::Channel {
+                    status_notification_tx,
+                } => {
+                    let _ = status_notification_tx.send(ConnectionStatus::Opened);
+                }
+                TrackerCounter::Shared { open, .. } => {
+                    open.fetch_add(1, Ordering::AcqRel);
+                    debug!(label = ?self.label, "a peer connection was opened");
+                }
+            }
         }
     }
 
@@ -291,7 +394,32 @@ impl ConnectionTracker {
         );
 
         Self {
-            status_notification_tx: counter.status_notification_tx.clone(),
+            counter: TrackerCounter::Channel {
+                status_notification_tx: counter.status_notification_tx.clone(),
+            },
+            has_marked_open: false,
+            label: counter.label.clone(),
+        }
+    }
+
+    /// Create and return a new active connection tracker holding `slot` of
+    /// `counter`'s slots.
+    ///
+    /// When the returned tracker is dropped, the slot is released, and the
+    /// shared count decreases by 1.
+    fn new_shared(counter: &SharedConnectionCounter, slot: SlotGuard) -> Self {
+        debug!(
+            open_connections = ?counter.slots.count(),
+            limit = ?counter.limit,
+            label = ?counter.label,
+            "opening a new peer connection",
+        );
+
+        Self {
+            counter: TrackerCounter::Shared {
+                _slot: slot,
+                open: counter.open.clone(),
+            },
             has_marked_open: false,
             label: counter.label.clone(),
         }
@@ -303,19 +431,28 @@ impl Drop for ConnectionTracker {
     fn drop(&mut self) {
         debug!(label = ?self.label, "closing a peer connection");
 
-        // We ignore disconnected errors, because the receiver can be dropped
-        // before some connections are dropped.
-        //
-        // # Security
-        //
-        // This channel is actually bounded by the inbound and outbound connection limit.
-        //
         // # Correctness
         //
-        // Unopened connections should be opened just before being closed to decrement both
-        // the count for pending connection attempts and the count for open connections in
-        // the active connection tracker.
+        // Unopened connections are opened just before being closed, so both
+        // the pending-attempt count and the open count are balanced.
         self.mark_open();
-        let _ = self.status_notification_tx.send(ConnectionStatus::Closed);
+
+        match &self.counter {
+            // We ignore disconnected errors, because the receiver can be dropped
+            // before some connections are dropped.
+            //
+            // # Security
+            //
+            // This channel is actually bounded by the inbound and outbound connection limit.
+            TrackerCounter::Channel {
+                status_notification_tx,
+            } => {
+                let _ = status_notification_tx.send(ConnectionStatus::Closed);
+            }
+            // The held slot is released when this tracker drops.
+            TrackerCounter::Shared { open, .. } => {
+                open.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
     }
 }

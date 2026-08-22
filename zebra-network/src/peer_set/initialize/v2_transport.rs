@@ -6,17 +6,18 @@
 //! ordinary peer [`Client`](crate::peer::Client)s, which join the peer set
 //! alongside legacy peers.
 
-use std::{net::IpAddr, sync::Arc};
+use std::{net::IpAddr, pin::Pin, sync::Arc};
 
-use futures::SinkExt;
+use futures::{future::FutureExt, stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use indexmap::IndexMap;
 use tokio::sync::watch;
 use tower::{Service, ServiceExt};
 use tracing::{debug, info, warn, Instrument};
 
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
 
 use crate::{
+    connection_metrics::{record_connection_attempt_finished, ConnectionDirection},
     constants,
     peer::{
         v2::{V2HandshakeRequest, V2Handshaker},
@@ -77,6 +78,7 @@ pub(super) async fn run_v2_endpoint<S, C>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
     active_inbound_connections: SharedConnectionCounter,
+    recent_inbound_connections: watch::Sender<recent_by_ip::RecentByIp>,
 ) -> Result<(), BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -84,14 +86,37 @@ where
     C: ChainTip + Clone + Send + Sync + 'static,
 {
     // Accept inbound v2 connections.
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
-
+    //
     // The inbound handshakes currently in progress; above the threshold,
     // unvalidated addresses are asked to retry with a token.
     let pending_handshakes = crate::peer_set::SlotCounter::default();
 
-    while let Some(incoming) = endpoint.accept().await {
+    // The per-connection handshake tasks are supervised, so a panic in any
+    // of them stops the node instead of silently reducing the transport's
+    // connectivity.
+    let mut handshake_tasks: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
+        FuturesUnordered::new();
+    // Keeping an unresolved future in the pool means the stream never terminates.
+    handshake_tasks.push(futures::future::pending().boxed());
+
+    loop {
+        // Check for panics in finished tasks, before accepting new connections.
+        let incoming = tokio::select! {
+            biased;
+            joined = handshake_tasks.next() => match joined {
+                Some(()) => continue,
+                None => unreachable!(
+                    "handshake_tasks never terminates, because it contains a future that never resolves"
+                ),
+            },
+
+            // This future must wait until new connections are available: it can't have a timeout.
+            incoming = endpoint.accept() => match incoming {
+                Some(incoming) => incoming,
+                // The endpoint was closed: this node is shutting down.
+                None => return Ok(()),
+            },
+        };
         // # Security
         //
         // Above a threshold of concurrently pending handshakes — as under a
@@ -124,10 +149,9 @@ where
         let Some(connection_tracker) = inbound_admission::try_reserve_public_inbound_slot(
             &config.network,
             addr,
-            active_inbound_connections.update_count(),
             config.peerset_inbound_connection_limit(),
             &active_inbound_connections,
-            &mut recent_inbound_connections,
+            &recent_inbound_connections,
         ) else {
             incoming.refuse();
             // Allow invalid connections to be cleared quickly, but still put a
@@ -142,11 +166,17 @@ where
         // Counts this attempt as a pending handshake until it completes.
         let pending_slot = pending_handshakes.claim();
 
-        tokio::spawn(
+        let handshake_task = tokio::spawn(
             async move {
                 let connection = match quic::accept(incoming, &network).await {
                     Ok(connection) => connection,
                     Err(error) => {
+                        record_connection_attempt_finished(
+                            &network,
+                            ConnectionDirection::Inbound,
+                            addr,
+                            Some(&error),
+                        );
                         debug!(%error, ?addr, "inbound v2 connection failed");
                         return;
                     }
@@ -163,6 +193,13 @@ where
                     .await;
                 drop(pending_slot);
 
+                record_connection_attempt_finished(
+                    &network,
+                    ConnectionDirection::Inbound,
+                    addr,
+                    client.as_ref().err(),
+                );
+
                 match client {
                     Ok(client) => {
                         let _ = peerset_tx.send((addr, client)).await;
@@ -172,10 +209,14 @@ where
             }
             .in_current_span(),
         );
+        handshake_tasks.push(handshake_task.wait_for_panics().boxed());
 
         // Rate-limit inbound connections, like the legacy listener.
         tokio::time::sleep(constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL).await;
-    }
 
-    Ok(())
+        // Security: Let other tasks run after each connection is processed,
+        // so remote peers cannot starve other Zebra tasks using inbound
+        // connections. (Sleeps are not guaranteed to schedule other tasks.)
+        tokio::task::yield_now().await;
+    }
 }

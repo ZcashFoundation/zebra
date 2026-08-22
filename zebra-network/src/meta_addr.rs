@@ -917,6 +917,14 @@ impl MetaAddrChange {
         }
     }
 
+    /// Return the timestamp when a ping was last sent, if available.
+    pub fn ping_sent(&self) -> Option<Instant> {
+        match self {
+            UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
+            _ => None,
+        }
+    }
+
     /// Return the RTT for this change, if available
     pub fn rtt(&self) -> Option<Duration> {
         match self {

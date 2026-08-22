@@ -28,6 +28,7 @@
   - [Contribution Guide](CONTRIBUTING.md)
   - [Design Overview](dev/overview.md)
   - [Mempool Specification](dev/mempool-specification.md)
+  - [Dual-Protocol Networking](dev/dual-protocol-networking.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
     - [Mempool Architecture](dev/diagrams/mempool-architecture.md)

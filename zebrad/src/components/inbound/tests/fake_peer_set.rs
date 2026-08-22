@@ -1227,10 +1227,9 @@ async fn setup_gossiped_block_misbehavior(
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
-
     // An empty state, so gossiped blocks are always unknown, and the lookahead limit is
     // measured from the genesis height.
-    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -1258,6 +1257,7 @@ async fn setup_gossiped_block_misbehavior(
         block_verifier,
         mempool: buffered_mempool,
         state: state_service,
+        read_state: read_only_state_service,
         latest_chain_tip,
         misbehavior_sender,
     };

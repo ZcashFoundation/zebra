@@ -237,14 +237,129 @@ async fn ban_removes_every_entry_for_the_banned_ip() {
     let response = handles
         .handle
         .clone()
-        .oneshot(PeerBookRequest::SelectCandidate)
+        .oneshot(PeerBookRequest::SelectCandidates { max: 1 })
         .await
         .expect("the actor is running");
     match response {
-        PeerBookResponse::Candidate(Some(peer)) => assert_eq!(
-            peer.addr, unrelated_addr,
-            "a banned IP must never be a reconnection candidate",
+        PeerBookResponse::Candidates(candidates) => {
+            let (peer, _transports) = candidates
+                .first()
+                .expect("the unrelated peer should be a candidate");
+            assert_eq!(
+                peer.addr, unrelated_addr,
+                "a banned IP must never be a reconnection candidate",
+            );
+        }
+        other => panic!("unexpected response variant: {other:?}"),
+    }
+}
+
+/// A sub-threshold misbehavior report for an already-banned peer must not
+/// re-create its book entry: the ban reset the peer's score, so later
+/// reports fall through the ban threshold and used to reach the book.
+#[tokio::test]
+async fn banned_peer_cannot_reenter_via_further_misbehavior() {
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        network: Network::Mainnet,
+        ..Config::default()
+    };
+
+    let handles =
+        AddressBookUpdater::spawn(&config, "127.0.0.1:8233".parse().expect("valid address"));
+    let mut bans_receiver = handles.bans_receiver.clone();
+
+    let addr: PeerSocketAddr = "203.0.113.10:8233".parse().expect("valid address");
+    handles
+        .change_sender
+        .send(MetaAddrChange::UpdateMisbehavior {
+            addr,
+            score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        })
+        .await
+        .expect("the actor is running");
+
+    tokio::time::timeout(TEST_TIMEOUT, bans_receiver.changed())
+        .await
+        .expect("the bans watch updates in time")
+        .expect("the actor is running");
+
+    // A follow-up report, like one from the misbehavior batcher flushing
+    // after the ban fired.
+    handles
+        .change_sender
+        .send(MetaAddrChange::UpdateMisbehavior {
+            addr,
+            score_increment: 1,
+        })
+        .await
+        .expect("the actor is running");
+
+    let response = handles
+        .handle
+        .clone()
+        .oneshot(crate::peer_book::PeerBookRequest::TestPeerEntry(addr))
+        .await
+        .expect("the actor is running");
+    assert!(
+        matches!(response, PeerBookResponse::PeerEntry(None)),
+        "a banned peer must not re-enter the book through further misbehavior reports: \
+         {response:?}",
+    );
+}
+
+/// Gossiped addresses from one address group are bounded by the group's
+/// secret-keyed bucket, on the production intake path (`GossipedAddrs`).
+#[tokio::test]
+async fn gossiped_addrs_are_bounded_by_group_buckets() {
+    use zebra_chain::serialization::DateTime32;
+
+    use crate::peer_book::buckets::GOSSIP_BUCKET_SIZE;
+
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        network: Network::Mainnet,
+        ..Config::default()
+    };
+
+    let handles =
+        AddressBookUpdater::spawn(&config, "127.0.0.1:8233".parse().expect("valid address"));
+
+    // Three buckets' worth of addresses, all in one IPv4 /16 group.
+    let addrs: Vec<MetaAddr> = (0..3 * GOSSIP_BUCKET_SIZE)
+        .map(|index| {
+            // Safety: the index is bounded far below u8::MAX * 250.
+            let addr = format!("198.51.{}.{}:8233", index / 250, 1 + (index % 250));
+            MetaAddr::new_gossiped_meta_addr(
+                addr.parse().expect("valid address"),
+                crate::protocol::types::PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )
+        })
+        .collect();
+
+    let response = handles
+        .handle
+        .clone()
+        .oneshot(crate::peer_book::PeerBookRequest::GossipedAddrs { addrs })
+        .await
+        .expect("the actor is running");
+    assert!(matches!(response, PeerBookResponse::Done));
+
+    let response = handles
+        .handle
+        .clone()
+        .oneshot(crate::peer_book::PeerBookRequest::CacheSnapshot)
+        .await
+        .expect("the actor is running");
+    match response {
+        PeerBookResponse::Addrs(peers) => assert_eq!(
+            peers.len(),
+            GOSSIP_BUCKET_SIZE,
+            "one address group must be bounded by one bucket's capacity",
         ),
-        other => panic!("the unrelated peer should be a candidate: {other:?}"),
+        other => panic!("unexpected response variant: {other:?}"),
     }
 }

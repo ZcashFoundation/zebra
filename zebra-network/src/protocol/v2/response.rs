@@ -5,13 +5,14 @@
 //! requested item, in request order, so their entries are encoded and read
 //! individually. The other responses are single structures.
 
-use std::{any::type_name, io, sync::Arc};
+use std::{io, sync::Arc};
 
 use tokio::io::AsyncRead;
 
 use zebra_chain::{
-    block::{self, CountedHeader, Header, SyncHashEntry, TreeRootsEntry},
+    block::{self, Block, CountedHeader, Header, SyncHashEntry, TreeRootsEntry},
     serialization::{ZcashDeserialize, ZcashSerialize},
+    transaction::Transaction,
 };
 
 use super::{
@@ -105,47 +106,104 @@ impl HeadersResponse {
     }
 }
 
-/// Encodes one entry of a `get-blocks` or `get-tx` response to `writer`.
-///
-/// `None` encodes the not-found result. Compact blocks occur only as
-/// announcements, so there is no compact block result.
-pub fn encode_result_entry<T: ZcashSerialize, W: io::Write>(
-    mut writer: W,
-    entry: Option<&T>,
-) -> Result<(), WireError> {
-    let Some(object) = entry else {
-        writer.write_all(&[RESULT_NOT_FOUND])?;
+/// One entry of a `get-blocks` response.
+#[derive(Clone, Debug)]
+pub enum BlockResponseEntry {
+    /// A full block.
+    Full(Arc<Block>),
 
-        return Ok(());
-    };
-
-    writer.write_all(&[RESULT_OBJECT])?;
-    let bytes = object
-        .zcash_serialize_to_vec()
-        .map_err(|err| WireError::Local(format!("unserializable {}: {err}", type_name::<T>())))?;
-    record::write_record(&mut writer, &bytes)?;
-
-    Ok(())
+    /// The block was not found.
+    NotFound,
 }
 
-/// Reads one entry of a `get-blocks` or `get-tx` response from `reader`.
-///
-/// Returns `None` for the not-found result. An unrecognized `result` value
-/// is a connection error of type `PROTOCOL_ERROR`.
-pub async fn read_result_entry<T: ZcashDeserialize, R: AsyncRead + Unpin>(
-    reader: &mut R,
-    what: &str,
-) -> Result<Option<Arc<T>>, WireError> {
-    match record::read_u8(reader).await? {
-        RESULT_OBJECT => {
-            let bytes = record::read_length_prefixed_bytes(reader, MAX_RECORD_PAYLOAD_LEN).await?;
-
-            Ok(Some(Arc::new(T::zcash_deserialize(bytes.as_slice())?)))
+impl BlockResponseEntry {
+    /// Encodes this entry to `writer`.
+    pub fn encode<W: io::Write>(&self, mut writer: W) -> Result<(), WireError> {
+        match self {
+            BlockResponseEntry::Full(block) => {
+                writer.write_all(&[RESULT_OBJECT])?;
+                let block_bytes = block
+                    .zcash_serialize_to_vec()
+                    .map_err(|err| WireError::Local(format!("unserializable block: {err}")))?;
+                record::write_record(&mut writer, &block_bytes)?;
+            }
+            BlockResponseEntry::NotFound => {
+                writer.write_all(&[RESULT_NOT_FOUND])?;
+            }
         }
-        RESULT_NOT_FOUND => Ok(None),
-        unknown => Err(WireError::Protocol(format!(
-            "unrecognized {what} result value {unknown:#04x}",
-        ))),
+
+        Ok(())
+    }
+
+    /// Reads one entry of a `get-blocks` response from `reader`.
+    ///
+    /// An unrecognized `result` value is a connection error of type
+    /// `PROTOCOL_ERROR`. Compact blocks occur only as announcements, so
+    /// there is no compact block result.
+    pub async fn read<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Self, WireError> {
+        match record::read_u8(reader).await? {
+            RESULT_OBJECT => {
+                let block_bytes =
+                    record::read_length_prefixed_bytes(reader, MAX_RECORD_PAYLOAD_LEN).await?;
+                let block = Arc::new(Block::zcash_deserialize(block_bytes.as_slice())?);
+                Ok(BlockResponseEntry::Full(block))
+            }
+            RESULT_NOT_FOUND => Ok(BlockResponseEntry::NotFound),
+            unknown => Err(WireError::Protocol(format!(
+                "unrecognized get-blocks result value {unknown:#04x}",
+            ))),
+        }
+    }
+}
+
+/// One entry of a `get-tx` response.
+#[derive(Clone, Debug)]
+pub enum TxResponseEntry {
+    /// The requested transaction.
+    Found(Arc<Transaction>),
+
+    /// The transaction was not found.
+    NotFound,
+}
+
+impl TxResponseEntry {
+    /// Encodes this entry to `writer`.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn encode<W: io::Write>(&self, mut writer: W) -> Result<(), WireError> {
+        match self {
+            TxResponseEntry::Found(tx) => {
+                writer.write_all(&[RESULT_OBJECT])?;
+                let tx_bytes = tx
+                    .zcash_serialize_to_vec()
+                    .expect("serializing a transaction to a Vec never fails");
+                record::write_record(&mut writer, &tx_bytes)?;
+            }
+            TxResponseEntry::NotFound => {
+                writer.write_all(&[RESULT_NOT_FOUND])?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reads one entry of a `get-tx` response from `reader`.
+    ///
+    /// An unrecognized `result` value is a connection error of type
+    /// `PROTOCOL_ERROR`. A compact block result is only defined for
+    /// `get-blocks` responses, so it is unrecognized here.
+    pub async fn read<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Self, WireError> {
+        match record::read_u8(reader).await? {
+            RESULT_OBJECT => {
+                let tx_bytes =
+                    record::read_length_prefixed_bytes(reader, MAX_RECORD_PAYLOAD_LEN).await?;
+                let tx = Arc::new(Transaction::zcash_deserialize(tx_bytes.as_slice())?);
+                Ok(TxResponseEntry::Found(tx))
+            }
+            RESULT_NOT_FOUND => Ok(TxResponseEntry::NotFound),
+            unknown => Err(WireError::Protocol(format!(
+                "unrecognized get-tx result value {unknown:#04x}",
+            ))),
+        }
     }
 }
 
@@ -157,11 +215,7 @@ pub struct AddrResponse(pub Vec<MetaAddr>);
 impl AddrResponse {
     /// Encodes this response to `writer`.
     pub fn encode<W: io::Write>(&self, mut writer: W) -> Result<(), WireError> {
-        record::check_send_limit(
-            self.0.len() as u64,
-            MAX_ADDRS_IN_RESPONSE,
-            "address records",
-        )?;
+        record::check_send_limit(self.0.len(), MAX_ADDRS_IN_RESPONSE, "address records")?;
 
         record::write_compact_size(&mut writer, self.0.len() as u64)?;
         for addr in &self.0 {

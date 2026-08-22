@@ -9,7 +9,7 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -273,21 +273,22 @@ where
                 inv_collector: inv_collector.clone(),
                 misbehavior_tx,
                 announcement_tx,
-                pushed_transactions: Mutex::new(Default::default()),
-                sent_blocks: Mutex::new(Default::default()),
-                reconstructed_blocks: Mutex::new(Default::default()),
+                pushed_transactions: Default::default(),
+                sent_blocks: Default::default(),
+                reconstructed_blocks: Default::default(),
                 mempool_updates: tokio::sync::broadcast::channel(
                     connection::MEMPOOL_UPDATES_CHANNEL_CAPACITY,
                 )
                 .0,
                 mempool_subscribed: Default::default(),
-                remote_mempool: Mutex::new(Default::default()),
-                pending_tx_announcements: Mutex::new(Default::default()),
-                cached_addrs: Mutex::new(Vec::new()),
-                addr_tokens: Mutex::new(Default::default()),
-                open_inbound_announcements: Mutex::new(Default::default()),
+                remote_mempool: Default::default(),
+                pending_tx_announcements: Default::default(),
+                cached_addrs: Default::default(),
+                addr_tokens: Default::default(),
+                open_inbound_announcements: Default::default(),
                 sent_get_addr: Default::default(),
                 consecutive_timeouts: Default::default(),
+                responses_received: Default::default(),
                 active_bulk_streams: Default::default(),
                 artifact_dir,
             });

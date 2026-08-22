@@ -50,7 +50,7 @@ use crate::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
-    peer_book::{ChangeSender, PeerBookHandle, PeerBookReader},
+    peer_book::{transports::AddrTransports, ChangeSender, PeerBookHandle, PeerBookReader},
     peer_cache_updater::peer_cache_updater,
     peer_set::{
         crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
@@ -67,6 +67,24 @@ mod tests;
 mod inbound_admission;
 mod recent_by_ip;
 mod v2_transport;
+
+/// The share of candidates with unknown transport reachability that are
+/// probed for version 2 support before the legacy dial.
+///
+/// Probing is how a node discovers version 2 peers it learned about over the
+/// legacy network, before the draft ZIP grows a per-address transport hint.
+/// The share is small, and probes are rate-limited along with every other
+/// dial, so the cost is a few UDP packets per minute.
+const V2_PROBE_RATIO: f32 = 0.05;
+
+/// The timeout for a version 2 probe of a peer whose version 2
+/// reachability is unknown.
+///
+/// Deliberately well under [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT):
+/// a probe of a peer that does not speak version 2 must barely delay the
+/// legacy dial that follows it. A QUIC handshake to a listening peer takes
+/// one round trip, so this is generous for a peer that answers at all.
+const V2_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The version 2 outbound connector, type-erased so the crawler does not
 /// carry the inbound service and chain tip types.
@@ -326,7 +344,8 @@ where
 
     // The legacy and v2 transports open connections from separate tasks, but
     // their connections share the configured limits, so they share these
-    // counters.
+    // counters, and one per-IP inbound limiter: separate limiters would let
+    // one IP hold `max_connections_per_ip` connections on each transport.
     let active_inbound_connections = SharedConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
         "Inbound Connections",
@@ -335,6 +354,11 @@ where
         config.peerset_outbound_connection_limit(),
         "Outbound Connections",
     );
+    let recent_inbound_connections = watch::channel(recent_by_ip::RecentByIp::new(
+        None,
+        Some(config.max_connections_per_ip),
+    ))
+    .0;
 
     // Connect peerset_tx to the 3 peer sources:
     //
@@ -348,6 +372,7 @@ where
         bans_receiver.clone(),
         block_gossip_peer_ips,
         active_inbound_connections.clone(),
+        recent_inbound_connections.clone(),
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -381,6 +406,7 @@ where
                 peerset_tx.clone(),
                 bans_receiver,
                 active_inbound_connections,
+                recent_inbound_connections,
             );
 
             (
@@ -391,17 +417,17 @@ where
         None => (None, None),
     };
 
-    // Dial the configured version 2 peers, and add them to the book so the
-    // legacy crawler redials them if the version 2 connection drops.
-    if let Some(connector) = v2_connector.clone() {
-        let dial_fut = add_initial_v2_peers(
-            config.clone(),
-            connector,
-            peerset_tx.clone(),
-            address_book_updater.clone(),
-            active_outbound_connections.clone(),
-        );
-        tokio::spawn(dial_fut.in_current_span());
+    // Seed the configured version 2 peers as QUIC-reachable, and add them
+    // to the book: the crawler then dials and redials them over version 2
+    // like any other peer whose reachability this node has learned.
+    if v2_connector.is_some() {
+        for peer_addr in config.initial_v2_peers().await {
+            address_book_updater.record_transport(peer_addr, AddrTransports::QUIC, true);
+
+            let _ = address_book_updater
+                .send(MetaAddr::new_initial_peer(peer_addr))
+                .await;
+        }
     }
 
     // 2. Initial peers, specified in the config and cached on disk.
@@ -456,6 +482,7 @@ where
         crawl_service,
         peer_book_handle.clone(),
         outbound_connector,
+        v2_connector,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
@@ -791,15 +818,13 @@ async fn accept_inbound_connections<S>(
     bans_receiver: watch::Receiver<Arc<IndexMap<crate::peer_book::BanKey, std::time::Instant>>>,
     zcashd_compat_peer_ips: Vec<IpAddr>,
     active_inbound_connections: SharedConnectionCounter,
+    recent_inbound_connections: watch::Sender<recent_by_ip::RecentByIp>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone,
     S::Future: Send + 'static,
 {
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(config.max_connections_per_ip));
-
     let zcashd_compat_peer_ips: HashSet<_> = zcashd_compat_peer_ips
         .into_iter()
         .map(|ip| canonical_socket_addr(SocketAddr::new(ip, 0)).ip())
@@ -881,10 +906,9 @@ where
                 match inbound_admission::try_reserve_public_inbound_slot(
                     &config.network,
                     addr,
-                    active_public_inbound_connections,
                     public_limit,
                     &active_inbound_connections,
-                    &mut recent_inbound_connections,
+                    &recent_inbound_connections,
                 ) {
                     Some(tracker) => tracker,
                     None => {
@@ -1061,6 +1085,7 @@ enum CrawlerAction {
         crawl_service,
         peer_book_handle,
         outbound_connector,
+        v2_connector,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
@@ -1077,6 +1102,7 @@ async fn crawl_and_dial<C, S>(
     crawl_service: CrawlService<S>,
     peer_book_handle: PeerBookHandle,
     outbound_connector: C,
+    v2_connector: Option<V2OutboundConnector>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     active_outbound_connections: SharedConnectionCounter,
     address_book_updater: ChangeSender,
@@ -1177,6 +1203,7 @@ where
                 let mut next_peer_service = next_peer_service.clone();
                 let crawl_service = crawl_service.clone();
                 let outbound_connector = outbound_connector.clone();
+                let v2_connector = v2_connector.clone();
                 let active_outbound_connections = active_outbound_connections.clone();
                 let peerset_tx = peerset_tx.clone();
                 let address_book_updater = address_book_updater.clone();
@@ -1203,13 +1230,16 @@ where
                         // task, so it shouldn't hang.
                         let candidate = next_reconnect_peer(&mut next_peer_service).await;
 
-                        if let Some(candidate) = candidate {
+                        if let Some((candidate, transports)) = candidate {
                             // we don't need to spawn here, because there's nothing running concurrently
                             dial(
                                 network,
                                 candidate,
+                                transports,
                                 outbound_connector,
+                                v2_connector,
                                 outbound_connection_tracker,
+                                active_outbound_connections,
                                 outbound_connections,
                                 peerset_tx,
                                 address_book_updater,
@@ -1359,7 +1389,9 @@ where
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(
     outbound_connector,
+    v2_connector,
     outbound_connection_tracker,
+    active_outbound_connections,
     outbound_connections,
     peerset_tx,
     address_book_updater,
@@ -1368,8 +1400,11 @@ where
 async fn dial<C>(
     network: Network,
     candidate: MetaAddr,
+    transports: AddrTransports,
     mut outbound_connector: C,
-    outbound_connection_tracker: ConnectionTracker,
+    v2_connector: Option<V2OutboundConnector>,
+    mut outbound_connection_tracker: ConnectionTracker,
+    active_outbound_connections: SharedConnectionCounter,
     outbound_connections: usize,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     address_book_updater: ChangeSender,
@@ -1397,6 +1432,34 @@ where
 
     debug!(?candidate.addr, "attempting outbound connection in response to demand");
 
+    // The version 2 attempt comes first for peers known to accept QUIC, so
+    // the node uses version 2 wherever it is available. Every failure falls
+    // back to the legacy transport immediately, so a node is never worse
+    // off than a legacy-only node.
+    if let Some(connector) = v2_connector {
+        match dial_v2(
+            &candidate,
+            transports,
+            connector,
+            outbound_connection_tracker,
+            &active_outbound_connections,
+            &address_book_updater,
+        )
+        .await
+        {
+            V2Dial::Connected(client) => {
+                debug!(?candidate.addr, "successfully dialed new v2 peer");
+                address_book_updater.record_transport(candidate.addr, AddrTransports::QUIC, true);
+
+                peerset_tx.send((candidate.addr, client)).await?;
+                return Ok(());
+            }
+            // The legacy dial below continues with the tracker the attempt
+            // returned.
+            V2Dial::Fallback(tracker) => outbound_connection_tracker = tracker,
+        }
+    }
+
     // the connector is always ready, so this can't hang
     let outbound_connector = outbound_connector.ready().await?;
 
@@ -1419,6 +1482,7 @@ where
     match handshake_result {
         Ok((address, client)) => {
             debug!(?candidate.addr, "successfully dialed new peer");
+            address_book_updater.record_transport(candidate.addr, AddrTransports::TCP, true);
 
             // The connection limit makes sure this send doesn't block.
             peerset_tx.send((address, client)).await?;
@@ -1452,53 +1516,79 @@ where
     Ok(())
 }
 
-/// Dials the configured version 2 peers, and adds them to the address book.
+/// The outcome of a version 2 dial attempt.
+enum V2Dial {
+    /// The peer connected over version 2.
+    Connected(peer::Client),
+
+    /// Version 2 was not attempted, or the attempt failed. The caller
+    /// falls back to the legacy transport with the returned tracker, so one
+    /// logical dial holds one outbound slot however many transports it
+    /// tries.
+    Fallback(ConnectionTracker),
+}
+
+/// Attempts a version 2 dial to `candidate`, if the dial policy calls for
+/// one, and records what the attempt taught about the peer's reachability.
 ///
-/// The configured peers are the only ones dialed over version 2: a relayed
-/// address carries no indication of the transports its peer accepts, so
-/// this node cannot tell which of them would answer a QUIC dial.
-#[instrument(skip(
-    connector,
-    peerset_tx,
-    address_book_updater,
-    active_outbound_connections
-))]
-async fn add_initial_v2_peers(
-    config: Config,
-    mut connector: V2OutboundConnector,
-    mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: crate::peer_book::ChangeSender,
-    active_outbound_connections: SharedConnectionCounter,
-) {
-    for addr in config.initial_v2_peers().await {
-        // The book keeps the peer as a reconnection candidate for the
-        // legacy crawler if the version 2 connection drops.
-        let _ = address_book_updater
-            .send(MetaAddr::new_initial_peer(addr))
-            .await;
+/// A peer known to accept QUIC is always tried. A peer not known to accept
+/// it is probed at [`V2_PROBE_RATIO`], which is how a node discovers the
+/// version 2 peers it learned about over the legacy network: relayed
+/// addresses carry no transport hint, so reachability can only be learned
+/// by trying.
+async fn dial_v2(
+    candidate: &MetaAddr,
+    transports: AddrTransports,
+    connector: V2OutboundConnector,
+    connection_tracker: ConnectionTracker,
+    active_outbound_connections: &SharedConnectionCounter,
+    address_book_updater: &crate::peer_book::ChangeSender,
+) -> V2Dial {
+    let known_v2 = transports.contains(AddrTransports::QUIC);
 
-        let request = OutboundConnectorRequest {
-            addr,
-            connection_tracker: active_outbound_connections.track_connection(),
-        };
+    // A peer that speaks the legacy protocol may also speak version 2, so
+    // the probe is gated on version 2 reachability alone: gating on "no
+    // known transports" would stop probing every peer as soon as it
+    // completed one legacy handshake.
+    let probe = !known_v2 && rand::random::<f32>() < V2_PROBE_RATIO;
+    if !known_v2 && !probe {
+        return V2Dial::Fallback(connection_tracker);
+    }
 
-        let Ok(connector) = connector.ready().await else {
-            return;
-        };
+    // A probe of a peer that does not answer must barely delay the legacy
+    // dial that follows it.
+    let timeout = if known_v2 {
+        constants::HANDSHAKE_TIMEOUT
+    } else {
+        V2_PROBE_TIMEOUT
+    };
 
-        match connector.call(request).await {
-            Ok((addr, client)) => {
-                debug!(?addr, "connected to configured v2 peer");
+    let request = OutboundConnectorRequest {
+        addr: candidate.addr,
+        connection_tracker,
+    };
 
-                if peerset_tx.send((addr, client)).await.is_err() {
-                    return;
-                }
-            }
-            Err(error) => {
-                info!(?error, ?addr, "failed to connect to configured v2 peer");
-            }
+    // The attempt owns the tracker from here: the handshake takes it on
+    // success, and it is dropped with the future otherwise. Timing out
+    // drops the future, which cancels the dial and releases the slot, so an
+    // abandoned attempt cannot hold one until the transport's idle timeout.
+    match tokio::time::timeout(timeout, connector.oneshot(request)).await {
+        Ok(Ok((_addr, client))) => return V2Dial::Connected(client),
+        Ok(Err(error)) => {
+            debug!(?error, ?candidate.addr, "v2 dial failed, trying the legacy transport");
+
+            // A refused dial is what teaches the peer book that this peer
+            // does not accept QUIC.
+            address_book_updater.record_transport(candidate.addr, AddrTransports::QUIC, false);
+        }
+        // A timeout does not prove the peer refuses QUIC, so it teaches the
+        // peer book nothing.
+        Err(_elapsed) => {
+            debug!(?candidate.addr, "v2 dial timed out, trying the legacy transport");
         }
     }
+
+    V2Dial::Fallback(active_outbound_connections.track_connection())
 }
 
 /// Mark `addr` as a failed peer to `address_book_updater`.

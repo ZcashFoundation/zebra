@@ -78,7 +78,8 @@ pub(crate) struct MisbehaviorStore {
 
 /// The interval between sweeps of expired scores and bans.
 ///
-/// Expiry is enforced per lookup, so sweeping only reclaims memory.
+/// Expiry is enforced per lookup inside the store, so sweeping reclaims
+/// memory and tells the actor when the published bans snapshot went stale.
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 
 impl MisbehaviorStore {
@@ -89,17 +90,6 @@ impl MisbehaviorStore {
     /// Reaching the threshold resets the score: the ban itself carries the
     /// state forward.
     pub(crate) fn record(&mut self, key: BanKey, points: u32, now: Instant) -> bool {
-        // Expired entries are ignored by every lookup, so pruning them is
-        // only about memory: a periodic sweep bounds it without making each
-        // report scan both maps.
-        let due = self
-            .last_prune
-            .is_none_or(|last| now.saturating_duration_since(last) >= PRUNE_INTERVAL);
-        if due {
-            self.prune(now);
-            self.last_prune = Some(now);
-        }
-
         let entry = self.scores.entry(key).or_insert(ScoreEntry {
             score: 0,
             last_penalty: now,
@@ -109,12 +99,7 @@ impl MisbehaviorStore {
 
         if entry.score >= MAX_PEER_MISBEHAVIOR_SCORE {
             self.scores.shift_remove(&key);
-            self.bans.insert(key, now);
-
-            // Bound the number of banned keys, dropping the oldest bans.
-            while self.bans.len() > MAX_BANNED_IPS {
-                self.bans.shift_remove_index(0);
-            }
+            self.ban(key, now);
 
             return true;
         }
@@ -127,16 +112,47 @@ impl MisbehaviorStore {
         false
     }
 
+    /// Bans `key` at `now`.
+    pub(crate) fn ban(&mut self, key: BanKey, now: Instant) {
+        self.bans.insert(key, now);
+
+        // Bound the number of banned keys, dropping the oldest bans.
+        while self.bans.len() > MAX_BANNED_IPS {
+            self.bans.shift_remove_index(0);
+        }
+    }
+
     /// Returns true if `key` is currently banned.
-    pub(crate) fn is_banned(&self, key: BanKey) -> bool {
+    pub(crate) fn is_banned(&self, key: &BanKey) -> bool {
         self.bans
-            .get(&key)
+            .get(key)
             .is_some_and(|banned_at| banned_at.elapsed() < DEFAULT_BAN_DURATION)
     }
 
     /// Returns a snapshot of the current bans, for the bans watch channel.
     pub(crate) fn bans_snapshot(&self) -> Arc<IndexMap<BanKey, Instant>> {
         Arc::new(self.bans.clone())
+    }
+
+    /// Prunes expired scores and bans, at most once per [`PRUNE_INTERVAL`].
+    ///
+    /// Returns `true` if any ban expired. Expiry is enforced per lookup
+    /// inside the store, but the bans watch consumers only see the
+    /// published snapshot, so the caller must republish it when this
+    /// returns `true` — otherwise the peer set and inbound admission would
+    /// enforce expired bans forever.
+    pub(crate) fn prune_due(&mut self, now: Instant) -> bool {
+        let due = self
+            .last_prune
+            .is_none_or(|last| now.saturating_duration_since(last) >= PRUNE_INTERVAL);
+        if !due {
+            return false;
+        }
+        self.last_prune = Some(now);
+
+        let bans_before = self.bans.len();
+        self.prune(now);
+        bans_before != self.bans.len()
     }
 
     /// Drops scores that have not been updated for about the ban duration,

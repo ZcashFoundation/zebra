@@ -604,7 +604,7 @@ async fn v2_oversized_get_headers_response_is_scored() {
     // connection error.
     let mut data = TestData::new();
     let header = data.headers[0].clone();
-    data.headers = vec![header; MAX_HEADERS_RESULTS as usize + 1];
+    data.headers = vec![header; MAX_HEADERS_RESULTS + 1];
 
     let mut peers = connect_peers(Arc::new(data)).await;
 
@@ -979,8 +979,12 @@ async fn v2_get_blocks_is_hash_only_and_unservable_tx_refs_answer_not_found() {
     use zebra_chain::transaction::{AuthDigest, UnminedTxId, WtxId};
 
     use crate::protocol::v2::{
-        compact_block::ShortTxId, record, request::Request as V2WireRequest,
-        response::read_result_entry, txref::TransactionReference,
+        compact_block::ShortTxId,
+        record,
+        request::Request as V2WireRequest,
+        response::{BlockResponseEntry, TxResponseEntry},
+        txref::TransactionReference,
+        types::StreamType,
     };
 
     let _init_guard = zebra_test::init();
@@ -992,23 +996,22 @@ async fn v2_get_blocks_is_hash_only_and_unservable_tx_refs_answer_not_found() {
 
     // Request the block by hash on a raw request stream: `get-blocks`
     // requests carry only hashes, and are served with full blocks.
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetBlocks {
-            hashes: vec![block.hash()],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetBlocks.byte()];
+    V2WireRequest::GetBlocks {
+        hashes: vec![block.hash()],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
-    let entry = tokio::time::timeout(
-        TEST_TIMEOUT,
-        read_result_entry::<zebra_chain::block::Block, _>(&mut recv, "get-blocks"),
-    )
-    .await
-    .expect("response arrives in time")
-    .expect("response entry parses");
+    let entry = tokio::time::timeout(TEST_TIMEOUT, BlockResponseEntry::read(&mut recv))
+        .await
+        .expect("response arrives in time")
+        .expect("response entry parses");
     match entry {
-        Some(served) => assert_eq!(served.hash(), block.hash()),
+        BlockResponseEntry::Full(served) => assert_eq!(served.hash(), block.hash()),
         other => panic!("expected a full block response, got: {other:?}"),
     }
     record::expect_end_of_stream(&mut recv)
@@ -1019,33 +1022,32 @@ async fn v2_get_blocks_is_hash_only_and_unservable_tx_refs_answer_not_found() {
     // sent to the requesting peer for the block. No compact block has been
     // sent on this connection, so they are answered not-found, without an
     // error or a penalty.
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetTx {
-            refs: vec![
-                TransactionReference::ShortId {
-                    block_hash: block.hash(),
-                    short_id: ShortTxId([0x0F; 6]),
-                },
-                TransactionReference::ShortId {
-                    block_hash: zebra_chain::block::Hash([0xAB; 32]),
-                    short_id: ShortTxId([0x0F; 6]),
-                },
-            ],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetTx.byte()];
+    V2WireRequest::GetTx {
+        refs: vec![
+            TransactionReference::ShortId {
+                block_hash: block.hash(),
+                short_id: ShortTxId([0x0F; 6]),
+            },
+            TransactionReference::ShortId {
+                block_hash: zebra_chain::block::Hash([0xAB; 32]),
+                short_id: ShortTxId([0x0F; 6]),
+            },
+        ],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
     for _ in 0..2 {
-        let missing = tokio::time::timeout(
-            TEST_TIMEOUT,
-            read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx"),
-        )
-        .await
-        .expect("response arrives in time")
-        .expect("response entry parses");
+        let missing = tokio::time::timeout(TEST_TIMEOUT, TxResponseEntry::read(&mut recv))
+            .await
+            .expect("response arrives in time")
+            .expect("response entry parses");
         assert!(
-            missing.is_none(),
+            matches!(missing, TxResponseEntry::NotFound),
             "a SHORTID without a sent compact block is answered not-found",
         );
     }
@@ -1067,33 +1069,32 @@ async fn v2_get_blocks_is_hash_only_and_unservable_tx_refs_answer_not_found() {
         auth_digest: AuthDigest([0xFF; 32]),
     });
 
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetTx {
-            refs: vec![
-                wrong_typed,
-                TransactionReference::from(raw.data.transaction.id),
-            ],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetTx.byte()];
+    V2WireRequest::GetTx {
+        refs: vec![
+            wrong_typed,
+            TransactionReference::from(raw.data.transaction.id),
+        ],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
-    let missing = tokio::time::timeout(
-        TEST_TIMEOUT,
-        read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx"),
-    )
-    .await
-    .expect("response arrives in time")
-    .expect("response entry parses");
+    let missing = tokio::time::timeout(TEST_TIMEOUT, TxResponseEntry::read(&mut recv))
+        .await
+        .expect("response arrives in time")
+        .expect("response entry parses");
     assert!(
-        missing.is_none(),
+        matches!(missing, TxResponseEntry::NotFound),
         "a wrong-typed reference is answered not-found",
     );
-    let found = read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx")
+    let found = TxResponseEntry::read(&mut recv)
         .await
         .expect("response entry parses");
     match found {
-        Some(transaction) => {
+        TxResponseEntry::Found(transaction) => {
             assert_eq!(transaction, raw.data.transaction.transaction);
         }
         other => panic!("expected the referenced transaction, got: {other:?}"),
@@ -1231,7 +1232,7 @@ async fn v2_compact_announcement_is_reconstructed_and_served_from_cache() {
         compact_block::{CompactBlock, CompactBlockIds},
         record,
         request::Request as V2WireRequest,
-        response::encode_result_entry,
+        response::TxResponseEntry,
         txref::TransactionReference,
         types::StreamType,
     };
@@ -1296,7 +1297,9 @@ async fn v2_compact_announcement_is_reconstructed_and_served_from_cache() {
 
     let mut bytes = Vec::new();
     for tx in block.transactions.iter().skip(1) {
-        encode_result_entry(&mut bytes, Some(tx.as_ref())).expect("entry encodes");
+        TxResponseEntry::Found(tx.clone())
+            .encode(&mut bytes)
+            .expect("entry encodes");
     }
     req_send.write_all(&bytes).await.expect("response writes");
     req_send.finish().expect("stream finishes");
@@ -1836,7 +1839,7 @@ async fn v2_hb_compact_block_announcement_and_reconstruction_serving() {
         compact_block::{short_id_keys, short_transaction_id, CompactBlock, CompactBlockIds},
         record,
         request::Request as V2WireRequest,
-        response::read_result_entry,
+        response::TxResponseEntry,
         txref::TransactionReference,
         types::StreamType,
     };
@@ -1906,37 +1909,36 @@ async fn v2_hb_compact_block_announcement_and_reconstruction_serving() {
     // IDs of the announcement, and by ordinary references, even though the
     // responder's mempool does not hold them. Unknown short IDs and other
     // blocks' short IDs are answered not-found.
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetTx {
-            refs: vec![
-                TransactionReference::ShortId {
-                    block_hash: block.hash(),
-                    short_id: expected_ids[0],
-                },
-                TransactionReference::from(UnminedTxId::from(block.transactions[2].as_ref())),
-                TransactionReference::ShortId {
-                    block_hash: block.hash(),
-                    short_id: crate::protocol::v2::compact_block::ShortTxId([0x0F; 6]),
-                },
-                TransactionReference::ShortId {
-                    block_hash: zebra_chain::block::Hash([0xAB; 32]),
-                    short_id: expected_ids[0],
-                },
-            ],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetTx.byte()];
+    V2WireRequest::GetTx {
+        refs: vec![
+            TransactionReference::ShortId {
+                block_hash: block.hash(),
+                short_id: expected_ids[0],
+            },
+            TransactionReference::from(UnminedTxId::from(block.transactions[2].as_ref())),
+            TransactionReference::ShortId {
+                block_hash: block.hash(),
+                short_id: crate::protocol::v2::compact_block::ShortTxId([0x0F; 6]),
+            },
+            TransactionReference::ShortId {
+                block_hash: zebra_chain::block::Hash([0xAB; 32]),
+                short_id: expected_ids[0],
+            },
+        ],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
     let mut entries = Vec::new();
     for _ in 0..4 {
-        let entry = tokio::time::timeout(
-            TEST_TIMEOUT,
-            read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx"),
-        )
-        .await
-        .expect("response arrives in time")
-        .expect("response entry parses");
+        let entry = tokio::time::timeout(TEST_TIMEOUT, TxResponseEntry::read(&mut recv))
+            .await
+            .expect("response arrives in time")
+            .expect("response entry parses");
         entries.push(entry);
     }
     record::expect_end_of_stream(&mut recv)
@@ -1944,19 +1946,19 @@ async fn v2_hb_compact_block_announcement_and_reconstruction_serving() {
         .expect("response is complete");
 
     match &entries[0] {
-        Some(tx) => assert_eq!(tx, &block.transactions[1]),
+        TxResponseEntry::Found(tx) => assert_eq!(tx, &block.transactions[1]),
         other => panic!("expected the short ID's transaction, got: {other:?}"),
     }
     match &entries[1] {
-        Some(tx) => assert_eq!(tx, &block.transactions[2]),
+        TxResponseEntry::Found(tx) => assert_eq!(tx, &block.transactions[2]),
         other => panic!("expected the sent block's transaction, got: {other:?}"),
     }
     assert!(
-        entries[2].is_none(),
+        matches!(entries[2], TxResponseEntry::NotFound),
         "an unknown short ID is answered not-found",
     );
     assert!(
-        entries[3].is_none(),
+        matches!(entries[3], TxResponseEntry::NotFound),
         "a short ID for a block without a sent compact block is answered not-found",
     );
 
@@ -2100,7 +2102,11 @@ async fn v2_get_headers_with_tx_ids_serves_coinbase_and_full_ids() {
 
     use zebra_chain::{block::Header, transaction::Transaction};
 
-    use crate::protocol::v2::{record, request::Request as V2WireRequest, types::WireError};
+    use crate::protocol::v2::{
+        record,
+        request::Request as V2WireRequest,
+        types::{StreamType, WireError},
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -2111,15 +2117,17 @@ async fn v2_get_headers_with_tx_ids_serves_coinbase_and_full_ids() {
     let raw = raw_initiator(Arc::new(data)).await;
     let block_1 = raw.data.block_1.clone();
 
-    let mut recv = send_request(
-        &raw.connection,
-        V2WireRequest::GetHeaders {
-            known_blocks: vec![],
-            stop: None,
-            tx_ids: true,
-        },
-    )
-    .await;
+    let (mut send, mut recv) = raw.connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetHeaders.byte()];
+    V2WireRequest::GetHeaders {
+        known_blocks: vec![],
+        stop: None,
+        tx_ids: true,
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
     let response = tokio::time::timeout(TEST_TIMEOUT, async {
         let count = record::read_compact_size(&mut recv).await?;
@@ -2191,42 +2199,40 @@ async fn v2_get_headers_with_tx_ids_serves_coinbase_and_full_ids() {
     // transactions to this peer, even though they are not in its mempool —
     // but not by `SHORTID`, which only a compact block establishes.
     use crate::protocol::v2::{
-        compact_block::ShortTxId, response::read_result_entry, txref::TransactionReference,
+        compact_block::ShortTxId, response::TxResponseEntry, txref::TransactionReference,
     };
     use zebra_chain::transaction::UnminedTxId;
 
     let coinbase_id = UnminedTxId::from(block_1.transactions[0].as_ref());
-    let mut recv = send_request(
-        &raw.connection,
-        V2WireRequest::GetTx {
-            refs: vec![
-                TransactionReference::from(coinbase_id),
-                TransactionReference::ShortId {
-                    block_hash: block_1.hash(),
-                    short_id: ShortTxId([0x0F; 6]),
-                },
-            ],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = raw.connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetTx.byte()];
+    V2WireRequest::GetTx {
+        refs: vec![
+            TransactionReference::from(coinbase_id),
+            TransactionReference::ShortId {
+                block_hash: block_1.hash(),
+                short_id: ShortTxId([0x0F; 6]),
+            },
+        ],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
-    let found = tokio::time::timeout(
-        TEST_TIMEOUT,
-        read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx"),
-    )
-    .await
-    .expect("response arrives in time")
-    .expect("response entry parses");
+    let found = tokio::time::timeout(TEST_TIMEOUT, TxResponseEntry::read(&mut recv))
+        .await
+        .expect("response arrives in time")
+        .expect("response entry parses");
     match found {
-        Some(tx) => assert_eq!(&tx, &block_1.transactions[0]),
+        TxResponseEntry::Found(tx) => assert_eq!(&tx, &block_1.transactions[0]),
         other => panic!("expected the sent block's coinbase, got: {other:?}"),
     }
-    let missing =
-        read_result_entry::<zebra_chain::transaction::Transaction, _>(&mut recv, "get-tx")
-            .await
-            .expect("response entry parses");
+    let missing = TxResponseEntry::read(&mut recv)
+        .await
+        .expect("response entry parses");
     assert!(
-        missing.is_none(),
+        matches!(missing, TxResponseEntry::NotFound),
         "a SHORTID reference to a block sent without a compact block is not-found",
     );
 }
@@ -2333,62 +2339,78 @@ async fn v2_sync_primitives_are_served() {
         }
     }
 
-    // Each case is (name, anchor, count, max_bytes, expected result,
-    // expected block hashes).
-    let cases: [(&str, zebra_chain::block::Hash, u64, u64, u8, Vec<_>); 4] = [
-        (
-            "blocks stream in descending order from the anchor",
-            raw.data.block_2.hash(),
-            5,
-            8_000_000,
-            0x00,
-            vec![raw.data.block_2.hash(), raw.data.block_1.hash()],
-        ),
-        (
-            "the count bound is exact",
-            raw.data.block_2.hash(),
-            1,
-            8_000_000,
-            0x00,
-            vec![raw.data.block_2.hash()],
-        ),
-        (
-            "the first block is delivered regardless of max_bytes",
-            raw.data.block_2.hash(),
-            5,
-            1,
-            0x00,
-            vec![raw.data.block_2.hash()],
-        ),
-        (
-            "an unknown anchor answers not-found",
-            zebra_chain::block::Hash([0xAB; 32]),
-            5,
-            8_000_000,
-            0x02,
-            vec![],
-        ),
-    ];
+    let mut recv = send_request(
+        &connection,
+        V2WireRequest::GetBlockRange {
+            final_hash: raw.data.block_2.hash(),
+            count: 5,
+            max_bytes: 8_000_000,
+        },
+    )
+    .await;
+    let (result, blocks) = tokio::time::timeout(TEST_TIMEOUT, read_block_range(&mut recv))
+        .await
+        .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    let hashes: Vec<_> = blocks.iter().map(|block| block.hash()).collect();
+    assert_eq!(
+        hashes,
+        vec![raw.data.block_2.hash(), raw.data.block_1.hash()],
+        "blocks stream in descending order from the anchor",
+    );
 
-    for (name, final_hash, count, max_bytes, expected_result, expected_hashes) in cases {
-        let mut recv = send_request(
-            &connection,
-            V2WireRequest::GetBlockRange {
-                final_hash,
-                count,
-                max_bytes,
-            },
-        )
-        .await;
+    // The count bound is exact.
+    let mut recv = send_request(
+        &connection,
+        V2WireRequest::GetBlockRange {
+            final_hash: raw.data.block_2.hash(),
+            count: 1,
+            max_bytes: 8_000_000,
+        },
+    )
+    .await;
+    let (result, blocks) = tokio::time::timeout(TEST_TIMEOUT, read_block_range(&mut recv))
+        .await
+        .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(blocks.len(), 1, "the count bound is exact");
 
-        let (result, blocks) = tokio::time::timeout(TEST_TIMEOUT, read_block_range(&mut recv))
-            .await
-            .unwrap_or_else(|_| panic!("{name}: response arrives in time"));
+    // The first block is delivered regardless of max_bytes; the second
+    // would exceed it.
+    let mut recv = send_request(
+        &connection,
+        V2WireRequest::GetBlockRange {
+            final_hash: raw.data.block_2.hash(),
+            count: 5,
+            max_bytes: 1,
+        },
+    )
+    .await;
+    let (result, blocks) = tokio::time::timeout(TEST_TIMEOUT, read_block_range(&mut recv))
+        .await
+        .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(
+        blocks.len(),
+        1,
+        "the first block is delivered regardless of max_bytes",
+    );
 
-        assert_eq!(result, expected_result, "{name}");
-        let hashes: Vec<_> = blocks.iter().map(|block| block.hash()).collect();
-        assert_eq!(hashes, expected_hashes, "{name}");
-    }
+    // An unknown anchor answers not-found.
+    let mut recv = send_request(
+        &connection,
+        V2WireRequest::GetBlockRange {
+            final_hash: zebra_chain::block::Hash([0xAB; 32]),
+            count: 5,
+            max_bytes: 8_000_000,
+        },
+    )
+    .await;
+    let (result, blocks) = tokio::time::timeout(TEST_TIMEOUT, read_block_range(&mut recv))
+        .await
+        .expect("response arrives in time");
+    assert_eq!(result, 0x02, "an unknown anchor answers not-found");
+    assert!(blocks.is_empty());
 }
 
 /// `get-object` serves ranged reads of content-addressed artifacts from
@@ -2399,7 +2421,11 @@ async fn v2_sync_primitives_are_served() {
 async fn v2_get_object_serves_ranged_artifact_reads() {
     use sha2::{Digest, Sha256};
 
-    use crate::protocol::v2::{record, request::Request as V2WireRequest, types::ObjectHash};
+    use crate::protocol::v2::{
+        record,
+        request::Request as V2WireRequest,
+        types::{ObjectHash, StreamType},
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -2428,7 +2454,11 @@ async fn v2_get_object_serves_ranged_artifact_reads() {
         connection: &quinn::Connection,
         request: V2WireRequest,
     ) -> (u8, u64, Vec<u8>) {
-        let mut recv = send_request(connection, request).await;
+        let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+        let mut bytes = vec![StreamType::GetObject.byte()];
+        request.encode(&mut bytes).expect("request encodes");
+        send.write_all(&bytes).await.expect("request writes");
+        send.finish().expect("stream finishes");
 
         let result = record::read_u8(&mut recv)
             .await
@@ -2449,67 +2479,93 @@ async fn v2_get_object_serves_ranged_artifact_reads() {
         (result, size, data)
     }
 
-    // Each case is (name, hash, offset, length, expected result, expected data).
-    let cases: [(&str, [u8; 32], u64, u64, u8, &[u8]); 5] = [
-        ("the whole object", hash, 0, 200_000, 0x00, &object),
-        (
-            "a middle range delivers exactly the requested bytes",
-            hash,
-            40_000,
-            10_000,
-            0x00,
-            &object[40_000..50_000],
+    // The whole object.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 0,
+                length: 200_000,
+            },
         ),
-        (
-            "a range past the end is truncated at the object's size",
-            hash,
-            90_000,
-            50_000,
-            0x00,
-            &object[90_000..],
-        ),
-        (
-            "an offset at the size answers the size and no data",
-            hash,
-            100_000,
-            1_000,
-            0x00,
-            &[],
-        ),
-        (
-            "an unknown hash answers not-found",
-            [0xEE; 32],
-            0,
-            16,
-            0x02,
-            &[],
-        ),
-    ];
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert_eq!(data, object);
 
-    for (name, object_hash, offset, length, expected_result, expected_data) in cases {
-        let (result, size, data) = tokio::time::timeout(
-            TEST_TIMEOUT,
-            get_object(
-                &connection,
-                V2WireRequest::GetObject {
-                    hash: ObjectHash(object_hash),
-                    offset,
-                    length,
-                },
-            ),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("{name}: response arrives in time"));
+    // A middle range delivers exactly the requested bytes.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 40_000,
+                length: 10_000,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert_eq!(data, object[40_000..50_000]);
 
-        assert_eq!(result, expected_result, "{name}");
-        assert_eq!(data, expected_data, "{name}");
+    // A range past the end is truncated at the object's size.
+    let (result, _size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 90_000,
+                length: 50_000,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(data, object[90_000..]);
 
-        // A found result always reports the object's full size, whatever
-        // range of it was asked for.
-        if result == 0x00 && offset + length <= object.len() as u64 {
-            assert_eq!(size, object.len() as u64, "{name}");
-        }
-    }
+    // An offset at the size answers the size and no data.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 100_000,
+                length: 1_000,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert!(data.is_empty());
+
+    // An unknown hash answers not-found.
+    let (result, _size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash([0xEE; 32]),
+                offset: 0,
+                length: 16,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x02);
+    assert!(data.is_empty());
 }
 
 /// `get-object` requests are refused while the artifact store does not
@@ -2577,7 +2633,10 @@ async fn v2_get_object_is_refused_and_malformed_sync_requests_are_rejected() {
 #[tokio::test]
 async fn v2_unknown_stream_types_are_refused_without_penalty() {
     use crate::protocol::v2::{
-        record, request::Request as V2WireRequest, response::read_result_entry, types::ErrorCode,
+        record,
+        request::Request as V2WireRequest,
+        response::BlockResponseEntry,
+        types::{ErrorCode, StreamType},
     };
 
     let _init_guard = zebra_test::init();
@@ -2615,23 +2674,22 @@ async fn v2_unknown_stream_types_are_refused_without_penalty() {
 
     // The connection survives, requests are still served, and no penalty
     // was assigned.
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetBlocks {
-            hashes: vec![raw.data.block.hash()],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetBlocks.byte()];
+    V2WireRequest::GetBlocks {
+        hashes: vec![raw.data.block.hash()],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
-    let entry = tokio::time::timeout(
-        TEST_TIMEOUT,
-        read_result_entry::<zebra_chain::block::Block, _>(&mut recv, "get-blocks"),
-    )
-    .await
-    .expect("response arrives in time")
-    .expect("response entry parses");
+    let entry = tokio::time::timeout(TEST_TIMEOUT, BlockResponseEntry::read(&mut recv))
+        .await
+        .expect("response arrives in time")
+        .expect("response entry parses");
     assert!(
-        entry.is_some(),
+        matches!(entry, BlockResponseEntry::Full(_)),
         "the connection still serves requests after refused streams",
     );
     record::expect_end_of_stream(&mut recv)
@@ -2761,7 +2819,7 @@ async fn v2_stalled_inbound_request_stream_is_abandoned() {
         constants::INBOUND_STREAM_TIMEOUT,
         record,
         request::Request as V2WireRequest,
-        response::read_result_entry,
+        response::BlockResponseEntry,
         types::{ErrorCode, StreamType},
     };
 
@@ -2800,23 +2858,22 @@ async fn v2_stalled_inbound_request_stream_is_abandoned() {
 
     // The connection survives, requests are still served, and no penalty
     // was assigned: a stall is indistinguishable from a slow peer.
-    let mut recv = send_request(
-        &connection,
-        V2WireRequest::GetBlocks {
-            hashes: vec![raw.data.block.hash()],
-        },
-    )
-    .await;
+    let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+    let mut bytes = vec![StreamType::GetBlocks.byte()];
+    V2WireRequest::GetBlocks {
+        hashes: vec![raw.data.block.hash()],
+    }
+    .encode(&mut bytes)
+    .expect("request encodes");
+    send.write_all(&bytes).await.expect("request writes");
+    send.finish().expect("stream finishes");
 
-    let entry = tokio::time::timeout(
-        TEST_TIMEOUT,
-        read_result_entry::<zebra_chain::block::Block, _>(&mut recv, "get-blocks"),
-    )
-    .await
-    .expect("response arrives in time")
-    .expect("response entry parses");
+    let entry = tokio::time::timeout(TEST_TIMEOUT, BlockResponseEntry::read(&mut recv))
+        .await
+        .expect("response arrives in time")
+        .expect("response entry parses");
     assert!(
-        entry.is_some(),
+        matches!(entry, BlockResponseEntry::Full(_)),
         "the connection still serves requests after an abandoned stream",
     );
     record::expect_end_of_stream(&mut recv)

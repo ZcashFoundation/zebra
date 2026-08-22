@@ -121,26 +121,29 @@ async fn peer_book_actor_serves_all_request_variants() {
         "gossiped peers should not be recently live",
     );
 
-    // A `SelectCandidate` request returns one of the gossiped peers.
+    // A `SelectCandidates` request returns one of the gossiped peers.
     let response = handles
         .handle
         .clone()
-        .oneshot(PeerBookRequest::SelectCandidate)
+        .oneshot(PeerBookRequest::SelectCandidates { max: 1 })
         .await
         .expect("actor should be running");
     match response {
-        PeerBookResponse::Candidate(Some(peer)) => {
+        PeerBookResponse::Candidates(candidates) => {
+            let (peer, _transports) = candidates
+                .first()
+                .expect("gossiped peers should be available for reconnection");
             let gossiped: Vec<_> = (0..3).map(|number| gossiped_addr(number).into()).collect();
             assert!(
                 gossiped.contains(&peer.addr),
                 "the reconnection candidate should be one of the gossiped peers: {peer:?}",
             );
         }
-        other => panic!("gossiped peers should be available for reconnection: {other:?}"),
+        other => panic!("unexpected response variant: {other:?}"),
     }
 }
 
-/// Test that concurrent `SelectCandidate` requests never return the same peer.
+/// Test that concurrent `SelectCandidates` requests never return the same peer.
 ///
 /// The actor picks the candidate and marks it as `AttemptPending` in the same
 /// actor turn, so each request marks its candidate before the next request
@@ -181,7 +184,7 @@ async fn concurrent_select_candidate_requests_return_distinct_peers() {
         handles
             .handle
             .clone()
-            .oneshot(PeerBookRequest::SelectCandidate)
+            .oneshot(PeerBookRequest::SelectCandidates { max: 1 })
     });
 
     let responses = future::join_all(requests).await;
@@ -190,9 +193,11 @@ async fn concurrent_select_candidate_requests_return_distinct_peers() {
         .into_iter()
         .map(|response| {
             match response.expect("the peer book actor should serve concurrent requests") {
-                PeerBookResponse::Candidate(Some(peer)) => peer.addr,
-                PeerBookResponse::Candidate(None) => {
-                    panic!("every request should return a candidate peer")
+                PeerBookResponse::Candidates(candidates) => {
+                    let (peer, _transports) = candidates
+                        .first()
+                        .expect("every request should return a candidate peer");
+                    peer.addr
                 }
                 other => panic!("unexpected response variant: {other:?}"),
             }
@@ -202,6 +207,6 @@ async fn concurrent_select_candidate_requests_return_distinct_peers() {
     assert_eq!(
         unique_peers.len(),
         TEST_PEER_COUNT,
-        "concurrent SelectCandidate requests must never return the same peer",
+        "concurrent SelectCandidates requests must never return the same peer",
     );
 }

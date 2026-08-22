@@ -55,6 +55,18 @@ use Network::*;
 
 /// Returns the inbound connection counter the listener under test shares with
 /// the v2 transport in production.
+/// Returns the shared per-IP inbound limiter the listener under test shares
+/// with the v2 transport in production.
+fn test_recent_by_ip(
+    config: &Config,
+) -> tokio::sync::watch::Sender<super::super::recent_by_ip::RecentByIp> {
+    tokio::sync::watch::channel(super::super::recent_by_ip::RecentByIp::new(
+        None,
+        Some(config.max_connections_per_ip),
+    ))
+    .0
+}
+
 fn test_inbound_counter(config: &Config) -> SharedConnectionCounter {
     SharedConnectionCounter::new_counter_with(
         config.peerset_inbound_connection_limit(),
@@ -874,6 +886,8 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         crawl_service,
         peer_book_handle.clone(),
         success_stay_open_outbound_connector,
+        // The version 2 transport is disabled in this test.
+        None,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
@@ -1180,6 +1194,7 @@ async fn listener_reserves_one_zcashd_compat_inbound_slot() {
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
@@ -1189,6 +1204,7 @@ async fn listener_reserves_one_zcashd_compat_inbound_slot() {
         bans_rx,
         vec![IpAddr::V6(zcashd_compat_ip.to_ipv6_mapped())],
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1274,6 +1290,7 @@ async fn listener_zcashd_compat_reconnect_bypasses_recent_ip_limit() {
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1283,6 +1300,7 @@ async fn listener_zcashd_compat_reconnect_bypasses_recent_ip_limit() {
         bans_rx,
         vec![zcashd_compat_ip.into()],
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1341,6 +1359,7 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
     );
 
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1350,6 +1369,7 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
         bans_rx,
         vec![zcashd_compat_ip.into()],
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1430,6 +1450,7 @@ async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1439,6 +1460,7 @@ async fn listener_canonicalizes_ipv4_mapped_inbound_addrs() {
         bans_rx,
         Vec::new(),
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1522,6 +1544,7 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
     );
 
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config,
         tcp_listener,
@@ -1531,6 +1554,7 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
         bans_rx,
         Vec::new(),
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1975,9 +1999,7 @@ async fn self_connections_should_fail() {
     .await;
 
     // Insert our own address into the address book, and make sure it works
-    let real_self_listener =
-        MetaAddr::new_local_listener_change(address_book.local_listener_socket_addr())
-            .local_listener_into_new_meta_addr(Utc::now().try_into().expect("in range"));
+    let real_self_listener = address_book.local_listener_meta_addr(Utc::now());
 
     // Set a fake listener on the book to get past the check for adding our
     // own address. The change below travels the same channel, so it is
@@ -2243,24 +2265,24 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         "Test user agent".to_string(),
     )
     .await;
-    let local_listener = peer_book_reader.local_listener_socket_addr();
+    let local_listener = peer_book_reader.local_listener_meta_addr(Utc::now());
 
     if listen_addr.port() == 0 {
         assert_ne!(
-            local_listener.port(),
+            local_listener.addr.port(),
             0,
             "dynamic ports are replaced with OS-assigned ports"
         );
     } else {
         assert_eq!(
-            local_listener.port(),
+            local_listener.addr.port(),
             listen_addr.port(),
             "fixed ports are correctly propagated"
         );
     }
 
     assert_eq!(
-        local_listener.ip(),
+        local_listener.addr.ip(),
         listen_addr.ip(),
         "IP addresses are correctly propagated"
     );
@@ -2414,6 +2436,8 @@ where
         crawl_service,
         peer_book_handle.clone(),
         outbound_connector,
+        // The version 2 transport is disabled in this test.
+        None,
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
@@ -2542,6 +2566,7 @@ where
 
     // Start listening for connections.
     let active_inbound_connections = test_inbound_counter(&config);
+    let recent_inbound_connections = test_recent_by_ip(&config);
     let listen_fut = accept_inbound_connections(
         config.clone(),
         tcp_listener,
@@ -2551,6 +2576,7 @@ where
         bans_rx,
         Vec::new(),
         active_inbound_connections,
+        recent_inbound_connections,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -2865,6 +2891,7 @@ async fn v2_listener_rejects_banned_peers() {
         peerset_tx,
         bans_rx,
         test_inbound_counter(&config),
+        test_recent_by_ip(&config),
     );
     let v2_task_handle = tokio::spawn(v2_fut);
 

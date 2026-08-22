@@ -109,7 +109,7 @@ use tower::{Service, ServiceExt};
 
 use crate::{
     constants,
-    peer_book::{PeerBookHandle, PeerBookRequest, PeerBookResponse},
+    peer_book::{transports::AddrTransports, PeerBookHandle, PeerBookRequest, PeerBookResponse},
     types::MetaAddr,
     BoxError, Request, Response,
 };
@@ -152,7 +152,7 @@ where
     let next_peer_service = RateLimitOnYield::new(
         peer_book_handle.clone(),
         constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
-        |response| matches!(response, PeerBookResponse::Candidate(Some(_))),
+        |response| matches!(response, PeerBookResponse::Candidates(candidates) if !candidates.is_empty()),
     );
 
     let crawl_service = CrawlFanout::service(peer_service, peer_book_handle);
@@ -187,29 +187,29 @@ where
 /// apart. If a peer was recently provided, then this future will sleep
 /// until the rate-limit has passed.
 ///
-/// The returned candidate records which transports the peer is known to
+/// The candidate is returned with the transports it is known to
 /// accept, so the dialer can reach version 2 peers over QUIC and
 /// everything else over TCP.
 ///
 /// [`Responded`]: crate::PeerAddrState::Responded
 pub(crate) async fn next_reconnect_peer(
     next_peer_service: &mut NextPeerService,
-) -> Option<MetaAddr> {
+) -> Option<(MetaAddr, AddrTransports)> {
     // Security: new outbound peer connections are rate-limited by the
     // [`RateLimitOnYield`] middleware, which only sleeps before yielding
     // an address: when there is no peer, `None` is returned immediately.
     let response = match next_peer_service.ready().await {
         Ok(next_peer_service) => {
             next_peer_service
-                .call(PeerBookRequest::SelectCandidate)
+                .call(PeerBookRequest::SelectCandidates { max: 1 })
                 .await
         }
         Err(error) => Err(error),
     };
 
     match response {
-        Ok(PeerBookResponse::Candidate(next_peer)) => next_peer,
-        Ok(_) => unreachable!("SelectCandidate requests always return Candidate"),
+        Ok(PeerBookResponse::Candidates(candidates)) => candidates.into_iter().next(),
+        Ok(_) => unreachable!("SelectCandidates requests always return Candidates"),
         Err(error) => {
             debug!(
                 ?error,

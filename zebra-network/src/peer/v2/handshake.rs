@@ -96,7 +96,6 @@ pub struct HandshakeParams {
 ///
 /// The handshake stream halves are kept open for the life of the connection:
 /// finishing or resetting the handshake stream signals intent to disconnect.
-#[derive(Debug)]
 pub struct V2Handshake {
     /// The remote peer's `init` record.
     pub remote_init: InitRecord,
@@ -110,6 +109,15 @@ pub struct V2Handshake {
 
     /// The receiving half of the handshake stream.
     pub handshake_recv: quinn::RecvStream,
+}
+
+impl std::fmt::Debug for V2Handshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2Handshake")
+            .field("remote_init", &self.remote_init)
+            .field("negotiated_version", &self.negotiated_version)
+            .finish()
+    }
 }
 
 /// Performs the version 2 handshake as the connection initiator:
@@ -198,7 +206,7 @@ async fn read_and_validate_remote_init(
     // Check the remote nonce against every nonce this node recently sent:
     // any match means the connection is to the node itself, possibly via a
     // simultaneous connection in each direction.
-    if params.nonces.contains(&remote_init.nonce).await {
+    if params.nonces.contains(&remote_init.nonce) {
         return Err(V2HandshakeError::SelfConnection);
     }
 
@@ -218,7 +226,6 @@ async fn register_local_nonce(params: &HandshakeParams) -> Result<(), V2Handshak
     if !params
         .nonces
         .register(params.local_init.nonce, params.nonce_limit)
-        .await
     {
         return Err(V2HandshakeError::LocalDuplicateNonce);
     }
