@@ -16,8 +16,8 @@ A hotfix release should only be created when a bug or critical issue is discover
 - [ ] Create a hotfix release PR by adding `&template=hotfix-release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=hotfix-release-checklist.md)).
 - [ ] Add the `C-exclude-from-changelog` label so that the PR is omitted from the next release changelog
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
-- [ ] Add the `do-not-merge` tag to prevent Mergify from merging, since after PR approval the
-      release is done from the branch itself.
+- [ ] Add the `do-not-merge` tag to keep the PR out of the merge queue, since after PR approval
+      the release is done from the branch itself.
 - [ ] Ensure the `check-no-git-dependencies` check passes.
 - [ ] Add a changelog entry for the release summarizing user-visible changes.
 

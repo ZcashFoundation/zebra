@@ -34,23 +34,51 @@ Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebr
 
 ## Automated Merges
 
-We use [Mergify](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) to automatically merge most pull requests.
-To merge, a PR has to pass all required `main` branch protection checks, and be approved by a Zebra developer.
+We use [GitHub's merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+to merge pull requests. To merge, a PR has to pass all required `main` checks and be approved
+by a Zebra developer, as stated by the `PR Requirements` ruleset.
 
-We try to use Mergify as much as we can, so all PRs get consistent checks.
+Once a PR is approved and green, press **Merge when ready**. The queue then builds it on top of
+`main` plus every PR ahead of it, re-runs the required checks against that merged result, and
+merges it if they pass. A PR whose checks fail in the queue is dequeued, and the PRs behind it
+are rebuilt without it, so a broken change cannot land on `main` behind a stale green tick.
 
-Some PRs don't use Mergify:
+Because the queue tests the merged result, PRs do **not** have to be up to date with `main`
+before they are queued.
 
-- Mergify config updates
+Some PRs don't use the queue:
+
 - Admin merges, which happen when there are multiple failures on the `main` branch
-- Manual merges (these are allowed by our branch protection rules, but we almost always use Mergify)
+  (see `Admin: Manually Merging PRs` below)
 
-Merging with failing CI is usually disabled by our branch protection rules.
-See the `Admin: Manually Merging PRs` section below for manual merge instructions.
+### Holding a Pull Request Back
+
+Two holds are implemented as part of the required `pr-gate-result` check, in the `merge-gates`
+job of [`pr-gate.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/pr-gate.yml).
+A held PR fails a required check, so it cannot be queued at all:
+
+- **`do-not-merge` label**: holds a single PR. Remove the label to release it.
+- **Merge freeze**: holds every non-release PR, for release windows. Freeze and thaw with:
+
+  ```sh
+  # freeze
+  git push origin main:refs/heads/merge-freeze
+  # thaw
+  git push origin --delete merge-freeze
+  ```
+
+  PRs labelled `A-release`, and PRs from a `release-plz-` branch, are exempt. A freeze only
+  stops PRs from _entering_ the queue; anything already queued still merges.
+
+Adding or removing `do-not-merge` fires a pull request event, so that hold takes effect at once.
+Creating the freeze ref does not: a PR that is already green keeps its green `pr-gate-result`
+until something re-runs the gate, and could still be queued in that window. Any PR pushed to,
+reopened, or relabelled after the freeze picks it up. For a hard freeze, re-run PR Gate on the
+open pull requests after creating the ref.
 
 Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
 
-On `pull_request` events the filter narrows what runs; on `push` to `main` and `merge_group` events the filter step is skipped and every gated worker runs (the `|| 'true'` default on the `changes` job outputs makes this explicit).
+On `pull_request` events the filter narrows what runs against the PR's own base. On `merge_group` events it narrows against `github.event.merge_group.base_sha`, so a queue entry costs what its changes cost rather than a full matrix — without this a docs-only entry spends the whole unit test matrix it had just skipped on the PR. On `push` to `main` the filter step is skipped and every gated worker runs (the `|| 'true'` default on the `changes` job outputs makes this explicit).
 
 ### Branch Protection Rules
 
@@ -134,7 +162,7 @@ Until we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529)
 1. Reviewing the code to make sure it won't give our secret keys to anyone
 2. Pushing a copy of the branch to the Zebra repository
 3. Opening a PR using that branch
-4. Closing the original PR with a note that it will be merged (closing duplicate PRs is required by Mergify)
+4. Closing the original PR with a note that it will be merged
 5. Asking another Zebra developer to approve the new PR
 
 ## Manual Testing Using Google Cloud
@@ -193,7 +221,7 @@ But the specific failure is a few steps earlier:
 
 1. The earliest failure can also be in another job or pull request:
    - check the whole workflow run (use the "Summary" button on the top left of the job details, and zoom in)
-   - if Mergify failed with "The pull request embarked with main cannot be merged", look at the PR "Conversation" tab, and find the latest Mergify PR that tried to merge this PR. Then start again from step 1.
+   - if the merge queue dequeued the PR, the failure is on the merge group, not on the PR: open the queue entry from the PR timeline and read the `merge_group` run. A failure there that does not reproduce on the PR alone means the PR conflicts semantically with something ahead of it in the queue.
 
 2. If that doesn't help, try looking for the latest failure. In Rust tests, the "failure:" notice contains the failed test names.
 
@@ -290,9 +318,12 @@ Some errors happen due to network connection issues, high load, or other rare si
 
 If it looks like a failure might be temporary, try re-running all the jobs on the PR using one of these methods:
 
-1. `@mergifyio update`
+1. click on the failed job, and select "re-run all jobs". If the workflow hasn't finished, you might need to cancel it, and wait for it to finish.
 2. `@dependabot recreate` (for dependabot PRs only)
-3. click on the failed job, and select "re-run all jobs". If the workflow hasn't finished, you might need to cancel it, and wait for it to finish.
+
+A flaky required check costs more in the queue than on a PR: it fails the merge group, dequeues
+the PR, and rebuilds everything behind it. Queue the PR again after re-running it green. If the
+same test flakes repeatedly, quarantine it rather than re-queueing.
 
 Here are some of the rare and temporary errors that should be retried:
 

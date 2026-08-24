@@ -27,28 +27,28 @@ env:
 
 jobs:
   changes:
-    # Docker validation runs on source PRs, not temporary Mergify queue candidates.
-    if: >-
-      ${{
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.user.login != 'mergify[bot]' ||
-        github.event.pull_request.head.repo.full_name != github.repository ||
-        !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
-      }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       test_docker: ${{ steps.filter.outputs.test_docker || 'true' }}
     steps:
+      # The queue tests the merged result, so the filter compares the whole merge group
+      # against the `main` commit it was built on. Without this, `merge_group` runs skip
+      # the filter and every gated job runs, so a queue entry spends a full matrix that
+      # the same change had already filtered away on its pull request.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
+          # Deep enough for the filter to reach the merge base without a full clone.
+          fetch-depth: ${{ github.event_name == 'merge_group' && 20 || 1 }}
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           filters: .github/path-filters.yml
+          # Ignored on `pull_request`, where the action uses the pull request's own base.
+          base: ${{ github.event.merge_group.base_sha }}
 
   build-docker-image:
     name: Build Docker Image

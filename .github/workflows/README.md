@@ -177,12 +177,16 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
 
 ### 6. Queue Management
 
-[Mergify](https://mergify.com)
+[GitHub merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
 
-- Automated PR merging and queue-based testing
-- Priority management
-- Ensures code quality before merge
-- See our [`.mergify.yml`](../../.mergify.yml) for configuration
+- Approved pull requests are queued with "Merge when ready", and merged once the
+  required checks pass against the merged result rather than against the branch tip
+- Configured on the `PR Requirements` ruleset, not in a file: merge method, build
+  concurrency, and group size live in the repository settings
+- Every required-check workflow must keep its `merge_group` trigger and its aggregator
+  job name, or the queue stalls waiting for a check that is never reported
+- Merge holds are required checks, not queue conditions: see the `merge-gates` job in
+  [`pr-gate.yml`](pr-gate.yml) for the `do-not-merge` label and the merge freeze
 
 ## Workflow Organization
 
@@ -365,11 +369,15 @@ docker run --rm zebra-tests
   - Unable to access configuration variables
   - Limited ability to test infrastructure changes
 
-### Mitigation Through Mergify
+### Mitigation Through the Merge Queue
 
-- When external PRs enter the merge queue, they are tested with full access to variables and resources
-- All CI workflows run in the context of our repository, not the fork
-- This provides a safety net, ensuring no untested code reaches production
-- External contributors can still get feedback through code review before their changes are tested in the queue
+- `merge_group` runs execute in the context of this repository, not the fork, so the
+  required checks do get full access to secrets and repository variables before a fork
+  PR reaches `main`
+- This covers the four required checks (`lint`, `unit-tests`, `test-crates`,
+  `pr-gate-result`), which is what gates the merge
 
-These safeguards help maintain code quality while working around the platform limitations for external contributions.
+It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
+`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
+manually with the PR number. Track that gap in
+[#4529](https://github.com/ZcashFoundation/zebra/issues/4529).

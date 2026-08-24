@@ -1,16 +1,17 @@
 # Required source-PR gate verifying that a conventional-commit declaration is consistent with its code and changelog entries.
-# Mergify queue candidates skip these policy jobs because their generated metadata does not describe a source change.
+# It also carries the merge-policy gates that decide whether a pull request may enter the merge queue at all.
+# The merge queue re-runs this workflow on `merge_group`, where the policy jobs skip and the result skip-passes:
+# every job here reads pull request metadata, which a merge group does not have.
 name: PR Gate
 
 on:
-  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate release readiness.
+  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate
+  # release readiness and the `do-not-merge` hold.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main]
   push:
     branches: [main]
-  # Keeps this aggregator reporting if GitHub's native merge queue is ever enabled,
-  # matching the sibling required-check workflows; jobs skip and the result skip-passes.
   merge_group:
 
 # Cancel obsolete gate runs after new commits. Events that cannot change the gate
@@ -21,6 +22,7 @@ concurrency:
     ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'A-release' &&
+      github.event.label.name != 'do-not-merge' &&
       'ignored-label' ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
@@ -28,17 +30,7 @@ concurrency:
       'ignored-edit' ||
       'required'
     }}
-  # Never cancel a queue candidate's run. Mergify keeps its queue status in the
-  # temporary PR's body and rewrites it on every check event, so these runs arrive
-  # in bursts, and Mergify counts a cancelled required check as a failure and
-  # dequeues the PR. Queue runs skip every policy job, so serialising them is cheap.
-  cancel-in-progress: >-
-    ${{
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.user.login != 'mergify[bot]' ||
-      github.event.pull_request.head.repo.full_name != github.repository ||
-      !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
-    }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -46,54 +38,43 @@ permissions:
 
 env:
   CLICOLOR: 1
+  # A pull request cannot be queued while this ref exists, unless it is a release
+  # pull request. Freeze with `git push origin main:refs/heads/merge-freeze`, thaw by
+  # deleting the ref. A ref is used rather than a repository variable because
+  # `vars` are not readable from pull requests opened from forks.
+  FREEZE_REF: merge-freeze
 
 jobs:
   changes:
-    # Only the A-release label affects gate results, and only a title or base edit can
-    # change the declaration this gate reads. Every other label and edit event is a
-    # no-op, so it must not spend a runner or replace the required check.
+    # Only the A-release and do-not-merge labels affect gate results, and only a title
+    # or base edit can change the declaration this gate reads. Every other label and
+    # edit event is a no-op, so it must not spend a runner or replace the required check.
     if: >-
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'A-release' ||
+      github.event.label.name == 'do-not-merge') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      queue_candidate: ${{ steps.classify.outputs.queue_candidate || 'false' }}
       semver: ${{ steps.filter.outputs.semver || 'true' }}
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
     steps:
-      - name: Identify Mergify queue candidates
-        id: classify
-        if: github.event_name == 'pull_request'
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          queue_candidate=false
-          if [[ "$PR_AUTHOR" == "mergify[bot]" ]] &&
-             [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] &&
-             [[ "$HEAD_REF" == mergify/merge-queue/* ]]; then
-            queue_candidate=true
-          fi
-          echo "queue_candidate=$queue_candidate" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
+        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
+        if: github.event_name == 'pull_request'
         with:
           filters: .github/path-filters.yml
       - name: Read the declaration from the PR title
         id: title
-        if: github.event_name == 'pull_request' && steps.classify.outputs.queue_candidate != 'true'
+        if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -121,13 +102,52 @@ jobs:
             echo "conventional=$conventional"
           } >> "$GITHUB_OUTPUT"
 
+  # Merge-policy holds. The native merge queue has no conditions of its own: a pull
+  # request is queueable exactly when its required checks pass, so both holds are
+  # expressed as a required check that fails while the hold is in force.
+  merge-gates:
+    name: Merge gates
+    if: >-
+      github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'A-release' ||
+      github.event.label.name == 'do-not-merge') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hold the pull request while do-not-merge is set
+        if: contains(github.event.pull_request.labels.*.name, 'do-not-merge')
+        run: |
+          echo "::error title=Held by do-not-merge::Remove the \`do-not-merge\` label to let this pull request enter the merge queue."
+          exit 1
+      # Release pull requests are exempt: a freeze exists so that only the release can land.
+      - name: Hold the pull request while the merge freeze is active
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          IS_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'A-release') }}
+        run: |
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${FREEZE_REF}" >/dev/null 2>&1; then
+            echo "No \`${FREEZE_REF}\` ref: merges are open."
+            exit 0
+          fi
+
+          if [[ "${IS_RELEASE}" == "true" ]] || [[ "${HEAD_REF}" == release-plz-* ]]; then
+            echo "Merge freeze is active, and this is a release pull request: allowed through."
+            exit 0
+          fi
+
+          echo "::error title=Held by the merge freeze::A merge freeze is active (the \`${FREEZE_REF}\` ref exists). Only release pull requests can be queued until it is deleted."
+          exit 1
+
   semver-checks:
     needs: changes
     # Real work runs only on contributor pull requests that change Rust and do not already declare
     # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
     if: >-
       github.event_name == 'pull_request' &&
-      needs.changes.outputs.queue_candidate != 'true' &&
       needs.changes.outputs.semver == 'true' &&
       needs.changes.outputs.breaking == 'false'
     runs-on: ubuntu-latest
@@ -161,9 +181,7 @@ jobs:
   # If the title indicates a breaking change, the changelog must also have a `### Breaking Changes` section.
   changelog-gate:
     needs: changes
-    if: >-
-      github.event_name == 'pull_request' &&
-      needs.changes.outputs.queue_candidate != 'true'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -184,13 +202,14 @@ jobs:
           bash .github/scripts/validate-pr-changelogs.sh \
             "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
-  # No branch rule or Mergify condition pins this worker's display name; Mergify consumes `pr-gate-result`.
+  # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
   release-readiness:
     name: Release readiness
     if: >-
       github.event_name == 'pull_request' &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'A-release' ||
+      github.event.label.name == 'do-not-merge') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
@@ -296,6 +315,7 @@ jobs:
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
         github.event.label.name != 'A-release' &&
+        github.event.label.name != 'do-not-merge' &&
         'Label does not affect the PR gate' ||
         github.event.action == 'edited' &&
         github.event.changes.title == null &&
@@ -307,10 +327,11 @@ jobs:
     if: >-
       always() &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'A-release' ||
+      github.event.label.name == 'do-not-merge') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
-    needs: [changes, semver-checks, changelog-gate, release-readiness]
+    needs: [changes, merge-gates, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -322,4 +343,6 @@ jobs:
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
           allowed-failures: changelog-gate
-          allowed-skips: semver-checks, release-readiness
+          # `merge-gates` only skips on `push` and `merge_group`, where there is no pull
+          # request to hold. On a pull request it always runs, so a hold always fails here.
+          allowed-skips: merge-gates, semver-checks, release-readiness
