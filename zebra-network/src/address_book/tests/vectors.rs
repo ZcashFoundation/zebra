@@ -272,10 +272,15 @@ fn address_book_mutations_preserve_peer_order() {
 fn address_book_insert_canonicalizes_key_and_value() {
     let canonical_addr = "127.0.0.4:8233".parse().unwrap();
     let noncanonical_addr = "[::ffff:127.0.0.4]:8233".parse().unwrap();
-    let mut meta_addr = MetaAddr::new_gossiped_meta_addr(
+    let canonical_meta_addr = MetaAddr::new_gossiped_meta_addr(
         canonical_addr,
         PeerServices::NODE_NETWORK,
         DateTime32::MIN,
+    );
+    let mut meta_addr = MetaAddr::new_gossiped_meta_addr(
+        canonical_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
     );
     meta_addr.addr = noncanonical_addr;
 
@@ -286,7 +291,15 @@ fn address_book_insert_canonicalizes_key_and_value() {
         Span::current(),
     );
 
-    assert_eq!(address_book.insert_meta_addr(meta_addr), None);
+    assert_eq!(
+        address_book.insert_meta_addr(canonical_meta_addr.clone()),
+        None,
+    );
+    assert_eq!(
+        address_book.insert_meta_addr(meta_addr),
+        Some(canonical_meta_addr),
+    );
+    assert_eq!(address_book.by_addr.len(), 1);
     assert!(!address_book.by_addr.contains_key(&noncanonical_addr));
     assert_eq!(
         address_book
