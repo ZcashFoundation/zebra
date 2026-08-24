@@ -79,13 +79,6 @@ pull_request_rules:
 #
 # These rules are checked in order, the first one to be satisfied applies
 priority_rules:
-  - name: urgent
-    conditions:
-      # is labeled urgent
-      - label=urgent
-    allow_checks_interruption: false
-    priority: high
-
   - name: low
     conditions:
       # is a dependency-update PR, the only low-priority traffic

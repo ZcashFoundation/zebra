@@ -3,6 +3,7 @@ name: '🔓 Private Security Issue'
 description: Zebra team use only
 title: 'Security Issue #NNN'
 labels: [security]
+type: Bug
 body:
   - type: markdown
     attributes:

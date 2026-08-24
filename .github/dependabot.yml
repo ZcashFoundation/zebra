@@ -1,4 +1,6 @@
 version: 2
+# No labels on dependency PRs: Mergify routes them by author, and the
+# changelog gate reads the PR title.
 updates:
   # Rust section
   - package-ecosystem: cargo
@@ -16,8 +18,6 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
-    # No labels: Mergify routes dependency PRs by author, and the changelog
-    # gate reads the PR title.
     labels: []
     groups:
         ecc:
@@ -53,8 +53,6 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
-    # No labels: Mergify routes dependency PRs by author, and the changelog
-    # gate reads the PR title.
     labels: []
     groups:
       devops:

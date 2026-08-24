@@ -2,6 +2,7 @@
 name: "📋 Usability Testing Plan"
 about: Create a Usability Testing Plan
 title: "Usability Testing Plan"
+type: Task
 assignees: ""
 ---
 

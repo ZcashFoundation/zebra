@@ -1,8 +1,8 @@
 ---
 name: "Hotfix Release Checklist Template"
 about: "Checklist to create and publish a hotfix Zebra release"
-title: "Release Zebra (version)"
-labels: "A-release, urgent"
+title: "release: Zebra (version)"
+labels: "A-release"
 assignees: ""
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: "Legacy Release Checklist Template"
 about: "Manual fallback checklist to create and publish a Zebra release"
-title: "Release Zebra (version)"
+title: "release: Zebra (version)"
 labels: "A-release, urgent"
 assignees: ""
 ---
@@ -75,7 +75,7 @@ fastmod --fixed-strings '1.58' '1.65'
       for example: `bump-v1.0.0` - this needs to be different to the tag name
 - [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-- [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
+- [ ] Add the `urgent` label to all the release PRs, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
