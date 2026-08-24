@@ -2,7 +2,7 @@
 name: "Hotfix Release Checklist Template"
 about: "Checklist to create and publish a hotfix Zebra release"
 title: "Release Zebra (version)"
-labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
+labels: "A-release, urgent"
 assignees: ""
 ---
 
@@ -14,7 +14,6 @@ A hotfix release should only be created when a bug or critical issue is discover
       for example: `hotfix-v2.3.1` - this needs to be different to the tag name
 - [ ] Make the required changes
 - [ ] Create a hotfix release PR by adding `&template=hotfix-release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=hotfix-release-checklist.md)).
-- [ ] Add the `C-exclude-from-changelog` label so that the PR is omitted from the next release changelog
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 - [ ] Add the `do-not-merge` tag to prevent Mergify from merging, since after PR approval the
       release is done from the branch itself.

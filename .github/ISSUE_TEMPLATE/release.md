@@ -2,7 +2,7 @@
 name: "🚀 Zebra Release"
 about: "Zebra team use only"
 title: "Publish next Zebra release: (version)"
-labels: "A-release, C-exclude-from-changelog, P-Medium :zap:"
+labels: "A-release"
 assignees: ""
 ---
 

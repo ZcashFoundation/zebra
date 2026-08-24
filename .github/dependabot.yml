@@ -16,11 +16,9 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
-    labels:
-      - 'C-exclude-from-changelog'
-      - 'A-rust'
-      - 'A-dependencies'
-      - 'P-Low :snowflake:'
+    # No labels: Mergify routes dependency PRs by author, and the changelog
+    # gate reads the PR title.
+    labels: []
     groups:
         ecc:
           patterns:
@@ -55,11 +53,9 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
-    labels:
-      - 'C-exclude-from-changelog'
-      - 'A-devops'
-      - 'A-dependencies'
-      - 'P-Low :snowflake:'
+    # No labels: Mergify routes dependency PRs by author, and the changelog
+    # gate reads the PR title.
+    labels: []
     groups:
       devops:
         patterns:

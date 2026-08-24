@@ -15,7 +15,7 @@ how to build, run, and instrument Zebra.
 
 ## Bug Reports
 
-Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=) on the Zebra issue tracker.
+Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?template=bug_report.yml) on the Zebra issue tracker.
 
 ## Pull Requests
 
@@ -31,7 +31,7 @@ Zebra is a validator node — it excludes features not strictly needed for block
 
 Check out the [help wanted][hw] or [good first issue][gfi] labels if you're looking for a place to get started.
 
-[hw]: https://github.com/ZcashFoundation/zebra/labels/E-help-wanted
+[hw]: https://github.com/ZcashFoundation/zebra/labels/help%20wanted
 [gfi]: https://github.com/ZcashFoundation/zebra/labels/good%20first%20issue
 
 ## AI-Assisted Contributions

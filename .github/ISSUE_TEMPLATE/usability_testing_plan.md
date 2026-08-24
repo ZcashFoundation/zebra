@@ -2,7 +2,6 @@
 name: "📋 Usability Testing Plan"
 about: Create a Usability Testing Plan
 title: "Usability Testing Plan"
-labels: C-research
 assignees: ""
 ---
 
