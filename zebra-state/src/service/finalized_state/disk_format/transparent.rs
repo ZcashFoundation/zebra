@@ -426,41 +426,41 @@ impl AddressUnspentOutput {
         }
     }
 
-    /// Create an [`AddressUnspentOutput`] which starts iteration for the
-    /// supplied address. Used to look up the first output with
-    /// [`ReadDisk::zs_next_key_value_from`][1].
+    /// Create a range of [`AddressUnspentOutput`]s which covers the unspent outputs of the
+    /// supplied address in `query`. Starts at the first UTXO, or at the `query` start height,
+    /// whichever is greater. Ends at the maximum possible output index for the end height.
     ///
-    /// The unspent output location is before all unspent output locations in
-    /// the index. It is always invalid, due to the genesis consensus rules. But
-    /// this is not an issue since [`ReadDisk::zs_next_key_value_from`][1] will
-    /// fetch the next existing (valid) value.
+    /// Used to look up unspent outputs with [`DiskDb::zs_forward_range_iter`][1].
     ///
-    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
-    pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
-        // Iterating from the lowest possible output location gets us the first output.
-        let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+    /// The output locations in the:
+    /// - start bound might be invalid, if it is based on the `query` start height.
+    /// - end bound will always be invalid.
+    ///
+    /// But this is not an issue, since [`DiskDb::zs_forward_range_iter`][1] will fetch all existing
+    /// (valid) values in the range.
+    ///
+    /// [1]: super::super::disk_db::DiskDb
+    pub fn address_iterator_range(
+        address_location: AddressLocation,
+        query: std::ops::RangeInclusive<Height>,
+    ) -> std::ops::RangeInclusive<AddressUnspentOutput> {
+        // The address location is the output location of the first UTXO sent to the address,
+        // so no unspent output can be before it.
+        let first_utxo_location = address_location;
 
-        AddressUnspentOutput {
-            address_location,
-            unspent_output_location: zero_output_location,
-        }
-    }
+        // Iterating from the start height to the end height filters out outputs that aren't needed.
+        let query_start_location = OutputLocation::from_output_index(
+            TransactionLocation::from_index(*query.start(), 0),
+            0,
+        );
+        let query_end_location = OutputLocation::from_output_index(
+            TransactionLocation::from_index(*query.end(), u16::MAX),
+            u32::MAX,
+        );
 
-    /// Update the unspent output location to the next possible output for the
-    /// supplied address. Used to look up the next output with
-    /// [`ReadDisk::zs_next_key_value_from`][1].
-    ///
-    /// The updated unspent output location may be invalid, which is not an
-    /// issue since [`ReadDisk::zs_next_key_value_from`][1] will fetch the next
-    /// existing (valid) value.
-    ///
-    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
-    pub fn address_iterator_next(&mut self) {
-        // Iterating from the next possible output location gets us the next output,
-        // even if it is in a later block or transaction.
-        //
-        // Consensus: the block size limit is 2MB, which is much lower than the index range.
-        self.unspent_output_location.output_index += 1;
+        let addr_out = |out_loc| AddressUnspentOutput::new(address_location, out_loc);
+
+        addr_out(max(first_utxo_location, query_start_location))..=addr_out(query_end_location)
     }
 
     /// The location of the first [`transparent::Output`] sent to the address of this output.

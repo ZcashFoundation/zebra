@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest::UtxosByAddresses` is now a struct variant, taking a `height_range` and an optional `max_entries` alongside the addresses. Both bound the index scan, so the work the query does is set by what the caller asks for rather than by the size of the addresses'' UTXO sets ([#11239](https://github.com/ZcashFoundation/zebra/issues/11239)).'
+time: 2026-08-18T00:00:01.000000000Z
