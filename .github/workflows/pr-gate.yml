@@ -123,23 +123,33 @@ jobs:
           echo "::error title=Held by do-not-merge::Remove the \`do-not-merge\` label to let this pull request enter the merge queue."
           exit 1
       # Release pull requests are exempt: a freeze exists so that only the release can land.
+      # The exemption is the `A-release` label, which needs write access to set. It is not
+      # the `release-plz-` branch name, which the pull request author chooses.
       - name: Hold the pull request while the merge freeze is active
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           IS_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'A-release') }}
         run: |
-          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${FREEZE_REF}" >/dev/null 2>&1; then
+          # `matching-refs` answers an absent ref with an empty array, so "no freeze" and
+          # "could not tell" are distinguishable. A freeze must not lift because the API
+          # timed out, so anything other than a clean answer holds the pull request.
+          if ! refs="$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/heads/${FREEZE_REF}" --jq '.[].ref')"; then
+            echo "::error title=Merge freeze state unknown::Reading \`${FREEZE_REF}\` failed, so this check cannot tell whether a freeze is active. Re-run it."
+            exit 1
+          fi
+
+          # `matching-refs` matches by prefix, so require the exact ref.
+          if ! grep -qxF "refs/heads/${FREEZE_REF}" <<<"${refs}"; then
             echo "No \`${FREEZE_REF}\` ref: merges are open."
             exit 0
           fi
 
-          if [[ "${IS_RELEASE}" == "true" ]] || [[ "${HEAD_REF}" == release-plz-* ]]; then
-            echo "Merge freeze is active, and this is a release pull request: allowed through."
+          if [[ "${IS_RELEASE}" == "true" ]]; then
+            echo "Merge freeze is active, and this pull request is labelled \`A-release\`: allowed through."
             exit 0
           fi
 
-          echo "::error title=Held by the merge freeze::A merge freeze is active (the \`${FREEZE_REF}\` ref exists). Only release pull requests can be queued until it is deleted."
+          echo "::error title=Held by the merge freeze::A merge freeze is active (the \`${FREEZE_REF}\` ref exists). Only \`A-release\` pull requests can be queued until it is deleted."
           exit 1
 
   semver-checks:

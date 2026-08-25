@@ -67,7 +67,7 @@ A held PR fails a required check, so it cannot be queued at all:
   git push origin --delete merge-freeze
   ```
 
-  PRs labelled `A-release`, and PRs from a `release-plz-` branch, are exempt. A freeze only
+  PRs labelled `A-release` are exempt, which release-plz applies to release PRs itself. A freeze only
   stops PRs from _entering_ the queue; anything already queued still merges.
 
 Adding or removing `do-not-merge` fires a pull request event, so that hold takes effect at once.

@@ -75,7 +75,7 @@ fastmod --fixed-strings '1.58' '1.65'
       for example: `bump-v1.0.0` - this needs to be different to the tag name
 - [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
 - [ ] Freeze the merge queue: `git push origin main:refs/heads/merge-freeze`. Release PRs
-      (`A-release`, or a `release-plz-` branch) stay exempt; everything else fails `pr-gate-result`.
+      (labelled `A-release`) stay exempt; everything else fails `pr-gate-result`.
 - [ ] Re-run PR Gate on the open PRs so already-green ones pick the freeze up — see
       [Holding a Pull Request Back](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#holding-a-pull-request-back).
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
