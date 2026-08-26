@@ -38,10 +38,11 @@ We use [GitHub's merge queue](https://docs.github.com/en/repositories/configurin
 to merge pull requests. To merge, a PR has to pass all required `main` checks and be approved
 by a Zebra developer, as stated by the `PR Requirements` ruleset.
 
-Once a PR is approved and green, press **Merge when ready**. The queue then builds it on top of
-`main` plus every PR ahead of it, re-runs the required checks against that merged result, and
-merges it if they pass. A PR whose checks fail in the queue is dequeued, and the PRs behind it
-are rebuilt without it, so a broken change cannot land on `main` behind a stale green tick.
+After approving a green PR, a Zebra maintainer presses **Merge when ready**. This
+manual enrollment applies to Zebra-owned and fork PRs; authors do not need write access
+to the queue. The queue builds the PR on top of `main` plus every PR ahead of it,
+re-runs the required checks against that merged result, and merges it if they pass. A
+PR whose checks fail is dequeued, and the PRs behind it are rebuilt without it.
 
 Because the queue tests the merged result, PRs do **not** have to be up to date with `main`
 before they are queued.
@@ -53,32 +54,49 @@ Some PRs don't use the queue:
 
 ### Holding a Pull Request Back
 
-Two holds are implemented as part of the required `pr-gate-result` check, in the `merge-gates`
-job of [`pr-gate.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/pr-gate.yml).
-A held PR fails a required check, so it cannot be queued at all:
+The ruleset requires two independent hold checks:
 
-- **`do-not-merge` label**: holds a single PR. Remove the label to release it.
-- **Merge freeze**: holds every non-release PR, for release windows. Freeze and thaw with:
+- **`merge-policy`**: fails while a PR has the `do-not-merge` label. Remove the
+  label to release it. Label changes re-run only this small workflow.
+- **`mergefreeze`**: the [Merge Freeze](https://www.mergefreeze.com/) GitHub App
+  fails this status during a release window. Repository admins and members with
+  write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
 
-  ```sh
-  # freeze
-  git push origin main:refs/heads/merge-freeze
-  # thaw
-  git push origin --delete merge-freeze
-  ```
+Use Merge Freeze's **Unfreeze 1 pull request** action for the release PR. The
+`A-release` label controls Zebra's release checks, but it does not bypass a freeze.
 
-  PRs labelled `A-release` are exempt, which release-plz applies to release PRs itself. A freeze only
-  stops PRs from _entering_ the queue; anything already queued still merges.
+Merge Freeze reports on both the source PR and the native merge group. There is one
+timing edge: if `mergefreeze` has already succeeded on a merge group, starting a
+freeze while another required check is still running does not revoke that successful
+result. For an immediate freeze, remove every active non-release entry from GitHub's
+queue after freezing. GitHub rebuilds them when maintainers enroll them again.
 
-Adding or removing `do-not-merge` fires a pull request event, so that hold takes effect at once.
-Creating the freeze ref does not: a PR that is already green keeps its green `pr-gate-result`
-until something re-runs the gate, and could still be queued in that window. Any PR pushed to,
-reopened, or relabelled after the freeze picks it up. For a hard freeze, re-run PR Gate on the
-open pull requests after creating the ref.
+The initial native queue settings are `MERGE`, build concurrency `5`, `ALLGREEN`,
+a 180-minute check timeout, and minimum/maximum merge group sizes of `1`, with a
+two-minute minimum wait. The group-size setting preserves one merge commit per PR;
+it does not recreate Mergify's CI batching. Native FIFO and manual jump-to-top replace
+Mergify's automatic enrollment and high/low priority rules.
+
+| Queue behavior | GitHub merge queue policy |
+| --- | --- |
+| Enrollment | An approving Zebra maintainer selects **Merge when ready** |
+| Ordering | FIFO; a maintainer can manually jump an urgent PR to the top |
+| CI concurrency | Up to five cumulative merge-group builds |
+| Final merges | One merge commit per PR |
+| Single-PR hold | Required `merge-policy` check and `do-not-merge` label |
+| Release freeze | Required Merge Freeze `mergefreeze` status |
+| Failed queue check | The PR is removed and later groups are rebuilt |
+
+Unlike the previous Mergify queue, the native queue does not provide automatic
+enrollment, label-based high and low priority, CI batch construction and bisection,
+or Mergify's dashboard and queue statistics. The simpler policy is intentional.
 
 Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
 
-On `pull_request` events the filter narrows what runs against the PR's own base. On `merge_group` events it narrows against `github.event.merge_group.base_sha`, so a queue entry costs what its changes cost rather than a full matrix — without this a docs-only entry spends the whole unit test matrix it had just skipped on the PR. On `push` to `main` the filter step is skipped and every gated worker runs (the `|| 'true'` default on the `changes` job outputs makes this explicit).
+On `pull_request` and `merge_group` events, paths-filter v4 selects the event's base
+and head commits, so a queue entry costs what its changes cost rather than a full
+matrix. On `push` to `main` the filter step is skipped and every gated worker runs
+(the `|| 'true'` default on the `changes` job outputs makes this explicit).
 
 ### Branch Protection Rules
 
@@ -101,13 +119,13 @@ To add a new gated job to an existing required check, add it to the producing wo
 
 Adding a new Zebra crate automatically extends the `build` matrix in [test-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml); no manual step is required.
 
-#### Admin: Changing Branch Protection Rules
+#### Admin: Changing the Ruleset
 
 [Zebra repository admins](https://github.com/orgs/ZcashFoundation/teams/zebra-admins) and
 [Zcash Foundation organisation owners](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
-can add or delete branch protection rules in the Zebra repository.
+can change the `PR Requirements` ruleset in the Zebra repository.
 
-To change branch protection rules:
+To change required checks:
 
 Any developer:
 
@@ -115,10 +133,9 @@ Any developer:
 
 Admin:
 
-1. Go to the [branch protection rule settings](https://github.com/ZcashFoundation/zebra/settings/branches)
-2. Click on `Edit` for the `main` branch
-3. Scroll down to the `Require status checks to pass before merging` section.
-   (This section must always be enabled. If it is disabled, all the rules get deleted.)
+1. Go to the [repository rules](https://github.com/ZcashFoundation/zebra/settings/rules).
+2. Open the `PR Requirements` ruleset.
+3. Edit **Require status checks to pass before merging**.
 
 To add jobs:
 
@@ -130,9 +147,7 @@ To remove jobs:
 1. Go to `Status checks that are required.`
 2. Find the job name, and click the cross on the right to remove it
 
-And finally:
-
-1. Click `Save changes`, using your security key if needed
+Finally, save the ruleset using your security key if needed.
 
 If you accidentally delete a lot of rules, and you can't remember what they were, ask a
 ZF organisation owner to send you a copy of the rules from the [audit log](https://github.com/organizations/ZcashFoundation/settings/audit-log).
@@ -143,21 +158,15 @@ Organisation owners can also monitor rule changes and other security settings us
 
 Admins can allow merges with failing CI, to fix CI when multiple issues are causing failures.
 
-Admin:
-
-1. Follow steps 2 and 3 above to open the `main` branch protection rule settings
-2. Scroll down to `Do not allow bypassing the above settings`
-3. Uncheck it
-4. Click `Save changes`
-5. Do the manual merge, and put an explanation on the PR
-6. Re-open the branch protection rule settings, and re-enable `Do not allow bypassing the above settings`
+Admin merges use the ruleset's documented bypass path. Put the reason on the PR and
+restore the normal ruleset enforcement immediately after repairing `main`.
 
 ### Pull Requests from Forked Repositories
 
 GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
 This means that Google Cloud CI fails on these PRs.
 
-Until we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
+When a fork PR requires a secret-bearing GCP integration run, we can merge it by:
 
 1. Reviewing the code to make sure it won't give our secret keys to anyone
 2. Pushing a copy of the branch to the Zebra repository
