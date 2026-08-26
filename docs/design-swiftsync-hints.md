@@ -1,6 +1,6 @@
-# SwiftSync-Style Spentness Hints in Zebra — Design (rev 4)
+# SwiftSync-Style Spentness Hints in Zebra — Design (rev 5)
 
-Status: decisions locked with the author · 2026-08-17 (rev 4)
+Status: decisions locked with the author · 2026-08-17 (rev 5)
 Spec basis: [zcash/zips#1346](https://github.com/zcash/zips/pull/1346) at head `c593c65`.
 Rev 2 incorporates today's spentness changes: `f3d170c` (bind hints to the trusted
 commitment's reach, drop redundant checks), `5aeb43f` (one hash over the whole hint
@@ -40,6 +40,27 @@ bitmap, separate from entry chunks), and `c593c65` (snapshots keep all pool bala
 8. **Sequencing:** rework the open five-PR stack in place (PR 3 absorbs the
    combined format; the engine + hinted sync land in the reworked stack, at most
    one PR added). No follow-on stack.
+9a. **Content-addressed serving; capture at frontier passage (2026-08-17,
+   later session):** `get-object` requests are keyed by hash, never by
+   height, so a serving node never computes "spentness as of height H" —
+   it answers from a stored-artifacts lookup ({pinned hash → CF row} built
+   from the compiled constants). The bitmap artifact is captured at the only
+   moment it is cheap: when the node's own sync frontier passes the pinned
+   checkpoint height, one ordered scan of `utxo_by_out_loc` (already in
+   canonical bit order) against the cumulative output counts produces the
+   bitmap (~25 MB), stored in a `spentness_hint` column family keyed by
+   height. A node that hint-synced stores the artifact it used. Nodes
+   already past the pinned height never reconstruct (that would need
+   per-output spending heights); they fetch-verify-store from peers to
+   serve onward. Known-hash chunks serve the same way: hash → chunk index
+   via the pinned constants, bytes read-or-regenerated from state.
+   Also walked back (same session): the `zebra-known-hashes` data crates
+   and all file/crate distribution — chunks travel only over the P2P
+   protocol, verified by `KnownHashListSpec::verify_chunk_bytes`; the
+   current pinned constants are re-pinned to v2 chunk hashes by the release
+   flow, and local multi-node tests pin from a trusted local node
+   (config-supplied pins are honored only on networks with no compiled
+   spec, i.e. Regtest and custom testnets).
 9. **Pinned hash replaces the aggregate in production (2026-08-17, later
    session):** the release pins a `MaxCheckpoint { height, hash,
    spentness_hash }` constant per network. The node downloads the whole hint
