@@ -7500,6 +7500,7 @@ dependencies = [
  "thiserror 2.0.18",
  "zcash_primitives",
  "zcash_script",
+ "zcash_transparent",
  "zebra-chain",
  "zebra-test",
 ]

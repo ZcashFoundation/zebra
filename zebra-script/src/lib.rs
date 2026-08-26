@@ -16,6 +16,7 @@ use thiserror::Error;
 use libzcash_script::ZcashScript;
 
 use zcash_script::{opcode::PossiblyBad, script, script::Evaluable as _, Opcode};
+use zcash_transparent::bundle as zp_transparent;
 use zebra_chain::{
     parameters::NetworkUpgrade,
     transaction::{HashType, SigHasher},
@@ -109,9 +110,13 @@ impl CachedFfiTransaction {
         })
     }
 
-    /// Returns the transparent inputs for this transaction.
-    pub fn inputs(&self) -> Vec<transparent::Input> {
-        self.transaction.inputs()
+    /// Returns the transparent inputs of this transaction, borrowed from the underlying
+    /// `zcash_primitives` transaction.
+    fn vin(&self) -> &[zp_transparent::TxIn<zp_transparent::Authorized>] {
+        self.transaction
+            .transparent_bundle()
+            .map(|bundle| bundle.vin.as_slice())
+            .unwrap_or_default()
     }
 
     /// Returns the outputs from previous transactions that match each input in the transaction
@@ -148,7 +153,7 @@ impl CachedFfiTransaction {
         let previous_output = self
             .all_previous_outputs
             .get(input_index)
-            .filter(|_| self.all_previous_outputs.len() == self.transaction.inputs().len())
+            .filter(|_| self.all_previous_outputs.len() == self.vin().len())
             .ok_or(Error::TxIndex)?
             .clone();
 
@@ -162,16 +167,20 @@ impl CachedFfiTransaction {
             | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
 
         let lock_time = self.transaction.raw_lock_time();
-        let inputs = self.transaction.inputs();
-        let is_final = inputs[input_index].sequence() == u32::MAX;
-        let signature_script = match &inputs[input_index] {
-            transparent::Input::PrevOut {
-                outpoint: _,
-                unlock_script,
-                sequence: _,
-            } => unlock_script.as_raw_bytes(),
-            transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
-        };
+        // `vin()` is used instead of `Transaction::inputs()` because the latter
+        // rebuilds an owned `Vec<transparent::Input>` on every call, and every
+        // input of a transaction is script-verified concurrently, so calling it
+        // per input makes the live footprint quadratic in the input count.
+        // Nothing in script verification needs the converted Zebra type, so
+        // borrow the librustzcash inputs instead.
+        let txin = self.vin().get(input_index).ok_or(Error::TxIndex)?;
+        let is_final = txin.sequence() == u32::MAX;
+
+        if *txin.prevout() == zp_transparent::OutPoint::NULL {
+            Err(Error::TxCoinbase)?;
+        }
+
+        let signature_script: &[u8] = &txin.script_sig().0 .0;
 
         let script =
             script::Raw::from_raw_parts(signature_script.to_vec(), script_pub_key.to_vec());
