@@ -1,0 +1,32 @@
+# Fast required check for repository-owned merge holds.
+name: Merge Policy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  merge-policy:
+    name: merge-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce do-not-merge
+        env:
+          HELD: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'do-not-merge') }}
+        run: |
+          if [[ "${HELD}" == "true" ]]; then
+            echo "::error title=Held by do-not-merge::Remove the \`do-not-merge\` label before adding this pull request to the merge queue."
+            exit 1
+          fi
+
+          echo "No repository-owned merge hold is active."
