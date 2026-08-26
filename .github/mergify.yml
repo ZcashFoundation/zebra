@@ -42,27 +42,6 @@ defaults:
 
 # Allows to define the rules that reign over our merge queues
 queue_rules:
-  - name: urgent
-    batch_size: 5
-    # Wait a short time to embark hotfixes together in a merge train
-    batch_max_wait_time: "2 minutes"
-    # A queue_rule's `queue_conditions` REPLACES the value from
-    # `defaults.queue_rule.queue_conditions` rather than extending it. Restate
-    # the same gates here so a P-Critical label cannot bypass the approval,
-    # changes-requested, base-branch, and required-check checks.
-    queue_conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
-      - "#approved-reviews-by >= 1"
-      - "#changes-requested-reviews-by = 0"
-      - check-success=lint
-      - check-success=unit-tests
-      - check-success=test-crates
-      - check-success=pr-gate-result
-      # is labeled with Critical priority
-      - 'label~=^P-Critical'
-
   - name: batched
     batch_size:
       min: 1
@@ -79,17 +58,10 @@ pull_request_rules:
 #
 # These rules are checked in order, the first one to be satisfied applies
 priority_rules:
-  - name: urgent
-    conditions:
-      # is labeled with Critical priority
-      - 'label~=^P-Critical'
-    allow_checks_interruption: false
-    priority: high
-
   - name: low
     conditions:
-      # is labeled with Optional or Low priority
-      - 'label~=^P-(Optional|Low)'
+      # is a dependency-update PR, the only low-priority traffic
+      - author~=^dependabot
     allow_checks_interruption: false
     priority: low
 merge_protections_settings:
