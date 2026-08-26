@@ -8,6 +8,7 @@
     - [Platform Tier Policy](user/target-tier-policies.md)
   - [Building and Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
+    - [Syncing from a State Snapshot](user/snapshots.md)
   - [Zebra with Docker](user/docker.md)
   - [Tracing Zebra](user/tracing.md)
   - [Zebra Metrics](user/metrics.md)
