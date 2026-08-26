@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 564c59096813fdc3465173eb71ec8b63b6971acac5fef4d5b8e75614e74594ab # shrinks to mut sync_lengths = []
+cc c27e466b3b6fc3defd3a8b3a75988af6153676b35e8337fd87848444d864193b # shrinks to transaction_ids = {Legacy("transaction::Hash(\"private\")")}
+cc b538e3fd780d2ef8ea5d2506cb3ebd433256327c73a8cdb89d9d32bc0b921e83 # shrinks to service_call_error = InMempool, transaction_ids_for_call_failure = {Legacy("transaction::Hash(\"private\")")}, transaction_ids_and_responses = [(Legacy("transaction::Hash(\"private\")"), Ok(()))], transaction_ids_for_return_to_normal = {Legacy("transaction::Hash(\"private\")")}

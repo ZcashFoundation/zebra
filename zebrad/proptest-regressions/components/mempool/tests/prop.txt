@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1124fa55c691d7c168df421599139b44eb5d05d229eb2c14a4575212a0637d16 # shrinks to network = Mainnet, transaction = VerifiedUnminedTx("private")
+cc 4da09db4d2692c3c3c637cd4393cec6a708df458d2aee13157974c1ce59f2bd2 # shrinks to network = Mainnet, transaction = VerifiedUnminedTx("private"), chain_tip = ChainTipBlock { height: Height(235856960), hash: block::Hash("eda68299167f036546604bee40c3bad3d6847daf9ec1982aaf076c76073a354c"), transactions: 69 }
+cc 58f67001e21d0823a40acbee2370d6c9daa3b8d97f5dd2e256514bb367f1a529 # shrinks to network = Mainnet, mut previous_chain_tip = ChainTipBlock { height: Height(969967750), hash: block::Hash("e6179dd9b48e6d8e65b92c6b08d8feb9fadea6b4358dd3f284e34d1700000000"), transactions: 61 }, mut transactions = [VerifiedUnminedTx("private"), VerifiedUnminedTx("private"), VerifiedUnminedTx("private"), VerifiedUnminedTx("private")], fake_chain_tips = [zebrad::components::mempool::tests::prop::FakeChainTip]
