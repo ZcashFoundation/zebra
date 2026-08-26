@@ -314,10 +314,8 @@ impl HashesResponse {
     }
 
     /// Reads a `get-hashes` response from `reader`.
-    //
-    // Used by round-trip tests; the v2 synchronization requester (Phase 5)
-    // will use it outside tests.
-    #[cfg_attr(not(test), allow(dead_code))]
+    ///
+    /// Used by the v2 synchronization requester (`Request::RemoteSyncHashes`).
     pub async fn read<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Self, WireError> {
         let count = record::read_compact_size(reader).await?;
         record::check_recv_limit(count, MAX_GET_HASHES_COUNT, "get-hashes response")?;
@@ -359,10 +357,8 @@ impl TreeRootsResponse {
     }
 
     /// Reads a `get-tree-roots` response from `reader`.
-    //
-    // Used by round-trip tests; the v2 synchronization requester (Phase 5)
-    // will use it outside tests.
-    #[cfg_attr(not(test), allow(dead_code))]
+    ///
+    /// Used by the v2 synchronization requester (`Request::RemoteTreeRoots`).
     pub async fn read<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Self, WireError> {
         let count = record::read_compact_size(reader).await?;
         record::check_recv_limit(count, MAX_GET_TREE_ROOTS_COUNT, "get-tree-roots response")?;

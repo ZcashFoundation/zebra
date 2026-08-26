@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: A `get-object` request for an object the node does not hold now answers not-found even when the node has no artifact directory; the request stream was previously refused.
+time: 2026-08-18T13:38:45.614296018-04:00

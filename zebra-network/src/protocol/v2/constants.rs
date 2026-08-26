@@ -108,6 +108,15 @@ pub const MAX_GET_TREE_ROOTS_COUNT: usize = 4_000;
 /// that each piece is independently fetchable and verifiable.
 pub const MAX_GET_OBJECT_LENGTH: u64 = 33_554_432;
 
+/// The maximum total size of a synchronization artifact (128 MiB).
+///
+/// `get-object` responses report the whole object's size so downloads are
+/// resumable by byte range; this bounds the reported total, while
+/// [`MAX_GET_OBJECT_LENGTH`] bounds each requested piece. The current
+/// artifacts are far below this bound (known-hash chunks are ~10 MB and the
+/// spentness-hint bitmap is ~25 MB).
+pub const MAX_OBJECT_TOTAL_SIZE: u64 = 4 * MAX_GET_OBJECT_LENGTH;
+
 /// The maximum total number of transactions (`ids_count + prefilled_count`)
 /// in a compact block.
 ///

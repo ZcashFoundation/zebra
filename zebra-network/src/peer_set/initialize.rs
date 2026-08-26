@@ -253,12 +253,18 @@ where
     // completes are refused.
     let mut advertised_services = crate::protocol::external::types::PeerServices::NODE_NETWORK
         | crate::protocol::external::types::PeerServices::NODE_TREE_ROOTS;
-    // NODE_SYNC_ARTIFACTS: advertised when the node has an artifact
-    // directory to serve `get-object` requests from.
+    // NODE_SYNC_ARTIFACTS: advertised when the node can serve `get-object`
+    // requests — it has an artifact directory, or the network pins
+    // known-hash chunks, which this node reads from its state store or
+    // regenerates on demand. (Early in sync, pinned artifacts the node has
+    // not reached yet answer not-found, like `NODE_TREE_ROOTS` requests
+    // that arrive before the metadata backfill completes.)
     if config
         .cache_dir
         .artifact_dir_path(&config.network)
         .is_some()
+        || zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(&config.network)
+            .is_some()
     {
         advertised_services |= crate::protocol::external::types::PeerServices::NODE_SYNC_ARTIFACTS;
     }

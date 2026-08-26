@@ -122,6 +122,10 @@ impl StreamType {
 /// known-hash chunk files and state snapshot pieces); the protocol does not
 /// interpret their contents.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
 pub struct ObjectHash(pub [u8; 32]);
 
 /// Application error codes, used when closing a connection, resetting a

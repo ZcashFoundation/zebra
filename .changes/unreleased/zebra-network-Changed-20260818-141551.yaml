@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`NODE_SYNC_ARTIFACTS` is now advertised when the network pins known-hash chunks, not only when an artifact directory exists, because the node serves pinned artifacts from its state.'
+time: 2026-08-18T14:15:51.179575704-04:00

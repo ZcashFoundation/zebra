@@ -6,7 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::PeerSocketAddr;
+use crate::{protocol::v2::types::ObjectHash, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -290,6 +290,90 @@ pub enum Request {
         /// The number of entries requested.
         count: u32,
     },
+
+    /// Request best-chain block hashes and aggregated synchronization
+    /// metadata at a height stride from a remote v2 peer: the peer-routable
+    /// form of [`Request::SyncHashes`], carried by the v2 protocol's
+    /// `get-hashes` request stream.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::SyncHashes`](super::Response::SyncHashes).
+    RemoteSyncHashes {
+        /// The height of the first requested entry.
+        start_height: u32,
+
+        /// The spacing between requested heights; never 0.
+        stride: u32,
+
+        /// The maximum number of entries requested.
+        count: u32,
+    },
+
+    /// Request per-block note commitment tree roots and counts for a height
+    /// range anchored at `final_hash` from a remote v2 peer: the
+    /// peer-routable form of [`Request::TreeRoots`], carried by the v2
+    /// protocol's `get-tree-roots` request stream.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::TreeRoots`](super::Response::TreeRoots) with
+    /// `Some` entries; a peer whose best chain does not contain the anchor
+    /// refuses the request rather than answering for different blocks.
+    RemoteTreeRoots {
+        /// The height of the first requested entry.
+        start_height: u32,
+
+        /// The hash of the block at the highest requested height,
+        /// `start_height + count − 1`, anchoring the request to a specific
+        /// chain.
+        final_hash: block::Hash,
+
+        /// The number of entries requested.
+        count: u32,
+    },
+
+    /// Request a byte range of a content-addressed synchronization artifact
+    /// from a remote v2 peer, carried by the v2 protocol's `get-object`
+    /// request stream.
+    ///
+    /// The caller verifies the delivered bytes against `hash`; the network
+    /// layer does not interpret object contents. The whole exchange is
+    /// bounded by the per-request timeout, so callers downloading large
+    /// artifacts should request them in pieces of a few MiB rather than one
+    /// maximal range.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Object`](super::Response::Object).
+    Object {
+        /// The SHA-256 hash of the requested object.
+        hash: ObjectHash,
+
+        /// The byte offset into the object at which to start.
+        offset: u64,
+
+        /// The maximum number of bytes requested.
+        length: u64,
+    },
+
+    /// Request a content-addressed synchronization artifact by its SHA-256
+    /// hash, from the local node's pinned-constant lookup: a pinned
+    /// known-hash chunk or the pinned spentness-hint artifact, serving the
+    /// v2 protocol's `get-object` requests.
+    ///
+    /// This request is only sent to the local inbound service; it is never
+    /// routed to a remote peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Object`](super::Response::Object) with the whole
+    /// artifact, or with a zero total size when the hash names no pinned
+    /// artifact of this network or the artifact is not held.
+    LocalObject {
+        /// The SHA-256 hash of the requested object.
+        hash: ObjectHash,
+    },
 }
 
 /// What a peer must support to answer a [`Request`].
@@ -312,9 +396,18 @@ impl Request {
             Request::BlockRange { .. } => PeerCapability::V2,
 
             // Answered by the local inbound service, never routed to a
-            // peer; the peer set treats them as unroutable rather than
-            // sending them anywhere.
-            Request::SyncHashes { .. } | Request::TreeRoots { .. } => PeerCapability::V2,
+            // peer: routing goes by capability, so a mis-routed request
+            // still reaches a peer connection, which rejects it as
+            // local-only.
+            Request::SyncHashes { .. }
+            | Request::TreeRoots { .. }
+            | Request::LocalObject { .. } => PeerCapability::V2,
+
+            // Synchronization and artifact requests exist only as v2
+            // request streams; they have no legacy protocol encoding.
+            Request::RemoteSyncHashes { .. }
+            | Request::RemoteTreeRoots { .. }
+            | Request::Object { .. } => PeerCapability::V2,
 
             _ => PeerCapability::Any,
         }
@@ -354,6 +447,10 @@ impl fmt::Display for Request {
             Request::BlockRange { count, .. } => format!("BlockRange({count})"),
             Request::SyncHashes { count, .. } => format!("SyncHashes({count})"),
             Request::TreeRoots { count, .. } => format!("TreeRoots({count})"),
+            Request::RemoteSyncHashes { count, .. } => format!("RemoteSyncHashes({count})"),
+            Request::RemoteTreeRoots { count, .. } => format!("RemoteTreeRoots({count})"),
+            Request::Object { length, .. } => format!("Object({length})"),
+            Request::LocalObject { .. } => "LocalObject".to_string(),
         })
     }
 }
@@ -379,6 +476,10 @@ impl Request {
             Request::BlockRange { .. } => "BlockRange",
             Request::SyncHashes { .. } => "SyncHashes",
             Request::TreeRoots { .. } => "TreeRoots",
+            Request::RemoteSyncHashes { .. } => "RemoteSyncHashes",
+            Request::RemoteTreeRoots { .. } => "RemoteTreeRoots",
+            Request::Object { .. } => "Object",
+            Request::LocalObject { .. } => "LocalObject",
         }
     }
 

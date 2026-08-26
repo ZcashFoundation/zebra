@@ -13,6 +13,9 @@ use regex::Regex;
 // TODO: should these constants be split into protocol also?
 use crate::protocol::external::types::*;
 
+/// Re-exported so artifact downloaders can size their `get-object` requests.
+pub use crate::protocol::v2::constants::{MAX_GET_OBJECT_LENGTH, MAX_OBJECT_TOTAL_SIZE};
+
 use zebra_chain::{
     parameters::{
         Network::{self, *},

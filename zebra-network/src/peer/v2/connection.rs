@@ -53,8 +53,8 @@ use crate::{
                 BLOCK_ANNOUNCEMENT_KIND_COMPACT, BLOCK_ANNOUNCEMENT_KIND_HEADER,
                 HEADERS_ENTRY_HAS_TXS, HEADERS_ENTRY_NO_TXS, INBOUND_STREAM_TIMEOUT,
                 MAX_CONCURRENT_BULK_STREAMS, MAX_CONSECUTIVE_REQUEST_TIMEOUTS,
-                MAX_MEMPOOL_RECORD_REFS, MAX_MEMPOOL_RESPONSE_REFS, MAX_RECORD_PAYLOAD_LEN,
-                MISBEHAVIOR_PENALTY_INVALID_POW, TX_TRICKLE_MEAN_INTERVAL,
+                MAX_MEMPOOL_RECORD_REFS, MAX_MEMPOOL_RESPONSE_REFS, MAX_OBJECT_TOTAL_SIZE,
+                MAX_RECORD_PAYLOAD_LEN, MISBEHAVIOR_PENALTY_INVALID_POW, TX_TRICKLE_MEAN_INTERVAL,
             },
             init::{HandshakeRecord, InitRecord},
             record,
@@ -1697,12 +1697,125 @@ async fn drive_outbound_request(
             Ok(Response::Blocks(blocks))
         }
 
+        Request::RemoteSyncHashes {
+            start_height,
+            stride,
+            count,
+        } => {
+            let mut recv = send_wire_request(
+                shared,
+                WireRequest::GetHashes {
+                    start_height,
+                    stride,
+                    count: u64::from(count),
+                },
+            )
+            .await?;
+
+            let HashesResponse(entries) = HashesResponse::read(&mut recv).await?;
+            record::expect_end_of_stream(&mut recv).await?;
+
+            Ok(Response::SyncHashes(entries))
+        }
+
+        Request::RemoteTreeRoots {
+            start_height,
+            final_hash,
+            count,
+        } => {
+            let mut recv = send_wire_request(
+                shared,
+                WireRequest::GetTreeRoots {
+                    start_height,
+                    final_hash,
+                    count: u64::from(count),
+                },
+            )
+            .await?;
+
+            let TreeRootsResponse(entries) = TreeRootsResponse::read(&mut recv).await?;
+            record::expect_end_of_stream(&mut recv).await?;
+
+            Ok(Response::TreeRoots(Some(entries)))
+        }
+
+        Request::Object {
+            hash,
+            offset,
+            length,
+        } => {
+            use tokio::io::AsyncReadExt;
+
+            let mut recv = send_wire_request(
+                shared,
+                WireRequest::GetObject {
+                    hash,
+                    offset,
+                    length,
+                },
+            )
+            .await?;
+
+            match record::read_u8(&mut recv).await? {
+                RESULT_OBJECT => {}
+                RESULT_NOT_FOUND => {
+                    record::expect_end_of_stream(&mut recv).await?;
+
+                    // The peer does not hold the object: a zero total size,
+                    // which no held object can have (the server answers a
+                    // not-held object with the not-found result alone, never
+                    // with a zero-sized object).
+                    return Ok(Response::Object {
+                        total_size: 0,
+                        bytes: Vec::new(),
+                    });
+                }
+                unknown => {
+                    return Err(OutboundError::Wire(WireError::Protocol(format!(
+                        "unrecognized get-object result value {unknown:#04x}",
+                    ))));
+                }
+            }
+
+            let total_size = record::read_compact_size(&mut recv).await?;
+            // A held object is never zero-sized: the server answers a
+            // not-held object with the not-found result alone.
+            if total_size == 0 {
+                return Err(OutboundError::Wire(WireError::Protocol(
+                    "get-object result claims a zero-sized object".to_string(),
+                )));
+            }
+            // The cast is lossless: the bound is 128 MiB, far below usize.
+            record::check_recv_limit(
+                total_size,
+                MAX_OBJECT_TOTAL_SIZE as usize,
+                "get-object response",
+            )?;
+
+            // The server streams at most `length` bytes from `offset` and
+            // then finishes the stream. Fewer bytes mean the object ended or
+            // the file shrank while serving; the requester re-requests the
+            // rest. More bytes than requested are trailing data, rejected by
+            // the end-of-stream check.
+            let mut bytes = Vec::with_capacity(record::preallocate_len(length.min(total_size)));
+            (&mut recv)
+                .take(length)
+                .read_to_end(&mut bytes)
+                .await
+                .map_err(WireError::from)?;
+            record::expect_end_of_stream(&mut recv).await?;
+
+            Ok(Response::Object { total_size, bytes })
+        }
+
         // These are answered by the local inbound service, never by a
         // peer: a mis-routed request is a local wiring mistake, so the
         // caller is told rather than the connection task panicking.
-        request @ (Request::SyncHashes { .. } | Request::TreeRoots { .. }) => Err(
-            OutboundError::Local(PeerError::LocalOnlyRequest(request.command())),
-        ),
+        request @ (Request::SyncHashes { .. }
+        | Request::TreeRoots { .. }
+        | Request::LocalObject { .. }) => Err(OutboundError::Local(PeerError::LocalOnlyRequest(
+            request.command(),
+        ))),
     }
 }
 
@@ -2508,10 +2621,39 @@ where
             offset,
             length,
         } => {
-            // A node without an artifact store refuses `get-object`; it
-            // also does not advertise `NODE_SYNC_ARTIFACTS`.
+            // Bound the bulk streams one peer holds open concurrently: each
+            // commits this node to up to 32 MiB of artifact reads, and
+            // possibly a known-hash chunk regeneration. A refused stream is
+            // retried on another peer.
+            let _slot = shared
+                .active_bulk_streams
+                .try_claim(MAX_CONCURRENT_BULK_STREAMS)
+                .ok_or(ServeError::Refused)?;
+
+            // The state-backed pinned lookup answers first: a pinned
+            // known-hash chunk or spentness-hint artifact, read from the
+            // store or regenerated from state. A node therefore serves the
+            // compiled pins even without an artifact directory. A lookup
+            // miss or failure falls through to the artifact directory; a
+            // wedged inbound service does not (the stream timeout bounds
+            // the wait), like every other request type.
+            if let Ok(Response::Object { total_size, bytes }) =
+                call_inbound_service(inbound_service, Request::LocalObject { hash }).await
+            {
+                if total_size > 0 {
+                    // The inbound service returns whole artifacts: the
+                    // reported size is always the byte length. The cast is a
+                    // lossless widening.
+                    debug_assert_eq!(total_size, bytes.len() as u64);
+                    return serve_stored_object(send, &bytes, offset, length).await;
+                }
+            }
+
+            // A node with no state-backed answer and no artifact store does
+            // not hold the object: a not-found result, with nothing
+            // following.
             let Some(artifact_dir) = shared.artifact_dir.clone() else {
-                return Err(ServeError::Refused);
+                return write_response_bytes(send, &[RESULT_NOT_FOUND]).await;
             };
 
             // Artifacts are named by the lowercase hex hash of their
@@ -2568,6 +2710,35 @@ where
             Ok(())
         }
     }
+}
+
+/// Writes a `get-object` response for a held object: the object result
+/// byte, the total size header, and up to `length` bytes from `offset`, read
+/// from the in-memory `bytes`.
+///
+/// The framing mirrors the file-backed server: both response bounds are
+/// exact, and an offset at or past the size delivers no data.
+async fn serve_stored_object(
+    send: &mut quinn::SendStream,
+    bytes: &[u8],
+    offset: u64,
+    length: u64,
+) -> Result<(), ServeError> {
+    // The cast is a lossless widening: the in-memory length fits u64.
+    let size = bytes.len() as u64;
+
+    let mut header = vec![RESULT_OBJECT];
+    record::write_compact_size(&mut header, size).map_err(ServeError::Encode)?;
+    write_response_bytes(send, &header).await?;
+
+    if offset < size {
+        // The casts are safe: the range is bounded by the in-memory length.
+        let start = offset as usize;
+        let end = offset.saturating_add(length).min(size) as usize;
+        write_response_bytes(send, &bytes[start..end]).await?;
+    }
+
+    Ok(())
 }
 
 /// Calls the inbound service, mapping service unavailability to a stream

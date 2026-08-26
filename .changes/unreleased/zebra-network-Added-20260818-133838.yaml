@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'Client-side v2 synchronization requests: `Request::RemoteSyncHashes`, `Request::RemoteTreeRoots`, and `Request::Object` issue `get-hashes`, `get-tree-roots`, and `get-object` wire requests to remote v2 peers and return the streamed responses. `get-object` serving now answers pinned known-hash chunks and the pinned spentness-hint artifact from the local state — through the new local-only `Request::LocalObject` internal request — before consulting the artifact directory.'
+time: 2026-08-18T13:38:38.627770054-04:00

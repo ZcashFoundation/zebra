@@ -78,6 +78,23 @@ pub enum Response {
     /// serving index is unavailable: the request must be refused.
     TreeRoots(Option<Vec<block::TreeRootsEntry>>),
 
+    /// A byte range of a content-addressed synchronization artifact, in
+    /// response to [`Request::Object`](super::Request::Object).
+    ///
+    /// A `total_size` of zero means the peer does not hold the object: a
+    /// held object's size is never zero, and the v2 server answers a
+    /// not-held object with the not-found result rather than a zero-sized
+    /// object.
+    Object {
+        /// The total size of the object in bytes, so the requester can plan
+        /// a resumable multi-request download.
+        total_size: u64,
+
+        /// The delivered bytes: at most the requested length, starting at
+        /// the requested offset; possibly fewer when the object ends.
+        bytes: Vec<u8>,
+    },
+
     /// A list of found blocks, and missing block hashes.
     ///
     /// Each list contains zero or more entries.
@@ -118,6 +135,12 @@ impl fmt::Display for Response {
                     .as_ref()
                     .map_or_else(|| "refused".to_string(), |e| e.len().to_string()),
             ),
+            Response::Object { total_size, bytes } => {
+                format!(
+                    "Object {{ total_size: {total_size}, bytes: {} }}",
+                    bytes.len()
+                )
+            }
 
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks) if blocks.len() == 1 => {
@@ -164,6 +187,7 @@ impl Response {
             Response::TransactionIds(_) => "TransactionIds",
             Response::SyncHashes(_) => "SyncHashes",
             Response::TreeRoots(_) => "TreeRoots",
+            Response::Object { .. } => "Object",
 
             Response::Blocks(_) => "Blocks",
             Response::Transactions(_) => "Transactions",

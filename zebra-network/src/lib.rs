@@ -213,6 +213,7 @@ pub mod types {
         protocol::{
             external::{types::Version, AddrInVersion, Nonce},
             types::PeerServices,
+            v2::types::ObjectHash,
         },
     };
 

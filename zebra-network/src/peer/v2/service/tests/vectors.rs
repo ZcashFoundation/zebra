@@ -70,6 +70,10 @@ struct TestData {
     /// The peers returned for address requests.
     peers: Vec<MetaAddr>,
 
+    /// The pinned artifacts the inbound service serves by content hash:
+    /// SHA-256 of the contents to the serialized bytes.
+    pinned_artifacts: IndexMap<[u8; 32], Vec<u8>>,
+
     /// If set, the inbound service never answers, simulating a peer whose
     /// QUIC stack is alive but whose application is wedged.
     hang_inbound: bool,
@@ -123,6 +127,12 @@ impl TestData {
                 PeerServices::NODE_NETWORK,
                 DateTime32::from(1_700_000_000),
             )],
+            pinned_artifacts: {
+                use sha2::Digest;
+                let bytes = b"pinned known-hash chunk fixture".to_vec();
+                let hash: [u8; 32] = sha2::Sha256::digest(&bytes).into();
+                [(hash, bytes)].into_iter().collect()
+            },
             hang_inbound: false,
         }
     }
@@ -214,6 +224,18 @@ impl Service<Request> for TestInbound {
                 Request::TreeRoots { final_hash, .. } => Response::TreeRoots(
                     (final_hash == data.block.hash()).then(test_tree_roots_entries),
                 ),
+                Request::LocalObject { hash } => match data.pinned_artifacts.get(&hash.0) {
+                    Some(bytes) => {
+                        let bytes = bytes.clone();
+                        // The cast is a lossless widening: the artifact length fits u64.
+                        let total_size = bytes.len() as u64;
+                        Response::Object { total_size, bytes }
+                    }
+                    None => Response::Object {
+                        total_size: 0,
+                        bytes: Vec::new(),
+                    },
+                },
                 Request::Peers => Response::Peers(data.peers.clone()),
                 request @ (Request::AdvertiseTransactionIds(_, _)
                 | Request::AdvertiseBlock(_, _)
@@ -1513,6 +1535,341 @@ async fn v2_block_range_requester_rejects_invalid_responses() {
     }
 }
 
+/// Serves one `get-hashes` request on `connection` with `entries`, and
+/// asserts the request's start height, stride, and count.
+async fn serve_hashes(
+    connection: &quinn::Connection,
+    expected: (u32, u32, u64),
+    entries: Vec<zebra_chain::block::SyncHashEntry>,
+) {
+    use crate::protocol::v2::{
+        request::Request as V2WireRequest, response::HashesResponse, types::StreamType,
+    };
+
+    let (mut send, mut recv) = accept_request_stream(connection, StreamType::GetHashes).await;
+    let request = V2WireRequest::read(StreamType::GetHashes, &mut recv)
+        .await
+        .expect("request parses");
+    let V2WireRequest::GetHashes {
+        start_height,
+        stride,
+        count,
+    } = request
+    else {
+        panic!("expected a get-hashes request, got: {request:?}");
+    };
+    assert_eq!((start_height, stride, count), expected);
+
+    let mut bytes = Vec::new();
+    HashesResponse(entries)
+        .encode(&mut bytes)
+        .expect("response encodes");
+    send.write_all(&bytes).await.expect("response writes");
+    send.finish().expect("stream finishes");
+}
+
+/// The `get-hashes` requester returns the served synchronization metadata
+/// entries.
+#[tokio::test]
+async fn v2_remote_sync_hashes_round_trip() {
+    let _init_guard = zebra_test::init();
+
+    let mut raw = raw_responder(Arc::new(TestData::new())).await;
+    let connection = raw.connection.clone();
+
+    let entries = vec![
+        zebra_chain::block::SyncHashEntry {
+            hash: zebra_chain::block::Hash([0x11; 32]),
+            span_size: 100,
+            span_txs: 40,
+            span_notes: 80,
+        },
+        zebra_chain::block::SyncHashEntry {
+            hash: zebra_chain::block::Hash([0x22; 32]),
+            span_size: 200,
+            span_txs: 60,
+            span_notes: 120,
+        },
+    ];
+
+    let serve = serve_hashes(&connection, (419_200, 32, 2), entries.clone());
+    let request = call(
+        &mut raw.initiator_client,
+        Request::RemoteSyncHashes {
+            start_height: 419_200,
+            stride: 32,
+            count: 2,
+        },
+    );
+    let (_, response) = tokio::join!(serve, tokio::time::timeout(TEST_TIMEOUT, request));
+    let response = response
+        .expect("response arrives in time")
+        .expect("get-hashes request succeeds");
+    match response {
+        Response::SyncHashes(served) => assert_eq!(served, entries),
+        other => panic!("expected SyncHashes, got: {other:?}"),
+    }
+}
+
+/// Serves one `get-tree-roots` request on `connection` with `entries`, and
+/// asserts the request's start height, anchor hash, and count.
+async fn serve_tree_roots(
+    connection: &quinn::Connection,
+    expected: (u32, zebra_chain::block::Hash, u64),
+    entries: Vec<zebra_chain::block::TreeRootsEntry>,
+) {
+    use crate::protocol::v2::{
+        request::Request as V2WireRequest, response::TreeRootsResponse, types::StreamType,
+    };
+
+    let (mut send, mut recv) = accept_request_stream(connection, StreamType::GetTreeRoots).await;
+    let request = V2WireRequest::read(StreamType::GetTreeRoots, &mut recv)
+        .await
+        .expect("request parses");
+    let V2WireRequest::GetTreeRoots {
+        start_height,
+        final_hash,
+        count,
+    } = request
+    else {
+        panic!("expected a get-tree-roots request, got: {request:?}");
+    };
+    assert_eq!((start_height, final_hash, count), expected);
+
+    let mut bytes = Vec::new();
+    TreeRootsResponse(entries)
+        .encode(&mut bytes)
+        .expect("response encodes");
+    send.write_all(&bytes).await.expect("response writes");
+    send.finish().expect("stream finishes");
+}
+
+/// The `get-tree-roots` requester returns the served tree root entries.
+#[tokio::test]
+async fn v2_remote_tree_roots_round_trip() {
+    let _init_guard = zebra_test::init();
+
+    let mut raw = raw_responder(Arc::new(TestData::new())).await;
+    let connection = raw.connection.clone();
+    let anchor = raw.data.block_2.hash();
+
+    let entries = vec![zebra_chain::block::TreeRootsEntry {
+        sapling_root: [0x33; 32],
+        orchard_root: [0x44; 32],
+        ironwood_root: [0x55; 32],
+        sapling_txs: 3,
+        orchard_txs: 4,
+        ironwood_txs: 5,
+        auth_data_root: [0x66; 32],
+    }];
+
+    let serve = serve_tree_roots(&connection, (1, anchor, 2), entries.clone());
+    let request = call(
+        &mut raw.initiator_client,
+        Request::RemoteTreeRoots {
+            start_height: 1,
+            final_hash: anchor,
+            count: 2,
+        },
+    );
+    let (_, response) = tokio::join!(serve, tokio::time::timeout(TEST_TIMEOUT, request));
+    let response = response
+        .expect("response arrives in time")
+        .expect("get-tree-roots request succeeds");
+    match response {
+        Response::TreeRoots(served) => assert_eq!(served, Some(entries)),
+        other => panic!("expected TreeRoots, got: {other:?}"),
+    }
+}
+
+/// Serves one `get-object` request on `connection`: asserts the request's
+/// hash, offset, and length, then answers with `result`, and for an object
+/// result a `total_size` header followed by `payload` bytes.
+async fn serve_object(
+    connection: &quinn::Connection,
+    expected: (crate::protocol::v2::types::ObjectHash, u64, u64),
+    result: u8,
+    total_size: u64,
+    payload: &[u8],
+) {
+    use crate::protocol::v2::{record, request::Request as V2WireRequest, types::StreamType};
+
+    let (mut send, mut recv) = accept_request_stream(connection, StreamType::GetObject).await;
+    let request = V2WireRequest::read(StreamType::GetObject, &mut recv)
+        .await
+        .expect("request parses");
+    let V2WireRequest::GetObject {
+        hash,
+        offset,
+        length,
+    } = request
+    else {
+        panic!("expected a get-object request, got: {request:?}");
+    };
+    assert_eq!((hash, offset, length), expected);
+
+    let mut bytes = vec![result];
+    if result == 0x00 {
+        record::write_compact_size(&mut bytes, total_size).expect("size header writes");
+        bytes.extend_from_slice(payload);
+    }
+    send.write_all(&bytes).await.expect("response writes");
+    send.finish().expect("stream finishes");
+}
+
+/// The `get-object` requester returns the object's total size and the
+/// delivered byte range; a not-held object answers a zero total size with no
+/// bytes.
+#[tokio::test]
+async fn v2_object_requester_reads_ranges_and_not_found() {
+    use crate::protocol::v2::types::ObjectHash;
+
+    let _init_guard = zebra_test::init();
+
+    let mut raw = raw_responder(Arc::new(TestData::new())).await;
+    let connection = raw.connection.clone();
+
+    let hash = ObjectHash([0x77; 32]);
+    let payload = b"hello artifact".to_vec();
+
+    // A held object: the server reports a total size larger than the
+    // delivered range, like a resumable download's middle piece.
+    let serve = serve_object(&connection, (hash, 50, 14), 0x00, 1_000_000, &payload);
+    let request = call(
+        &mut raw.initiator_client,
+        Request::Object {
+            hash,
+            offset: 50,
+            length: 14,
+        },
+    );
+    let (_, response) = tokio::join!(serve, tokio::time::timeout(TEST_TIMEOUT, request));
+    let response = response
+        .expect("response arrives in time")
+        .expect("get-object request succeeds");
+    match response {
+        Response::Object { total_size, bytes } => {
+            assert_eq!(total_size, 1_000_000);
+            assert_eq!(bytes, payload);
+        }
+        other => panic!("expected Object, got: {other:?}"),
+    }
+
+    // A not-held object: the not-found result maps to a zero total size.
+    let serve = serve_object(&connection, (hash, 0, 32), 0x02, 0, &[]);
+    let request = call(
+        &mut raw.initiator_client,
+        Request::Object {
+            hash,
+            offset: 0,
+            length: 32,
+        },
+    );
+    let (_, response) = tokio::join!(serve, tokio::time::timeout(TEST_TIMEOUT, request));
+    let response = response
+        .expect("response arrives in time")
+        .expect("get-object not-found request succeeds");
+    match response {
+        Response::Object { total_size, bytes } => {
+            assert_eq!(total_size, 0, "not-held object has a zero total size");
+            assert!(bytes.is_empty(), "not-held object delivers no bytes");
+        }
+        other => panic!("expected Object, got: {other:?}"),
+    }
+}
+
+/// The synchronization request types round-trip end to end: the real client
+/// maps them onto v2 request streams, and the real serving stack answers
+/// them from its inbound service.
+#[tokio::test]
+async fn v2_sync_requests_round_trip_end_to_end() {
+    use crate::protocol::v2::types::ObjectHash;
+
+    let _init_guard = zebra_test::init();
+
+    let data = Arc::new(TestData::new());
+    let mut peers = connect_peers(data.clone()).await;
+    let initiator_client = &mut peers.initiator_client;
+
+    // RemoteSyncHashes maps to a get-hashes request stream.
+    let response = call(
+        initiator_client,
+        Request::RemoteSyncHashes {
+            start_height: 0,
+            stride: 400,
+            count: 100,
+        },
+    )
+    .await
+    .expect("remote sync hashes succeeds");
+    match response {
+        Response::SyncHashes(entries) => assert_eq!(entries, test_sync_hash_entries(&data)),
+        other => panic!("expected SyncHashes, got: {other:?}"),
+    }
+
+    // RemoteTreeRoots maps to a get-tree-roots request stream; the anchor
+    // selects the entries.
+    let response = call(
+        initiator_client,
+        Request::RemoteTreeRoots {
+            start_height: 0,
+            final_hash: data.block.hash(),
+            count: 1,
+        },
+    )
+    .await
+    .expect("remote tree roots succeeds");
+    match response {
+        Response::TreeRoots(entries) => assert_eq!(entries, Some(test_tree_roots_entries())),
+        other => panic!("expected TreeRoots, got: {other:?}"),
+    }
+
+    // Object maps to a get-object request stream, served from the inbound
+    // pinned-artifact lookup.
+    let (object_hash, object_bytes) = data
+        .pinned_artifacts
+        .iter()
+        .next()
+        .expect("the fixture has a pinned artifact");
+    let response = call(
+        initiator_client,
+        Request::Object {
+            hash: ObjectHash(*object_hash),
+            offset: 0,
+            length: 1_000,
+        },
+    )
+    .await
+    .expect("object request succeeds");
+    match response {
+        Response::Object { total_size, bytes } => {
+            // The cast is a lossless widening: the artifact length fits u64.
+            assert_eq!(total_size, object_bytes.len() as u64);
+            assert_eq!(bytes, *object_bytes);
+        }
+        other => panic!("expected Object, got: {other:?}"),
+    }
+
+    // An unheld object answers a zero total size.
+    let response = call(
+        initiator_client,
+        Request::Object {
+            hash: ObjectHash([0xEE; 32]),
+            offset: 0,
+            length: 16,
+        },
+    )
+    .await
+    .expect("object not-found request succeeds");
+    match response {
+        Response::Object { total_size, bytes } => {
+            assert_eq!(total_size, 0, "not-held object has a zero total size");
+            assert!(bytes.is_empty(), "not-held object delivers no bytes");
+        }
+        other => panic!("expected Object, got: {other:?}"),
+    }
+}
+
 /// The relayed-address token bucket admits a full burst, then throttles to
 /// the reference rate.
 #[test]
@@ -2568,19 +2925,22 @@ async fn v2_get_object_serves_ranged_artifact_reads() {
     assert!(data.is_empty());
 }
 
-/// `get-object` requests are refused while the artifact store does not
-/// exist, and malformed sync requests are still connection errors: requests
-/// are read and validated before refusal.
+/// `get-object` requests for unheld objects answer not-found — even with
+/// no artifact store, the state-backed pinned lookup is always consulted
+/// first — and malformed sync requests are still connection errors:
+/// requests are read and validated before the lookup.
 #[tokio::test]
-async fn v2_get_object_is_refused_and_malformed_sync_requests_are_rejected() {
+async fn v2_get_object_not_found_and_malformed_sync_requests_are_rejected() {
     use crate::protocol::v2::{
+        record,
         request::Request as V2WireRequest,
         types::{ErrorCode, ObjectHash, StreamType},
     };
 
     let _init_guard = zebra_test::init();
 
-    // The responder has no cache directory, so it has no artifact store.
+    // The responder has no cache directory, so it has no artifact store;
+    // with no pinned-constant answer either, the object is not held.
     let config = Config {
         network: Network::Mainnet,
         cache_dir: crate::config::CacheDir::disabled(),
@@ -2589,6 +2949,7 @@ async fn v2_get_object_is_refused_and_malformed_sync_requests_are_rejected() {
     let raw = raw_initiator_with_config(Arc::new(TestData::new()), config).await;
     let connection = raw.connection.clone();
 
+    // A hash no pinned constant or artifact file names answers not-found.
     let request = V2WireRequest::GetObject {
         hash: ObjectHash([0x5A; 32]),
         offset: 0,
@@ -2600,15 +2961,16 @@ async fn v2_get_object_is_refused_and_malformed_sync_requests_are_rejected() {
     send.write_all(&bytes).await.expect("request writes");
     send.finish().expect("stream finishes");
 
-    assert_reset_with(
-        &mut recv,
-        ErrorCode::Refused,
-        "get-object requests are refused with REFUSED",
-    )
-    .await;
+    let result = record::read_u8(&mut recv)
+        .await
+        .expect("result byte parses");
+    assert_eq!(result, 0x02, "an unheld object answers not-found");
+    record::expect_end_of_stream(&mut recv)
+        .await
+        .expect("nothing follows a not-found result");
 
     // A malformed sync request (stride 0) is not refused but rejected:
-    // requests are validated before the refusal, and a violation is a
+    // requests are validated before the lookup, and a violation is a
     // connection error of type `PROTOCOL_ERROR`.
     let (mut send, _recv) = connection.open_bi().await.expect("stream opens");
     let mut bytes = vec![StreamType::GetHashes.byte()];
@@ -2624,6 +2986,135 @@ async fn v2_get_object_is_refused_and_malformed_sync_requests_are_rejected() {
         "a malformed sync request is a connection error",
     )
     .await;
+}
+
+/// `get-object` serves pinned artifacts from the state-backed lookup even
+/// with no artifact store: the whole object, ranged reads, and an offset at
+/// the object's size all answer, and unknown hashes answer not-found.
+#[tokio::test]
+async fn v2_get_object_serves_state_backed_pinned_artifacts() {
+    use sha2::{Digest, Sha256};
+
+    use crate::protocol::v2::{
+        record,
+        request::Request as V2WireRequest,
+        types::{ObjectHash, StreamType},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    // The responder has no cache directory, so only the state-backed pinned
+    // lookup can answer: the fixture artifact from `TestData`.
+    let config = Config {
+        network: Network::Mainnet,
+        cache_dir: crate::config::CacheDir::disabled(),
+        ..Config::default()
+    };
+    let raw = raw_initiator_with_config(Arc::new(TestData::new()), config).await;
+    let connection = raw.connection.clone();
+
+    let object = b"pinned known-hash chunk fixture".to_vec();
+    let hash: [u8; 32] = Sha256::digest(&object).into();
+
+    async fn get_object(
+        connection: &quinn::Connection,
+        request: V2WireRequest,
+    ) -> (u8, u64, Vec<u8>) {
+        let (mut send, mut recv) = connection.open_bi().await.expect("stream opens");
+        let mut bytes = vec![StreamType::GetObject.byte()];
+        request.encode(&mut bytes).expect("request encodes");
+        send.write_all(&bytes).await.expect("request writes");
+        send.finish().expect("stream finishes");
+
+        let result = record::read_u8(&mut recv)
+            .await
+            .expect("result byte parses");
+        if result != 0x00 {
+            record::expect_end_of_stream(&mut recv)
+                .await
+                .expect("nothing follows a not-found result");
+            return (result, 0, Vec::new());
+        }
+        let size = record::read_compact_size(&mut recv)
+            .await
+            .expect("size parses");
+        let mut data = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut recv, &mut data)
+            .await
+            .expect("data reads");
+        (result, size, data)
+    }
+
+    // The whole object.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 0,
+                length: 1_000,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert_eq!(data, object);
+
+    // A middle range delivers exactly the requested bytes.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: 7,
+                length: 9,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert_eq!(data, object[7..16]);
+
+    // An offset at the size answers the size and no data.
+    let (result, size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash(hash),
+                offset: object.len() as u64,
+                length: 16,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x00);
+    assert_eq!(size, object.len() as u64);
+    assert!(data.is_empty());
+
+    // An unknown hash answers not-found.
+    let (result, _size, data) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        get_object(
+            &connection,
+            V2WireRequest::GetObject {
+                hash: ObjectHash([0xEE; 32]),
+                offset: 0,
+                length: 16,
+            },
+        ),
+    )
+    .await
+    .expect("response arrives in time");
+    assert_eq!(result, 0x02);
+    assert!(data.is_empty());
 }
 
 /// Streams with unrecognized type bytes are refused with

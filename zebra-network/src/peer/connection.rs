@@ -1071,7 +1071,7 @@ where
             // mapping. Answering with fabricated empty data would make a
             // mis-routed request look like a peer with nothing to offer, so
             // the caller is told instead; the connection stays usable.
-            (AwaitingRequest, request @ (BlockRange { .. } | SyncHashes { .. } | TreeRoots { .. })) => {
+            (AwaitingRequest, request @ (BlockRange { .. } | SyncHashes { .. } | TreeRoots { .. } | RemoteSyncHashes { .. } | RemoteTreeRoots { .. } | Object { .. } | LocalObject { .. })) => {
                 Ok(Handler::Finished(Err(PeerError::LocalOnlyRequest(
                     request.command(),
                 ))))
@@ -1496,7 +1496,7 @@ where
             Response::Nil => { /* generic success, do nothing */ }
             // The v2 synchronization primitives are answered by the local
             // inbound service, so there is nothing to send to a peer.
-            Response::SyncHashes(_) | Response::TreeRoots(_) => {}
+            Response::SyncHashes(_) | Response::TreeRoots(_) | Response::Object { .. } => {}
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
