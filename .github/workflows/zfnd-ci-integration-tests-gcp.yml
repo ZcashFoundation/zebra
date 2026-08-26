@@ -623,7 +623,7 @@ jobs:
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           # New failures open an issue with this label.
-          label-name: S-ci-fail-main-branch-auto-issue
+          label-name: ci-fail/main
           # If there is already an open issue with this label, any failures become comments on that issue.
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}

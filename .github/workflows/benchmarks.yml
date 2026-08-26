@@ -95,13 +95,13 @@ jobs:
           fail-on-alert: false
 
   # Compares benchmarks between the PR branch and the base branch.
-  # Runs when the `C-benchmark` label is present: both when it is first added
+  # Runs when the `run-benchmarks` label is present: both when it is first added
   # and on subsequent pushes to the PR.
   compare:
     name: Compare Benchmarks
     if: >-
       github.event_name == 'pull_request' &&
-      contains(github.event.pull_request.labels.*.name, 'C-benchmark')
+      contains(github.event.pull_request.labels.*.name, 'run-benchmarks')
     permissions:
       contents: read
       pull-requests: write
