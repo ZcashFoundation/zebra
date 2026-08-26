@@ -106,6 +106,29 @@ fn for_network_coverage() {
     assert!(KnownHashListSpec::for_network(&Network::new_regtest(Default::default())).is_none());
 }
 
+/// The serving-side content-address lookup finds every pinned chunk by its
+/// hash, and rejects hashes no chunk is pinned to.
+#[test]
+fn chunk_index_by_hash_round_trips() {
+    let _init_guard = zebra_test::init();
+
+    let spec = &MAINNET_KNOWN_HASHES;
+
+    for (index, pinned) in spec.chunk_hashes.iter().enumerate() {
+        let hash: [u8; 32] = hex::decode(pinned)
+            .expect("pinned hashes are hex")
+            .try_into()
+            .expect("pinned hashes are 32 bytes");
+        assert_eq!(
+            spec.chunk_index_by_hash(&hash),
+            Some(index),
+            "chunk {index} is found by its pinned hash",
+        );
+    }
+
+    assert_eq!(spec.chunk_index_by_hash(&[0xEE; 32]), None);
+}
+
 #[test]
 fn synthetic_chunk_verifies_and_parses() {
     let _init_guard = zebra_test::init();

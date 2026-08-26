@@ -221,6 +221,19 @@ impl KnownHashListSpec {
         }
     }
 
+    /// Returns the chunk index whose pinned SHA-256 content hash is `hash`,
+    /// or `None` if no chunk of this list is pinned to that hash.
+    ///
+    /// This is the serving-side content-address lookup: a `get-object`
+    /// request names a chunk by its hash, and the serving node answers with
+    /// the chunk's bytes, read from the store or regenerated from state.
+    pub fn chunk_index_by_hash(&self, hash: &[u8; 32]) -> Option<usize> {
+        let hex_hash = hex::encode(hash);
+        self.chunk_hashes
+            .iter()
+            .position(|&pinned| pinned == hex_hash)
+    }
+
     /// Verifies `bytes` as chunk `index` of this list for `network`, and
     /// returns the parsed chunk on success.
     ///
