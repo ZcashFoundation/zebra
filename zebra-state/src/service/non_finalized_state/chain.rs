@@ -2697,22 +2697,18 @@ impl Ord for Chain {
     /// [2]: super::NonFinalizedState::chain_set
     /// [3]: ChainInner::received_time
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.partial_cumulative_work != other.partial_cumulative_work {
-            self.partial_cumulative_work
-                .cmp(&other.partial_cumulative_work)
-        } else {
+        self.partial_cumulative_work
+            .cmp(&other.partial_cumulative_work)
             // Prefer the first-received tip: an EARLIER receipt time is a BETTER chain,
             // so it must compare `Greater` (the best chain is the greatest in the set).
-            match self.received_time.cmp(&other.received_time).reverse() {
-                // This comparison is a tie-breaker within the local node, so it does not need to
-                // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
-                Ordering::Equal => self
-                    .non_finalized_tip_hash()
+            .then_with(|| self.received_time.cmp(&other.received_time).reverse())
+            // This comparison is a tie-breaker within the local node, so it does not need to
+            // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
+            .then_with(|| {
+                self.non_finalized_tip_hash()
                     .0
-                    .cmp(&other.non_finalized_tip_hash().0),
-                ordering => ordering,
-            }
-        }
+                    .cmp(&other.non_finalized_tip_hash().0)
+            })
     }
 }
 
