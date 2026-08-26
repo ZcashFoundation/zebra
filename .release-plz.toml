@@ -16,7 +16,8 @@ git_release_enable = false
 # entries under versioned headings and add dependency-only release notes.
 changelog_update = true
 
-# Breaking-change detection runs per PR via ziff, not in the release-pr job.
+# The PR gate detects breaking changes per PR with cargo-semver-checks and zc,
+# so the release-pr job does not repeat that work.
 semver_check = false
 
 # These commits trigger version bumps. Other commits can still cascade through
