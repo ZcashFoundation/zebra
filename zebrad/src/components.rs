@@ -11,6 +11,7 @@ pub mod inbound;
 pub mod mempool;
 pub mod metrics;
 pub mod notify;
+pub mod spentness;
 #[allow(missing_docs)]
 pub mod sync;
 #[allow(missing_docs)]

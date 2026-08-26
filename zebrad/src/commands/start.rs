@@ -620,6 +620,17 @@ impl StartCmd {
                 .in_current_span(),
         );
 
+        // Spawn the spentness-hint artifact fetch task: a node whose tip was
+        // already past the pinned checkpoint height downloads, verifies, and
+        // stores the artifact from v2 peers, so it can serve it onward. The
+        // task exits immediately when the network has no pinned artifact.
+        let mut spentness_fetch_task_handle = crate::components::spentness::start(
+            config.network.network.clone(),
+            peer_set.clone(),
+            state.clone(),
+            read_only_state_service.clone(),
+        );
+
         // Give the inbound service more time to clear its queue,
         // then start concurrent tasks that can add load to the inbound service
         // (by opening more peer connections, so those peers send us requests)
@@ -703,6 +714,11 @@ impl StartCmd {
 
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
+
+        // The spentness-hint fetch task exits once the artifact is stored,
+        // so its handle must be fused.
+        let spentness_fetch_task_handle_fused = (&mut spentness_fetch_task_handle).fuse();
+        pin!(spentness_fetch_task_handle_fused);
 
         // The zcashd-compat supervisor exits when supervision is disabled or fails,
         // but Zebra keeps running, so its handle must be fused.
@@ -797,6 +813,18 @@ impl StartCmd {
                     Ok(())
                 }
 
+                // And the spentness-hint fetch task should finish once the
+                // pinned artifact is stored (or immediately when the network
+                // has no pinned artifact), so its exit is not a shutdown
+                // reason.
+                spentness_fetch_result = &mut spentness_fetch_task_handle_fused => {
+                    exit_when_task_finishes = false;
+                    spentness_fetch_result
+                        .expect("unexpected panic in the spentness-hint fetch task")
+                        .map_err(|e| eyre!(e))
+                        .map(|_| info!("spentness-hint fetch task exited"))
+                }
+
                 miner_result = &mut miner_task_handle => miner_result
                     .expect("unexpected panic in the miner task")
                     .map(|_| info!("miner task exited")),
@@ -834,6 +862,7 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
+        spentness_fetch_task_handle.abort();
         miner_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");

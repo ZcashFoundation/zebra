@@ -618,6 +618,18 @@ impl Service<zn::Request> for Inbound {
                     _ => unreachable!("zebra-state should always respond to a `TreeRoots` request with a `TreeRoots` response"),
                 }).boxed()
             }
+            zn::Request::LocalObject { hash } => {
+                let request = zs::ReadRequest::SyncArtifact(hash.0);
+                read_state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::ReadResponse::SyncArtifact(Some(bytes)) => {
+                        // The cast is a lossless widening: the artifact length fits u64.
+                        let total_size = bytes.len() as u64;
+                        zn::Response::Object { total_size, bytes }
+                    }
+                    zs::ReadResponse::SyncArtifact(None) => zn::Response::Object { total_size: 0, bytes: Vec::new() },
+                    _ => unreachable!("zebra-state should always respond to a `SyncArtifact` request with a `SyncArtifact` response"),
+                }).boxed()
+            }
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
@@ -633,7 +645,13 @@ impl Service<zn::Request> for Inbound {
 
             zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
-            zn::Request::BlockRange { .. } => unreachable!("block range requests are sent to peers, not the inbound service")
+            zn::Request::BlockRange { .. } => unreachable!("block range requests are sent to peers, not the inbound service"),
+
+            zn::Request::RemoteSyncHashes { .. } => unreachable!("remote sync hashes requests are sent to peers, not the inbound service"),
+
+            zn::Request::RemoteTreeRoots { .. } => unreachable!("remote tree roots requests are sent to peers, not the inbound service"),
+
+            zn::Request::Object { .. } => unreachable!("object requests are sent to peers, not the inbound service")
         }
     }
 }

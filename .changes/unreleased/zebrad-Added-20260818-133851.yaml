@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'A spentness-hint artifact fetch task: a node whose finalized tip was already past the pinned checkpoint height downloads the pinned artifact range-by-range from v2 peers over `get-object`, verifies the whole artifact against the pinned SHA-256 constant, and stores it, so the node can serve it onward to other nodes. The task is dormant until release tooling pins a checkpoint for the network.'
+time: 2026-08-18T13:38:51.994893955-04:00
