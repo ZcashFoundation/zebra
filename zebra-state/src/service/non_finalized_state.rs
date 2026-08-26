@@ -707,7 +707,7 @@ impl NonFinalizedState {
     /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
-    /// (Using the tip block hash tie-breaker.)
+    /// (Using the first-received, then tip block hash tie-breakers.)
     pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,

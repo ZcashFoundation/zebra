@@ -1261,3 +1261,54 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
 
     Ok(())
 }
+
+/// Check that `Chain::received_time` mirrors the tip block's receipt stamp across
+/// pushes and fork truncation, since `Chain::cmp` reads the field directly.
+#[test]
+fn chain_received_time_tracks_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    let child = block1.make_fake_child().set_work(10);
+    let grandchild = child.make_fake_child().set_work(10);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state
+        .commit_new_chain(block1.clone().prepare(), &finalized_state)
+        .expect("fake root block should commit to an empty non-finalized state");
+
+    let earlier = std::time::Instant::now();
+    let later = earlier + Duration::from_secs(1);
+
+    let mut child_prepared = child.clone().prepare();
+    child_prepared.received_time = Some(earlier);
+    state
+        .commit_block(child_prepared, &finalized_state)
+        .expect("child block should commit");
+
+    let mut grandchild_prepared = grandchild.clone().prepare();
+    grandchild_prepared.received_time = Some(later);
+    state
+        .commit_block(grandchild_prepared, &finalized_state)
+        .expect("grandchild block should commit");
+
+    let chain = state.best_chain().expect("chain was just committed");
+    assert_eq!(
+        chain.received_time,
+        Some(later),
+        "chain receipt time mirrors its tip block's stamp"
+    );
+
+    // Truncating the tip moves the chain's receipt time back to the new tip's stamp.
+    let forked = chain.fork(child.hash()).expect("child is in the chain");
+    assert_eq!(
+        forked.received_time,
+        Some(earlier),
+        "fork receipt time mirrors the fork tip's stamp"
+    );
+
+    Ok(())
+}

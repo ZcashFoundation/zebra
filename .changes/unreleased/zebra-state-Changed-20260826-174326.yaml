@@ -1,0 +1,9 @@
+project: zebra-state
+kind: Changed
+body: 'Best-chain selection among non-finalized chains with equal cumulative
+  work now prefers the chain whose tip block was received first, per the Zcash
+  protocol specification ("To break ties between leaf blocks, a node will prefer
+  the block that it received first"), with the tip block hash as the final
+  tie-breaker. The block verifier stamps each block''s receipt time, and the
+  non-finalized `Chain` tracks its tip''s stamp for the comparison.'
+time: 2026-08-26T17:43:26.380768625Z
