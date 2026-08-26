@@ -29,6 +29,7 @@ use zebra_chain::{
 use zebra_db::{
     chain::{BLOCK_INFO, SYNC_META},
     known_hash::KNOWN_HASH_CHUNK,
+    spentness_hint::SPENTNESS_HINT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
@@ -114,6 +115,8 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     SYNC_META,
     // Verified known-hash chunk bytes for the known-hash sync engine
     KNOWN_HASH_CHUNK,
+    // Verified spentness-hint artifacts for hinted checkpoint synchronization
+    SPENTNESS_HINT,
 ];
 
 /// The finalized part of the chain state, stored in the db.

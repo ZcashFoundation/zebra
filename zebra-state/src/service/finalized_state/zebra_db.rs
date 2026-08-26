@@ -36,6 +36,7 @@ pub mod chain;
 pub mod known_hash;
 pub mod metrics;
 pub mod shielded;
+pub mod spentness_hint;
 pub mod transparent;
 
 #[cfg(any(test, feature = "proptest-impl"))]

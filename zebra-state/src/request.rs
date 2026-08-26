@@ -14,6 +14,7 @@ use zebra_chain::{
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
+    parameters::spentness_hints::MaxCheckpoint,
     serialization::SerializationError,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
@@ -1063,6 +1064,69 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Reads the stored `chunk_v2` bytes for the known-hash chunk at the given
+    /// index from the `known_hash_chunk` column family, or generates them
+    /// deterministically from the finalized state.
+    ///
+    /// Returns [`Response::KnownHashChunk(Some(bytes))`](Response::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`Response::KnownHashChunk(None)`](Response::KnownHashChunk) if the chunk
+    /// index is entirely above the finalized tip.
+    KnownHashChunk(u32),
+
+    /// Persists a downloaded-and-verified known-hash chunk's bytes into the
+    /// `known_hash_chunk` column family, so a later run can read it back without
+    /// re-fetching it.
+    ///
+    /// The caller is responsible for verifying `bytes` against the pinned
+    /// SHA-256 constant for `index` before issuing this request; the state
+    /// stores the bytes opaquely. This is a side-index write that is
+    /// independent of block-commit ordering, so it does not go through the
+    /// block write task.
+    ///
+    /// Returns [`Response::WroteKnownHashChunk`](Response::WroteKnownHashChunk)
+    /// on success.
+    WriteKnownHashChunk {
+        /// The chunk index.
+        index: u32,
+        /// The verified `chunk_v2` bytes to store.
+        bytes: Vec<u8>,
+    },
+
+    /// Captures the spentness-hint artifact for the given pinned max
+    /// checkpoint from the finalized state, and stores it in the
+    /// `spentness_hint` column family.
+    ///
+    /// The capture is one ordered scan of the UTXO set, and is only valid
+    /// while the finalized tip is exactly the pinned height, so callers
+    /// trigger it at the moment the sync frontier passes the pinned height.
+    ///
+    /// Returns [`Response::CapturedSpentnessHint`](Response::CapturedSpentnessHint)
+    /// with the artifact's content hash when an artifact is stored (captured
+    /// now or previously), or with `None` when the finalized tip is not the
+    /// pinned height, the chain does not match the pin, or the sync metadata
+    /// needed for output ordinals is missing.
+    CaptureSpentnessHint(MaxCheckpoint),
+
+    /// Persists a downloaded-and-verified spentness-hint artifact's bytes
+    /// into the `spentness_hint` column family, keyed by the final
+    /// checkpoint height it covers.
+    ///
+    /// The caller is responsible for verifying `bytes` against the pinned
+    /// SHA-256 constant for `height` before issuing this request; the state
+    /// stores the bytes opaquely. This is a side-index write that is
+    /// independent of block-commit ordering, so it does not go through the
+    /// block write task.
+    ///
+    /// Returns [`Response::WroteSpentnessHint`](Response::WroteSpentnessHint)
+    /// on success.
+    WriteSpentnessHint {
+        /// The final checkpoint height the artifact covers.
+        height: block::Height,
+        /// The verified artifact bytes to store.
+        bytes: Vec<u8>,
+    },
 }
 
 impl Request {
@@ -1093,6 +1157,10 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::KnownHashChunk(_) => "known_hash_chunk",
+            Request::WriteKnownHashChunk { .. } => "write_known_hash_chunk",
+            Request::CaptureSpentnessHint(_) => "capture_spentness_hint",
+            Request::WriteSpentnessHint { .. } => "write_spentness_hint",
         }
     }
 
@@ -1530,6 +1598,40 @@ pub enum ReadRequest {
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
     IsTransparentOutputSpent(transparent::OutPoint),
+
+    /// Reads the stored `chunk_v2` bytes for the known-hash chunk at the given
+    /// index from the `known_hash_chunk` column family, or generates them
+    /// deterministically from the finalized state.
+    ///
+    /// Returns
+    /// [`ReadResponse::KnownHashChunk(Some(bytes))`](ReadResponse::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`ReadResponse::KnownHashChunk(None)`](ReadResponse::KnownHashChunk) if the
+    /// chunk index is entirely above the finalized tip.
+    KnownHashChunk(u32),
+
+    /// Reads the stored spentness-hint artifact bytes for the final
+    /// checkpoint `height` from the `spentness_hint` column family.
+    ///
+    /// Returns
+    /// [`ReadResponse::SpentnessHint(Some(bytes))`](ReadResponse::SpentnessHint)
+    /// if an artifact is stored for `height`, or
+    /// [`ReadResponse::SpentnessHint(None)`](ReadResponse::SpentnessHint)
+    /// otherwise.
+    SpentnessHint(block::Height),
+
+    /// Resolves a content-addressed synchronization artifact by its SHA-256
+    /// hash: a pinned known-hash chunk (read from the store or regenerated
+    /// from state) or the pinned spentness-hint artifact (read from the
+    /// store), serving the v2 network protocol's `get-object` requests.
+    ///
+    /// Returns
+    /// [`ReadResponse::SyncArtifact(Some(bytes))`](ReadResponse::SyncArtifact)
+    /// if the hash names a pinned artifact of this network and the artifact
+    /// is held, or
+    /// [`ReadResponse::SyncArtifact(None)`](ReadResponse::SyncArtifact)
+    /// otherwise.
+    SyncArtifact([u8; 32]),
 }
 
 impl ReadRequest {
@@ -1579,6 +1681,9 @@ impl ReadRequest {
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::KnownHashChunk(_) => "known_hash_chunk",
+            ReadRequest::SpentnessHint(_) => "spentness_hint",
+            ReadRequest::SyncArtifact(_) => "sync_artifact",
         }
     }
 
@@ -1635,6 +1740,14 @@ impl TryFrom<Request> for ReadRequest {
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
+            Request::WriteKnownHashChunk { .. } => {
+                Err("ReadService does not write known-hash chunks")
+            }
+
+            Request::CaptureSpentnessHint(_) | Request::WriteSpentnessHint { .. } => {
+                Err("ReadService does not write spentness hints")
+            }
+
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
                      and handle pending UTXOs"),
@@ -1644,6 +1757,8 @@ impl TryFrom<Request> for ReadRequest {
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),
+
+            Request::KnownHashChunk(index) => Ok(ReadRequest::KnownHashChunk(index)),
         }
     }
 }

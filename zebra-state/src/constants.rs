@@ -53,14 +53,15 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-/// - 28.1.0: known-hash synchronization data, three additions. Adds the `sync_meta_by_height`
+/// - 28.1.0: known-hash synchronization data, four additions. Adds the `sync_meta_by_height`
 ///   column family, per-block synchronization metadata served by the v2 network protocol's
 ///   `get-hashes` and `get-tree-roots` requests, written at block commit and backfilled for
 ///   existing blocks by a format upgrade. Each record also stores the chain's cumulative
 ///   transparent output count at its block, which assigns every transparent output the global
 ///   ordinal used by spentness hints. Also adds the `known_hash_chunk` column family, which
-///   caches verified known-hash chunk bytes; it is written on demand by the sync engine and is
-///   not backfilled by the upgrade.
+///   caches verified known-hash chunk bytes, and the `spentness_hint` column family, which
+///   stores verified spentness-hint artifacts by final checkpoint height; both are written on
+///   demand and are not backfilled by the upgrade.
 const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a

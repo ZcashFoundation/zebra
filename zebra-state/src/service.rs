@@ -1320,6 +1320,71 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Persists a verified known-hash chunk into the `known_hash_chunk`
+            // column family. This is a content-addressed side-index write
+            // (verified by the caller before issuance) that is independent of
+            // the block-commit ordering, so it writes its own atomic batch
+            // directly through the shared `ZebraDb` rather than going through the
+            // block write task.
+            Request::WriteKnownHashChunk { index, bytes } => {
+                let db = self.read_service.db.clone();
+
+                async move {
+                    // The write touches RocksDB, so it runs on a blocking thread
+                    // instead of the async runtime.
+                    tokio::task::spawn_blocking(move || db.write_known_hash_chunk(index, &bytes))
+                        .await
+                        .map_err(BoxError::from)?
+                        .map_err(BoxError::from)?;
+
+                    Ok(Response::WroteKnownHashChunk)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
+            // Captures the pinned spentness-hint artifact from the finalized
+            // state and stores it in the `spentness_hint` column family. The
+            // capture scan is CPU- and IO-heavy, so it runs on a blocking
+            // thread; it is valid only at the moment the finalized tip is the
+            // pinned height. (The commit path's automatic trigger uses a
+            // dedicated thread instead, because the write worker runs outside
+            // the tokio runtime.)
+            Request::CaptureSpentnessHint(max_checkpoint) => {
+                let db = self.read_service.db.clone();
+                let network = self.network.clone();
+
+                async move {
+                    let artifact_hash = tokio::task::spawn_blocking(move || {
+                        read::capture_spentness_hint(&db, &network, &max_checkpoint)
+                    })
+                    .await
+                    .map_err(BoxError::from)?;
+
+                    Ok(Response::CapturedSpentnessHint(artifact_hash))
+                }
+                .instrument(span)
+                .boxed()
+            }
+
+            // Persists a verified spentness-hint artifact into the
+            // `spentness_hint` column family: the same content-addressed
+            // side-index write shape as `WriteKnownHashChunk`.
+            Request::WriteSpentnessHint { height, bytes } => {
+                let db = self.read_service.db.clone();
+
+                async move {
+                    tokio::task::spawn_blocking(move || db.write_spentness_hint(height, &bytes))
+                        .await
+                        .map_err(BoxError::from)?
+                        .map_err(BoxError::from)?;
+
+                    Ok(Response::WroteSpentnessHint)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
             // Runs concurrently using the ReadStateService
             Request::Tip
             | Request::Depth(_)
@@ -1336,7 +1401,8 @@ impl Service<Request> for StateService {
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_)
-            | Request::CheckBlockProposalValidity(_) => {
+            | Request::CheckBlockProposalValidity(_)
+            | Request::KnownHashChunk(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1874,6 +1940,24 @@ impl Service<ReadRequest> for ReadStateService {
                 let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
                 Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
             }
+
+            // Used by the known-hash sync engine's chunk source, and by the v2
+            // network protocol's chunk serving.
+            ReadRequest::KnownHashChunk(index) => Ok(ReadResponse::KnownHashChunk(
+                read::known_hash_chunk_bytes(&state.db, index),
+            )),
+
+            // Used by the v2 network protocol's artifact serving: the serving
+            // lookup maps the pinned artifact hash to its checkpoint height.
+            ReadRequest::SpentnessHint(height) => {
+                Ok(ReadResponse::SpentnessHint(state.db.spentness_hint(height)))
+            }
+
+            // Used by the v2 network protocol's `get-object` serving: the
+            // content-addressed lookup over the compiled pins.
+            ReadRequest::SyncArtifact(hash) => Ok(ReadResponse::SyncArtifact(
+                read::sync_artifact_bytes(&state.db, &state.db.network(), &hash),
+            )),
         };
 
         timed_span.spawn_blocking(request_handler)

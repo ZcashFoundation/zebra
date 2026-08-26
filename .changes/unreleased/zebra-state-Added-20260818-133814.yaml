@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'The `spentness_hint` column family, extending the still-unreleased database format 28.1.0: it stores verified spentness-hint artifacts by final checkpoint height, written on demand and not backfilled by the format upgrade. New state requests read-or-generate and persist known-hash chunks (`KnownHashChunk`, `WriteKnownHashChunk`), capture and store the pinned spentness-hint artifact (`CaptureSpentnessHint`, `WriteSpentnessHint`), and resolve content-addressed artifacts (`ReadRequest::SyncArtifact`) for the v2 protocol''s `get-object` serving; the spentness-hint capture runs once, when the finalized sync frontier passes the pinned checkpoint height.'
+time: 2026-08-18T13:38:14.682373386-04:00

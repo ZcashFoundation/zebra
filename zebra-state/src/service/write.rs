@@ -315,8 +315,48 @@ impl WriteBlockWorkerTask {
             {
                 Ok((finalized, note_commitment_trees)) => {
                     let tip_block = ChainTipBlock::from(finalized);
+                    let committed_height = tip_block.height;
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+
+                    // The spentness-hint capture is valid only at the moment
+                    // the sync frontier passes the pinned checkpoint height:
+                    // finalized commits are sequential, so this check fires
+                    // exactly once, while the UTXO set still records
+                    // spentness at that height. The scan is long, so it runs
+                    // on its own thread, off the commit path.
+                    if let Some(max_checkpoint) =
+                        zebra_chain::parameters::spentness_hints::max_checkpoint(
+                            &finalized_state.db.network(),
+                        )
+                    {
+                        if committed_height == max_checkpoint.height {
+                            let db = finalized_state.db.clone();
+                            let network = finalized_state.db.network();
+                            let max_checkpoint = *max_checkpoint;
+
+                            std::thread::spawn(move || {
+                                match crate::service::read::capture_spentness_hint(
+                                    &db,
+                                    &network,
+                                    &max_checkpoint,
+                                ) {
+                                    Some(artifact_hash) => info!(
+                                        height = ?max_checkpoint.height,
+                                        artifact_hash = %hex::encode(artifact_hash),
+                                        "captured the pinned spentness-hint artifact",
+                                    ),
+                                    // A skip at the pinned height means the
+                                    // next commit won the race; this node
+                                    // fetches the artifact from peers instead.
+                                    None => warn!(
+                                        height = ?max_checkpoint.height,
+                                        "spentness-hint capture skipped at the pinned height",
+                                    ),
+                                }
+                            });
+                        }
+                    }
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();

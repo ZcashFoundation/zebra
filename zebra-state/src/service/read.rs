@@ -18,6 +18,7 @@ pub mod address;
 pub mod block;
 pub mod difficulty;
 pub mod find;
+pub mod snapshot;
 pub mod tree;
 
 #[cfg(test)]
@@ -42,6 +43,7 @@ pub use find::{
     find_chain_headers, find_fork_point, hash_by_height, height_by_hash, next_median_time_past,
     non_finalized_state_contains_block_hash, tip, tip_with_value_balance,
 };
+pub use snapshot::{capture_spentness_hint, known_hash_chunk_bytes, sync_artifact_bytes};
 pub use tree::{
     ironwood_subtrees, ironwood_tree, orchard_subtrees, orchard_tree, sapling_subtrees,
     sapling_tree,

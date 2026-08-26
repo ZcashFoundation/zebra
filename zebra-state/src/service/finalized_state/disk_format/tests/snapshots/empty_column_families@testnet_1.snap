@@ -11,6 +11,7 @@ expression: empty_column_families
   "orchard_nullifiers: no entries",
   "sapling_note_commitment_subtree: no entries",
   "sapling_nullifiers: no entries",
+  "spentness_hint: no entries",
   "sprout_nullifiers: no entries",
   "tx_loc_by_spent_out_loc: no entries",
 ]

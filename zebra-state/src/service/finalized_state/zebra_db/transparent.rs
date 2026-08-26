@@ -165,6 +165,24 @@ impl ZebraDb {
         self.tx_location_by_spent_output_location(&output_location)
     }
 
+    /// Returns an iterator over every unspent transparent output in the
+    /// finalized state, in [`OutputLocation`] order: block height,
+    /// transaction index, then output index — the canonical spentness-hint
+    /// bit order.
+    ///
+    /// Holding this iterator open might delay block commit transactions and
+    /// compaction; it is intended for one-shot background scans.
+    pub fn utxos_in_canonical_order(
+        &self,
+    ) -> impl Iterator<Item = (OutputLocation, transparent::Output)> + '_ {
+        let utxo_by_out_loc = self
+            .db
+            .cf_handle("utxo_by_out_loc")
+            .expect("the utxo_by_out_loc column family exists on an opened database");
+
+        self.db.zs_forward_range_iter(&utxo_by_out_loc, ..)
+    }
+
     /// Returns the transparent output for an [`OutputLocation`],
     /// if it is unspent in the finalized state.
     #[allow(clippy::unwrap_in_result)]

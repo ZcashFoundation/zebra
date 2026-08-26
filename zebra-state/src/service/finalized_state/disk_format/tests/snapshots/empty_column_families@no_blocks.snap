@@ -23,6 +23,7 @@ expression: empty_column_families
   "sapling_note_commitment_subtree: no entries",
   "sapling_note_commitment_tree: no entries",
   "sapling_nullifiers: no entries",
+  "spentness_hint: no entries",
   "sprout_anchors: no entries",
   "sprout_note_commitment_tree: no entries",
   "sprout_nullifiers: no entries",
