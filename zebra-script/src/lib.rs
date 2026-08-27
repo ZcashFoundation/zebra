@@ -167,12 +167,6 @@ impl CachedFfiTransaction {
             | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
 
         let lock_time = self.transaction.raw_lock_time();
-        // `vin()` is used instead of `Transaction::inputs()` because the latter
-        // rebuilds an owned `Vec<transparent::Input>` on every call, and every
-        // input of a transaction is script-verified concurrently, so calling it
-        // per input makes the live footprint quadratic in the input count.
-        // Nothing in script verification needs the converted Zebra type, so
-        // borrow the librustzcash inputs instead.
         let txin = self.vin().get(input_index).ok_or(Error::TxIndex)?;
         let is_final = txin.sequence() == u32::MAX;
 
