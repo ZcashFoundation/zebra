@@ -414,7 +414,8 @@ jobs:
           fi
           "
 
-      # Collect VM-level diagnostics when the test, or any earlier step, failed.
+      # Collect VM-level diagnostics when the test, or any earlier step, failed, or
+      # when the job was cancelled or hit its `timeout-minutes`.
       #
       # This must stay *after* the test-result step: `failure()` is only true once a
       # step has failed, and the test's exit status is not known until the step above
@@ -423,10 +424,20 @@ jobs:
       # killed by the OOM killer looked indistinguishable from one that exited on its
       # own. It still runs when an earlier step fails, because `failure()` also allows
       # a skipped-over step to execute.
-      - name: Show debug logs if the test or an earlier step failed
-        if: ${{ failure() }}
-        # The job has already failed at this point; a failure to collect logs must not
-        # replace the real failure with a misleading one.
+      #
+      # `cancelled()` covers the case this step is most needed for: when zebrad
+      # vanishes, `docker wait` above can hang until the job times out, which is a
+      # cancellation rather than a failure, so `failure()` alone would collect nothing.
+      #
+      # The kernel log and journal dumps are bounded to their last lines: on COS the
+      # container's own output also goes to journald, so on a multi-day sync test the
+      # unbounded dumps are large enough to be truncated by GitHub, which would drop
+      # the diagnostic groups above them. The OOM grep runs over the whole kernel log,
+      # so the signal that matters is captured even when the tail cuts it off.
+      - name: Show debug logs if the test failed, or the job was cancelled
+        if: ${{ failure() || cancelled() }}
+        # The job is already failing or cancelled at this point; a failure to collect
+        # logs must not replace the real outcome with a misleading one.
         continue-on-error: true
         env:
           INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
@@ -463,12 +474,12 @@ jobs:
           if command -v lsof >/dev/null; then sudo lsof '${DISK_DEVICE}' || true; else echo 'lsof is not installed on this image'; fi;
           echo '::endgroup::';
 
-          echo '::group::Kernel log';
-          sudo dmesg -T;
+          echo '::group::Kernel log (last 1000 lines)';
+          sudo dmesg -T | tail -n 1000;
           echo '::endgroup::';
 
-          echo '::group::System journal';
-          sudo journalctl -b --no-pager;
+          echo '::group::System journal (last 2000 lines)';
+          sudo journalctl -b --no-pager -n 2000;
           echo '::endgroup::';
           "
 
