@@ -12,7 +12,7 @@ on:
 # already in process, will get cancelled. Only the latest commit will be allowed
 # to run, cancelling any workflows in between
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:

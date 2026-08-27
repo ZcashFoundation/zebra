@@ -13,7 +13,7 @@ on:
 # separate group so they cannot cancel the required unit test run.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.ref }}-${{
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       github.event.action == 'labeled' &&
       github.event.label.name != 'A-release' &&
       'ignored-label' ||

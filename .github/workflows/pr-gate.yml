@@ -18,7 +18,7 @@ on:
 # unrelated labels, and edits that leave the title and the base branch alone.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.ref }}-${{
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'A-release' &&
       'ignored-label' ||
