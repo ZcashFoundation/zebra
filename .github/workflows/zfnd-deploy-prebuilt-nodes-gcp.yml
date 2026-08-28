@@ -45,11 +45,15 @@ on:
         required: true
         type: string
       log_file:
-        description: The Zebra log file path
+        description: Overrides the environment's default Zebra log file path. Empty uses the environment default.
         required: true
         type: string
       verify:
         description: Whether to wait for deployed nodes to become healthy
+        required: true
+        type: boolean
+      use_reserved_ip:
+        description: Whether to bind the environment's reserved external address
         required: true
         type: boolean
 
@@ -67,15 +71,27 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           NETWORKS: ${{ inputs.networks }}
           ZONES: ${{ inputs.zones }}
+          LOG_FILE: ${{ inputs.log_file }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^/@[:space:]:]+/[^/@[:space:]:]+/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::image must be a complete Google Artifact Registry repository@sha256:digest identity"
+            exit 1
+          fi
+          # Truncated to seven characters for template names and resource labels, both
+          # of which constrain the character set.
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit hash"
             exit 1
           fi
           case "${ENVIRONMENT}" in
             dev|stage|prod) ;;
             *) echo "::error::environment must be dev, stage, or prod"; exit 1 ;;
           esac
+          # The network and zone allow-lists below are deliberately hard-coded rather
+          # than derived from the caller. They duplicate the wrapper's matrix source,
+          # so adding a zone means editing both, but that is the point: an arbitrary
+          # caller must not be able to name a cell this fleet does not operate.
           if ! jq -e '
             type == "array" and length > 0 and
             length == (unique | length) and
@@ -90,6 +106,12 @@ jobs:
             all(.[]; . == "us-east1-b" or . == "us-east1-c" or . == "us-east1-d")
           ' <<< "${ZONES}" >/dev/null; then
             echo "::error::zones must be a non-empty, unique array containing only supported us-east1 zones"
+            exit 1
+          fi
+          # log_file is concatenated into a comma-separated --container-env list, so a
+          # comma would inject additional container environment variables.
+          if [[ "${LOG_FILE}" == *,* ]]; then
+            echo "::error::log_file must not contain a comma"
             exit 1
           fi
 
@@ -166,8 +188,14 @@ jobs:
         network: ${{ fromJSON(inputs.networks) }}
         zone: ${{ fromJSON(inputs.zones) }}
     name: Deploy ${{ matrix.network }} ${{ matrix.zone }}
+    # Serialize by the MIG this cell actually updates, not by environment. Those are
+    # not the same key: `stage` and a `dev` deploy running from `main` both resolve to
+    # the `main-` prefix, so keying on environment hands them separate locks while they
+    # roll the same MIG and the same stateful disk.
     concurrency:
-      group: zebra-gcp-${{ inputs.environment }}-${{ matrix.network }}-${{ matrix.zone }}
+      group: >-
+        zebra-gcp-${{ inputs.environment == 'prod' && 'prod'
+          || (inputs.environment == 'stage' && 'main' || github.ref_name) }}-${{ matrix.network }}-${{ matrix.zone }}
       cancel-in-progress: false
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
     runs-on: ubuntu-latest
@@ -231,13 +259,17 @@ jobs:
             prod)  PREFIX="" ;;
             stage) PREFIX="main-" ;;
             dev)   PREFIX="${REF_SLUG}-" ;;
+            # An unmatched environment would leave PREFIX empty, which is the
+            # production MIG name. Fail instead.
+            *)     echo "::error::unsupported environment ${ENVIRONMENT}"; exit 1 ;;
           esac
           SOURCE_SHA_SHORT="${SOURCE_SHA:0:7}"
-          IMAGE_DIGEST="${DEPLOY_IMAGE##*@sha256:}"
+          # TEMPLATE_NAME is not derivable here: it digests the template's full
+          # contents, and the reserved address is not resolved until a later step.
+          # It is computed in "Create instance template".
           {
             echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
             echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
-            echo "TEMPLATE_NAME=zebrad-${ENVIRONMENT}-${IMAGE_DIGEST:0:12}-${GITHUB_RUN_ID}-${NETWORK}-${ZONE_LETTER}"
             echo "SOURCE_SHA_SHORT=${SOURCE_SHA_SHORT}"
           } >> "$GITHUB_ENV"
 
@@ -276,10 +308,11 @@ jobs:
             --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
 
       # Single source of truth for the zone-suffix to reserved-IP mapping.
-      # Gated to stable deploys so feature-branch dispatches to dev can't
-      # advertise a prod IP that isn't actually attached to the MIG.
+      # The caller decides whether this deploy is stable-addressed, so a
+      # feature-branch dispatch to dev can't advertise an address that isn't
+      # actually attached to the MIG it rolls.
       - name: Resolve reserved external IP
-        if: ${{ inputs.environment == 'prod' || inputs.environment == 'stage' }}
+        if: ${{ inputs.use_reserved_ip }}
         env:
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
@@ -287,6 +320,9 @@ jobs:
             b) SUFFIX="" ;;
             c) SUFFIX="-secondary" ;;
             d) SUFFIX="-tertiary" ;;
+            # An unmatched zone would leave SUFFIX empty, silently selecting the
+            # primary address. Fail instead.
+            *) echo "::error::unsupported zone ${ZONE}"; exit 1 ;;
           esac
           IP_NAME="zebra-${NETWORK}${SUFFIX}"
           IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
@@ -302,7 +338,9 @@ jobs:
           GCP_DEPLOYMENTS_SA: ${{ vars.GCP_DEPLOYMENTS_SA }}
           GCP_MACHINE: ${{ vars.GCP_SMALL_MACHINE }}
           GCP_SUBNETWORK: ${{ vars.GCP_SUBNETWORK }}
-          LOG_FILE: ${{ inputs.log_file }}
+          # Resolved here rather than in the caller: this job is environment-scoped,
+          # so vars.CD_LOG_FILE picks up a dev/stage/prod override if one is set.
+          LOG_FILE: ${{ inputs.log_file || vars.CD_LOG_FILE }}
           MATRIX_NETWORK: ${{ matrix.network }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           SENTRY_DSN: ${{ vars.SENTRY_DSN }}
@@ -313,6 +351,38 @@ jobs:
           else
             P2P=18233; RPC=18232
           fi
+
+          # log_file is spliced into the comma-separated --container-env list below, so
+          # a comma would inject extra container environment variables. The validate
+          # job checks the input; check the effective value, which may instead have
+          # come from the environment-scoped vars.CD_LOG_FILE fallback.
+          if [[ "${LOG_FILE}" == *,* ]]; then
+            echo "::error::log_file must not contain a comma"
+            exit 1
+          fi
+
+          # Name the template after a digest of everything that goes into it, so that
+          # "a template with this name exists" means "it holds exactly this
+          # configuration". Naming it after a subset - the commit and image alone -
+          # is not safe: MIG and disk names carry the branch prefix, so two dev refs
+          # at one commit would share a template that attaches the *other* ref's
+          # stateful disk. It also keeps changes to the log file, Sentry DSN, machine
+          # type, subnet, service account or reserved address from being silently
+          # dropped on redeploy. Redeploying identical configuration still reuses the
+          # template, so the rolling update stays a no-op.
+          IMAGE_DIGEST="${DEPLOY_IMAGE##*@sha256:}"
+          TEMPLATE_IDENTITY=$(printf '%s\0' \
+            "${DEPLOY_IMAGE}" "${ENVIRONMENT}" "${MIG_NAME}" "${DISK_NAME}" \
+            "${MATRIX_NETWORK}" "${P2P}" "${RPC}" "${LOG_FILE}" "${SENTRY_DSN}" \
+            "${GCP_MACHINE}" "${GCP_SUBNETWORK}" "${GCP_DEPLOYMENTS_SA}" \
+            "${IP_ADDRESS:-}" "${CREATED_BY}" "${SOURCE_SHA}" "${GITHUB_REF_SLUG_URL}" \
+            | sha256sum | cut -c1-12)
+          TEMPLATE_NAME="zebrad-${ENVIRONMENT}-${SOURCE_SHA_SHORT}-${IMAGE_DIGEST:0:12}-${TEMPLATE_IDENTITY}-${NETWORK}-${ZONE_LETTER}"
+          echo "TEMPLATE_NAME=${TEMPLATE_NAME}" >> "$GITHUB_ENV"
+
+          # The name is a digest of the contents, so an existing template already holds
+          # this configuration. Verify the image anyway rather than assuming it: this
+          # is the one field whose mismatch would silently deploy the wrong code.
           if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
             TEMPLATE_IMAGE=$(gcloud compute instance-templates describe "${TEMPLATE_NAME}" \
               --format="value(properties.metadata.items.filter(key:zebra-container-image).extract(value))")
@@ -374,11 +444,7 @@ jobs:
       # RUNNING-UNKNOWN instances; the short poll handles the async gap
       # between MIG-create returning and list-instances reporting.
       - name: Assign static IP (fresh MIG, stable deploy)
-        if: >-
-          ${{
-            steps.does-group-exist.outcome == 'failure' &&
-            (inputs.environment == 'prod' || inputs.environment == 'stage')
-          }}
+        if: ${{ steps.does-group-exist.outcome == 'failure' && inputs.use_reserved_ip }}
         run: |
           if [ -z "${IP_ADDRESS:-}" ]; then
             echo "::warning::${IP_NAME:-zebra-${NETWORK}} not reserved; skipping"
@@ -409,6 +475,7 @@ jobs:
       # verification so a later deployment cannot replace the template while
       # this deployment is being verified.
       - name: Wait for requested template rollout
+        id: rollout
         run: |
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
             --version-target-reached --zone="${ZONE}" --timeout=600
@@ -420,9 +487,11 @@ jobs:
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
             --stable --zone="${ZONE}" --timeout=5400
 
-      # Surface the failing instance's health state and container logs.
-      - name: Diagnose verify failure
-        if: ${{ failure() && steps.verify.outcome == 'failure' }}
+      # Surface the failing instance's health state and container logs. Covers both
+      # waits: a rollout that never reaches the requested template is as much in need
+      # of diagnostics as a node that never becomes healthy.
+      - name: Diagnose rollout or verify failure
+        if: ${{ failure() && (steps.rollout.outcome == 'failure' || steps.verify.outcome == 'failure') }}
         env:
           GCP_PROJECT: ${{ vars.GCP_PROJECT }}
         run: |
@@ -455,7 +524,10 @@ jobs:
   failure-issue:
     name: Open or update issues for deploy failures
     needs: [validate, deploy-nodes]
-    if: failure() || cancelled()
+    # PR statuses are already reported in the PR jobs list, so only open tickets for
+    # non-PR callers. No caller deploys on a pull_request today; this keeps that true
+    # if one ever does.
+    if: ${{ (failure() || cancelled()) && github.event.pull_request == null }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

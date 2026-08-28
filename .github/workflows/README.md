@@ -72,7 +72,8 @@ graph TB
   %% Build dependency
   BuildDocker --> IT
   IT --> FindDisks --> Deploy
-  DeployNodes --> BuildDocker --> DeployPrebuilt
+  DeployNodes --> BuildDocker
+  DeployNodes --> DeployPrebuilt
 
   %% Styling
   classDef primary fill:#2374ab,stroke:#2374ab,color:white

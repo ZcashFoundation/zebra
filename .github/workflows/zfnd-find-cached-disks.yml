@@ -11,8 +11,8 @@ on:
   workflow_call:
     inputs:
       source_sha:
-        description: The immutable source revision used to determine the database format
-        required: true
+        description: The immutable source revision used to determine the database format. Defaults to the caller's commit.
+        required: false
         type: string
       network:
         description: The Zcash network used to look up the disks
@@ -72,7 +72,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:

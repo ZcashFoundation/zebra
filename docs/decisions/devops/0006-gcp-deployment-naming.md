@@ -94,7 +94,7 @@ Deterministic zone-to-IP mapping for `stage` and `prod`:
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-Dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that explicitly selects `prod` updates the stable production MIG and reserved IP for its selected network and zone.
+The deployment workflow takes this as an explicit `use_reserved_ip` input rather than inferring it, so each caller states whether its deploy is stable-addressed. The event-driven wrapper sets it for `push` and `release`, and for a workflow_dispatch that either selects `prod` or runs from the `main` ref — the latter because a dispatch selecting `dev` from `main` resolves to the `main-` prefix, i.e. the stage MIG, which must keep advertising the stage address. Every other dev workflow_dispatch gets no external address: the template passes `--no-address`, so those instances are outbound-only.
 
 ### Labels
 

@@ -244,7 +244,14 @@ Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-The workflow assigns them via per-instance configs in `stage` and `prod`; dev workflow_dispatch deploys use ephemeral IPs. A workflow_dispatch that selects `prod` updates the stable production MIG and reserved IP for its selected network and zone. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
+The workflow assigns them via per-instance configs whenever the caller passes `use_reserved_ip`: always for `push` and `release`, and for a workflow_dispatch that either selects `prod` or runs from the `main` ref. Two dispatch cases to watch:
+
+- Selecting `prod` updates the stable production MIG and its reserved IP for the selected network and zone, from whatever ref you dispatched.
+- Selecting `dev` **from the `main` ref** resolves to the `main-` prefix, so it updates the **stage** MIG and its reserved address — not a branch-private one.
+
+Every other dev workflow_dispatch gets no external IP at all: the instance template passes `--no-address`, so those instances reach the network outbound-only and never advertise a `ZEBRA_NETWORK__EXTERNAL_ADDR`. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
+
+Assignment only happens when the MIG is first created. If `instance-configs create` fails, or the address was not reserved at the time (the step warns and continues), a later rerun will not repair the binding — the MIG already exists, so the step is skipped — while the template may still carry `ZEBRA_NETWORK__EXTERNAL_ADDR`. Repair it by hand with `gcloud compute instance-groups managed instance-configs create`.
 
 **Cache images** are produced by `zfnd-ci-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
 

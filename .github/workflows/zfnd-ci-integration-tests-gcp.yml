@@ -163,7 +163,6 @@ jobs:
       id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     with:
-      source_sha: ${{ github.sha }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Check if the cached state disks used by the tests are available for testnet.
@@ -178,7 +177,6 @@ jobs:
       id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     with:
-      source_sha: ${{ github.sha }}
       network: Testnet
 
   # zebrad cached checkpoint state tests

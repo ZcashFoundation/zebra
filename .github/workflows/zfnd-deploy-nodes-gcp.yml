@@ -143,28 +143,32 @@ jobs:
       cached_disk_type: ${{ steps.set-matrix.outputs.cached_disk_type }}
       log_file: ${{ steps.set-matrix.outputs.log_file }}
       verify: ${{ steps.set-matrix.outputs.verify }}
+      use_reserved_ip: ${{ steps.set-matrix.outputs.use_reserved_ip }}
     steps:
       - id: set-matrix
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
           DISPATCH_NETWORK: ${{ inputs.network }}
           DISPATCH_ZONE: ${{ inputs.zone }}
           DISPATCH_ENVIRONMENT: ${{ inputs.environment }}
           DISPATCH_USE_CACHED_DISK: ${{ inputs.need_cached_disk }}
           DISPATCH_CACHED_DISK_TYPE: ${{ inputs.cached_disk_type }}
           DISPATCH_LOG_FILE: ${{ inputs.log_file }}
-          DEFAULT_LOG_FILE: ${{ vars.CD_LOG_FILE }}
         run: |
           NETWORKS='["Mainnet","Testnet"]'
           ZONES='["us-east1-b","us-east1-c","us-east1-d"]'
           CACHED_DISK_TYPE="tip"
-          LOG_FILE="${DEFAULT_LOG_FILE}"
+          # Empty means "use the deployment environment's default", which the
+          # environment-scoped deploy job resolves from vars.CD_LOG_FILE.
+          LOG_FILE=""
 
           case "${EVENT_NAME}" in
             release)
               ENVIRONMENT="prod"
               USE_CACHED_DISK="false"
               VERIFY="true"
+              USE_RESERVED_IP="true"
               ;;
             workflow_dispatch)
               ENVIRONMENT="${DISPATCH_ENVIRONMENT}"
@@ -172,20 +176,28 @@ jobs:
               ZONES=$(jq -cn --arg zone "${DISPATCH_ZONE}" '[$zone]')
               USE_CACHED_DISK="${DISPATCH_USE_CACHED_DISK}"
               CACHED_DISK_TYPE="${DISPATCH_CACHED_DISK_TYPE}"
-              if [ -n "${DISPATCH_LOG_FILE}" ]; then
-                LOG_FILE="${DISPATCH_LOG_FILE}"
-              fi
+              LOG_FILE="${DISPATCH_LOG_FILE}"
               VERIFY="false"
+              # A dispatch binds the reserved address when it targets prod, or when it
+              # runs from `main` - where the dev prefix resolves to the stage MIG, and
+              # so must keep advertising the stage address.
+              if [ "${DISPATCH_ENVIRONMENT}" = "prod" ] || [ "${REF_NAME}" = "main" ]; then
+                USE_RESERVED_IP="true"
+              else
+                USE_RESERVED_IP="false"
+              fi
               ;;
             push)
               ENVIRONMENT="stage"
               USE_CACHED_DISK="true"
               VERIFY="true"
+              USE_RESERVED_IP="true"
               ;;
             *)
               ENVIRONMENT="dev"
               USE_CACHED_DISK="true"
               VERIFY="false"
+              USE_RESERVED_IP="false"
               ;;
           esac
 
@@ -197,6 +209,7 @@ jobs:
             echo "cached_disk_type=${CACHED_DISK_TYPE}"
             echo "log_file=${LOG_FILE}"
             echo "verify=${VERIFY}"
+            echo "use_reserved_ip=${USE_RESERVED_IP}"
           } >> "$GITHUB_OUTPUT"
 
   # Each time this workflow is executed, a build will be triggered to create a new image
@@ -264,6 +277,7 @@ jobs:
       cached_disk_type: ${{ needs.set-matrix.outputs.cached_disk_type }}
       log_file: ${{ needs.set-matrix.outputs.log_file }}
       verify: ${{ fromJSON(needs.set-matrix.outputs.verify) }}
+      use_reserved_ip: ${{ fromJSON(needs.set-matrix.outputs.use_reserved_ip) }}
 
   build-failure-issue:
     name: Open or update issues for image build failures
