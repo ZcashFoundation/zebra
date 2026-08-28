@@ -74,10 +74,10 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Push the updated changelog and README into a new branch
       for example: `bump-v1.0.0` - this needs to be different to the tag name
 - [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
-- [ ] Freeze the merge queue: `git push origin main:refs/heads/merge-freeze`. Release PRs
-      (labelled `A-release`) stay exempt; everything else fails `pr-gate-result`.
-- [ ] Re-run PR Gate on the open PRs so already-green ones pick the freeze up — see
-      [Holding a Pull Request Back](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#holding-a-pull-request-back).
+- [ ] Freeze `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
+- [ ] Remove every active non-release entry from GitHub's merge queue so the freeze
+      takes effect immediately.
+- [ ] Use Merge Freeze's **Unfreeze 1 pull request** action for this release PR.
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
@@ -177,7 +177,7 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Set the tag name to the version tag,
       for example: `v1.0.0`
 - [ ] Set the release to target the `main` branch
-- [ ] Set the release title to `Zebra ` followed by the version tag,
+- [ ] Set the release title to `Zebra` followed by a space and the version tag,
       for example: `Zebra 1.0.0`
 - [ ] Copy the final changelog you created into the release description;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
@@ -216,7 +216,7 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
-- [ ] Thaw the merge queue: `git push origin --delete merge-freeze`
+- [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
 - [ ] Remove `do-not-merge` from any PRs you added it to
 
 ## Release Failures

@@ -1,28 +1,26 @@
-# Required source-PR gate verifying that a conventional-commit declaration is consistent with its code and changelog entries.
-# It also carries the merge-policy gates that decide whether a pull request may enter the merge queue at all.
-# The merge queue re-runs this workflow on `merge_group`, where the policy jobs skip and the result skip-passes:
-# every job here reads pull request metadata, which a merge group does not have.
+# Required source-PR gate verifying that a conventional-commit declaration is
+# consistent with its code and changelog entries.
 name: PR Gate
 
 on:
-  # `edited` re-runs the source gate when the declaration changes; labels re-evaluate
-  # release readiness and the `do-not-merge` hold.
+  # `edited` re-runs the source gate when the declaration changes; labels
+  # re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: [main]
   push:
     branches: [main]
   merge_group:
+    types: [checks_requested]
 
 # Cancel obsolete gate runs after new commits. Events that cannot change the gate
 # outcome use separate groups so they cannot cancel the required PR Gate run:
 # unrelated labels, and edits that leave the title and the base branch alone.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'A-release' &&
-      github.event.label.name != 'do-not-merge' &&
       'ignored-label' ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
@@ -38,21 +36,15 @@ permissions:
 
 env:
   CLICOLOR: 1
-  # A pull request cannot be queued while this ref exists, unless it is a release
-  # pull request. Freeze with `git push origin main:refs/heads/merge-freeze`, thaw by
-  # deleting the ref. A ref is used rather than a repository variable because
-  # `vars` are not readable from pull requests opened from forks.
-  FREEZE_REF: merge-freeze
 
 jobs:
   changes:
-    # Only the A-release and do-not-merge labels affect gate results, and only a title
-    # or base edit can change the declaration this gate reads. Every other label and
-    # edit event is a no-op, so it must not spend a runner or replace the required check.
+    # Only the A-release label affects gate results, and only a title or base edit
+    # can change the declaration this gate reads. Every other label and edit event
+    # is a no-op, so it must not spend a runner or replace the required check.
     if: >-
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release' ||
-      github.event.label.name == 'do-not-merge') &&
+      github.event.label.name == 'A-release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     runs-on: ubuntu-latest
@@ -67,6 +59,13 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
+      - name: Require one release-plz configuration
+        if: github.event_name == 'pull_request'
+        run: |
+          if [[ ! -f release-plz.toml || -e .release-plz.toml ]]; then
+            echo "::error title=Invalid release-plz configuration::Keep the complete configuration in release-plz.toml and do not add .release-plz.toml."
+            exit 1
+          fi
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         if: github.event_name == 'pull_request'
@@ -101,56 +100,6 @@ jobs:
             echo "type=$type"
             echo "conventional=$conventional"
           } >> "$GITHUB_OUTPUT"
-
-  # Merge-policy holds. The native merge queue has no conditions of its own: a pull
-  # request is queueable exactly when its required checks pass, so both holds are
-  # expressed as a required check that fails while the hold is in force.
-  merge-gates:
-    name: Merge gates
-    if: >-
-      github.event_name == 'pull_request' &&
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release' ||
-      github.event.label.name == 'do-not-merge') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Hold the pull request while do-not-merge is set
-        if: contains(github.event.pull_request.labels.*.name, 'do-not-merge')
-        run: |
-          echo "::error title=Held by do-not-merge::Remove the \`do-not-merge\` label to let this pull request enter the merge queue."
-          exit 1
-      # Release pull requests are exempt: a freeze exists so that only the release can land.
-      # The exemption is the `A-release` label, which needs write access to set. It is not
-      # the `release-plz-` branch name, which the pull request author chooses.
-      - name: Hold the pull request while the merge freeze is active
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IS_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'A-release') }}
-        run: |
-          # `matching-refs` answers an absent ref with an empty array, so "no freeze" and
-          # "could not tell" are distinguishable. A freeze must not lift because the API
-          # timed out, so anything other than a clean answer holds the pull request.
-          if ! refs="$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/heads/${FREEZE_REF}" --jq '.[].ref')"; then
-            echo "::error title=Merge freeze state unknown::Reading \`${FREEZE_REF}\` failed, so this check cannot tell whether a freeze is active. Re-run it."
-            exit 1
-          fi
-
-          # `matching-refs` matches by prefix, so require the exact ref.
-          if ! grep -qxF "refs/heads/${FREEZE_REF}" <<<"${refs}"; then
-            echo "No \`${FREEZE_REF}\` ref: merges are open."
-            exit 0
-          fi
-
-          if [[ "${IS_RELEASE}" == "true" ]]; then
-            echo "Merge freeze is active, and this pull request is labelled \`A-release\`: allowed through."
-            exit 0
-          fi
-
-          echo "::error title=Held by the merge freeze::A merge freeze is active (the \`${FREEZE_REF}\` ref exists). Only \`A-release\` pull requests can be queued until it is deleted."
-          exit 1
 
   semver-checks:
     needs: changes
@@ -218,8 +167,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release' ||
-      github.event.label.name == 'do-not-merge') &&
+      github.event.label.name == 'A-release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
@@ -325,7 +273,6 @@ jobs:
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
         github.event.label.name != 'A-release' &&
-        github.event.label.name != 'do-not-merge' &&
         'Label does not affect the PR gate' ||
         github.event.action == 'edited' &&
         github.event.changes.title == null &&
@@ -337,11 +284,10 @@ jobs:
     if: >-
       always() &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release' ||
-      github.event.label.name == 'do-not-merge') &&
+      github.event.label.name == 'A-release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
-    needs: [changes, merge-gates, semver-checks, changelog-gate, release-readiness]
+    needs: [changes, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -353,6 +299,4 @@ jobs:
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
           allowed-failures: changelog-gate
-          # `merge-gates` only skips on `push` and `merge_group`, where there is no pull
-          # request to hold. On a pull request it always runs, so a hold always fails here.
-          allowed-skips: merge-gates, semver-checks, release-readiness
+          allowed-skips: semver-checks, release-readiness
