@@ -19,6 +19,26 @@ on:
     # This is limited to the Zebra and lightwalletd Full Sync jobs
     - cron: 0 12 * * 5
 
+  #! Only this repository runs the weekly `schedule`. A copy of this workflow in any other
+  #! repository is scheduled independently by GitHub and would deploy into the same GCP
+  #! project, colliding on instance and disk names.
+  #!
+  #! The schedule guard means: "Run unless this is a scheduled event in the wrong repository."
+  #!
+  #! | Event           | Repository               | Guard |
+  #! |-----------------|--------------------------|-------|
+  #! | `schedule`      | `ZcashFoundation/zebra`  | true  |
+  #! | `schedule`      | any clone                | false |
+  #! | anything else   | any repository           | true  |
+  #!
+  #! The guard is on the three jobs that have no `needs:` — `build`, `get-available-disks`
+  #! and `get-available-disks-testnet` — so everything downstream skips with them, plus
+  #! `integration-tests-success` because it is `always()` and does not allow `build` to skip.
+  #! Guard any new job without `needs:`, and any downstream job whose `if:` can still be true
+  #! when its guarded dependencies are skipped, such as a job using `always()`.
+  #!
+  #! `workflow_dispatch`, `push` and `pull_request` are deliberately unaffected everywhere.
+
   workflow_dispatch:
     inputs:
       network:
@@ -126,7 +146,7 @@ jobs:
   build:
     name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) && (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') }}
     permissions:
       contents: read
       id-token: write
@@ -157,7 +177,7 @@ jobs:
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) && (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') }}
     permissions:
       contents: read
       id-token: write
@@ -171,7 +191,7 @@ jobs:
   # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) && (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') }}
     permissions:
       contents: read
       id-token: write
@@ -258,7 +278,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ github.event_name == 'schedule' || (needs.get-available-disks.result == 'success' && !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') && (github.event_name == 'schedule' || (needs.get-available-disks.result == 'success' && !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet')) }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-mainnet', github.run_id) || 'sync-full-mainnet' }}
       cancel-in-progress: false
@@ -362,7 +382,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ github.event_name == 'schedule' || (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') && (github.event_name == 'schedule' || (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet')) }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-testnet', github.run_id) || 'sync-full-testnet' }}
       cancel-in-progress: false
@@ -615,7 +635,8 @@ jobs:
       ${{
         always() &&
         (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) &&
-        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests'))
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) &&
+        (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra')
       }}
     needs:
       - build
