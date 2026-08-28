@@ -35,6 +35,13 @@ semver:
   - ".github/workflows/pr-gate.yml"
   - ".github/path-filters.yml"
 
+api_diff:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".github/workflows/pr-gate.yml"
+  - ".github/path-filters.yml"
+
 unit_tests:
   - "**/*.rs"
   - "**/Cargo.toml"

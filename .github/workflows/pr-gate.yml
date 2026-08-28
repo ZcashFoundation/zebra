@@ -62,6 +62,7 @@ jobs:
     outputs:
       queue_candidate: ${{ steps.classify.outputs.queue_candidate || 'false' }}
       semver: ${{ steps.filter.outputs.semver || 'true' }}
+      api_diff: ${{ steps.filter.outputs.api_diff || 'true' }}
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
@@ -155,6 +156,94 @@ jobs:
           exclude: zebrad, zebra-test, zebra-utils
           feature-group: default-features
           baseline-rev: ${{ steps.baseline.outputs.rev }}
+
+  api-diff:
+    needs: changes
+    # Real work runs only on contributor pull requests that change Rust. A declared break runs
+    # too: the diff is the evidence a reviewer needs to judge what the `!` actually covers.
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.queue_candidate != 'true' &&
+      needs.changes.outputs.api_diff == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Check out the PR head, not the merge commit, so the API delta is the PR's own.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compute the baseline from the PR's fork point
+        id: baseline
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # `fetch-depth: 0` populates the base branch without persisting credentials.
+          echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
+      # zc builds the workspace crates at both refs, so librocksdb-sys needs libclang.
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` writes on main; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache
+          # zc keys entries by commit SHA and prunes them after 14 days, so a prefix restore is safe.
+          key: zc-cache-${{ runner.os }}-v0.5.0-${{ steps.baseline.outputs.rev }}
+          restore-keys: zc-cache-${{ runner.os }}-v0.5.0-
+      # A declared break only has to analyse cleanly; an undeclared one must not break the API.
+      - name: Diff the public API and dependencies
+        uses: ZcashFoundation/zc@15a7a89df262cf68bdf5daac807d14638307488b # v0.5.0
+        with:
+          baseline: ${{ steps.baseline.outputs.rev }}
+          fail-on: ${{ needs.changes.outputs.breaking == 'true' && 'error' || 'api-breaking' }}
+
+  # A pull request can only restore caches written on its own ref or on main, so this
+  # push-only job is what makes the pull request side's `restore-keys` prefix hit.
+  api-diff-warm:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: api-diff-warm-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the baseline this push builds on
+        id: baseline
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A force push or a new branch reports an all-zero or unreachable predecessor.
+          baseline="$BEFORE"
+          if [[ "$baseline" =~ ^0+$ ]] || ! git cat-file -e "${baseline}^{commit}" 2> /dev/null; then
+            baseline="$(git rev-parse 'HEAD^')"
+          fi
+          echo "rev=$baseline" >> "$GITHUB_OUTPUT"
+      # zc builds the workspace crates at both refs, so librocksdb-sys needs libclang.
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Restore the zc rustdoc cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache
+          key: zc-cache-${{ runner.os }}-v0.5.0-${{ github.sha }}
+          restore-keys: zc-cache-${{ runner.os }}-v0.5.0-
+      - name: Diff the public API and dependencies
+        # Warming only has to populate the cache, so findings and environmental failures both pass.
+        continue-on-error: true
+        uses: ZcashFoundation/zc@15a7a89df262cf68bdf5daac807d14638307488b # v0.5.0
+        with:
+          baseline: ${{ steps.baseline.outputs.rev }}
+          fail-on: none
+      - name: Save the zc rustdoc cache
+        if: always() && hashFiles('target/zc-cache/**') != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache
+          key: zc-cache-${{ runner.os }}-v0.5.0-${{ github.sha }}
 
   # This checks for changelog entries depending on the type of the PR (per title).
   # An entry is required for a crate if any file in the crate changed.
@@ -310,7 +399,7 @@ jobs:
       github.event.label.name == 'A-release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
-    needs: [changes, semver-checks, changelog-gate, release-readiness]
+    needs: [changes, semver-checks, api-diff, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -322,4 +411,4 @@ jobs:
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
           allowed-failures: changelog-gate
-          allowed-skips: semver-checks, release-readiness
+          allowed-skips: semver-checks, api-diff, release-readiness

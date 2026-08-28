@@ -135,7 +135,7 @@ when the gate could not run (for example, the previous release was yanked, which
 - [ ] For each crate, confirm the chosen release level matches the API surface:
       `cargo semver-checks -p <crate> --default-features`. List the full API diff
       with `cargo public-api diff latest -p <crate> -sss`, or run
-      [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once to
+      [`zc`](https://github.com/ZcashFoundation/zc) `<previous_tag>` once to
       get the per-crate diff plus dependency and (with `--with-values`)
       const/static value and doc changes in one pass.
 
