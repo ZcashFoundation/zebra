@@ -435,7 +435,7 @@ fuzz_target!(|data: &[u8]| {
         let mut sapling_tree = zebra_chain::sapling::tree::NoteCommitmentTree::default();
         for cm_u in block.sapling_note_commitments() {
             // Single-block insert; FullTree etc. are valid Err returns.
-            let _ = sapling_tree.append(*cm_u);
+            let _ = sapling_tree.append(cm_u);
         }
         // Root computation must not panic on any valid intermediate
         // state of the tree.
@@ -444,7 +444,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let mut orchard_tree = zebra_chain::orchard::tree::NoteCommitmentTree::default();
         for cm_x in block.orchard_note_commitments() {
-            let _ = orchard_tree.append(*cm_x);
+            let _ = orchard_tree.append(cm_x);
         }
         let _ = orchard_tree.root();
     }));
@@ -685,9 +685,8 @@ fn deep_fuzz_transaction(tx: &Transaction) {
     let _has_transparent_or_shielded_out = tx.has_transparent_or_shielded_outputs();
 
     let _joinsplit_count = tx.joinsplit_count();
-    for _js in tx.sprout_joinsplits() {}
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        for _js in tx.sprout_groth16_joinsplits() {}
+        for _js in tx.sprout_joinsplit_descriptions() {}
     }));
     let _pub_key = tx.sprout_joinsplit_pub_key();
     let _has_sprout = tx.has_sprout_joinsplit_data();
@@ -696,13 +695,12 @@ fn deep_fuzz_transaction(tx: &Transaction) {
     }));
 
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.sapling_anchors() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _s in tx.sapling_spends_per_anchor() {} }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _s in tx.sapling_spends() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _o in tx.sapling_outputs() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.sapling_nullifiers() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.sapling_note_commitments() {} }));
     let _has_sapling = tx.has_sapling_shielded_data();
 
-    let _orchard_data = tx.orchard_shielded_data();
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.orchard_actions() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.orchard_nullifiers() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.orchard_note_commitments() {} }));
@@ -712,7 +710,6 @@ fn deep_fuzz_transaction(tx: &Transaction) {
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.output_values_to_sprout() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.input_values_from_sprout() {} }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.sapling_value_balance() }));
-    let _binding_sig = tx.sapling_binding_sig();
 
     let _enough_flags = tx.has_enough_orchard_flags();
     let _valid_non_coinbase = tx.is_valid_non_coinbase();
