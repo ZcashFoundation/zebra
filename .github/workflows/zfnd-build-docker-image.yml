@@ -150,7 +150,7 @@ jobs:
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
@@ -165,7 +165,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 #v6.2.0
         with:
           # list of Docker images to use as base name for tags
           # Docker Hub publishing requires ALL conditions to be true:
@@ -212,14 +212,14 @@ jobs:
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f #v4.6.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to DockerHub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f #v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -227,7 +227,7 @@ jobs:
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
         with:
           version: lab:latest
           driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
@@ -239,7 +239,7 @@ jobs:
       - name: Build & push (with attestations)
         id: docker_build
         if: github.repository_owner == 'ZcashFoundation'
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a #v7.3.0
         with:
           platforms: ${{ matrix.platform }}
           target: ${{ inputs.dockerfile_target }}
@@ -266,7 +266,7 @@ jobs:
       - name: Build & push (without attestations)
         id: docker_build_no_attestations
         if: github.repository_owner != 'ZcashFoundation'
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a #v7.3.0
         with:
           platforms: ${{ matrix.platform }}
           target: ${{ inputs.dockerfile_target }}
@@ -329,7 +329,7 @@ jobs:
       # Docker meta for tag generation
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 #v6.2.0
         with:
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
@@ -353,7 +353,7 @@ jobs:
           access_token_lifetime: 3600s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f #v4.6.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
@@ -364,7 +364,7 @@ jobs:
       # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
         if: (inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease) || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v'))
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f #v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -395,7 +395,7 @@ jobs:
       # Sign + attest the released image
       - name: Attest build provenance
         if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: docker.io/zfnd/${{ inputs.image_name }}
           subject-digest: ${{ steps.create.outputs.digest }}
@@ -459,7 +459,7 @@ jobs:
       # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a #v1.21.0
+        uses: docker/scout-action@7c6b6c3f7844478ace1ffd4e7aef649053d1f87d #v1.24.0
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
