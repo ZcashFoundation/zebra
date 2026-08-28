@@ -14,12 +14,14 @@ For production, set `P=zfnd-prod-zebra` instead.
 
 Zonal MIGs use `--zone` (not `--region`). One MIG per zone per network. MIG names end with the zone letter (`-b`, `-c`, `-d`).
 
-## Deploy success has two channels
+## Deploy success has two stages
 
-The workflow reports two independent signals:
+Each `deploy-nodes` matrix cell reports two sequential signals:
 
-- `deploy-nodes` (and `failure-issue` with label `S-ci-fail-release-auto-issue`) reports **infrastructure**: template, zonal MIG, stateful disk, and static IP landed. Usually green within 3-5 minutes per matrix cell; a failure means the deploy itself broke.
-- `verify-nodes` (and `verify-failure-issue` with label `S-ci-fail-verify-auto-issue`) reports **application**: the zonal MIG reached HEALTHY. Up to 90 minutes; a failure means the node took longer than that to establish peers and catch up to chain tip. The MIG itself is fine; on-call action is usually "wait, or investigate why sync is slow".
+- **Template rollout** waits up to 10 minutes for the requested template to reach the zonal MIG. A failure means the deployment infrastructure did not converge.
+- **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. A failure means the node took longer than that to establish peers and catch up to chain tip; on-call action is usually "wait, or investigate why sync is slow".
+
+The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `S-ci-fail-release-auto-issue`.
 
 ## Quick reference
 
@@ -247,7 +249,14 @@ Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY
 - `us-east1-c` → `zebra-${network}-secondary`
 - `us-east1-d` → `zebra-${network}-tertiary`
 
-The workflow assigns them via per-instance configs for push and release deploys; workflow_dispatch deploys use ephemeral IPs. Reserve new ones manually with `gcloud compute addresses create` before adding capacity.
+The workflow assigns them via per-instance configs whenever the caller passes `use_reserved_ip`: always for `push` and `release`, and for a workflow_dispatch that either selects `prod` or runs from the `main` ref. Two dispatch cases to watch:
+
+- Selecting `prod` updates the stable production MIG and its reserved IP for the selected network and zone, from whatever ref you dispatched.
+- Selecting `dev` **from the `main` ref** resolves to the `main-` prefix, so it updates the **stage** MIG and its reserved address — not a branch-private one.
+
+Every other dev workflow_dispatch gets no external IP at all: the instance template passes `--no-address`, so those instances reach the network outbound-only and never advertise a `ZEBRA_NETWORK__EXTERNAL_ADDR`. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
+
+Assignment only happens when the MIG is first created. If `instance-configs create` fails, or the address was not reserved at the time (the step warns and continues), a later rerun will not repair the binding — the MIG already exists, so the step is skipped — while the template may still carry `ZEBRA_NETWORK__EXTERNAL_ADDR`. Repair it by hand with `gcloud compute instance-groups managed instance-configs create`.
 
 **Cache images** are produced by `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
 
