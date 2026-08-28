@@ -1,0 +1,541 @@
+# Deploy one complete immutable Zebra image to Google Cloud Platform.
+#
+# One zonal MIG per (environment, branch, network, zone). MIG names:
+#   - prod:  zebrad-${network}-${zone-letter}
+#   - stage: zebrad-main-${network}-${zone-letter}
+#   - dev:   zebrad-${branch}-${network}-${zone-letter}
+#
+# Design rationale: docs/decisions/devops/0006-gcp-deployment-naming.md
+# Operations: book/src/dev/gcp-deployment-operations.md
+name: Deploy prebuilt GCP image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: The immutable Google Artifact Registry image to deploy, as repository@sha256:digest
+        required: true
+        type: string
+      source_sha:
+        description: The immutable source commit represented by the image
+        required: true
+        type: string
+      environment:
+        description: The target environment, dev, stage, or prod
+        required: true
+        type: string
+      created_by:
+        description: The deployment origin stored in GCP resource labels
+        required: true
+        type: string
+      networks:
+        description: A JSON array of Zcash networks
+        required: true
+        type: string
+      zones:
+        description: A JSON array of GCP zones
+        required: true
+        type: string
+      use_cached_disk:
+        description: Whether fresh state disks should use cached state images
+        required: true
+        type: boolean
+      cached_disk_type:
+        description: The cached state image type
+        required: true
+        type: string
+      log_file:
+        description: Overrides the environment's default Zebra log file path. Empty uses the environment default.
+        required: true
+        type: string
+      verify:
+        description: Whether to wait for deployed nodes to become healthy
+        required: true
+        type: boolean
+      use_reserved_ip:
+        description: Whether to bind the environment's reserved external address
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate deployment inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate deployment contract
+        env:
+          IMAGE: ${{ inputs.image }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          NETWORKS: ${{ inputs.networks }}
+          ZONES: ${{ inputs.zones }}
+          LOG_FILE: ${{ inputs.log_file }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if [[ ! "${IMAGE}" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[^/@[:space:]:]+/[^/@[:space:]:]+/[^@[:space:]:]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::image must be a complete Google Artifact Registry repository@sha256:digest identity"
+            exit 1
+          fi
+          # Truncated to seven characters for template names and resource labels, both
+          # of which constrain the character set.
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit hash"
+            exit 1
+          fi
+          case "${ENVIRONMENT}" in
+            dev|stage|prod) ;;
+            *) echo "::error::environment must be dev, stage, or prod"; exit 1 ;;
+          esac
+          # The network and zone allow-lists below are deliberately hard-coded rather
+          # than derived from the caller. They duplicate the wrapper's matrix source,
+          # so adding a zone means editing both, but that is the point: an arbitrary
+          # caller must not be able to name a cell this fleet does not operate.
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "Mainnet" or . == "Testnet")
+          ' <<< "${NETWORKS}" >/dev/null; then
+            echo "::error::networks must be a non-empty, unique array containing only Mainnet and Testnet"
+            exit 1
+          fi
+          if ! jq -e '
+            type == "array" and length > 0 and
+            length == (unique | length) and
+            all(.[]; . == "us-east1-b" or . == "us-east1-c" or . == "us-east1-d")
+          ' <<< "${ZONES}" >/dev/null; then
+            echo "::error::zones must be a non-empty, unique array containing only supported us-east1 zones"
+            exit 1
+          fi
+          # log_file is concatenated into a comma-separated --container-env list, so a
+          # comma would inject additional container environment variables.
+          if [[ "${LOG_FILE}" == *,* ]]; then
+            echo "::error::log_file must not contain a comma"
+            exit 1
+          fi
+
+  # One-shot upsert of the HTTP health checks used by the zonal MIGs.
+  # These are global, network-scoped resources (one per network), so running
+  # them once per deployment avoids concurrent create/update races.
+  ensure-health-checks:
+    name: Ensure health checks exist
+    needs: [validate]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+      - env:
+          NETWORKS: ${{ inputs.networks }}
+        run: |
+          for NET in $(jq -r '.[] | ascii_downcase' <<< "${NETWORKS}"); do
+            # A competing deployment can win the create; accept that race only
+            # when a second describe confirms the shared health check exists.
+            gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null \
+            || gcloud compute health-checks create http "zebra-${NET}-health" \
+              --port=8080 --request-path=/healthy \
+              --check-interval=60s --timeout=10s \
+              --unhealthy-threshold=3 --healthy-threshold=2 \
+              --global \
+            || gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null
+          done
+
+  # Cache images are network-scoped, so each selected network gets one lookup.
+  get-disk-name-mainnet:
+    name: Get Mainnet cached disk
+    needs: [validate]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-find-cached-disks.yml
+    if: ${{ inputs.use_cached_disk && contains(fromJSON(inputs.networks), 'Mainnet') }}
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      network: Mainnet
+      environment: ${{ inputs.environment }}
+      disk_prefix: zebrad-cache
+      disk_suffix: ${{ inputs.cached_disk_type }}
+
+  get-disk-name-testnet:
+    name: Get Testnet cached disk
+    needs: [validate]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-find-cached-disks.yml
+    if: ${{ inputs.use_cached_disk && contains(fromJSON(inputs.networks), 'Testnet') }}
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      network: Testnet
+      environment: ${{ inputs.environment }}
+      disk_prefix: zebrad-cache
+      disk_suffix: ${{ inputs.cached_disk_type }}
+
+  # Create or update one zonal MIG per matrix cell. Each cell is a
+  # (network, zone) tuple. MIG identity is the tuple plus environment +
+  # branch. No two MIGs ever share a disk; rolling updates are per-zone.
+  deploy-nodes:
+    strategy:
+      fail-fast: false
+      matrix:
+        network: ${{ fromJSON(inputs.networks) }}
+        zone: ${{ fromJSON(inputs.zones) }}
+    name: Deploy ${{ matrix.network }} ${{ matrix.zone }}
+    # Serialize by the MIG this cell actually updates, not by environment. Those are
+    # not the same key: `stage` and a `dev` deploy running from `main` both resolve to
+    # the `main-` prefix, so keying on environment hands them separate locks while they
+    # roll the same MIG and the same stateful disk.
+    concurrency:
+      group: >-
+        zebra-gcp-${{ inputs.environment == 'prod' && 'prod'
+          || (inputs.environment == 'stage' && 'main' || github.ref_name) }}-${{ matrix.network }}-${{ matrix.zone }}
+      cancel-in-progress: false
+    needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CACHED_DISK_NAME: >-
+        ${{ matrix.network == 'Mainnet'
+            && needs.get-disk-name-mainnet.outputs.cached_disk_name
+            || needs.get-disk-name-testnet.outputs.cached_disk_name }}
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    if: >-
+      ${{
+        !cancelled() && !failure() &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
+        with:
+          short-length: 7
+
+      - name: Extract matrix values
+        env:
+          MATRIX_NETWORK: ${{ matrix.network }}
+          MATRIX_ZONE: ${{ matrix.zone }}
+        run: |
+          {
+            echo "NETWORK=${MATRIX_NETWORK,,}"
+            echo "ZONE=${MATRIX_ZONE}"
+            echo "ZONE_LETTER=${MATRIX_ZONE##*-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+        with:
+          install_components: 'beta'
+
+      - name: Compute MIG and disk naming
+        env:
+          DEPLOY_IMAGE: ${{ inputs.image }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          case "${ENVIRONMENT}" in
+            prod)  PREFIX="" ;;
+            stage) PREFIX="main-" ;;
+            dev)   PREFIX="${REF_SLUG}-" ;;
+            # An unmatched environment would leave PREFIX empty, which is the
+            # production MIG name. Fail instead.
+            *)     echo "::error::unsupported environment ${ENVIRONMENT}"; exit 1 ;;
+          esac
+          SOURCE_SHA_SHORT="${SOURCE_SHA:0:7}"
+          # TEMPLATE_NAME is not derivable here: it digests the template's full
+          # contents, and the reserved address is not resolved until a later step.
+          # It is computed in "Create instance template".
+          {
+            echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+            echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+            echo "SOURCE_SHA_SHORT=${SOURCE_SHA_SHORT}"
+          } >> "$GITHUB_ENV"
+
+      # Reject early if the zonal disk is held by an instance from another MIG.
+      - name: Pre-flight check for stateful disk squatter
+        run: |
+          users=$(gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" \
+            --format="value(users.basename())" 2>/dev/null || true)
+          for user in ${users}; do
+            owner=$(gcloud compute instances describe "${user}" --zone="${ZONE}" \
+              --format="value(metadata.items.filter(key:created-by).extract(value))" 2>/dev/null \
+              | grep -oE 'instanceGroupManagers/[a-z0-9-]+' | cut -d/ -f2 || true)
+            if [ -n "${owner}" ] && [ "${owner}" != "${MIG_NAME}" ]; then
+              echo "::error::${DISK_NAME} in ${ZONE} is held by ${user} (MIG ${owner}). See gcp-deployment-operations.md."
+              exit 1
+            fi
+          done
+
+      # Create zonal disk from cache image on first deploy; attach existing on
+      # subsequent deploys or after a manual bootstrap.
+      - name: Ensure zonal disk exists
+        env:
+          CREATED_BY: ${{ inputs.created_by }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" &>/dev/null; then
+            exit 0
+          fi
+          if [ -z "${CACHED_DISK_NAME}" ]; then
+            echo "::error::No ${DISK_NAME} and no cache image. Seed via integration-tests or manual snapshot."
+            exit 1
+          fi
+          gcloud compute disks create "${DISK_NAME}" --zone="${ZONE}" \
+            --image="${CACHED_DISK_NAME}" \
+            --size=400 --type=pd-balanced \
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}"
+
+      # Single source of truth for the zone-suffix to reserved-IP mapping.
+      # The caller decides whether this deploy is stable-addressed, so a
+      # feature-branch dispatch to dev can't advertise an address that isn't
+      # actually attached to the MIG it rolls.
+      - name: Resolve reserved external IP
+        if: ${{ inputs.use_reserved_ip }}
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          case "${ZONE_LETTER}" in
+            b) SUFFIX="" ;;
+            c) SUFFIX="-secondary" ;;
+            d) SUFFIX="-tertiary" ;;
+            # An unmatched zone would leave SUFFIX empty, silently selecting the
+            # primary address. Fail instead.
+            *) echo "::error::unsupported zone ${ZONE}"; exit 1 ;;
+          esac
+          IP_NAME="zebra-${NETWORK}${SUFFIX}"
+          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
+            --region="${GCP_REGION}" --format='value(address)' 2>/dev/null || true)
+          echo "IP_NAME=${IP_NAME}" >> "$GITHUB_ENV"
+          echo "IP_ADDRESS=${IP_ADDRESS}" >> "$GITHUB_ENV"
+
+      - name: Create instance template
+        env:
+          CREATED_BY: ${{ inputs.created_by }}
+          DEPLOY_IMAGE: ${{ inputs.image }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          GCP_DEPLOYMENTS_SA: ${{ vars.GCP_DEPLOYMENTS_SA }}
+          GCP_MACHINE: ${{ vars.GCP_SMALL_MACHINE }}
+          GCP_SUBNETWORK: ${{ vars.GCP_SUBNETWORK }}
+          # Resolved here rather than in the caller: this job is environment-scoped,
+          # so vars.CD_LOG_FILE picks up a dev/stage/prod override if one is set.
+          LOG_FILE: ${{ inputs.log_file || vars.CD_LOG_FILE }}
+          MATRIX_NETWORK: ${{ matrix.network }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if [ "${MATRIX_NETWORK}" = "Mainnet" ]; then
+            P2P=8233; RPC=8232
+          else
+            P2P=18233; RPC=18232
+          fi
+
+          # log_file is spliced into the comma-separated --container-env list below, so
+          # a comma would inject extra container environment variables. The validate
+          # job checks the input; check the effective value, which may instead have
+          # come from the environment-scoped vars.CD_LOG_FILE fallback.
+          if [[ "${LOG_FILE}" == *,* ]]; then
+            echo "::error::log_file must not contain a comma"
+            exit 1
+          fi
+
+          # Name the template after a digest of everything that goes into it, so that
+          # "a template with this name exists" means "it holds exactly this
+          # configuration". Naming it after a subset - the commit and image alone -
+          # is not safe: MIG and disk names carry the branch prefix, so two dev refs
+          # at one commit would share a template that attaches the *other* ref's
+          # stateful disk. It also keeps changes to the log file, Sentry DSN, machine
+          # type, subnet, service account or reserved address from being silently
+          # dropped on redeploy. Redeploying identical configuration still reuses the
+          # template, so the rolling update stays a no-op.
+          IMAGE_DIGEST="${DEPLOY_IMAGE##*@sha256:}"
+          TEMPLATE_IDENTITY=$(printf '%s\0' \
+            "${DEPLOY_IMAGE}" "${ENVIRONMENT}" "${MIG_NAME}" "${DISK_NAME}" \
+            "${MATRIX_NETWORK}" "${P2P}" "${RPC}" "${LOG_FILE}" "${SENTRY_DSN}" \
+            "${GCP_MACHINE}" "${GCP_SUBNETWORK}" "${GCP_DEPLOYMENTS_SA}" \
+            "${IP_ADDRESS:-}" "${CREATED_BY}" "${SOURCE_SHA}" "${GITHUB_REF_SLUG_URL}" \
+            | sha256sum | cut -c1-12)
+          TEMPLATE_NAME="zebrad-${ENVIRONMENT}-${SOURCE_SHA_SHORT}-${IMAGE_DIGEST:0:12}-${TEMPLATE_IDENTITY}-${NETWORK}-${ZONE_LETTER}"
+          echo "TEMPLATE_NAME=${TEMPLATE_NAME}" >> "$GITHUB_ENV"
+
+          # The name is a digest of the contents, so an existing template already holds
+          # this configuration. Verify the image anyway rather than assuming it: this
+          # is the one field whose mismatch would silently deploy the wrong code.
+          if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
+            TEMPLATE_IMAGE=$(gcloud compute instance-templates describe "${TEMPLATE_NAME}" \
+              --format="value(properties.metadata.items.filter(key:zebra-container-image).extract(value))")
+            if [ "${TEMPLATE_IMAGE}" != "${DEPLOY_IMAGE}" ]; then
+              echo "::error::${TEMPLATE_NAME} does not contain the requested immutable image"
+              exit 1
+            fi
+            exit 0
+          fi
+
+          EXTERNAL_ADDR_ENV=""
+          if [ -n "${IP_ADDRESS:-}" ]; then
+            EXTERNAL_ADDR_ENV=",ZEBRA_NETWORK__EXTERNAL_ADDR=${IP_ADDRESS}:${P2P}"
+          fi
+
+          gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
+            --machine-type="${GCP_MACHINE}" \
+            --provisioning-model=SPOT \
+            --boot-disk-size=10GB --boot-disk-type=pd-standard \
+            --image-project=cos-cloud --image-family=cos-stable \
+            --subnet="${GCP_SUBNETWORK}" --no-address \
+            --disk="name=${DISK_NAME},device-name=${DISK_NAME},mode=rw,auto-delete=no,boot=no" \
+            --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
+            --container-stdin --container-tty \
+            --container-image="${DEPLOY_IMAGE}" \
+            --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
+            --service-account="${GCP_DEPLOYMENTS_SA}" --scopes=cloud-platform \
+            --metadata="google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true,zebra-container-image=${DEPLOY_IMAGE}" \
+            --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
+            --tags=zebrad
+
+      - name: Check if zonal MIG exists
+        id: does-group-exist
+        continue-on-error: true
+        run: |
+          gcloud compute instance-groups managed describe "${MIG_NAME}" --zone="${ZONE}" >/dev/null 2>&1
+
+      # Fresh MIG: size=1 (one instance per zonal MIG). The template's
+      # `--disk=name=…` attaches the pre-created zonal disk.
+      - name: Create zonal MIG
+        if: steps.does-group-exist.outcome == 'failure'
+        run: |
+          gcloud compute instance-groups managed create "${MIG_NAME}" \
+            --template="${TEMPLATE_NAME}" \
+            --zone="${ZONE}" \
+            --size=1 \
+            --health-check="zebra-${NETWORK}-health" \
+            --initial-delay=3600
+
+      - name: Apply stateful disk policy (fresh MIG)
+        if: steps.does-group-exist.outcome == 'failure'
+        run: |
+          gcloud compute instance-groups managed update "${MIG_NAME}" \
+            --stateful-disk="device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
+            --zone="${ZONE}"
+
+      # Bind the reserved IP resolved earlier to the fresh MIG instance.
+      # `instance-configs create --stateful-external-ip` accepts STAGING /
+      # RUNNING-UNKNOWN instances; the short poll handles the async gap
+      # between MIG-create returning and list-instances reporting.
+      - name: Assign static IP (fresh MIG, stable deploy)
+        if: ${{ steps.does-group-exist.outcome == 'failure' && inputs.use_reserved_ip }}
+        run: |
+          if [ -z "${IP_ADDRESS:-}" ]; then
+            echo "::warning::${IP_NAME:-zebra-${NETWORK}} not reserved; skipping"
+            exit 0
+          fi
+          for _ in $(seq 1 30); do
+            INSTANCE=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+              --zone="${ZONE}" --format='value(instance.basename())' | head -1)
+            [ -n "${INSTANCE}" ] && break
+            sleep 2
+          done
+          [ -z "${INSTANCE}" ] && { echo "::error::instance did not appear within 60s"; exit 1; }
+          gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
+            --instance="${INSTANCE}" --zone="${ZONE}" \
+            --stateful-external-ip="address=${IP_ADDRESS},interface-name=nic0,auto-delete=never"
+
+      # Start the rolling update for an existing MIG.
+      - name: Rolling update on existing MIG
+        if: steps.does-group-exist.outcome == 'success'
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+            --version=template="${TEMPLATE_NAME}" \
+            --replacement-method=recreate \
+            --max-surge=0 --max-unavailable=1 \
+            --zone="${ZONE}"
+
+      # Keep the per-cell concurrency lock through rollout and health
+      # verification so a later deployment cannot replace the template while
+      # this deployment is being verified.
+      - name: Wait for requested template rollout
+        id: rollout
+        run: |
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --version-target-reached --zone="${ZONE}" --timeout=600
+
+      - name: Wait for deployed node health
+        id: verify
+        if: ${{ inputs.verify }}
+        run: |
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --stable --zone="${ZONE}" --timeout=5400
+
+      # Surface the failing instance's health state and container logs. Covers both
+      # waits: a rollout that never reaches the requested template is as much in need
+      # of diagnostics as a node that never becomes healthy.
+      - name: Diagnose rollout or verify failure
+        if: ${{ failure() && (steps.rollout.outcome == 'failure' || steps.verify.outcome == 'failure') }}
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+        run: |
+          gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" \
+            --format='table(instance.basename(),instanceStatus,currentAction,instanceHealth[0].detailedHealthState,lastAttempt.errors.errors[0].message)' || true
+          INSTANCE=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+            --zone="${ZONE}" --format='value(instance.basename())' | head -1 || true)
+          if [ -z "${INSTANCE}" ]; then
+            echo "MIG ${MIG_NAME} has no instance"
+            exit 0
+          fi
+          INSTANCE_ID=$(gcloud compute instances describe "${INSTANCE}" \
+            --zone="${ZONE}" --format='value(id)' || true)
+          gcloud logging read "logName=\"projects/${GCP_PROJECT}/logs/cos_containers\" AND resource.labels.instance_id=\"${INSTANCE_ID}\"" \
+            --freshness=2h --limit=50 --format='value(jsonPayload.message)' | tac || true
+
+  deploy-nodes-success:
+    name: Deploy nodes success
+    runs-on: ubuntu-latest
+    if: ${{ always() && needs.deploy-nodes.result != 'skipped' }}
+    needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks, deploy-nodes]
+    timeout-minutes: 1
+    steps:
+      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: get-disk-name-mainnet, get-disk-name-testnet
+
+  failure-issue:
+    name: Open or update issues for deploy failures
+    needs: [validate, deploy-nodes]
+    # PR statuses are already reported in the PR jobs list, so only open tickets for
+    # non-PR callers. No caller deploys on a pull_request today; this keeps that true
+    # if one ever does.
+    if: ${{ (failure() || cancelled()) && github.event.pull_request == null }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
+        with:
+          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
+          label-name: S-ci-fail-release-auto-issue
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
