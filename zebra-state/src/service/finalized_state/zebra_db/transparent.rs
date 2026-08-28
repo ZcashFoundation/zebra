@@ -185,18 +185,29 @@ impl ZebraDb {
         Some(utxo)
     }
 
-    /// Returns the unspent transparent outputs for a [`transparent::Address`],
-    /// if they are in the finalized state.
+    /// Returns the unspent transparent outputs for a [`transparent::Address`] in the finalized
+    /// chain `query_height_range`, at most `limit` of them.
+    ///
+    /// If the address has no finalized UTXOs, or the `query_height_range` is totally outside
+    /// the finalized block range, returns an empty list.
     pub fn address_utxos(
         &self,
         address: &transparent::Address,
+        query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeMap<OutputLocation, transparent::Output> {
         let address_location = match self.address_location(address) {
             Some(address_location) => address_location,
             None => return BTreeMap::new(),
         };
 
-        let output_locations = self.address_utxo_locations(address_location);
+        // Skip this address if its first UTXO is after the end height.
+        if address_location.height() > *query_height_range.end() {
+            return BTreeMap::new();
+        }
+
+        let output_locations =
+            self.address_utxo_locations(address_location, query_height_range, limit);
 
         // Ignore any outputs spent by blocks committed during this query
         output_locations
@@ -212,46 +223,29 @@ impl ZebraDb {
             .collect()
     }
 
-    /// Returns the unspent transparent output locations for a [`transparent::Address`],
-    /// if they are in the finalized state.
+    /// Returns the unspent transparent output locations for a [`transparent::Address`] in the
+    /// finalized chain `query_height_range`, at most `limit` of them.
     pub fn address_utxo_locations(
         &self,
         address_location: AddressLocation,
+        query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeSet<AddressUnspentOutput> {
         let utxo_loc_by_transparent_addr_loc = self
             .db
             .cf_handle("utxo_loc_by_transparent_addr_loc")
             .unwrap();
 
-        // Manually fetch the entire addresses' UTXO locations
-        let mut addr_unspent_outputs = BTreeSet::new();
+        // A potentially invalid key representing the first UTXO sent to the address,
+        // or the query start height.
+        let unspent_output_range =
+            AddressUnspentOutput::address_iterator_range(address_location, query_height_range);
 
-        // An invalid key representing the minimum possible output
-        let mut unspent_output = AddressUnspentOutput::address_iterator_start(address_location);
-
-        loop {
-            // Seek to a valid entry for this address, or the first entry for the next address
-            unspent_output = match self
-                .db
-                .zs_next_key_value_from(&utxo_loc_by_transparent_addr_loc, &unspent_output)
-            {
-                Some((unspent_output, ())) => unspent_output,
-                // We're finished with the final address in the column family
-                None => break,
-            };
-
-            // We found the next address, so we're finished with this address
-            if unspent_output.address_location() != address_location {
-                break;
-            }
-
-            addr_unspent_outputs.insert(unspent_output);
-
-            // A potentially invalid key representing the next possible output
-            unspent_output.address_iterator_next();
-        }
-
-        addr_unspent_outputs
+        self.db
+            .zs_forward_range_iter(&utxo_loc_by_transparent_addr_loc, unspent_output_range)
+            .map(|(unspent_output, ())| unspent_output)
+            .take(limit.unwrap_or(usize::MAX))
+            .collect()
     }
 
     /// Returns the transaction hash for an [`TransactionLocation`].
@@ -354,9 +348,14 @@ impl ZebraDb {
         )
     }
 
-    /// Returns the UTXOs for `addresses` in the finalized chain.
+    /// Returns the UTXOs for `addresses` in the finalized chain `query_height_range`,
+    /// at most `limit` of them per address.
     ///
     /// If none of the addresses has finalized UTXOs, returns an empty list.
+    ///
+    /// The per-address `limit` is enough for the caller to apply a global limit of the same
+    /// size: the first `limit` UTXOs across all addresses can only contain UTXOs that are
+    /// among the first `limit` for their own address.
     ///
     /// # Correctness
     ///
@@ -370,10 +369,12 @@ impl ZebraDb {
     pub fn partial_finalized_address_utxos(
         &self,
         addresses: &HashSet<transparent::Address>,
+        query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeMap<OutputLocation, transparent::Output> {
         addresses
             .iter()
-            .flat_map(|address| self.address_utxos(address))
+            .flat_map(|address| self.address_utxos(address, query_height_range.clone(), limit))
             .collect()
     }
 

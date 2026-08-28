@@ -2,7 +2,7 @@
 name: "Upgrade zcashd dependencies"
 description: "Specific steps for upgrading dependencies shared with zcashd. Zebra developers only."
 title: 'Upgrade dependencies for zcashd (version)'
-labels: [A-dependencies, A-script, S-needs-triage]
+type: Task
 body:
   - type: markdown
     attributes:

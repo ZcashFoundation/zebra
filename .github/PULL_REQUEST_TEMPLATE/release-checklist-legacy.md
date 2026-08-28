@@ -1,8 +1,8 @@
 ---
 name: "Legacy Release Checklist Template"
 about: "Manual fallback checklist to create and publish a Zebra release"
-title: "Release Zebra (version)"
-labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
+title: "release: Zebra (version)"
+labels: "A-release"
 assignees: ""
 ---
 
@@ -177,7 +177,7 @@ The end of support height is calculated from the current blockchain height:
 - [ ] Set the tag name to the version tag,
       for example: `v1.0.0`
 - [ ] Set the release to target the `main` branch
-- [ ] Set the release title to `Zebra` followed by a space and the version tag,
+- [ ] Set the release title to `Zebra ` followed by the version tag,
       for example: `Zebra 1.0.0`
 - [ ] Copy the final changelog you created into the release description;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
@@ -217,7 +217,7 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 - [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
-- [ ] Remove `do-not-merge` from any PRs you added it to
+- [ ] Remove `do-not-merge` from the PRs you added it to
 
 ## Release Failures
 

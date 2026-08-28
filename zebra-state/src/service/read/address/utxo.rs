@@ -103,22 +103,44 @@ impl AddressUtxos {
     }
 }
 
-/// Returns the unspent transparent outputs (UTXOs) for the supplied [`transparent::Address`]es,
-/// in chain order; and the transaction IDs for the transactions containing those UTXOs.
+/// Returns the unspent transparent outputs (UTXOs) for the supplied [`transparent::Address`]es
+/// in `query_height_range`, in chain order, at most `max_entries` of them; and the transaction
+/// IDs for the transactions containing those UTXOs.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
 /// returns an empty list.
+///
+/// Both limits are applied to the index scan, so the work this query does is bounded by what
+/// the caller asks for, rather than by the size of the addresses' UTXO sets.
 pub fn address_utxos<C>(
     network: &Network,
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
+    query_height_range: RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> Result<AddressUtxos, BoxError>
 where
     C: AsRef<Chain>,
 {
     let mut utxo_error = None;
     let address_count = addresses.len();
+
+    // The non-finalized chain can spend UTXOs that the finalized query returns, so a limited
+    // finalized query has to over-fetch by that many entries, or a full page of results can
+    // arrive short and look like the end of the address' UTXOs.
+    let finalized_limit = max_entries.map(|max_entries| {
+        let chain_spent_count = chain
+            .as_ref()
+            .map(|chain| {
+                chain
+                    .as_ref()
+                    .partial_transparent_spent_utxo_count(&addresses)
+            })
+            .unwrap_or(0);
+
+        finalized_scan_limit(max_entries, chain_spent_count)
+    });
 
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
@@ -127,7 +149,8 @@ where
     for attempt in 0..=FINALIZED_STATE_QUERY_RETRIES {
         debug!(?attempt, ?address_count, "starting address UTXO query");
 
-        let (finalized_utxos, finalized_tip_range) = finalized_address_utxos(db, &addresses);
+        let (finalized_utxos, finalized_tip_range) =
+            finalized_address_utxos(db, &addresses, query_height_range.clone(), finalized_limit);
 
         debug!(
             finalized_utxo_count = ?finalized_utxos.len(),
@@ -152,8 +175,14 @@ where
                     "chain address UTXO response",
                 );
 
-                let utxos =
-                    apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
+                let utxos = apply_utxo_changes(
+                    finalized_utxos,
+                    created_chain_utxos,
+                    spent_chain_utxos,
+                    &query_height_range,
+                    max_entries,
+                );
+
                 let tx_ids = lookup_tx_ids_for_utxos(chain.as_ref(), db, &addresses, &utxos);
 
                 debug!(
@@ -207,6 +236,8 @@ where
 fn finalized_address_utxos(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
+    query_height_range: RangeInclusive<Height>,
+    limit: Option<usize>,
 ) -> (
     BTreeMap<OutputLocation, transparent::Output>,
     Option<RangeInclusive<Height>>,
@@ -218,7 +249,7 @@ fn finalized_address_utxos(
     // Check if the finalized state changed while we were querying it
     let start_finalized_tip = db.finalized_tip_height();
 
-    let finalized_utxos = db.partial_finalized_address_utxos(addresses);
+    let finalized_utxos = db.partial_finalized_address_utxos(addresses, query_height_range, limit);
 
     let end_finalized_tip = db.finalized_tip_height();
 
@@ -400,20 +431,50 @@ where
     Ok((created, spent, Some(non_finalized_tip)))
 }
 
-/// Combines the supplied finalized and non-finalized UTXOs,
-/// removes the spent UTXOs, and returns the result.
+/// The number of UTXOs a limited finalized query has to ask for, when the caller wants
+/// `max_entries` of them and the non-finalized chain spends `chain_spent_count` of the
+/// addresses' UTXOs.
+///
+/// Any of the UTXOs the finalized query returns can turn out to be spent by the chain, so the
+/// query has to over-fetch by as many entries as the chain spends. Otherwise a full page comes
+/// back short, and a caller paging by count reads that as the end of the addresses' UTXOs.
+///
+/// The result is an over-approximation: it can make the query read entries that are then
+/// discarded, but never too few to fill the page.
+fn finalized_scan_limit(max_entries: usize, chain_spent_count: usize) -> usize {
+    max_entries.saturating_add(chain_spent_count)
+}
+
+/// Combines the supplied finalized and non-finalized UTXOs, removes the spent UTXOs and the
+/// UTXOs outside `query_height_range`, truncates the result to `max_entries`, and returns it.
 fn apply_utxo_changes(
     finalized_utxos: BTreeMap<OutputLocation, transparent::Output>,
     created_chain_utxos: BTreeMap<OutputLocation, transparent::Output>,
     spent_chain_utxos: BTreeSet<OutputLocation>,
+    query_height_range: &RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> BTreeMap<OutputLocation, transparent::Output> {
     // Correctness: combine the created UTXOs, then remove spent UTXOs,
     // to compensate for overlapping finalized and non-finalized blocks.
-    finalized_utxos
+    //
+    // The finalized UTXOs are already limited to the query height range, but the
+    // non-finalized ones are not.
+    let utxos: BTreeMap<_, _> = finalized_utxos
         .into_iter()
-        .chain(created_chain_utxos)
+        .chain(
+            created_chain_utxos
+                .into_iter()
+                .filter(|(utxo_location, _)| query_height_range.contains(&utxo_location.height())),
+        )
         .filter(|(utxo_location, _output)| !spent_chain_utxos.contains(utxo_location))
-        .collect()
+        .collect();
+
+    // Truncate after collecting, so the entries that survive are the first in chain order,
+    // rather than the first in the order the two sources happened to be chained in.
+    match max_entries {
+        Some(max_entries) => utxos.into_iter().take(max_entries).collect(),
+        None => utxos,
+    }
 }
 
 /// Returns the [`transaction::Hash`]es containing the supplied UTXOs,
@@ -459,4 +520,90 @@ where
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use zebra_chain::{amount::Amount, transparent::Script};
+
+    use super::*;
+
+    /// Returns a UTXO at `height`, and its location.
+    fn utxo(height: u32) -> (OutputLocation, transparent::Output) {
+        (
+            OutputLocation::from_usize(Height(height), 0, 0),
+            transparent::Output::new(Amount::zero(), Script::new(&[])),
+        )
+    }
+
+    /// Returns the heights of `utxos`, in chain order.
+    fn heights(utxos: &BTreeMap<OutputLocation, transparent::Output>) -> Vec<u32> {
+        utxos.keys().map(|location| location.height().0).collect()
+    }
+
+    /// The non-finalized chain creates UTXOs across the whole chain, not just the queried
+    /// range, so the ones outside it have to be dropped even though the finalized query
+    /// never returned them.
+    #[test]
+    fn created_chain_utxos_are_limited_to_the_query_height_range() {
+        let finalized = BTreeMap::from([utxo(30), utxo(40)]);
+        let created = BTreeMap::from([utxo(10), utxo(50)]);
+
+        let utxos = apply_utxo_changes(
+            finalized,
+            created,
+            BTreeSet::new(),
+            &(Height(20)..=Height(45)),
+            None,
+        );
+
+        assert_eq!(heights(&utxos), vec![30, 40]);
+    }
+
+    /// A truncated result keeps the first UTXOs in chain order, not the first in the order
+    /// the finalized and non-finalized sources are combined in.
+    #[test]
+    fn a_limited_result_keeps_the_lowest_utxos() {
+        let finalized = BTreeMap::from([utxo(30), utxo(40)]);
+        let created = BTreeMap::from([utxo(10), utxo(20)]);
+
+        let utxos = apply_utxo_changes(
+            finalized,
+            created,
+            BTreeSet::new(),
+            &ADDRESS_HEIGHTS_FULL_RANGE,
+            Some(3),
+        );
+
+        assert_eq!(heights(&utxos), vec![10, 20, 30]);
+    }
+
+    /// The over-fetch is what keeps a page full when the non-finalized chain spends some of
+    /// the UTXOs the finalized query returned.
+    #[test]
+    fn over_fetching_keeps_a_limited_page_full() {
+        let max_entries = 2;
+        let all_finalized = [utxo(10), utxo(20), utxo(30), utxo(40), utxo(50)];
+
+        // The chain spends the first UTXO the finalized query would return.
+        let spent = BTreeSet::from([all_finalized[0].0]);
+
+        // The finalized query returns the first `limit` UTXOs, whatever the limit is.
+        let query = |limit: usize| {
+            apply_utxo_changes(
+                all_finalized.iter().take(limit).cloned().collect(),
+                BTreeMap::new(),
+                spent.clone(),
+                &ADDRESS_HEIGHTS_FULL_RANGE,
+                Some(max_entries),
+            )
+        };
+
+        // Asking for exactly `max_entries` returns a short page, because one of them is spent.
+        assert_eq!(heights(&query(max_entries)), vec![20]);
+
+        // Over-fetching by the number of spends fills the page instead.
+        let limit = finalized_scan_limit(max_entries, spent.len());
+        assert_eq!(heights(&query(limit)), vec![20, 30]);
+    }
 }

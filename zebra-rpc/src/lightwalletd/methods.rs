@@ -955,8 +955,11 @@ async fn address_balance<Rpc: RpcMethods>(
     })
 }
 
-/// Fetches the UTXOs for a list of transparent addresses, filtered by the given
-/// start height and maximum number of entries.
+/// Fetches the UTXOs for a list of transparent addresses, at or above the given start height,
+/// at most `max_entries` of them.
+///
+/// Both limits are passed to the state query, so they bound the work the node does rather than
+/// just the size of the reply.
 async fn address_utxos<Rpc: RpcMethods>(
     rpc: &Rpc,
     args: GetAddressUtxosArg,
@@ -964,7 +967,10 @@ async fn address_utxos<Rpc: RpcMethods>(
     check_address_count(&args.addresses)?;
 
     let response = rpc
-        .get_address_utxos(GetAddressUtxosRequest::new(args.addresses, false))
+        .get_address_utxos(
+            GetAddressUtxosRequest::new(args.addresses, false)
+                .with_limits(args.start_height, args.max_entries),
+        )
         .await
         .map_err(rpc_arg_error_to_status)?;
 
@@ -972,17 +978,8 @@ async fn address_utxos<Rpc: RpcMethods>(
         unreachable!("chain info is never requested");
     };
 
-    let max_entries = if args.max_entries == 0 {
-        usize::MAX
-    } else {
-        // Cast is safe: `usize` is at least 32 bits on all supported platforms.
-        args.max_entries as usize
-    };
-
     Ok(utxos
         .iter()
-        .filter(|utxo| u64::from(utxo.height().0) >= args.start_height)
-        .take(max_entries)
         .map(|utxo| GetAddressUtxosReply {
             address: utxo.address().to_string(),
             txid: utxo.txid().0.to_vec(),
