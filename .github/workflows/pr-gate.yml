@@ -245,6 +245,108 @@ jobs:
           path: target/zc-cache
           key: zc-cache-${{ runner.os }}-v0.5.0-${{ github.sha }}
 
+  # Release reviewers read the whole public API and dependency diff since the last release, refreshed on every update.
+  release-api-diff:
+    if: >-
+      github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'A-release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'A-release')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the last release tag
+        id: baseline
+        run: |
+          if ! tag="$(git describe --tags --match 'v*' --abbrev=0 HEAD)"; then
+            echo "::error title=No release tag found::This diff needs a v* tag reachable from the release PR head."
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      # zc builds the workspace crates at both refs, so librocksdb-sys needs libclang.
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` writes on main; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache
+          # zc keys entries by commit SHA and prunes them after 14 days, so a prefix restore is safe.
+          key: zc-cache-${{ runner.os }}-v0.5.0-${{ steps.baseline.outputs.tag }}
+          restore-keys: zc-cache-${{ runner.os }}-v0.5.0-
+      - name: Diff the public API and dependencies since the last release
+        id: zc
+        uses: ZcashFoundation/zc@b8e68d70219b10e7a4b63e313b9a0bf01881b3f9 # changelog-file-surface
+        with:
+          baseline: ${{ steps.baseline.outputs.tag }}
+          fail-on: none
+          with-changelog: "true"
+      - name: Post the diff as a pull request comment
+        if: always() && steps.baseline.outputs.tag != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 #v9.0.0
+        env:
+          CHANGELOG_FILE: ${{ steps.zc.outputs.changelog }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TAG: ${{ steps.baseline.outputs.tag }}
+        with:
+          script: |
+            const fs = require('fs');
+
+            const tag = process.env.TAG;
+            const head = process.env.HEAD_SHA.slice(0, 12);
+            const file = process.env.CHANGELOG_FILE;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const heading = `## Public API diff since ${tag}`;
+
+            let body;
+            if (file && fs.existsSync(file)) {
+              body = `${heading}\n\nComparing \`${tag}\` with \`${head}\`.\n\n${fs.readFileSync(file, 'utf8')}`;
+            } else {
+              body = `${heading}\n\nThe diff could not be produced. See [the job log](${runUrl}).`;
+            }
+
+            // GitHub rejects comment bodies over 65536 characters, so cut back to a whole section.
+            if (body.length > 65536) {
+              const kept = body.slice(0, 60000);
+              const boundary = kept.lastIndexOf('\n#');
+              body = `${boundary > 0 ? kept.slice(0, boundary) : kept}\n\nThe remaining sections are in [the job log](${runUrl}).\n`;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            // Match the heading without its tag so a new baseline replaces the previous comment.
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.startsWith('## Public API diff since')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
   # This checks for changelog entries depending on the type of the PR (per title).
   # An entry is required for a crate if any file in the crate changed.
   # If the title indicates a breaking change, the changelog must also have a `### Breaking Changes` section.
