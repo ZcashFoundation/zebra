@@ -19,7 +19,7 @@ use crate::{
     connection_metrics::network_kind_label,
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
-    protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    protocol::external::{canonical_peer_addr, canonical_socket_addr, connection_limit_key},
     types::MetaAddr,
     AddressBookPeers, PeerAddrState, PeerSocketAddr,
 };
@@ -68,8 +68,8 @@ pub struct AddressBook {
     /// Some peers in this list might have open outbound or inbound connections.
     by_addr: IndexMap<PeerSocketAddr, MetaAddr>,
 
-    /// The address with a last_connection_state of [`PeerAddrState::Responded`] and
-    /// the most recent `last_response` time by IP.
+    /// The address with a [`PeerAddrState::Responded`](PeerAddrState) last connection state and
+    /// the most recent `last_response` time per IPv6 `/64` (or IPv4 `/24`) subnet.
     ///
     /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config), and
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
@@ -231,7 +231,7 @@ impl AddressBook {
                     .most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(socket_addr.ip(), meta_addr.clone());
+                    .insert(connection_limit_key(socket_addr.ip()), meta_addr.clone());
             }
             // overwrite any duplicate addresses
             let _ = new_book.insert_meta_addr(meta_addr);
@@ -373,7 +373,7 @@ impl AddressBook {
             return false;
         };
 
-        if let Some(previous) = most_recent_by_ip.get(&updated.addr.ip()) {
+        if let Some(previous) = most_recent_by_ip.get(&connection_limit_key(updated.addr.ip())) {
             updated.last_connection_state == PeerAddrState::Responded
                 && updated.last_response() > previous.last_response()
         } else {
@@ -388,7 +388,7 @@ impl AddressBook {
             return false;
         };
 
-        if let Some(previous) = most_recent_by_ip.get(&addr.ip()) {
+        if let Some(previous) = most_recent_by_ip.get(&connection_limit_key(addr.ip())) {
             previous.addr == addr
         } else {
             false
@@ -478,7 +478,7 @@ impl AddressBook {
                 // configured value, so we must guard the optional cache rather
                 // than unwrap it.
                 if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                    most_recent_by_ip.remove(&banned_ip);
+                    most_recent_by_ip.remove(&connection_limit_key(banned_ip));
                 }
 
                 let banned_addrs: Vec<_> = self
@@ -525,7 +525,7 @@ impl AddressBook {
                 self.most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(updated.addr.ip(), updated.clone());
+                    .insert(connection_limit_key(updated.addr.ip()), updated.clone());
             }
 
             let _ = self.insert_meta_addr(updated.clone());
@@ -560,7 +560,7 @@ impl AddressBook {
                     self.most_recent_by_ip
                         .as_mut()
                         .expect("should be some when should_remove_most_recent_by_ip is true")
-                        .remove(&surplus_peer.addr.ip());
+                        .remove(&connection_limit_key(surplus_peer.addr.ip()));
                 }
 
                 debug!(
@@ -602,7 +602,7 @@ impl AddressBook {
             // for this the surplus peer's ip to remove it there as well.
             if self.should_remove_most_recent_by_ip(entry.addr) {
                 if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                    most_recent_by_ip.remove(&entry.addr.ip());
+                    most_recent_by_ip.remove(&connection_limit_key(entry.addr.ip()));
                 }
             }
 
@@ -637,17 +637,21 @@ impl AddressBook {
     /// Is this IP ready for a new outbound connection attempt?
     /// Checks if the outbound connection with the most recent response at this IP has recently responded.
     ///
+    /// IPs are compared by IPv6 `/64` and IPv4 `/24` subnet, so reconnection
+    /// attempts from one machine's other addresses are throttled too.
+    ///
     /// Note: last_response times may remain live for a long time if the local clock is changed to an earlier time.
     fn is_ready_for_connection_attempt_with_ip(
         &self,
         ip: &IpAddr,
         chrono_now: chrono::DateTime<Utc>,
     ) -> bool {
+        let limit_key = connection_limit_key(*ip);
         let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
             // if we're not checking IPs, any connection is allowed
             return true;
         };
-        let Some(same_ip_peer) = most_recent_by_ip.get(ip) else {
+        let Some(same_ip_peer) = most_recent_by_ip.get(&limit_key) else {
             // If there's no entry for this IP, any connection is allowed
             return true;
         };

@@ -6,18 +6,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::constants;
+use crate::{constants, protocol::external::connection_limit_key};
 
 #[cfg(test)]
 mod tests;
 
 #[derive(Debug)]
-/// Stores IPs of recently attempted inbound connections.
+/// Tracks recently attempted inbound connections, grouped per IPv6 `/64`
+/// and per IPv4 `/24` subnet: one machine can originate many addresses,
+/// and every address it uses must count against a single limit.
 pub struct RecentByIp {
-    /// The list of IPs in decreasing connection age order.
+    /// The list of subnet keys in decreasing connection age order.
     pub by_time: VecDeque<(IpAddr, Instant)>,
 
-    /// Stores IPs for recently attempted inbound connections.
+    /// Stores the number of recently attempted inbound connections per subnet key.
     pub by_ip: HashMap<IpAddr, usize>,
 
     /// The maximum number of peer connections Zebra will keep for a given IP address
@@ -47,20 +49,22 @@ impl RecentByIp {
         }
     }
 
-    /// Prunes outdated entries, checks if there's a recently attempted inbound connection with
-    /// this IP, and adds the entry to `by_time`, and `by_ip` if needed.
+    /// Prunes outdated entries, checks if there's a recent inbound connection
+    /// attempt in the same IPv6 `/64` or IPv4 `/24` subnet, and adds the entry
+    /// to `by_time` and `by_ip` if needed.
     ///
     /// Returns true if the recently attempted inbound connection count is past the configured limit.
     pub fn is_past_limit_or_add(&mut self, ip: IpAddr) -> bool {
         let now = Instant::now();
         self.prune_by_time(now);
 
-        let count = self.by_ip.entry(ip).or_default();
+        let limit_key = connection_limit_key(ip);
+        let count = self.by_ip.entry(limit_key).or_default();
         if *count >= self.max_connections_per_ip {
             true
         } else {
             *count += 1;
-            self.by_time.push_back((ip, now));
+            self.by_time.push_back((limit_key, now));
             false
         }
     }
