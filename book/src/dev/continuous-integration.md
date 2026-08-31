@@ -84,11 +84,13 @@ not revoke that result. For an immediate freeze, remove every active non-release
 from GitHub's queue after freezing. GitHub rebuilds them when maintainers enroll them
 again.
 
-The initial native queue settings are `MERGE`, build concurrency `5`, `ALLGREEN`,
-a 180-minute check timeout, and minimum/maximum merge group sizes of `1`, with a
-two-minute minimum wait. The group-size setting preserves one merge commit per PR;
-it does not recreate Mergify's CI batching. Native FIFO and manual jump-to-top replace
-Mergify's automatic enrollment and high/low priority rules.
+The initial native queue settings are merge method `MERGE`, build concurrency `5`,
+`ALLGREEN`, a 180-minute check timeout, minimum and maximum pull requests to merge of
+`1`, and a two-minute minimum wait. The merge method is what gives each pull request
+its own merge commit. The merge limits only throttle how many already-validated
+entries merge at once; they do not group `merge_group` builds, so they are not
+Mergify's CI batching. Native FIFO and manual jump-to-top replace Mergify's automatic
+enrollment and high/low priority rules.
 
 | Queue behavior | GitHub merge queue policy |
 | --- | --- |

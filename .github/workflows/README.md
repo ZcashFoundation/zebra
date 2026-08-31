@@ -192,13 +192,14 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
   | Build concurrency | `5` |
   | Grouping strategy | `ALLGREEN` |
   | Check response timeout | `180 minutes` |
-  | Minimum entries merged | `1` |
-  | Maximum entries merged | `1` |
-  | Minimum wait | `2 minutes` |
+  | Minimum pull requests to merge | `1` |
+  | Maximum pull requests to merge | `1` |
+  | Wait time | `2 minutes` |
 
-  The merge limit preserves one merge commit per pull request. It does not batch CI
-  builds: GitHub validates cumulative merge-group branches, while Mergify created
-  explicit batches and split failed batches to identify the failing pull request.
+  The `MERGE` method is what gives each pull request its own merge commit; the merge
+  limits only throttle how many already-validated entries merge at once. They do not
+  batch CI builds: GitHub validates cumulative merge-group branches, while Mergify
+  created explicit batches and split failed batches to find the failing pull request.
 - Every required-check workflow must keep its `merge_group` trigger and its aggregator
   job name, or the queue stalls waiting for a check that is never reported
 - `merge-policy` holds a pull request carrying `do-not-merge`; the Merge Freeze app's
