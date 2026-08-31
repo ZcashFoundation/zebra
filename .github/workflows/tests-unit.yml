@@ -56,7 +56,6 @@ jobs:
     if: needs.changes.outputs.unit_tests == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -88,7 +87,6 @@ jobs:
     if: needs.changes.outputs.unit_tests == 'true' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'A-release')
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30

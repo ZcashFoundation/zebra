@@ -47,7 +47,6 @@ jobs:
     if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -114,7 +113,6 @@ jobs:
     if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -181,7 +179,6 @@ jobs:
     if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     steps:

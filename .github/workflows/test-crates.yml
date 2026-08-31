@@ -99,7 +99,6 @@ jobs:
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     timeout-minutes: 90
     # Some of these builds take more than 14GB disk space
@@ -164,7 +163,6 @@ jobs:
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     timeout-minutes: 90
     runs-on: ubuntu-latest
