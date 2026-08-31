@@ -2,7 +2,6 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use tracing::Instrument;
 
-use zebra_chain::transparent;
 use zebra_script::CachedFfiTransaction;
 
 use crate::{primitives::spawn_fifo_and_convert, BoxError};
@@ -58,25 +57,11 @@ impl tower::Service<Request> for Verifier {
 
         let span = tracing::trace_span!("script");
         async move {
-            // `inputs()` rebuilds an owned Vec, so bind it before indexing into it.
-            let inputs = cached_ffi_transaction.inputs();
-            let input = inputs.get(input_index).ok_or_else(|| {
-                format!("cached_ffi_transaction missing input at index {input_index}")
-            })?;
+            // Script verification is CPU-bound so run in Rayon thread
+            spawn_fifo_and_convert(move || cached_ffi_transaction.is_valid(input_index)).await?;
+            tracing::trace!(input_index, "script verification succeeded");
 
-            match input {
-                transparent::Input::PrevOut { outpoint, .. } => {
-                    let outpoint = *outpoint;
-
-                    // Script verification is CPU-bound so run in Rayon thread
-                    spawn_fifo_and_convert(move || cached_ffi_transaction.is_valid(input_index))
-                        .await?;
-                    tracing::trace!(?outpoint, "script verification succeeded");
-
-                    Ok(())
-                }
-                transparent::Input::Coinbase { .. } => Err("unexpected coinbase input".into()),
-            }
+            Ok(())
         }
         .instrument(span)
         .boxed()
