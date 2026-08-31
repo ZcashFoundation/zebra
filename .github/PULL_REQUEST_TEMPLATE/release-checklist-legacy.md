@@ -220,7 +220,6 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 - [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/), if
       it was frozen there.
-- [ ] Remove `do-not-merge` from the PRs you added it to
 
 ## Release Failures
 

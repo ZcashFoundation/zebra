@@ -19,10 +19,13 @@ jobs:
     name: merge-policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: read # reads the labels of the pull requests in a merge group
     steps:
       - name: Enforce do-not-merge
+        if: github.event_name == 'pull_request'
         env:
-          HELD: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'do-not-merge') }}
+          HELD: ${{ contains(github.event.pull_request.labels.*.name, 'do-not-merge') }}
         run: |
           if [[ "${HELD}" == "true" ]]; then
             echo "::error title=Held by do-not-merge::Remove the \`do-not-merge\` label before adding this pull request to the merge queue."
@@ -30,3 +33,41 @@ jobs:
           fi
 
           echo "No repository-owned merge hold is active."
+
+      # A merge group carries no pull request metadata, so the label has to be read
+      # back from the pull requests the queue named in the branch. Without this the
+      # label only fails the source pull request, which does not stop a group that has
+      # already been built: the group's own check passes and the queue merges it.
+      - name: Enforce do-not-merge across the merge group
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+        run: |
+          # refs/heads/gh-readonly-queue/<base>/pr-<number>-<sha>, one `pr-` segment
+          # per entry in the group.
+          numbers="$(grep -oE 'pr-[0-9]+-' <<<"${REF}" | grep -oE '[0-9]+' || true)"
+
+          if [[ -z "${numbers}" ]]; then
+            echo "::error title=Merge group not recognised::No pull request number in \`${REF}\`, so this check cannot tell whether a hold applies."
+            exit 1
+          fi
+
+          held=0
+
+          while read -r number; do
+            # Fail closed: a group whose labels cannot be read is held, not let through.
+            if ! labels="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}" --jq '.labels[].name')"; then
+              echo "::error title=Cannot read pull request #${number}::Reading its labels failed, so this check cannot tell whether a hold applies."
+              exit 1
+            fi
+
+            if grep -qxF 'do-not-merge' <<<"${labels}"; then
+              echo "::error title=Held by do-not-merge::Pull request #${number} in this merge group carries \`do-not-merge\`."
+              held=1
+            else
+              echo "Pull request #${number}: no repository-owned merge hold is active."
+            fi
+          done <<<"${numbers}"
+
+          exit "${held}"

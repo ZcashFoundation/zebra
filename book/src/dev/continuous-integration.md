@@ -73,11 +73,16 @@ bypass a freeze. That action has been reported returning an error, and Merge Fre
 documentation ties it to the _Push a status update to all PRs_ freeze method, so
 confirm which method the installation uses before relying on it for a release.
 
-Merge Freeze reports on both the source PR and the native merge group. There is one
-timing edge: if `mergefreeze` has already succeeded on a merge group, starting a
-freeze while another required check is still running does not revoke that successful
-result. For an immediate freeze, remove every active non-release entry from GitHub's
-queue after freezing. GitHub rebuilds them when maintainers enroll them again.
+`do-not-merge` also reaches a pull request that is already enrolled. A merge group
+carries no pull request metadata, so `merge-policy` reads the queued numbers back out
+of the group's branch name and checks their labels: labelling an enrolled pull request
+fails the group's check and the queue drops it.
+
+Merge Freeze does not work that way. It reports on both the source PR and the merge
+group, but if `mergefreeze` has already succeeded on a group, freezing afterwards does
+not revoke that result. For an immediate freeze, remove every active non-release entry
+from GitHub's queue after freezing. GitHub rebuilds them when maintainers enroll them
+again.
 
 The initial native queue settings are `MERGE`, build concurrency `5`, `ALLGREEN`,
 a 180-minute check timeout, and minimum/maximum merge group sizes of `1`, with a
