@@ -74,8 +74,12 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Push the updated changelog and README into a new branch
       for example: `bump-v1.0.0` - this needs to be different to the tag name
 - [ ] Create a release PR by adding `&template=release-checklist-legacy.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=release-checklist-legacy.md)).
-- [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-- [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
+- [ ] Freeze `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
+- [ ] Remove every active non-release entry from GitHub's merge queue so the freeze
+      takes effect immediately.
+- [ ] Use Merge Freeze's **Unfreeze 1 pull request** action for this release PR. That
+      action requires the project's freeze method to be
+      _Push a status update to all PRs_; confirm that before relying on it.
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
@@ -214,8 +218,8 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
-- [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-- [ ] Remove `do-not-merge` from the PRs you added it to
+- [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/), if
+      it was frozen there.
 
 ## Release Failures
 

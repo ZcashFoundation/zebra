@@ -1,6 +1,5 @@
 version: 2
-# No labels on dependency PRs: Mergify routes them by author, and the
-# changelog gate reads the PR title.
+# No labels on dependency PRs: the changelog gate reads the PR title.
 updates:
   # Rust section
   - package-ecosystem: cargo

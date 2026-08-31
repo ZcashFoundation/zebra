@@ -180,12 +180,36 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
 
 ### 6. Queue Management
 
-[Mergify](https://mergify.com)
+[GitHub merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
 
-- Automated PR merging and queue-based testing
-- Priority management
-- Ensures code quality before merge
-- See our [`.mergify.yml`](../../.mergify.yml) for configuration
+- After approving a green pull request, a Zebra maintainer selects **Merge when
+  ready**. Fork authors and other contributors do not need write access to the queue.
+- The queue is configured on the `PR Requirements` ruleset, not in a file:
+
+  | Setting | Value |
+  | --- | --- |
+  | Merge method | `MERGE` |
+  | Build concurrency | `5` |
+  | Grouping strategy | `ALLGREEN` |
+  | Check response timeout | `180 minutes` |
+  | Minimum pull requests to merge | `1` |
+  | Maximum pull requests to merge | `1` |
+  | Wait time | `2 minutes` |
+
+  The `MERGE` method is what gives each pull request its own merge commit; the merge
+  limits only throttle how many already-validated entries merge at once. They do not
+  batch CI builds: GitHub validates cumulative merge-group branches, while Mergify
+  created explicit batches and split failed batches to find the failing pull request.
+- Every required-check workflow must keep its `merge_group` trigger and its aggregator
+  job name, or the queue stalls waiting for a check that is never reported
+- `merge-policy` holds a pull request carrying `do-not-merge`; the Merge Freeze app's
+  `mergefreeze` status holds the repository during a release window. Neither is
+  enforced until the queue is activated — see [Activating the
+  queue](../../book/src/dev/continuous-integration.md#activating-the-queue)
+
+GitHub's queue is FIFO, with a manual jump-to-top operation that rebuilds affected
+entries. Moving from Mergify intentionally removes automatic enrollment, high and low
+priority rules, CI batching and bisection, and Mergify's queue dashboard and statistics.
 
 ## Workflow Organization
 
@@ -197,13 +221,14 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
+- **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
-### Supporting/Re-usable Workflows
+### Supporting/Reusable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
@@ -369,11 +394,15 @@ docker run --rm zebra-tests
   - Unable to access configuration variables
   - Limited ability to test infrastructure changes
 
-### Mitigation Through Mergify
+### Mitigation Through the Merge Queue
 
-- When external PRs enter the merge queue, they are tested with full access to variables and resources
-- All CI workflows run in the context of our repository, not the fork
-- This provides a safety net, ensuring no untested code reaches production
-- External contributors can still get feedback through code review before their changes are tested in the queue
+- `merge_group` runs execute in the context of this repository, not the fork, so the
+  required checks do get full access to secrets and repository variables before a fork
+  PR reaches `main`
+- This covers the repository-owned checks (`lint`, `unit-tests`, `test-crates`,
+  `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
+  `mergefreeze` status on the merge group
 
-These safeguards help maintain code quality while working around the platform limitations for external contributions.
+It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
+`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
+manually with the PR number.

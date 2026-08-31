@@ -7,12 +7,13 @@ on:
   push:
     branches: [main]
   merge_group:
+    types: [checks_requested]
 
 # Cancel obsolete test runs after new commits. Unrelated label events use a
 # separate group so they cannot cancel the required unit test run.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       github.event.action == 'labeled' &&
       github.event.label.name != 'A-release' &&
       'ignored-label' ||
@@ -40,12 +41,12 @@ jobs:
       unit_tests: ${{ steps.filter.outputs.unit_tests || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           filters: .github/path-filters.yml
 
@@ -55,7 +56,6 @@ jobs:
     if: needs.changes.outputs.unit_tests == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -87,7 +87,6 @@ jobs:
     if: needs.changes.outputs.unit_tests == 'true' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'A-release')
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -6,13 +6,14 @@ on:
   push:
     branches: [main]
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
 # to run, cancelling any workflows in between
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -34,12 +35,12 @@ jobs:
       test_crates: ${{ steps.filter.outputs.test_crates || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           filters: .github/path-filters.yml
 
@@ -98,7 +99,6 @@ jobs:
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     timeout-minutes: 90
     # Some of these builds take more than 14GB disk space
@@ -163,7 +163,6 @@ jobs:
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     timeout-minutes: 90
     runs-on: ubuntu-latest

@@ -1,28 +1,38 @@
-name: Cancel Closed Merge Queue Runs
+# Cancels the checks still running for a merge group the queue has thrown away.
+#
+# When a required check fails, the queue removes the pull request and deletes the
+# group's branch, but it does not stop the other checks already running against it.
+# They run to completion against a ref nobody will merge — for Zebra that is a full
+# unit test matrix, so one dequeue can waste over an hour of runner time.
+#
+# `merge_group` has a `destroyed` webhook activity type, but it is not valid as a
+# workflow trigger, and `workflow_run` arrives only once every job in the run has
+# finished, which is too late to cancel anything. Deleting the branch is the earliest
+# signal available: it arrives about twenty seconds after the group is destroyed.
+name: Cancel Dequeued Runs
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  delete:
 
 permissions: {}
 
 jobs:
   cancel-runs:
+    # `delete` fires for every branch and tag; only the queue's own branches matter.
     if: >-
-      github.event.pull_request.user.login == 'mergify[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+      github.event.ref_type == 'branch' &&
+      startsWith(github.event.ref, 'gh-readonly-queue/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: write
     steps:
-      - name: Cancel active runs for the closed queue candidate
+      - name: Cancel active runs for the deleted merge group branch
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const branch = context.payload.pull_request.head.ref;
+            const branch = context.payload.ref;
+
             const activeStatuses = new Set([
               'in_progress',
               'pending',
@@ -37,16 +47,16 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 branch,
-                event: 'pull_request',
+                event: 'merge_group',
                 per_page: 100,
               },
             );
 
-            const activeRuns = runs.filter(
+            const active = runs.filter(
               (run) => run.id !== context.runId && activeStatuses.has(run.status),
             );
 
-            for (const run of activeRuns) {
+            for (const run of active) {
               core.info(`Cancelling ${run.name} run ${run.id} (${run.status})`);
 
               try {
@@ -56,6 +66,7 @@ jobs:
                   run_id: run.id,
                 });
               } catch (error) {
+                // A run that finished between listing and cancelling answers 409.
                 if (error.status === 409) {
                   core.info(`Run ${run.id} completed before it could be cancelled`);
                   continue;
@@ -65,4 +76,4 @@ jobs:
               }
             }
 
-            core.info(`Requested cancellation for ${activeRuns.length} active run(s)`);
+            core.notice(`Cancelled ${active.length} run(s) for ${branch}.`);
