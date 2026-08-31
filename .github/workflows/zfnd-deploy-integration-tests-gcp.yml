@@ -297,6 +297,13 @@ jobs:
           PRIMARY_ZONE: ${{ vars.GCP_ZONE }}
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
           NAME: ${{ needs.determine-environment.outputs.disk_name }}
+          # Bound here rather than expanded inline in the `--labels` argument below:
+          # a `${{ }}` expansion is substituted before the shell parses the line, so a
+          # value containing shell metacharacters would escape its quoting context.
+          APP_NAME: ${{ inputs.app_name }}
+          TEST_ID: ${{ inputs.test_id }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
 
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
@@ -363,7 +370,7 @@ jobs:
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-            --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }},commit=${{ env.GITHUB_SHA_SHORT }} \
+            --labels="app=${APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${GITHUB_REF_SLUG_URL},test=${TEST_ID},commit=${GITHUB_SHA_SHORT}" \
             --tags ${{ inputs.app_name }} \
             --zone "${zone}"
           }
@@ -929,6 +936,16 @@ jobs:
       - name: Create image from state disk
         env:
           DISK_NAME: ${{ needs.determine-environment.outputs.disk_name }}
+          # Bound here rather than expanded inline in the `--labels` argument below:
+          # a `${{ }}` expansion is substituted before the shell parses the line, so a
+          # value containing shell metacharacters would escape its quoting context.
+          DISK_PREFIX: ${{ inputs.disk_prefix }}
+          DISK_SUFFIX: ${{ inputs.disk_suffix }}
+          FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
+          TEST_ID: ${{ inputs.test_id }}
+          APP_NAME: ${{ inputs.app_name }}
+          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
+          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
           # GCP label values accept only lowercase letters, digits, `-` and `_`, so the
           # `owner/name` form of GITHUB_REPOSITORY has to be folded before use. Without
@@ -937,7 +954,7 @@ jobs:
           REPOSITORY_LABEL="${REPOSITORY_LABEL//\//-}"
 
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
-          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${{ inputs.force_save_to_disk }}" == "true" ]]; then
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]]; then
 
              # Use RUNNING_DB_VERSION for image naming (more reliable than STATE_VERSION)
              # Extract just the major version number for the image name
@@ -948,7 +965,7 @@ jobs:
              if [[ -z $IMAGE_VERSION_FOR_NAME ]] || [[ ! $IMAGE_VERSION_FOR_NAME =~ ^[0-9]+$ ]]; then
                  echo "ERROR: Invalid version extracted for image naming: $IMAGE_VERSION_FOR_NAME"
                  echo "RUNNING_DB_VERSION was: $RUNNING_DB_VERSION"
-                 echo "STATE_VERSION was: ${{ env.STATE_VERSION }}"
+                 echo "STATE_VERSION was: ${STATE_VERSION}"
                  exit 1
              fi
              
@@ -956,13 +973,13 @@ jobs:
 
              # Create image from the test disk
              gcloud compute images create \
-              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${DISK_PREFIX}-${SHORT_GITHUB_REF}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk="${DISK_NAME}" \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
               --storage-location=us \
-              --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }},repository=${REPOSITORY_LABEL}"
+              --description="Created from commit ${GITHUB_SHA_SHORT} with height ${SYNC_HEIGHT} and database format ${DB_VERSION_SUMMARY}" \
+              --labels="height=${SYNC_HEIGHT},purpose=${DISK_PREFIX},branch=${GITHUB_REF_SLUG_URL},commit=${GITHUB_SHA_SHORT},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${DISK_SUFFIX},update-flag=${UPDATE_SUFFIX},force-save=${FORCE_SAVE_TO_DISK},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${TEST_ID},app-name=${APP_NAME},repository=${REPOSITORY_LABEL}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
