@@ -110,16 +110,50 @@ permissions:
 jobs:
   # Resolve the workflow environment once so every downstream job and the
   # SENTRY_ENVIRONMENT / GCP labels stay in lockstep.
+  #
+  # Also resolve the GCE instance and data-disk names once, here, so every job that
+  # creates, inspects or deletes them agrees. Both names identify the run that owns
+  # them: without that, two runs at the same commit generate identical names and race
+  # for the same instance and the same 400 GB state disk. That happens routinely — a
+  # push and the weekly schedule sit in different concurrency groups, and a copy of
+  # this workflow in another repository is scheduled independently.
+  #
+  # The pair `(repository_id, run_id)` is what makes a name unique:
+  #   - `run_id` alone is NOT enough. GitHub documents it as "a unique number for each
+  #     workflow run within a repository", so two repositories may legally produce the
+  #     same value. It happens to be globally sequential today, but that is an
+  #     unspecified implementation detail and not something to rely on.
+  #   - `repository_id` rather than `github.repository`: it is numeric, stable across
+  #     repository renames, and free of the uppercase and `/` that GCP names reject.
+  #   - `run_id`, not `run_attempt`, so a re-run addresses its own resources rather
+  #     than creating a second set.
+  #
+  # Two constraints on the format:
+  #   - `run_id` must stay the TRAILING component. The daily cleanup selects on
+  #     `name~-[0-9a-f]{7,}$` (scripts/gcp-delete-old-instances.sh, -disks.sh); a
+  #     decimal run id satisfies that, but anything appended after it would not, and
+  #     the resources would leak.
+  #   - The two names must DIFFER. GCE names an instance's boot disk after the
+  #     instance when none is given, and `create-with-container` gives none, so an
+  #     identical data-disk name collides with the boot disk and creation fails.
+  #
+  # Neither the branch nor the commit is part of the name: both are carried on the
+  # instance labels, where there is no 63-character budget to compete for.
   determine-environment:
     name: Determine environment
     runs-on: ubuntu-latest
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
+      instance_name: ${{ steps.set.outputs.instance_name }}
+      disk_name: ${{ steps.set.outputs.disk_name }}
     steps:
       - id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
+          TEST_ID: ${{ inputs.test_id }}
+          REPO_ID: ${{ github.repository_id }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           case "$EVENT_NAME" in
             release)      ENV="prod" ;;
@@ -127,6 +161,21 @@ jobs:
             *)            ENV="stage" ;;
           esac
           echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+
+          INSTANCE_NAME="${TEST_ID}-${REPO_ID}-${RUN_ID}"
+          DISK_NAME="${TEST_ID}-dsk-${REPO_ID}-${RUN_ID}"
+
+          # GCE rejects names over 63 characters. Fail here with a clear message
+          # rather than at instance creation with an opaque one.
+          for name in "${INSTANCE_NAME}" "${DISK_NAME}"; do
+            if [ "${#name}" -gt 63 ]; then
+              echo "::error::Generated name is ${#name} characters, over the GCE limit of 63: ${name}"
+              exit 1
+            fi
+          done
+
+          echo "instance_name=${INSTANCE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "disk_name=${DISK_NAME}" >> "$GITHUB_OUTPUT"
 
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
@@ -246,9 +295,9 @@ jobs:
         env:
           WORKFLOW_ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
           PRIMARY_ZONE: ${{ vars.GCP_ZONE }}
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
+          NAME: ${{ needs.determine-environment.outputs.disk_name }}
         run: |
-          NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
 
@@ -293,6 +342,9 @@ jobs:
               DISK_ATTACH_PARAMS="--create-disk=size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
             fi
 
+            # DISK_ATTACH_PARAMS and CONTAINER_MOUNT_DISKS each expand to one or more
+            # separate gcloud arguments, so they are deliberately left unquoted.
+            # shellcheck disable=SC2086
             gcloud compute instances create-with-container "${INSTANCE_NAME}" \
             --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
             --boot-disk-size=50GB \
@@ -311,7 +363,7 @@ jobs:
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-            --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+            --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }},commit=${{ env.GITHUB_SHA_SHORT }} \
             --tags ${{ inputs.app_name }} \
             --zone "${zone}"
           }
@@ -351,8 +403,9 @@ jobs:
       # Find the container ID and save it for use in subsequent steps
       - name: Find container ID
         id: find-container
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
           CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
 
           echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
@@ -360,7 +413,7 @@ jobs:
           # Wait up to 60 seconds for container to start
           for attempt in {1..30}; do
             echo "Attempt ${attempt}/30: Checking for running container..."
-            CONTAINER_ID=$(gcloud compute ssh ${INSTANCE_NAME} \
+            CONTAINER_ID=$(gcloud compute ssh "${INSTANCE_NAME}" \
               --zone ${{ steps.create-instance.outputs.instance_zone }} \
               --ssh-flag="-o ServerAliveInterval=5" \
               --ssh-flag="-o ConnectionAttempts=20" \
@@ -368,7 +421,7 @@ jobs:
               --command="sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null || echo "")
             if [ -n "${CONTAINER_ID}" ]; then
               echo "Found running container: ${CONTAINER_ID}"
-              echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
+              echo "CONTAINER_ID=${CONTAINER_ID}" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "No running container found yet, waiting 2 seconds..."
@@ -389,10 +442,12 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           echo "Using pre-discovered container ID: ${CONTAINER_ID}"
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -440,11 +495,11 @@ jobs:
         # logs must not replace the real outcome with a misleading one.
         continue-on-error: true
         env:
-          INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
           GCP_ZONE: ${{ steps.create-instance.outputs.instance_zone }}
-          # The data disk is attached with `device-name=<test_id>-<sha>`, which the
-          # guest exposes under /dev/disk/by-id/google-<device-name>.
-          DISK_DEVICE: /dev/disk/by-id/google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
+          # The data disk is attached with `device-name=<disk_name>`, which the guest
+          # exposes under /dev/disk/by-id/google-<device-name>.
+          DISK_DEVICE: /dev/disk/by-id/google-${{ needs.determine-environment.outputs.disk_name }}
           CONTAINER_ID: ${{ steps.find-container.outputs.CONTAINER_ID }}
         run: |
           gcloud compute ssh "${INSTANCE_NAME}" \
@@ -490,7 +545,7 @@ jobs:
         if: ${{ startsWith(inputs.test_id, 'generate-checkpoints-') }}
         env:
           CONTAINER_ID: ${{ steps.find-container.outputs.CONTAINER_ID }}
-          INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
           GCP_ZONE: ${{ steps.create-instance.outputs.instance_zone }}
         run: |
           gcloud compute ssh "${INSTANCE_NAME}" \
@@ -515,6 +570,7 @@ jobs:
     env:
       TEST_ID: ${{ inputs.test_id }}
       GCP_ZONE: ${{ needs.test-result.outputs.instance_zone }}
+      INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
     permissions:
       contents: read
       id-token: write
@@ -522,11 +578,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
-        with:
-          short-length: 7
-          slug-maxlength: 23
       - uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
@@ -546,7 +597,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
       - name: Pull checkpoint file from instance
         run: |
-          INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
           # Match the repo file naming used by checkpoint-update.yml.
           if echo "${TEST_ID}" | grep -qi "testnet"; then
             OUT="test-checkpoints.txt"
@@ -678,26 +728,26 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
           DB_VERSION_SUMMARY=""
 
-          # Get Instance Name
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
-
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
-          gcloud compute ssh ${INSTANCE_NAME} \
+          gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ needs.test-result.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command="sudo docker logs ${CONTAINER_ID} | head -1000" \
           )
+          SSH_STATUS=$?
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+          if [[ $SSH_STATUS -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
               echo "Failed to retrieve logs via SSH."
               exit 1
           fi
@@ -777,24 +827,24 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           SYNC_HEIGHT=""
-
-          # Get Instance Name
-          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
-          gcloud compute ssh ${INSTANCE_NAME} \
+          gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ needs.test-result.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command="sudo docker logs --tail 200 ${CONTAINER_ID}" \
           )
+          SSH_STATUS=$?
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+          if [[ $SSH_STATUS -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
               echo "Failed to retrieve logs via SSH."
               exit 1
           fi
@@ -877,7 +927,15 @@ jobs:
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container.
       - name: Create image from state disk
+        env:
+          DISK_NAME: ${{ needs.determine-environment.outputs.disk_name }}
         run: |
+          # GCP label values accept only lowercase letters, digits, `-` and `_`, so the
+          # `owner/name` form of GITHUB_REPOSITORY has to be folded before use. Without
+          # this the whole `gcloud compute images create` call is rejected.
+          REPOSITORY_LABEL="${GITHUB_REPOSITORY,,}"
+          REPOSITORY_LABEL="${REPOSITORY_LABEL//\//-}"
+
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
           if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${{ inputs.force_save_to_disk }}" == "true" ]]; then
 
@@ -900,11 +958,11 @@ jobs:
              gcloud compute images create \
               "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
-              --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+              --source-disk="${DISK_NAME}" \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }},repository=${REPOSITORY_LABEL}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
@@ -930,12 +988,6 @@ jobs:
           persist-credentials: false
           fetch-depth: '2'
 
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
-        with:
-          short-length: 7
-          slug-maxlength: 23
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -952,7 +1004,7 @@ jobs:
       - name: Delete test instance
         continue-on-error: true
         env:
-          INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           # The test job fails over across zones, so discover the zone the instance
           # actually landed in instead of assuming the primary zone.
