@@ -337,7 +337,8 @@ where
                 tx.as_ref(),
                 nu,
                 script_verifier,
-                cached_ffi_transaction.clone()
+                cached_ffi_transaction.clone(),
+                tx_id,
             )?;
 
             tracing::trace!(?tx_id, "awaiting async checks...");
@@ -532,7 +533,8 @@ where
                 tx.as_ref(),
                 nu,
                 script_verifier,
-                cached_ffi_transaction.clone()
+                cached_ffi_transaction.clone(),
+                tx_id,
             )?;
 
             let check_anchors_and_revealed_nullifiers_query = state
@@ -929,6 +931,12 @@ fn check_maturity_height(
 /// `nu` is the network upgrade active at the transaction's verification height,
 /// pre-computed by the caller using [`NetworkUpgrade::current`].
 ///
+/// `tx_id` must be the unmined ID of `tx`: the shielded verifiers key their caches on it, so an
+/// ID that does not identify `tx` would let one transaction's bundle be answered from another's
+/// verification. A v5 or v6 transaction's witnessed ID is passed down to the Halo2 verifier,
+/// which needs the transaction's authorizing-data digest; a legacy ID has none, so those bundles
+/// are verified without consulting the Halo2 cache.
+///
 /// Returns [`TransactionError::WrongVersion`] for V1-V3 transactions, which
 /// are not supported by any network upgrade Zebra verifies.
 fn dispatch_version_verification(
@@ -936,15 +944,40 @@ fn dispatch_version_verification(
     nu: NetworkUpgrade,
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    tx_id: UnminedTxId,
 ) -> Result<AsyncChecks, TransactionError> {
+    // V5 and V6 transactions always have a witnessed ID, so this is `Some` for the versions that
+    // reach the Orchard verifiers below. It stays an `Option` rather than an assertion because a
+    // missing ID only costs a cache miss, and consensus code must not panic on transaction data.
+    let wtx_id = match tx_id {
+        UnminedTxId::Witnessed(wtx_id) => Some(wtx_id),
+        UnminedTxId::Legacy(_) => None,
+    };
+
     match tx.tx_version() {
         TxVersion::Sprout(_) | TxVersion::V3 => {
             tracing::debug!(?tx, "got transaction with wrong version");
             Err(TransactionError::WrongVersion)
         }
-        TxVersion::V4 => verify_v4_transaction(tx, nu, script_verifier, cached_ffi_transaction),
-        TxVersion::V5 => verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction),
-        TxVersion::V6 => verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction),
+        TxVersion::V4 => {
+            verify_v4_transaction(tx, nu, script_verifier, cached_ffi_transaction, tx_id)
+        }
+        TxVersion::V5 => verify_v5_transaction(
+            tx,
+            nu,
+            script_verifier,
+            cached_ffi_transaction,
+            tx_id,
+            wtx_id,
+        ),
+        TxVersion::V6 => verify_v6_transaction(
+            tx,
+            nu,
+            script_verifier,
+            cached_ffi_transaction,
+            tx_id,
+            wtx_id,
+        ),
         #[allow(unreachable_patterns)]
         _ => {
             tracing::debug!(?tx, "got transaction with unsupported version");
@@ -968,12 +1001,14 @@ fn dispatch_version_verification(
 /// - the `nu` network upgrade active at the transaction's verification height
 /// - the `script_verifier` to use for verifying the transparent transfers
 /// - the prepared `cached_ffi_transaction` used by the script verifier
+/// - the transaction's `tx_id`, used by the Sapling verification cache
 #[allow(clippy::unwrap_in_result)]
 fn verify_v4_transaction(
     tx: &Transaction,
     nu: NetworkUpgrade,
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    tx_id: UnminedTxId,
 ) -> Result<AsyncChecks, TransactionError> {
     verify_v4_transaction_network_upgrade(tx, nu)?;
 
@@ -986,7 +1021,7 @@ fn verify_v4_transaction(
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
             .and(verify_sprout_shielded_data(tx, &sighash)?)
-            .and(verify_sapling_bundle(sapling_bundle, &sighash)),
+            .and(verify_sapling_bundle(sapling_bundle, &sighash, tx_id)),
     )
 }
 
@@ -1052,12 +1087,15 @@ fn verify_v4_transaction_network_upgrade(
 /// - the `nu` network upgrade active at the transaction's verification height
 /// - the `script_verifier` to use for verifying the transparent transfers
 /// - the prepared `cached_ffi_transaction` used by the script verifier
+/// - the transaction's `tx_id` and `wtx_id`, used by the shielded verification caches
 #[allow(clippy::unwrap_in_result)]
 fn verify_v5_transaction(
     tx: &Transaction,
     nu: NetworkUpgrade,
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    tx_id: UnminedTxId,
+    wtx_id: Option<transaction::WtxId>,
 ) -> Result<AsyncChecks, TransactionError> {
     verify_v5_transaction_network_upgrade(tx, nu)?;
 
@@ -1070,8 +1108,8 @@ fn verify_v5_transaction(
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
-            .and(verify_sapling_bundle(sapling_bundle, &sighash))
-            .and(verify_orchard_bundle(orchard_bundle, &sighash, nu)),
+            .and(verify_sapling_bundle(sapling_bundle, &sighash, tx_id))
+            .and(verify_orchard_bundle(orchard_bundle, &sighash, nu, wtx_id)),
     )
 }
 
@@ -1127,6 +1165,8 @@ fn verify_v6_transaction(
     nu: NetworkUpgrade,
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
+    tx_id: UnminedTxId,
+    wtx_id: Option<transaction::WtxId>,
 ) -> Result<AsyncChecks, TransactionError> {
     verify_v6_transaction_network_upgrade(tx, nu)?;
 
@@ -1142,9 +1182,9 @@ fn verify_v6_transaction(
     // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
-            .and(verify_sapling_bundle(sapling_bundle, &sighash))
-            .and(verify_orchard_v6_bundle(orchard_bundle, &sighash))
-            .and(verify_orchard_v6_bundle(ironwood_bundle, &sighash)),
+            .and(verify_sapling_bundle(sapling_bundle, &sighash, tx_id))
+            .and(verify_orchard_v6_bundle(orchard_bundle, &sighash, wtx_id))
+            .and(verify_orchard_v6_bundle(ironwood_bundle, &sighash, wtx_id)),
     )
 }
 
@@ -1281,9 +1321,13 @@ fn verify_sprout_shielded_data(
 }
 
 /// Verifies a transaction's Sapling shielded data.
+///
+/// `tx_id` must identify the transaction containing `bundle`; the verifier's cache adds it to the
+/// key that lets a mempool verification be reused for the block that mines it.
 fn verify_sapling_bundle(
     bundle: Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>>,
     sighash: &SigHash,
+    tx_id: UnminedTxId,
 ) -> AsyncChecks {
     let mut async_checks = AsyncChecks::new();
 
@@ -1338,7 +1382,7 @@ fn verify_sapling_bundle(
         async_checks.push(
             primitives::sapling::VERIFIER
                 .clone()
-                .oneshot(primitives::sapling::Item::new(bundle, *sighash)),
+                .oneshot(primitives::sapling::Item::new(bundle, *sighash, tx_id)),
         );
     }
 
@@ -1358,11 +1402,13 @@ fn verify_orchard_bundle(
     bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     sighash: &SigHash,
     network_upgrade: NetworkUpgrade,
+    wtx_id: Option<transaction::WtxId>,
 ) -> AsyncChecks {
     queue_orchard_bundle(
         || primitives::halo2::orchard_v5_verifier_for(network_upgrade),
         bundle,
         sighash,
+        wtx_id,
     )
 }
 
@@ -1375,8 +1421,14 @@ fn verify_orchard_bundle(
 fn verify_orchard_v6_bundle(
     bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     sighash: &SigHash,
+    wtx_id: Option<transaction::WtxId>,
 ) -> AsyncChecks {
-    queue_orchard_bundle(primitives::halo2::orchard_v6_verifier, bundle, sighash)
+    queue_orchard_bundle(
+        primitives::halo2::orchard_v6_verifier,
+        bundle,
+        sighash,
+        wtx_id,
+    )
 }
 
 /// Queues an Orchard-shaped bundle's single aggregated Halo2 proof against a verifier.
@@ -1395,19 +1447,26 @@ fn verify_orchard_v6_bundle(
 ///
 /// `select_verifier` is only invoked when a bundle is present, so a bundle-less transaction
 /// never forces the (lazily initialized) verifier services.
+///
+/// `wtx_id` must identify the transaction containing `bundle`; the verifier's cache keys on it,
+/// together with the sighash and the bundle's value pool, so that a bundle verified from the
+/// mempool is not verified again in the block that mines it. Without one the item is verified
+/// every time.
 fn queue_orchard_bundle(
     select_verifier: impl FnOnce() -> &'static primitives::halo2::VerifierService,
     bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     sighash: &SigHash,
+    wtx_id: Option<transaction::WtxId>,
 ) -> AsyncChecks {
     let mut async_checks = AsyncChecks::new();
 
     if let Some(bundle) = bundle {
-        async_checks.push(
-            select_verifier()
-                .clone()
-                .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
-        );
+        let item = match wtx_id {
+            Some(wtx_id) => primitives::halo2::Item::new_with_wtx_id(bundle, *sighash, wtx_id),
+            None => primitives::halo2::Item::new(bundle, *sighash),
+        };
+
+        async_checks.push(select_verifier().clone().oneshot(item));
     }
 
     async_checks
