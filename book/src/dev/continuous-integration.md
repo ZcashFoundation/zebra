@@ -70,7 +70,7 @@ Two independent hold checks:
 The release PR is meant to pass a freeze through Merge Freeze's **Unfreeze 1 pull
 request** action; the `A-release` label controls Zebra's release checks but does not
 bypass a freeze. That action has been reported returning an error, and Merge Freeze's
-documentation ties it to the *Push a status update to all PRs* freeze method, so
+documentation ties it to the _Push a status update to all PRs_ freeze method, so
 confirm which method the installation uses before relying on it for a release.
 
 Merge Freeze reports on both the source PR and the native merge group. There is one
@@ -108,7 +108,7 @@ is the sections above describe the intended end state rather than the current on
 An admin applies these, in order:
 
 1. Set the ruleset's `allowed_merge_methods` to `["merge"]`, and enable
-   `allow_auto_merge`. *(Both already applied.)*
+   `allow_auto_merge`. _(Both already applied.)_
 2. Add the `merge_queue` rule to the `PR Requirements` ruleset with the settings
    listed above. Set the check timeout to **180 minutes**: the default is 60 and unit
    tests take up to 69, so every Rust entry would be dequeued as assumed-failed.

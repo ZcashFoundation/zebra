@@ -78,8 +78,8 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Remove every active non-release entry from GitHub's merge queue so the freeze
       takes effect immediately.
 - [ ] Use Merge Freeze's **Unfreeze 1 pull request** action for this release PR. That
-      action requires the project's freeze method to be *Push a status update to all
-      PRs*; confirm that before relying on it.
+      action requires the project's freeze method to be
+      _Push a status update to all PRs_; confirm that before relying on it.
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
