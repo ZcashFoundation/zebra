@@ -54,7 +54,12 @@ Some PRs don't use the queue:
 
 ### Holding a Pull Request Back
 
-The ruleset requires two independent hold checks:
+> **Not enforced until the queue is activated.** Both checks below exist — the
+> Merge Freeze app is installed and `merge-policy` runs on every pull request — but
+> neither is a required status check yet, so neither holds anything. See
+> [Activating the queue](#activating-the-queue).
+
+Two independent hold checks:
 
 - **`merge-policy`**: fails while a PR has the `do-not-merge` label. Remove the
   label to release it. Label changes re-run only this small workflow.
@@ -62,8 +67,11 @@ The ruleset requires two independent hold checks:
   fails this status during a release window. Repository admins and members with
   write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
 
-Use Merge Freeze's **Unfreeze 1 pull request** action for the release PR. The
-`A-release` label controls Zebra's release checks, but it does not bypass a freeze.
+The release PR is meant to pass a freeze through Merge Freeze's **Unfreeze 1 pull
+request** action; the `A-release` label controls Zebra's release checks but does not
+bypass a freeze. That action has been reported returning an error, and Merge Freeze's
+documentation ties it to the *Push a status update to all PRs* freeze method, so
+confirm which method the installation uses before relying on it for a release.
 
 Merge Freeze reports on both the source PR and the native merge group. There is one
 timing edge: if `mergefreeze` has already succeeded on a merge group, starting a
@@ -83,13 +91,38 @@ Mergify's automatic enrollment and high/low priority rules.
 | Ordering | FIFO; a maintainer can manually jump an urgent PR to the top |
 | CI concurrency | Up to five cumulative merge-group builds |
 | Final merges | One merge commit per PR |
-| Single-PR hold | Required `merge-policy` check and `do-not-merge` label |
-| Release freeze | Required Merge Freeze `mergefreeze` status |
+| Single-PR hold | `merge-policy` check and `do-not-merge` label |
+| Release freeze | Merge Freeze `mergefreeze` status |
 | Failed queue check | The PR is removed and later groups are rebuilt |
 
 Unlike the previous Mergify queue, the native queue does not provide automatic
 enrollment, label-based high and low priority, CI batch construction and bisection,
 or Mergify's dashboard and queue statistics. The simpler policy is intentional.
+
+### Activating the queue
+
+The workflows in this repository are the whole of the change that lives in git. The
+queue itself is repository configuration, so it is applied separately, and until it
+is the sections above describe the intended end state rather than the current one.
+
+An admin applies these, in order:
+
+1. Set the ruleset's `allowed_merge_methods` to `["merge"]`, and enable
+   `allow_auto_merge`. *(Both already applied.)*
+2. Add the `merge_queue` rule to the `PR Requirements` ruleset with the settings
+   listed above. Set the check timeout to **180 minutes**: the default is 60 and unit
+   tests take up to 69, so every Rust entry would be dequeued as assumed-failed.
+3. Add `merge-policy` and `mergefreeze` to the required status checks. Merge Freeze
+   [requires both](https://docs.mergefreeze.com/github-merge-queue) its status and
+   `Require merge queue` to be selected. Not before this merge, though: `merge-policy`
+   does not exist on `main` until then, and every open pull request would block on a
+   check nothing produces.
+4. Remove Mergify's bypass actor from the ruleset, then uninstall the app.
+
+Steps 2 and 3 must follow the merge that puts these workflows on `main`, and step 4
+should follow immediately: Mergify reads its configuration from the default branch,
+so it stops the moment `mergify.yml` is gone, while the native queue does not start
+until step 2.
 
 Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
 

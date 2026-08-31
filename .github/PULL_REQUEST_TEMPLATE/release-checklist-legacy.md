@@ -77,7 +77,9 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Freeze `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
 - [ ] Remove every active non-release entry from GitHub's merge queue so the freeze
       takes effect immediately.
-- [ ] Use Merge Freeze's **Unfreeze 1 pull request** action for this release PR.
+- [ ] Use Merge Freeze's **Unfreeze 1 pull request** action for this release PR. That
+      action requires the project's freeze method to be *Push a status update to all
+      PRs*; confirm that before relying on it.
 - [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
@@ -216,7 +218,8 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
-- [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/).
+- [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/), if
+      it was frozen there.
 - [ ] Remove `do-not-merge` from the PRs you added it to
 
 ## Release Failures

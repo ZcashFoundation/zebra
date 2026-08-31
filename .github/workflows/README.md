@@ -202,7 +202,9 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
 - Every required-check workflow must keep its `merge_group` trigger and its aggregator
   job name, or the queue stalls waiting for a check that is never reported
 - `merge-policy` holds a pull request carrying `do-not-merge`; the Merge Freeze app's
-  `mergefreeze` status holds the repository during a release window
+  `mergefreeze` status holds the repository during a release window. Neither is
+  enforced until the queue is activated — see [Activating the
+  queue](../../book/src/dev/continuous-integration.md#activating-the-queue)
 
 GitHub's queue is FIFO, with a manual jump-to-top operation that rebuilds affected
 entries. Moving from Mergify intentionally removes automatic enrollment, high and low
@@ -396,9 +398,9 @@ docker run --rm zebra-tests
 - `merge_group` runs execute in the context of this repository, not the fork, so the
   required checks do get full access to secrets and repository variables before a fork
   PR reaches `main`
-- This covers the repository-owned required checks (`lint`, `unit-tests`,
-  `test-crates`, `pr-gate-result`, and `merge-policy`); Merge Freeze separately
-  reports its required `mergefreeze` status on the merge group
+- This covers the repository-owned checks (`lint`, `unit-tests`, `test-crates`,
+  `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
+  `mergefreeze` status on the merge group
 
 It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
 `pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
