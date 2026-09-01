@@ -1,0 +1,8 @@
+project: zebrad
+kind: Changed
+body: 'The `getblocktemplate` RPC returns a block template that Zebra keeps ready for the current
+  chain tip, rather than assembling one while the miner waits. Templates are refreshed on every
+  chain tip change and every few seconds, so a template can be a few seconds behind the mempool,
+  but it is never behind the chain
+  ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).'
+time: 2026-09-01T14:15:02.000000000Z

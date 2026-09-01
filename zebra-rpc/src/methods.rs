@@ -117,6 +117,7 @@ use types::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
             ZCASHD_FUNDING_STREAM_ORDER,
         },
+        precompute,
         proposal::proposal_block_from_template,
         BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
         GetBlockTemplateParameters, GetBlockTemplateResponse, MinerParams,
@@ -1002,6 +1003,30 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Spawns a task that keeps a block template for the current chain tip precomputed, so
+    /// `getblocktemplate` calls don't have to read the state and the mempool, select transactions,
+    /// and build a coinbase transaction.
+    ///
+    /// Returns `None` if mining isn't configured.
+    pub fn spawn_block_template_updater(&self) -> Option<JoinHandle<()>> {
+        let miner_params = self.gbt.miner_params()?.clone();
+        let template_cache = self.gbt.template_cache()?.clone();
+
+        Some(tokio::spawn(
+            precompute::run(
+                self.network.clone(),
+                miner_params,
+                self.gbt.coinbase_cache(),
+                template_cache,
+                self.mempool.clone(),
+                self.read_state.clone(),
+                self.latest_chain_tip.clone(),
+                self.gbt.sync_status(),
+            )
+            .in_current_span(),
+        ))
     }
 
     /// Returns a reference to the configured network.
@@ -2474,6 +2499,34 @@ where
             .gbt
             .miner_params()
             .ok_or_error(0, "miner parameters are required for get_block_template")?;
+
+        // - Precomputed template
+        //
+        // Serve the template that the block template updater task keeps ready, as long as it
+        // extends the current chain tip. Its mempool transactions can be a few seconds old, which
+        // only costs the miner the fees of the transactions that arrived in the meantime, and the
+        // next call picks them up.
+        //
+        // Long polling clients keep waiting if the precomputed template is the one they already
+        // have.
+        check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
+
+        if let (Some(cache), Some(tip_hash)) =
+            (self.gbt.template_cache(), latest_chain_tip.best_tip_hash())
+        {
+            if let Some(template) = cache.wait_for_tip(tip_hash).await {
+                if Some(template.long_poll_id) != client_long_poll_id {
+                    let submit_old = client_long_poll_id
+                        .as_ref()
+                        .map(|old_long_poll_id| template.long_poll_id.submit_old(old_long_poll_id));
+
+                    let mut template = (*template).clone();
+                    template.submit_old = submit_old;
+
+                    return Ok(template.into());
+                }
+            }
+        }
 
         // - Checks and fetches that can change during long polling
         //

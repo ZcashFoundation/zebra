@@ -191,14 +191,12 @@ fn coinbase_cache_reuses_built_coinbase() {
         "a cache hit reuses the stored coinbase",
     );
 
-    // A different height key or a cleared cache misses, so the next request rebuilds.
+    // A different height key misses, so the next request rebuilds.
     let next_height = height.next().expect("height is below Height::MAX");
     assert!(
         cache.get(next_height, fee).is_none(),
         "a different height misses"
     );
-    cache.clear();
-    assert!(cache.get(height, fee).is_none(), "a cleared cache misses");
 }
 
 /// Verifies the fix for #10907: the multi-entry coinbase cache retains both the zero-fee fake

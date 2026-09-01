@@ -2,6 +2,7 @@
 
 pub mod constants;
 pub mod parameters;
+pub(crate) mod precompute;
 pub mod proposal;
 pub mod zip317;
 
@@ -624,14 +625,6 @@ impl CoinbaseCache {
         }
         map.insert((height, fee), coinbase);
     }
-
-    /// Discards all cached coinbases, forcing the next request to rebuild them.
-    fn clear(&self) {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
-    }
 }
 
 /// Handler for the `getblocktemplate` RPC.
@@ -657,6 +650,14 @@ where
     /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
     /// the shielded-coinbase proof on every request within a block.
     coinbase_cache: CoinbaseCache,
+
+    /// A block template for the current chain tip, kept up to date by the task spawned by
+    /// `RpcImpl::spawn_block_template_updater()`, so `getblocktemplate` can answer without reading
+    /// the state and the mempool.
+    ///
+    /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
+    /// precomputed template pays the configured miner address.
+    template_cache: Option<precompute::TemplateCache>,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -679,6 +680,7 @@ where
             mined_block_sender: mined_block_sender
                 .unwrap_or(SubmitBlockChannel::default().sender()),
             coinbase_cache: CoinbaseCache::default(),
+            template_cache: Some(precompute::TemplateCache::default()),
         }
     }
 
@@ -697,11 +699,20 @@ where
         // its cache with the handler it was cloned from. Detach to a fresh cache so
         // neither handler can serve a coinbase built for the other's address.
         self.coinbase_cache = CoinbaseCache::default();
+        // The precomputed template pays the previous miner address, and it's shared with the
+        // handler this one was cloned from, so stop using it.
+        self.template_cache = None;
     }
 
     /// Returns a handle to the coinbase transaction cache.
     pub(crate) fn coinbase_cache(&self) -> CoinbaseCache {
         self.coinbase_cache.clone()
+    }
+
+    /// Returns a handle to the precomputed block template, unless this handler's miner parameters
+    /// were overridden after cloning.
+    pub(crate) fn template_cache(&self) -> Option<&precompute::TemplateCache> {
+        self.template_cache.as_ref()
     }
 
     /// Returns the sync status.
@@ -728,8 +739,11 @@ where
         if let Some(miner_params) = &mut self.miner_params {
             miner_params.randomize_data();
             miner_params.randomize_memo();
-            // The cached coinbase was built with the previous data, so it's now stale.
-            self.coinbase_cache.clear();
+            // The cached coinbases were built with the previous data, and both caches are shared
+            // with the handler this one was cloned from. Detach from them, so neither handler can
+            // serve a coinbase built for the other's data.
+            self.coinbase_cache = CoinbaseCache::default();
+            self.template_cache = None;
         }
     }
 }
