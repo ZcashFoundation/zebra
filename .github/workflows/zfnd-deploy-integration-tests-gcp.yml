@@ -1060,11 +1060,31 @@ jobs:
             exit 1
           fi
 
-          read -r INSTANCE ZONE <<< "${MATCHED}"
-          if [ -z "${INSTANCE}" ]; then
+          if [ -z "${MATCHED}" ]; then
             echo "No instance to delete"
           else
-            gcloud compute instances delete "${INSTANCE}" --zone "${ZONE}" --delete-disks all --quiet
+            # Delete every match, not just the first row. A name identifies a run, but
+            # GCE names are unique per zone rather than per project, so one run can own
+            # instances in more than one zone: the failover path's cleanup delete is
+            # `|| true` and may leave a partial instance behind before the next zone
+            # succeeds, and a re-run addresses the same names by design. Reading a
+            # single row would delete one and leave the rest running - the orphan this
+            # job exists to prevent.
+            #
+            # A failed delete is recorded rather than propagated, so one failure does
+            # not abort the loop and strand the instances after it.
+            DELETE_FAILED=0
+            while read -r INSTANCE ZONE; do
+              if [ -n "${INSTANCE}" ]; then
+                echo "Deleting ${INSTANCE} in ${ZONE}"
+                gcloud compute instances delete "${INSTANCE}" --zone "${ZONE}" --delete-disks all --quiet \
+                  || { echo "::error::Failed to delete ${INSTANCE} in ${ZONE}"; DELETE_FAILED=1; }
+              fi
+            done <<< "${MATCHED}"
+
+            if [ "${DELETE_FAILED}" -ne 0 ]; then
+              exit 1
+            fi
           fi
 
   deployment-success:
