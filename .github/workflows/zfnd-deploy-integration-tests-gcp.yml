@@ -244,8 +244,11 @@ jobs:
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
-          # GCP instance names are limited to 63 chars. With test_id (max ~31) + sha (7) + hyphens (2),
-          # we need to limit the slug to 23 chars to stay under the limit.
+          # The slug is no longer part of any resource name - names are resolved in
+          # `determine-environment` from the test id and the run identity. Its only
+          # consumer here is the `github_ref` instance label, where the GCP limit is
+          # 63 characters, so 23 is now a free choice; it is kept so that existing
+          # label values do not change.
           slug-maxlength: 23
 
       - name: Downcase network name for disks and labels
@@ -309,8 +312,6 @@ jobs:
           # value containing shell metacharacters would escape its quoting context.
           APP_NAME: ${{ inputs.app_name }}
           TEST_ID: ${{ inputs.test_id }}
-          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
-          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
 
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
