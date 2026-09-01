@@ -171,9 +171,14 @@ jobs:
           # carrying an underscore or a capital would pass a length-only check and
           # still fail creation with exactly the error this guard exists to prevent.
           #
-          # The third check asserts the selector contract from the naming block
-          # above: a name the daily cleanup cannot match would leak silently, so a
-          # format change that breaks the match must fail here, at composition time.
+          # The third check pins the name FORMAT to the daily cleanup's selector: a
+          # name the cleanup cannot match would leak silently, so a format change
+          # that breaks the match fails here, at composition time.
+          #
+          # It does not protect the selector itself. This is a third copy of the
+          # pattern, so narrowing the copies in scripts/gcp-delete-old-instances.sh
+          # or -disks.sh would leak every test resource while this check still
+          # passes. All three have to be changed together.
           REAPER_SELECTOR='-[0-9a-f]{7,}$'
           for name in "${INSTANCE_NAME}" "${DISK_NAME}"; do
             if [ "${#name}" -gt 63 ]; then
@@ -253,8 +258,10 @@ jobs:
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
-          # The slug now only feeds the `github_ref` instance label (GCP limit 63);
-          # 23 is kept so existing label values do not change.
+          # The slug no longer feeds any resource name. In this job it reaches the
+          # `github_ref` instance label and the GITHUB_REF_POINT_SLUG_URL container
+          # env var below, which the test reports as a Sentry tag - both capped at
+          # 63. 23 is kept so neither existing value changes.
           slug-maxlength: 23
 
       - name: Downcase network name for disks and labels
@@ -1017,7 +1024,14 @@ jobs:
     # upload-checkpoint-artifact is included to prevent the instance from being deleted
     # before checkpoint data is extracted from the container logs.
     if: always()
-    continue-on-error: true
+    # Deliberately NOT `continue-on-error`. Every failure this job can still report
+    # means either an instance known to be orphaned or one whose state is unknown,
+    # and both bill until the daily reaper catches them. The flag dates from a
+    # teardown that could not tell "nothing to delete" from "the lookup failed"; the
+    # step below distinguishes those and exits 0 on a genuine no-op, so suppressing
+    # its status now only hides actionable failures. It also masked a failure in
+    # `Authenticate to Google Cloud`, which skips the delete step outright and would
+    # otherwise report a green teardown that never ran.
     permissions:
       contents: read
       id-token: write
@@ -1048,7 +1062,6 @@ jobs:
         # An empty name means determine-environment never resolved one, so nothing
         # can have been created - and an empty `name=` filter is a gcloud error.
         if: ${{ needs.determine-environment.outputs.instance_name != '' }}
-        continue-on-error: true
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
@@ -1059,8 +1072,8 @@ jobs:
           # `instances list` - expired credentials on a multi-day run, a transient API
           # error - also returns nothing, and folding that into the "no match" case
           # would report a successful teardown while the instance keeps running, which
-          # is the silent orphan this job exists to prevent. The step is
-          # `continue-on-error`, so the annotation surfaces without failing the run.
+          # is the silent orphan this job exists to prevent. Failing here makes that
+          # a red X on the run, not an annotation on a green one.
           if ! MATCHED=$(gcloud compute instances list \
             --filter="name=${INSTANCE_NAME}" \
             --format='value(name,zone.basename())'); then

@@ -12,6 +12,11 @@ set -o pipefail
 # Calculate the date before which disks should be deleted
 DELETE_BEFORE_DATE=$(date --date="${DELETE_AGE_DAYS} days ago" '+%Y%m%d')
 
+# Records a delete that did not take, so the sweep can report it after finishing.
+# Not local: it accumulates across every delete_disks call below. See the same
+# reasoning in gcp-delete-old-instances.sh.
+DELETE_FAILED=0
+
 # Deletes old, unattached disks matching the gcloud name filter in $1.
 delete_disks() {
     local disks
@@ -23,7 +28,7 @@ delete_disks() {
         [[ -z "${NAME}" ]] && continue
         echo "Deleting disk: ${NAME} (--${SCOPE}=${LOCATION})"
         gcloud compute disks delete "${NAME}" "--${SCOPE}=${LOCATION}" --quiet --verbosity=info \
-            || echo "Failed to delete disk: ${NAME}"
+            || { echo "Failed to delete disk: ${NAME}"; DELETE_FAILED=1; }
     done <<< "${disks}"
 }
 
@@ -33,3 +38,8 @@ delete_disks() {
 delete_disks 'name~-[0-9a-f]{7,}$'
 # Disks prefixed with "zebrad-", but never the persistent "zebrad-cache-*" chain-state disks.
 delete_disks 'name~^zebrad- AND NOT name~^zebrad-cache'
+
+if [[ "${DELETE_FAILED}" -ne 0 ]]; then
+    echo "ERROR: one or more disks could not be deleted"
+    exit 1
+fi

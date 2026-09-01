@@ -28,10 +28,23 @@ if ! INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --fil
     exit 1
 fi
 
-# Delete each instance
+# Delete each instance.
+#
+# A failed delete is recorded rather than propagated, so one failure does not abort the
+# loop and strand the instances after it - but the script still exits non-zero at the
+# end. This sweep is the backstop for the per-run teardown in
+# zfnd-deploy-integration-tests-gcp.yml, and it is the last thing that will notice an
+# orphan: if a persistent failure (an IAM change, an instance stuck deleting) leaves the
+# scheduled run green, nothing else reports the leak.
+DELETE_FAILED=0
 while IFS=$'\t' read -r NAME ZONE; do
     [[ -z "${NAME}" ]] && continue
     echo "Deleting instance: ${NAME} (--zone=${ZONE})"
     gcloud compute instances delete "${NAME}" --zone="${ZONE}" --delete-disks=all --quiet --verbosity=info \
-        || echo "Failed to delete instance: ${NAME}"
+        || { echo "Failed to delete instance: ${NAME}"; DELETE_FAILED=1; }
 done <<< "${INSTANCES}"
+
+if [[ "${DELETE_FAILED}" -ne 0 ]]; then
+    echo "ERROR: one or more instances could not be deleted; they are still running"
+    exit 1
+fi

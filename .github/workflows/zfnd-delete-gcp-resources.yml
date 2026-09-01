@@ -54,23 +54,34 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
+      # Each sweep runs even if an earlier one failed. The scripts now exit non-zero
+      # when a delete does not take, and the default `success()` gate would otherwise
+      # let a single stuck instance skip the template, disk and image sweeps for the
+      # day - turning one leak into four. The job still fails if any sweep failed.
+      #
       # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
       # The selector must keep matching run-id-suffixed integration test resources:
-      # rationale in the script below, contract asserted in
-      # zfnd-deploy-integration-tests-gcp.yml's `determine-environment` guard.
+      # rationale in the script below. Nothing outside this repository's naming guard
+      # enforces that - zfnd-deploy-integration-tests-gcp.yml's `determine-environment`
+      # step pins the resource name format against its own copy of this pattern, so
+      # narrowing the pattern here would leak every test instance and its 400 GB disk
+      # while that guard still passes.
       - name: Delete old instances
+        if: ${{ !cancelled() }}
         run: |
           ./.github/workflows/scripts/gcp-delete-old-instances.sh
       # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
       - name: Delete old instance templates
+        if: ${{ !cancelled() }}
         run: |
           ./.github/workflows/scripts/gcp-delete-old-templates.sh
 
       # Deletes all mainnet and testnet disks older than $DELETE_AGE_DAYS days.
       - name: Delete old disks
+        if: ${{ !cancelled() }}
         run: |
           ./.github/workflows/scripts/gcp-delete-old-disks.sh
 
@@ -85,6 +96,7 @@ jobs:
       # TODO:
       # - refactor out repeated shell script code
       - name: Delete old cache images
+        if: ${{ !cancelled() }}
         run: |
           ./.github/workflows/scripts/gcp-delete-old-cache-images.sh
 
