@@ -1021,10 +1021,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
+      # This job deliberately does NOT check out the repository, and should not be
+      # given a checkout step by reflex when one is added elsewhere in this file.
+      # Nothing here reads the working tree: authentication is by workload identity,
+      # `setup-gcloud` downloads the SDK, and the teardown below is an inline script
+      # that names no repository path. `ensure-health-checks` in
+      # zfnd-deploy-prebuilt-nodes-gcp.yml is the same shape and runs without one.
+      #
+      # Contrast zfnd-delete-gcp-resources.yml, which does need a checkout: its steps
+      # execute ./.github/workflows/scripts/*.sh from the repository.
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
