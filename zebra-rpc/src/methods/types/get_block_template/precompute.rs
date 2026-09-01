@@ -306,8 +306,7 @@ where
         // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
         Some(BlockTemplateResponse::new_internal(
             &network,
-            None,
-            Some(coinbase_cache),
+            &coinbase_cache,
             &miner_params,
             &chain_info,
             long_poll_id,

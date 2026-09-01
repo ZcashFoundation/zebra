@@ -1,0 +1,6 @@
+project: zebrad
+kind: Fixed
+body: 'Zebra no longer runs a shielded coinbase proof for each outstanding `getblocktemplate` long
+  poll when the configured miner address has a shielded component
+  ([#10747](https://github.com/ZcashFoundation/zebra/issues/10747)).'
+time: 2026-09-01T14:15:04.000000000Z
