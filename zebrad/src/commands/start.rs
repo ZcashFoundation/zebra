@@ -485,6 +485,12 @@ impl StartCmd {
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
 
+        // Keep a block template ready for the `getblocktemplate` RPC, if this node is configured
+        // for mining.
+        let block_template_task_handle = rpc_impl
+            .spawn_block_template_updater()
+            .inspect(|_| info!("spawned block template updater task"));
+
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
             RpcServer::start(rpc_impl.clone(), config.rpc.clone())
                 .await
@@ -857,6 +863,9 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        if let Some(block_template_task_handle) = block_template_task_handle {
+            block_template_task_handle.abort();
+        }
         health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
