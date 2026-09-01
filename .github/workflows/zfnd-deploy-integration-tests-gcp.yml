@@ -744,6 +744,11 @@ jobs:
 
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
+          # The status has to be collected through `||`. GitHub runs `run:` blocks
+          # under `bash -e`, so a bare `DOCKER_LOGS=$(...)` aborts the step the moment
+          # gcloud exits non-zero - before any status line can run - and the message
+          # below would never be reached.
+          SSH_STATUS=0
           DOCKER_LOGS=$( \
           gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ needs.test-result.outputs.instance_zone }} \
@@ -751,8 +756,7 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command="sudo docker logs ${CONTAINER_ID} | head -1000" \
-          )
-          SSH_STATUS=$?
+          ) || SSH_STATUS=$?
 
           if [[ $SSH_STATUS -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
               echo "Failed to retrieve logs via SSH."
@@ -841,6 +845,9 @@ jobs:
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
           CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
+          # See the note in "Get database versions from logs": under `bash -e` the
+          # status has to be collected through `||` or the step aborts first.
+          SSH_STATUS=0
           DOCKER_LOGS=$( \
           gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ needs.test-result.outputs.instance_zone }} \
@@ -848,8 +855,7 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command="sudo docker logs --tail 200 ${CONTAINER_ID}" \
-          )
-          SSH_STATUS=$?
+          ) || SSH_STATUS=$?
 
           if [[ $SSH_STATUS -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
               echo "Failed to retrieve logs via SSH."
@@ -1025,12 +1031,21 @@ jobs:
         run: |
           # The test job fails over across zones, so discover the zone the instance
           # actually landed in instead of assuming the primary zone.
-          # `|| true` keeps `set -e` from aborting on an empty result: with no match,
-          # read hits EOF and returns non-zero, and the "nothing to delete" case is
-          # handled below.
-          read -r INSTANCE ZONE < <(gcloud compute instances list \
+          #
+          # The lookup's exit status is checked separately from its output. A failed
+          # `instances list` - expired credentials on a multi-day run, a transient API
+          # error - also returns nothing, and folding that into the "no match" case
+          # would report a successful teardown while the instance keeps running, which
+          # is the silent orphan this job exists to prevent. The step is
+          # `continue-on-error`, so the annotation surfaces without failing the run.
+          if ! MATCHED=$(gcloud compute instances list \
             --filter="name=${INSTANCE_NAME}" \
-            --format='value(name,zone.basename())') || true
+            --format='value(name,zone.basename())'); then
+            echo "::error::Could not list instances while looking for ${INSTANCE_NAME}; it may still be running"
+            exit 1
+          fi
+
+          read -r INSTANCE ZONE <<< "${MATCHED}"
           if [ -z "${INSTANCE}" ]; then
             echo "No instance to delete"
           else
@@ -1043,6 +1058,9 @@ jobs:
     # Always run this job to check the status of dependent jobs
     if: always()
     needs:
+      # determine-environment resolves the resource names and can fail on its own
+      # guards, so it is reported directly rather than through the jobs it skips.
+      - determine-environment
       - get-disk-name
       - test-result
       - create-state-image
