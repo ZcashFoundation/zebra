@@ -72,6 +72,11 @@ impl TemplateCache {
             .is_some_and(|template| template.previous_block_hash == tip_hash)
     }
 
+    /// Returns `true` if no [`run()`] task has published a template yet.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.borrow().is_none()
+    }
+
     /// Publishes `template` as the precomputed template.
     fn publish(&self, template: BlockTemplateResponse) {
         self.0.send_replace(Some(Arc::new(template)));
