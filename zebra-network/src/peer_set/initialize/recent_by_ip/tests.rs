@@ -102,10 +102,11 @@ fn ipv6_addresses_in_same_64_share_the_limit() {
     );
 }
 
-/// Connection attempts from different addresses in the same IPv4 `/24` share
-/// one limit slot, mirroring the IPv6 `/64` grouping.
+/// IPv4 addresses are limited per address, not per subnet: unlike an IPv6
+/// `/64`, every extra IPv4 address costs an attacker a separate allocation,
+/// and grouping them would let one peer block Zebra from its neighbours.
 #[test]
-fn ipv4_addresses_in_same_24_share_the_limit() {
+fn ipv4_addresses_in_same_24_are_limited_separately() {
     const TEST_TIME_LIMIT: Duration = Duration::from_secs(5);
 
     let _init_guard = zebra_test::init();
@@ -120,15 +121,14 @@ fn ipv4_addresses_in_same_24_share_the_limit() {
         "the first address in a /24 should be accepted"
     );
     assert!(
-        recent_connections.is_past_limit_or_add(second),
-        "a second address in the same /24 should be past the limit"
+        !recent_connections.is_past_limit_or_add(second),
+        "a different address in the same /24 should also be accepted"
     );
 
-    // An address in a different /24 is unaffected.
-    let other_subnet: IpAddr = "198.51.100.10".parse().expect("valid IPv4 address");
+    // The same address is still limited.
     assert!(
-        !recent_connections.is_past_limit_or_add(other_subnet),
-        "an address in a different /24 should be accepted"
+        recent_connections.is_past_limit_or_add(first),
+        "a repeat of the first address should be past the limit"
     );
 }
 

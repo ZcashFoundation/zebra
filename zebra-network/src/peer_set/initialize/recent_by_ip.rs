@@ -12,14 +12,14 @@ use crate::{constants, protocol::external::connection_limit_key};
 mod tests;
 
 #[derive(Debug)]
-/// Tracks recently attempted inbound connections, grouped per IPv6 `/64`
-/// and per IPv4 `/24` subnet: one machine can originate many addresses,
-/// and every address it uses must count against a single limit.
+/// Tracks recently attempted inbound connections, keyed per IPv4 address and
+/// per IPv6 `/64` subnet: one machine with a `/64` can originate many IPv6
+/// addresses, and every address it uses must count against a single limit.
 pub struct RecentByIp {
-    /// The list of subnet keys in decreasing connection age order.
+    /// The list of connection limit keys in decreasing connection age order.
     pub by_time: VecDeque<(IpAddr, Instant)>,
 
-    /// Stores the number of recently attempted inbound connections per subnet key.
+    /// Stores the number of recently attempted inbound connections per connection limit key.
     pub by_ip: HashMap<IpAddr, usize>,
 
     /// The maximum number of peer connections Zebra will keep for a given IP address
@@ -50,8 +50,8 @@ impl RecentByIp {
     }
 
     /// Prunes outdated entries, checks if there's a recent inbound connection
-    /// attempt in the same IPv6 `/64` or IPv4 `/24` subnet, and adds the entry
-    /// to `by_time` and `by_ip` if needed.
+    /// attempt from the same IPv4 address or IPv6 `/64` subnet, and adds the
+    /// entry to `by_time` and `by_ip` if needed.
     ///
     /// Returns true if the recently attempted inbound connection count is past the configured limit.
     pub fn is_past_limit_or_add(&mut self, ip: IpAddr) -> bool {

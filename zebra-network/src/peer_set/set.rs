@@ -313,7 +313,7 @@ where
     last_peer_log: Option<Instant>,
 
     /// The configured maximum number of peers that can be in the
-    /// peer set per IP subnet, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
+    /// peer set per connection limit key, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
 
     /// The network of this peer set.
@@ -358,7 +358,7 @@ where
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
     /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
-    ///   peer set per IP subnet, defaults to the config value or to
+    ///   peer set per connection limit key, defaults to the config value or to
     ///   [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
@@ -695,8 +695,8 @@ where
         }
     }
 
-    /// Returns the number of peer connections Zebra already has in the same
-    /// IPv6 `/64` or IPv4 `/24` subnet as the provided IP address.
+    /// Returns the number of peer connections Zebra already has with the
+    /// provided IPv4 address, or in the same IPv6 `/64` subnet.
     ///
     /// Peer set admission uses this count to enforce
     /// [`Config::max_connections_per_ip`](crate::config::Config).
@@ -776,9 +776,10 @@ where
 
                     // # Security
                     //
-                    // drop the new peer if there are already `max_conns_per_ip` peers in
-                    // the same IPv6 `/64` or IPv4 `/24` subnet. Sidecars are exempt: they
-                    // are trusted, and the listener already caps their inbound slots.
+                    // drop the new peer if there are already `max_conns_per_ip` peers with
+                    // the same IPv4 address, or in the same IPv6 `/64` subnet. Sidecars are
+                    // exempt: they are trusted, and the listener already caps their inbound
+                    // slots.
                     if !is_sidecar && self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
                         std::mem::drop(svc);
                         continue;

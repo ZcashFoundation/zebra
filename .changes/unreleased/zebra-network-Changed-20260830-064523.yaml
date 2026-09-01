@@ -1,9 +1,9 @@
 project: zebra-network
 kind: Changed
-body: '`network.max_connections_per_ip` now limits peer connections per IPv6 `/64`
-  subnet and per IPv4 `/24` subnet, rather than per individual address. A single
-  machine with a standard IPv6 `/64` allocation has 2^64 distinct addresses, and
-  a rented IPv4 `/24` has enough addresses to fill every inbound connection slot,
-  so per-address limiting did not bound the number of connections one machine
-  could open ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
+body: '`network.max_connections_per_ip` now limits IPv6 peer connections per `/64`
+  subnet, rather than per individual address. A single machine with a standard
+  IPv6 `/64` allocation has 2^64 distinct addresses, so per-address limiting did
+  not bound the number of connections one machine could open. IPv4 connections
+  are still limited per address
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
 time: 2026-08-30T01:15:23.000000000Z

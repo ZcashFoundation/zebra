@@ -1,8 +1,8 @@
 project: zebrad
 kind: Changed
-body: 'Peer connection limiting is now applied per IPv6 `/64` subnet and per IPv4
-  `/24` subnet instead of per individual address, so one machine can no longer
-  bypass `network.max_connections_per_ip` by connecting from many addresses in
-  the same allocation
-  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
+body: 'Peer connection limiting is now applied per IPv6 `/64` subnet instead of per
+  individual IPv6 address, so one machine can no longer bypass
+  `network.max_connections_per_ip` by connecting from many addresses in the same
+  `/64` allocation. IPv4 connections are unchanged, and are still limited per
+  address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
 time: 2026-08-30T01:15:23.000000000Z

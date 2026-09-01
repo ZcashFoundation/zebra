@@ -69,7 +69,7 @@ pub struct AddressBook {
     by_addr: IndexMap<PeerSocketAddr, MetaAddr>,
 
     /// The address with a [`PeerAddrState::Responded`](PeerAddrState) last connection state and
-    /// the most recent `last_response` time per IPv6 `/64` (or IPv4 `/24`) subnet.
+    /// the most recent `last_response` time per IPv4 address or IPv6 `/64` subnet.
     ///
     /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config), and
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
@@ -637,8 +637,8 @@ impl AddressBook {
     /// Is this IP ready for a new outbound connection attempt?
     /// Checks if the outbound connection with the most recent response at this IP has recently responded.
     ///
-    /// IPs are compared by IPv6 `/64` and IPv4 `/24` subnet, so reconnection
-    /// attempts from one machine's other addresses are throttled too.
+    /// IPv6 addresses are compared by `/64` subnet, so reconnection attempts
+    /// from one machine's other addresses in that subnet are throttled too.
     ///
     /// Note: last_response times may remain live for a long time if the local clock is changed to an earlier time.
     fn is_ready_for_connection_attempt_with_ip(
