@@ -273,8 +273,7 @@ impl BlockTemplateResponse {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_internal(
         net: &Network,
-        precomputed_coinbase: Option<TransactionTemplate<amount::NegativeOrZero>>,
-        coinbase_cache: Option<CoinbaseCache>,
+        coinbase_cache: &CoinbaseCache,
         miner_params: &MinerParams,
         chain_info: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
@@ -330,26 +329,18 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        // Prefer the long-poll precomputed coinbase, then the per-block cache, and only build (and
-        // re-prove, for a shielded address) as a last resort — caching the result so subsequent
-        // short-poll requests for the same height and fees reuse it.
-        let coinbase_txn = precomputed_coinbase
-            .or_else(|| {
-                coinbase_cache
-                    .as_ref()
-                    .and_then(|cache| cache.get(height, txs_fee))
-            })
-            .unwrap_or_else(|| {
-                let coinbase_txn =
-                    TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
-                        .expect("valid coinbase tx");
+        // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
+        // shielded address) as a last resort — caching the result so subsequent requests for the
+        // same height and fees reuse it.
+        let coinbase_txn = coinbase_cache.get(height, txs_fee).unwrap_or_else(|| {
+            let coinbase_txn =
+                TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
+                    .expect("valid coinbase tx");
 
-                if let Some(cache) = &coinbase_cache {
-                    cache.store(height, txs_fee, coinbase_txn.clone());
-                }
+            coinbase_cache.store(height, txs_fee, coinbase_txn.clone());
 
-                coinbase_txn
-            });
+            coinbase_txn
+        });
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
