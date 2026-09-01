@@ -165,11 +165,18 @@ jobs:
           INSTANCE_NAME="${TEST_ID}-${REPO_ID}-${RUN_ID}"
           DISK_NAME="${TEST_ID}-dsk-${REPO_ID}-${RUN_ID}"
 
-          # GCE rejects names over 63 characters. Fail here with a clear message
-          # rather than at instance creation with an opaque one.
+          # GCE rejects names over 63 characters, and names that are not lowercase
+          # RFC 1035 labels. Fail here with a clear message rather than at instance
+          # creation with an opaque one. Length alone is not enough: a `test_id`
+          # carrying an underscore or a capital would pass a length-only check and
+          # still fail creation with exactly the error this guard exists to prevent.
           for name in "${INSTANCE_NAME}" "${DISK_NAME}"; do
             if [ "${#name}" -gt 63 ]; then
               echo "::error::Generated name is ${#name} characters, over the GCE limit of 63: ${name}"
+              exit 1
+            fi
+            if [[ ! "${name}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]]; then
+              echo "::error::Generated name is not a valid GCE resource name: ${name}"
               exit 1
             fi
           done
@@ -950,14 +957,21 @@ jobs:
           FORCE_SAVE_TO_DISK: ${{ inputs.force_save_to_disk }}
           TEST_ID: ${{ inputs.test_id }}
           APP_NAME: ${{ inputs.app_name }}
-          GITHUB_REF_SLUG_URL: ${{ env.GITHUB_REF_SLUG_URL }}
-          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
-          # GCP label values accept only lowercase letters, digits, `-` and `_`, so the
-          # `owner/name` form of GITHUB_REPOSITORY has to be folded before use. Without
-          # this the whole `gcloud compute images create` call is rejected.
+          # GCP label values accept only lowercase letters, digits, `-` and `_`, and are
+          # capped at 63 characters, so the `owner/name` form of GITHUB_REPOSITORY has to
+          # be folded before use. Replacing `/` alone is not enough: an owner is limited
+          # to alphanumerics and hyphens, but a repository name may also contain `.`
+          # (`next.js` and `socket.io` are ordinary names), so after lowercasing the
+          # offending characters are exactly `.` and `/`. Either one makes GCP reject the
+          # whole `gcloud compute images create` call - which would discard the image at
+          # the very end of a multi-day sync, for a label that is purely informational.
+          # The cap matters too: an owner of 39 plus a name of 100 is well over 63.
+          # Substituting the complement of the accepted set keeps `ZcashFoundation/zebra`
+          # folding to `zcashfoundation-zebra` exactly as before.
           REPOSITORY_LABEL="${GITHUB_REPOSITORY,,}"
-          REPOSITORY_LABEL="${REPOSITORY_LABEL//\//-}"
+          REPOSITORY_LABEL="${REPOSITORY_LABEL//[^a-z0-9_-]/-}"
+          REPOSITORY_LABEL="${REPOSITORY_LABEL:0:63}"
 
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
           if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]]; then
