@@ -18,7 +18,11 @@ if ! command -v gcloud &> /dev/null; then
     exit 1
 fi
 
-# Fetch the list of instances to delete
+# Fetch the list of instances to delete.
+#
+# Integration test instances end in the GitHub run id, not a commit hash. Decimal digits
+# are a subset of `[0-9a-f]`, so they match this pattern, but only incidentally: do not
+# tighten it to assume a hexadecimal commit hash, or those instances will never be reaped.
 if ! INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < ${DELETE_BEFORE_DATE}" --format='value(NAME,ZONE)'); then
     echo "Error fetching instances."
     exit 1

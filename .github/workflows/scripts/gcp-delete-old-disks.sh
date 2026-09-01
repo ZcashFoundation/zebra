@@ -27,7 +27,11 @@ delete_disks() {
     done <<< "${disks}"
 }
 
-# Disks from PR jobs and other jobs that use a commit hash.
+# Disks from PR jobs and other jobs whose name ends in a run id or a commit hash.
+#
+# Integration test disks end in the GitHub run id. Decimal digits are a subset of
+# `[0-9a-f]`, so they match this pattern, but only incidentally: do not tighten it to
+# assume a hexadecimal commit hash, or those disks will never be reaped.
 delete_disks 'name~-[0-9a-f]{7,}$'
 # Disks prefixed with "zebrad-", but never the persistent "zebrad-cache-*" chain-state disks.
 delete_disks 'name~^zebrad- AND NOT name~^zebrad-cache'
