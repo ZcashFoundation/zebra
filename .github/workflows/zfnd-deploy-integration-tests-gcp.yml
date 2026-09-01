@@ -170,13 +170,22 @@ jobs:
           # creation with an opaque one. Length alone is not enough: a `test_id`
           # carrying an underscore or a capital would pass a length-only check and
           # still fail creation with exactly the error this guard exists to prevent.
+          #
+          # The third check asserts the selector contract from the naming block
+          # above: a name the daily cleanup cannot match would leak silently, so a
+          # format change that breaks the match must fail here, at composition time.
+          REAPER_SELECTOR='-[0-9a-f]{7,}$'
           for name in "${INSTANCE_NAME}" "${DISK_NAME}"; do
             if [ "${#name}" -gt 63 ]; then
-              echo "::error::Generated name is ${#name} characters, over the GCE limit of 63: ${name}"
+              echo "::error::Generated name is ${#name} characters, over the GCE limit of 63 (is test_id too long?): ${name}"
               exit 1
             fi
             if [[ ! "${name}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]]; then
-              echo "::error::Generated name is not a valid GCE resource name: ${name}"
+              echo "::error::Generated name is not a valid GCE resource name (check test_id): ${name}"
+              exit 1
+            fi
+            if [[ ! "${name}" =~ ${REAPER_SELECTOR} ]]; then
+              echo "::error::Generated name does not match the daily cleanup selector ${REAPER_SELECTOR} and would leak: ${name}"
               exit 1
             fi
           done
@@ -244,11 +253,8 @@ jobs:
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
-          # The slug is no longer part of any resource name - names are resolved in
-          # `determine-environment` from the test id and the run identity. Its only
-          # consumer here is the `github_ref` instance label, where the GCP limit is
-          # 63 characters, so 23 is now a free choice; it is kept so that existing
-          # label values do not change.
+          # The slug now only feeds the `github_ref` instance label (GCP limit 63);
+          # 23 is kept so existing label values do not change.
           slug-maxlength: 23
 
       - name: Downcase network name for disks and labels
@@ -959,17 +965,12 @@ jobs:
           TEST_ID: ${{ inputs.test_id }}
           APP_NAME: ${{ inputs.app_name }}
         run: |
-          # GCP label values accept only lowercase letters, digits, `-` and `_`, and are
-          # capped at 63 characters, so the `owner/name` form of GITHUB_REPOSITORY has to
-          # be folded before use. Replacing `/` alone is not enough: an owner is limited
-          # to alphanumerics and hyphens, but a repository name may also contain `.`
-          # (`next.js` and `socket.io` are ordinary names), so after lowercasing the
-          # offending characters are exactly `.` and `/`. Either one makes GCP reject the
-          # whole `gcloud compute images create` call - which would discard the image at
-          # the very end of a multi-day sync, for a label that is purely informational.
-          # The cap matters too: an owner of 39 plus a name of 100 is well over 63.
-          # Substituting the complement of the accepted set keeps `ZcashFoundation/zebra`
-          # folding to `zcashfoundation-zebra` exactly as before.
+          # GCP label values accept only `[a-z0-9_-]`, capped at 63 characters; anything
+          # else makes GCP reject the whole `images create` call, discarding the image at
+          # the very end of a multi-day sync. Replacing `/` alone is not enough: an owner
+          # is limited to alphanumerics and hyphens, but a repository name may also
+          # contain `.` (`next.js`, `socket.io`), and an owner of 39 plus a name of 100
+          # is well over the cap.
           REPOSITORY_LABEL="${GITHUB_REPOSITORY,,}"
           REPOSITORY_LABEL="${REPOSITORY_LABEL//[^a-z0-9_-]/-}"
           REPOSITORY_LABEL="${REPOSITORY_LABEL:0:63}"
@@ -1027,9 +1028,8 @@ jobs:
       # `setup-gcloud` downloads the SDK, and the teardown below is an inline script
       # that names no repository path. `ensure-health-checks` in
       # zfnd-deploy-prebuilt-nodes-gcp.yml is the same shape and runs without one.
-      #
-      # Contrast zfnd-delete-gcp-resources.yml, which does need a checkout: its steps
-      # execute ./.github/workflows/scripts/*.sh from the repository.
+      # (zfnd-delete-gcp-resources.yml, by contrast, needs its checkout: it executes
+      # scripts from the repository.)
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1045,6 +1045,9 @@ jobs:
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
       - name: Delete test instance
+        # An empty name means determine-environment never resolved one, so nothing
+        # can have been created - and an empty `name=` filter is a gcloud error.
+        if: ${{ needs.determine-environment.outputs.instance_name != '' }}
         continue-on-error: true
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
@@ -1068,28 +1071,25 @@ jobs:
           if [ -z "${MATCHED}" ]; then
             echo "No instance to delete"
           else
-            # Delete every match, not just the first row. A name identifies a run, but
-            # GCE names are unique per zone rather than per project, so one run can own
-            # instances in more than one zone: the failover path's cleanup delete is
-            # `|| true` and may leave a partial instance behind before the next zone
-            # succeeds, and a re-run addresses the same names by design. Reading a
-            # single row would delete one and leave the rest running - the orphan this
-            # job exists to prevent.
+            # Delete every match, not just the first row. GCE names are unique per
+            # zone rather than per project, so one run can own instances in more than
+            # one zone: the failover path's cleanup delete is `|| true` and may leave
+            # a partial instance behind before the next zone succeeds, and a re-run
+            # addresses the same names by design.
             #
             # A failed delete is recorded rather than propagated, so one failure does
-            # not abort the loop and strand the instances after it.
+            # not abort the loop and strand the instances after it. This deliberately
+            # duplicates the loop in scripts/gcp-delete-old-instances.sh - this job
+            # has no checkout to call it from - so keep the two in sync.
             DELETE_FAILED=0
             while read -r INSTANCE ZONE; do
-              if [ -n "${INSTANCE}" ]; then
-                echo "Deleting ${INSTANCE} in ${ZONE}"
-                gcloud compute instances delete "${INSTANCE}" --zone "${ZONE}" --delete-disks all --quiet \
-                  || { echo "::error::Failed to delete ${INSTANCE} in ${ZONE}"; DELETE_FAILED=1; }
-              fi
+              [ -n "${INSTANCE}" ] || continue
+              echo "Deleting ${INSTANCE} in ${ZONE}"
+              gcloud compute instances delete "${INSTANCE}" --zone "${ZONE}" --delete-disks all --quiet \
+                || { echo "::error::Failed to delete ${INSTANCE} in ${ZONE}"; DELETE_FAILED=1; }
             done <<< "${MATCHED}"
 
-            if [ "${DELETE_FAILED}" -ne 0 ]; then
-              exit 1
-            fi
+            [ "${DELETE_FAILED}" -eq 0 ] || exit 1
           fi
 
   deployment-success:

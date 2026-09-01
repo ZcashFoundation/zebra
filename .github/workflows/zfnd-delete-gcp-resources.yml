@@ -58,12 +58,9 @@ jobs:
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
-      #
-      # Integration test instances end in the GitHub run id, not a commit hash - see the
-      # naming block in zfnd-deploy-integration-tests-gcp.yml, which depends on this
-      # selector still matching them. Decimal digits are a subset of `[0-9a-f]`, so they
-      # do match, but only incidentally: tightening this pattern to assume a hexadecimal
-      # commit hash would silently orphan every test VM and its 400 GB state disk.
+      # The selector must keep matching run-id-suffixed integration test resources:
+      # rationale in the script below, contract asserted in
+      # zfnd-deploy-integration-tests-gcp.yml's `determine-environment` guard.
       - name: Delete old instances
         run: |
           ./.github/workflows/scripts/gcp-delete-old-instances.sh
