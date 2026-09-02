@@ -41,7 +41,10 @@ use futures::{
 };
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -147,6 +150,23 @@ pub enum TransactionDownloadVerifyError {
     },
 }
 
+/// The outcome of one download and verify task.
+///
+/// Sent to [`Downloads::poll_next`] over a channel rather than returned from the task, so a
+/// completed task is queued for the mempool before [`Downloads`] says a transaction is ready.
+type VerifyResult = Result<
+    Result<
+        (
+            VerifiedUnminedTx,
+            Vec<transparent::OutPoint>,
+            Option<Height>,
+            Option<oneshot::Sender<Result<(), BoxError>>>,
+        ),
+        Box<(TransactionDownloadVerifyError, UnminedTxId)>,
+    >,
+    (UnminedTxId, tokio::time::error::Elapsed),
+>;
+
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
@@ -175,23 +195,17 @@ where
 
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
+    ///
+    /// Each task sends its result to [`Self::results`] and returns nothing, so polling this only
+    /// reaps finished tasks and surfaces their panics.
     #[pin]
-    pending: FuturesUnordered<
-        JoinHandle<
-            Result<
-                Result<
-                    (
-                        VerifiedUnminedTx,
-                        Vec<transparent::OutPoint>,
-                        Option<Height>,
-                        Option<oneshot::Sender<Result<(), BoxError>>>,
-                    ),
-                    Box<(TransactionDownloadVerifyError, UnminedTxId)>,
-                >,
-                (UnminedTxId, tokio::time::error::Elapsed),
-            >,
-        >,
-    >,
+    pending: FuturesUnordered<JoinHandle<()>>,
+
+    /// The results of finished download and verify tasks.
+    results: mpsc::UnboundedReceiver<VerifyResult>,
+
+    /// The sender each task uses to queue its result.
+    results_sender: mpsc::UnboundedSender<VerifyResult>,
 
     /// A list of channels that can be used to cancel pending transaction
     /// download and verify tasks. Each entry also stores the corresponding
@@ -240,18 +254,23 @@ where
     >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
+
+        // Reap finished tasks, so the queue length stays accurate and a panicking task is not
+        // silently swallowed. Their results arrive over the channel below, not from these handles.
+        while let Poll::Ready(Some(join_result)) = this.pending.as_mut().poll_next(cx) {
+            join_result.expect("transaction download and verify tasks must not panic");
+        }
+
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        // If no download and verify tasks have exited since the last poll, this
-        // task is scheduled for wakeup when the next task becomes ready.
-        //
-        // TODO: this would be cleaner with poll_map (#2693)
-        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let result = join_result.expect("transaction download and verify tasks must not panic");
+        // Polling the results channel schedules this task for wakeup when the next result is
+        // queued. A task queues its result before signalling that it finished, so a poll that
+        // follows the signal sees the result here.
+        let item = if let Some(result) = ready!(this.results.poll_recv(cx)) {
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
                     let hash = tx.transaction.id;
@@ -318,11 +337,15 @@ where
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
     pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+        let (results_sender, results) = mpsc::unbounded_channel();
+
         Self {
             network,
             verifier,
             state,
             pending: FuturesUnordered::new(),
+            results,
+            results_sender,
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
         }
@@ -495,6 +518,7 @@ where
         })
         .in_current_span();
 
+        let results_sender = self.results_sender.clone();
         let task = tokio::spawn(async move {
             let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
 
@@ -537,7 +561,8 @@ where
                 },
             };
 
-            result
+            // A send only fails once `Downloads` has been dropped, along with the receiver.
+            let _ = results_sender.send(result);
         });
 
         self.pending.push(task);
