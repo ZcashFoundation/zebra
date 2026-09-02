@@ -2986,7 +2986,10 @@ where
         Ok(address_book
             .recently_live_peers(chrono::Utc::now())
             .into_iter()
-            .map(PeerInfo::from)
+            .map(|meta_addr| {
+                let banscore = address_book.misbehavior_score(meta_addr.addr());
+                PeerInfo::from_meta_addr(meta_addr, banscore)
+            })
             .collect())
     }
 

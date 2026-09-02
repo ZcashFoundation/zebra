@@ -1,0 +1,8 @@
+project: zebra-network
+kind: Changed
+body: 'Peer bans now expire after 24 hours, matching `zcashd`''s
+  `DEFAULT_MISBEHAVING_BANTIME`. Bans were previously kept until restart. A peer
+  whose ban has lapsed is banned again as soon as it misbehaves again. Lapsed
+  bans are pruned when a new ban is applied
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
+time: 2026-09-02T10:00:01.000000000Z
