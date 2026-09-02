@@ -310,11 +310,15 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
             .expect("the invalid transaction is admitted for verification");
 
         // Wait for the independent task, not Downloads::poll_next or Mempool::poll_ready.
-        let completed = tokio::time::timeout(Duration::from_secs(1), downloads.pending.next())
+        tokio::time::timeout(Duration::from_secs(1), downloads.pending.next())
             .await
             .expect("definite verification failures do not wait for a queue-checker tick")
             .expect("the download task exists")
-            .expect("the download task does not panic")
+            .expect("the download task does not panic");
+        let completed = downloads
+            .results
+            .try_recv()
+            .expect("the finished task queued its result")
             .expect("the download task does not time out");
         assert!(
             completed.is_err(),
