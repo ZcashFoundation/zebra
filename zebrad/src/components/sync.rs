@@ -29,6 +29,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
+use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
@@ -1354,6 +1355,19 @@ where
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
+            // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
+            // commit a restart would cancel, looping near the tip (#11168, #11132).
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } if matches!(
+                **source,
+                VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+            ) =>
+            {
+                debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting on the next tip walk, continuing");
+                false
+            }
 
             // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload { .. }
@@ -1404,6 +1418,15 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+
+            // The short post-final-checkpoint verify timeout is a UTXO race (#5125), not an
+            // invalid block; the 8-minute tower timeout stays in the catch-all (#5709).
+            BlockDownloadVerifyError::ValidationRequestError { error, .. }
+                if error.is::<tokio::time::error::Elapsed>() =>
+            {
+                debug!(error = ?e, "initial fully verified block timed out waiting for its parent's outputs, continuing");
                 false
             }
 

@@ -13,7 +13,9 @@ use zebra_chain::{
     parameters::subsidy::SubsidyError,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
+use zebra_consensus::{
+    error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+};
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -1396,6 +1398,68 @@ async fn invalid_height_does_not_restart_sync() {
     assert!(
         has_addr,
         "InvalidHeight should carry advertiser_addr for peer scoring"
+    );
+}
+
+/// A concrete `ChainSync` type for calling associated functions in tests.
+type TestChainSync = ChainSync<
+    MockService<zn::Request, zn::Response, PanicAssertion>,
+    MockService<zs::Request, zs::Response, PanicAssertion>,
+    MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    MockChainTip,
+>;
+
+/// Verifies fix for #11168 and #11132: a `TransparentInputNotFound` from an `AwaitUtxo`
+/// timeout does not trigger a sync restart, but other transaction errors still do.
+#[tokio::test]
+async fn transparent_input_not_found_does_not_restart_sync() {
+    let make_invalid = |tx_error| BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Transaction(tx_error)),
+        },
+        height: block::Height(3_427_629),
+        hash: block::Hash::from([0xCC; 32]),
+        advertiser_addr: None,
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_invalid(
+            TransactionError::TransparentInputNotFound
+        )),
+        "a transparent input UTXO lookup timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
+        "other transaction errors should still trigger sync restart"
+    );
+}
+
+/// Verifies fix for #11168: the short post-final-checkpoint verify timeout (#5125) does
+/// not trigger a sync restart, but the tower-level `BLOCK_VERIFY_TIMEOUT` still does (#5709).
+#[tokio::test]
+async fn verify_timeout_elapsed_does_not_restart_sync() {
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+
+    let make_error = |error: crate::BoxError| BlockDownloadVerifyError::ValidationRequestError {
+        error,
+        height: block::Height(3_428_007),
+        hash: block::Hash::from([0xCD; 32]),
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_error(tokio_elapsed.into())),
+        "the post-final-checkpoint verify timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_error(
+            tower::timeout::error::Elapsed::new().into()
+        )),
+        "the tower block verify timeout should still trigger sync restart (#5709)"
     );
 }
 
