@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: '`components::mempool::QueueChecker::spawn` and `components::mempool::downloads::Downloads::new` take an `Arc<tokio::sync::Notify>`; pass both the same notifier so the queue checker runs when a transaction finishes verifying instead of waiting for its 5-second backstop ([#11376](https://github.com/ZcashFoundation/zebra/pull/11376)).'
+time: 2026-11-17T11:18:11.667707367+01:00
