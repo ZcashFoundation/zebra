@@ -22,8 +22,10 @@ env:
   # Instances labelled `long-test=true` get a longer retention instead: their jobs
   # are allowed to run for up to 5 days (`is_long_test` grants a 7200-minute timeout
   # in zfnd-deploy-integration-tests-gcp.yml), so the default threshold would delete
-  # a VM and its state disk mid-test, days into a sync. One day past the timeout,
-  # so an instance the workflow failed to tear down still only survives one extra day.
+  # a VM and its state disk mid-test, days into a sync. One day past the timeout - and
+  # because the cutoff is truncated to a date and the cron runs at 0700 UTC, the actual
+  # deletion lands 6 to 7 days after creation. So an instance the workflow failed to
+  # tear down survives three days longer than it would under the default tier.
   DELETE_LONG_TEST_INSTANCE_DAYS: 6
   # Delete all other resources created before $DELETE_AGE_DAYS days ago.
   # We keep this short to reduce storage costs.
