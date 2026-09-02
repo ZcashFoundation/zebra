@@ -41,7 +41,10 @@ use futures::{
 };
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -147,6 +150,20 @@ pub enum TransactionDownloadVerifyError {
     },
 }
 
+/// A download and verify result queued before notifying the mempool.
+type VerifyResult = Result<
+    Result<
+        (
+            VerifiedUnminedTx,
+            Vec<transparent::OutPoint>,
+            Option<Height>,
+            Option<oneshot::Sender<Result<(), BoxError>>>,
+        ),
+        Box<(TransactionDownloadVerifyError, UnminedTxId)>,
+    >,
+    (UnminedTxId, tokio::time::error::Elapsed),
+>;
+
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
@@ -174,24 +191,18 @@ where
     state: ZS,
 
     // Internal downloads state
-    /// A list of pending transaction download and verify tasks.
+    /// Pending tasks, retained to reap finished tasks and propagate panics.
     #[pin]
-    pending: FuturesUnordered<
-        JoinHandle<
-            Result<
-                Result<
-                    (
-                        VerifiedUnminedTx,
-                        Vec<transparent::OutPoint>,
-                        Option<Height>,
-                        Option<oneshot::Sender<Result<(), BoxError>>>,
-                    ),
-                    Box<(TransactionDownloadVerifyError, UnminedTxId)>,
-                >,
-                (UnminedTxId, tokio::time::error::Elapsed),
-            >,
-        >,
-    >,
+    pending: FuturesUnordered<JoinHandle<()>>,
+
+    /// The results of finished download and verify tasks.
+    results: mpsc::UnboundedReceiver<VerifyResult>,
+
+    /// The sender each task uses to queue its result.
+    results_sender: mpsc::UnboundedSender<VerifyResult>,
+
+    /// Transactions whose results have not been consumed, including cancelled tasks.
+    in_flight: usize,
 
     /// A list of channels that can be used to cancel pending transaction
     /// download and verify tasks. Each entry also stores the corresponding
@@ -247,18 +258,16 @@ where
     >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        // CORRECTNESS
-        //
-        // The current task must be scheduled for wakeup every time we return
-        // `Poll::Pending`.
-        //
-        // If no download and verify tasks have exited since the last poll, this
-        // task is scheduled for wakeup when the next task becomes ready.
-        //
-        // TODO: this would be cleaner with poll_map (#2693)
-        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let result = join_result.expect("transaction download and verify tasks must not panic");
+        let mut this = self.project();
+
+        // Results arrive separately; join handles still propagate task panics.
+        while let Poll::Ready(Some(join_result)) = this.pending.as_mut().poll_next(cx) {
+            join_result.expect("transaction download and verify tasks must not panic");
+        }
+
+        // Register the caller for wakeup when the next result is queued.
+        let item = if let Some(result) = ready!(this.results.poll_recv(cx)) {
+            *this.in_flight -= 1;
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
                     let hash = tx.transaction.id;
@@ -297,10 +306,6 @@ where
 
         Poll::Ready(item)
     }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.pending.size_hint()
-    }
 }
 
 impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
@@ -325,11 +330,16 @@ where
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
     pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+        let (results_sender, results) = mpsc::unbounded_channel();
+
         Self {
             network,
             verifier,
             state,
             pending: FuturesUnordered::new(),
+            results,
+            results_sender,
+            in_flight: 0,
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
         }
@@ -355,25 +365,23 @@ where
         if self.cancel_handles.contains_key(&txid) {
             debug!(
                 ?txid,
-                queue_len = self.pending.len(),
+                queue_len = self.in_flight,
                 ?MAX_INBOUND_CONCURRENCY,
                 "transaction id already queued for inbound download: ignored transaction"
             );
-            metrics::gauge!("mempool.currently.queued.transactions",)
-                .set(self.pending.len() as f64);
+            metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
 
             return Err(MempoolError::AlreadyQueued);
         }
 
-        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+        if self.in_flight >= MAX_INBOUND_CONCURRENCY {
             debug!(
                 ?txid,
-                queue_len = self.pending.len(),
+                queue_len = self.in_flight,
                 ?MAX_INBOUND_CONCURRENCY,
                 "too many transactions queued for inbound download: ignored transaction"
             );
-            metrics::gauge!("mempool.currently.queued.transactions",)
-                .set(self.pending.len() as f64);
+            metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
 
             return Err(MempoolError::FullQueue);
         }
@@ -506,6 +514,7 @@ where
         })
         .in_current_span();
 
+        let results_sender = self.results_sender.clone();
         let task = tokio::spawn(async move {
             let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
 
@@ -548,10 +557,12 @@ where
                 },
             };
 
-            result
+            // A send only fails once `Downloads` has been dropped, along with the receiver.
+            let _ = results_sender.send(result);
         });
 
         self.pending.push(task);
+        self.in_flight += 1;
         assert!(
             self.cancel_handles
                 .insert(txid, (cancel_tx, gossiped_tx_req, source))
@@ -566,11 +577,11 @@ where
 
         debug!(
             ?txid,
-            queue_len = self.pending.len(),
+            queue_len = self.in_flight,
             ?MAX_INBOUND_CONCURRENCY,
             "queued transaction hash for download"
         );
-        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
         metrics::counter!("mempool.queued.transactions.total").increment(1);
 
         Ok(())
@@ -598,7 +609,7 @@ where
         }
     }
 
-    /// Cancel all running tasks and reset the downloader state.
+    /// Cancel all running tasks. Their admission slots remain reserved until results are consumed.
     // Note: copied from zebrad/src/components/sync/downloads.rs
     pub fn cancel_all(&mut self) {
         // Replace the pending task list with an empty one and drop it.
@@ -612,7 +623,7 @@ where
         self.pending_per_peer.clear();
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
-        metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
+        metrics::gauge!("mempool.currently.queued.transactions",).set(self.in_flight as f64);
     }
 
     /// Decrement the per-host pending count for `source`'s IP, removing the entry
@@ -627,10 +638,10 @@ where
         }
     }
 
-    /// Get the number of currently in-flight download tasks.
+    /// Get the number of transactions whose results have not been consumed.
     #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
-        self.pending.len()
+        self.in_flight
     }
 
     /// Get a list of the currently pending transaction requests.
