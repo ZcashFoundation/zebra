@@ -318,6 +318,11 @@ jobs:
           # value containing shell metacharacters would escape its quoting context.
           APP_NAME: ${{ inputs.app_name }}
           TEST_ID: ${{ inputs.test_id }}
+          # `true` or `false`. The daily cleanup gives `long-test=true` instances a
+          # longer retention than its default, which is shorter than these jobs'
+          # 5-day timeout - see DELETE_LONG_TEST_INSTANCE_DAYS in
+          # zfnd-delete-gcp-resources.yml.
+          IS_LONG_TEST: ${{ inputs.is_long_test }}
         run: |
 
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
@@ -384,7 +389,7 @@ jobs:
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-            --labels="app=${APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${GITHUB_REF_SLUG_URL},test=${TEST_ID},commit=${GITHUB_SHA_SHORT}" \
+            --labels="app=${APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${GITHUB_REF_SLUG_URL},test=${TEST_ID},commit=${GITHUB_SHA_SHORT},long-test=${IS_LONG_TEST}" \
             --tags ${{ inputs.app_name }} \
             --zone "${zone}"
           }
