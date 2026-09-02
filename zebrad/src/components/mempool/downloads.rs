@@ -29,6 +29,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -42,7 +43,7 @@ use futures::{
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Notify},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt};
@@ -230,6 +231,9 @@ where
     /// [`Self::cancel_handles`] have a source with that IP. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<IpAddr, usize>,
+
+    /// Wakes the queue checker to store and announce completed transactions.
+    transaction_verified: Arc<Notify>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -265,8 +269,13 @@ where
             join_result.expect("transaction download and verify tasks must not panic");
         }
 
-        // Register the caller for wakeup when the next result is queued.
-        let item = if let Some(result) = ready!(this.results.poll_recv(cx)) {
+        let result = this.results.poll_recv(cx);
+        // A cooperative yield must not strand queued results: the mempool returns readiness
+        // on Pending, so only another queue-check request will resume draining them.
+        if result.is_pending() && !this.results.is_empty() {
+            this.transaction_verified.notify_one();
+        }
+        let item = if let Some(result) = ready!(result) {
             *this.in_flight -= 1;
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
@@ -326,10 +335,12 @@ where
     /// `verifier` is used to verify transactions.
     /// `state` is used to check if transactions are already in the state.
     ///
+    /// The notification wakes the queue checker after each result is queued.
+    ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    pub fn new(network: ZN, verifier: ZV, state: ZS, transaction_verified: Arc<Notify>) -> Self {
         let (results_sender, results) = mpsc::unbounded_channel();
 
         Self {
@@ -342,6 +353,7 @@ where
             in_flight: 0,
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
+            transaction_verified,
         }
     }
 
@@ -514,6 +526,7 @@ where
         })
         .in_current_span();
 
+        let transaction_verified = self.transaction_verified.clone();
         let results_sender = self.results_sender.clone();
         let task = tokio::spawn(async move {
             let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
@@ -557,8 +570,11 @@ where
                 },
             };
 
-            // A send only fails once `Downloads` has been dropped, along with the receiver.
-            let _ = results_sender.send(result);
+            // Queue before notifying: the woken mempool must see the result even if this task
+            // has not exited yet. A dropped downloader needs no notification.
+            if results_sender.send(result).is_ok() {
+                transaction_verified.notify_one();
+            }
         });
 
         self.pending.push(task);
