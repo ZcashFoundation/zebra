@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: breaking
+body: 'Pass a `MempoolTxSubscriber` to `RpcImpl::spawn_block_template_updater()` so
+  template refreshes follow mempool changes
+  ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374)).'
+time: 2026-09-01T14:15:00.000000000Z

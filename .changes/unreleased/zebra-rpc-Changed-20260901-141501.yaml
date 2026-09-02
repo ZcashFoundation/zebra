@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: Changed
+body: 'The `getblocktemplate` updater rebuilds on relevant mempool changes,
+  coalesces bursts, and ignores invalidations that cannot change the cached template
+  ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374)).'
+time: 2026-09-01T14:15:01.000000000Z
