@@ -610,7 +610,9 @@ where
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");
-                if block_height >= max_checkpoint_height && block_height <= short_timeout_max {
+                // Only fully verified blocks: the checkpoint verifier holds the final checkpoint
+                // block until its whole range arrives, which can legitimately take longer.
+                if block_height > max_checkpoint_height && block_height <= short_timeout_max {
                     // Keep the typed `Elapsed` so `should_restart_sync` can match it (#11168).
                     rsp = timeout(FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, rsp)
                         .map_err(BoxError::from)

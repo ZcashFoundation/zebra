@@ -424,6 +424,10 @@ where
     /// Per-hash count of how many times a `NotFound` block has been re-requested,
     /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     block_reobtain_retries: HashMap<block::Hash, u8>,
+
+    /// `TransparentInputNotFound` drops since the last verified block, bounded by the
+    /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
+    utxo_race_drops: usize,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -572,6 +576,7 @@ where
             misbehavior_sender,
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
+            utxo_race_drops: 0,
         };
 
         (new_syncer, sync_status)
@@ -623,6 +628,7 @@ where
 
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
+        self.utxo_race_drops = 0;
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -1201,6 +1207,7 @@ where
 
                 // The block arrived, so forget any re-request bookkeeping for it.
                 self.block_reobtain_retries.remove(&hash);
+                self.utxo_race_drops = 0;
 
                 return Ok(());
             }
@@ -1285,7 +1292,36 @@ where
             }
         }
 
+        // A UTXO race resolves as soon as the parent commits. A whole lookahead wave of
+        // timeouts with no commit isn't the race, so restart instead of draining the batch.
+        if let Err(error) = &response {
+            if Self::is_utxo_lookup_timeout(error) {
+                self.utxo_race_drops += 1;
+                if self.utxo_race_drops >= self.full_verify_concurrency_limit {
+                    warn!(
+                        drops = self.utxo_race_drops,
+                        "no block verified across a full wave of UTXO lookup timeouts, restarting sync"
+                    );
+                    return response.map(|_| ());
+                }
+            }
+        }
+
         Self::handle_response(response)
+    }
+
+    /// Returns `true` for the `AwaitUtxo` timeout that `should_restart_sync` exempts (#11168).
+    fn is_utxo_lookup_timeout(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } if matches!(
+                **source,
+                VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+            )
+        )
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.
@@ -1357,14 +1393,7 @@ where
             }
             // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
             // commit a restart would cancel, looping near the tip (#11168, #11132).
-            BlockDownloadVerifyError::Invalid {
-                error: RouterError::Block { source },
-                ..
-            } if matches!(
-                **source,
-                VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
-            ) =>
-            {
+            e if Self::is_utxo_lookup_timeout(e) => {
                 debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting on the next tip walk, continuing");
                 false
             }

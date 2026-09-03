@@ -1436,6 +1436,58 @@ async fn transparent_input_not_found_does_not_restart_sync() {
     );
 }
 
+/// A poisoned `FindBlocks` batch can make every block in a lookahead wave time out on its
+/// UTXO lookup with nothing committing in between. The #11168 exemption is bounded so that
+/// case still restarts the sync, while a single near-tip race followed by a commit does not.
+#[tokio::test]
+async fn utxo_lookup_timeouts_without_a_commit_restart_sync() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let limit = chain_sync.full_verify_concurrency_limit;
+
+    let utxo_timeout = |i: u8| {
+        Err(BlockDownloadVerifyError::Invalid {
+            error: RouterError::Block {
+                source: Box::new(VerifyBlockError::Transaction(
+                    TransactionError::TransparentInputNotFound,
+                )),
+            },
+            height: block::Height(3_427_629 + u32::from(i)),
+            hash: block::Hash::from([i; 32]),
+            advertiser_addr: None,
+        })
+    };
+
+    for i in 0..(limit - 1) {
+        assert!(
+            chain_sync
+                .handle_block_response(utxo_timeout(i as u8))
+                .is_ok(),
+            "UTXO lookup timeouts below the lookahead limit should not restart sync (#11168)"
+        );
+    }
+
+    // A verified block means the race resolved, so the count starts over.
+    assert!(chain_sync
+        .handle_block_response(Ok((
+            block::Height(3_427_628),
+            block::Hash::from([0xAA; 32])
+        )))
+        .is_ok());
+    assert!(chain_sync.handle_block_response(utxo_timeout(0)).is_ok());
+
+    for i in 1..(limit - 1) {
+        assert!(chain_sync
+            .handle_block_response(utxo_timeout(i as u8))
+            .is_ok());
+    }
+    assert!(
+        chain_sync
+            .handle_block_response(utxo_timeout(0xFF))
+            .is_err(),
+        "a full lookahead wave of UTXO lookup timeouts with no verified block should restart sync"
+    );
+}
+
 /// Verifies fix for #11168: the short post-final-checkpoint verify timeout (#5125) does
 /// not trigger a sync restart, but the tower-level `BLOCK_VERIFY_TIMEOUT` still does (#5709).
 #[tokio::test]
