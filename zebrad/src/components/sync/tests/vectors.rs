@@ -1442,7 +1442,9 @@ async fn transparent_input_not_found_does_not_restart_sync() {
 #[tokio::test]
 async fn utxo_lookup_timeouts_without_a_commit_restart_sync() {
     let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
-    let limit = chain_sync.full_verify_concurrency_limit;
+    let limit = chain_sync
+        .full_verify_concurrency_limit
+        .max(sync::MIN_UTXO_RACE_DROPS_BEFORE_RESTART);
 
     let utxo_timeout = |i: u8| {
         Err(BlockDownloadVerifyError::Invalid {
@@ -1463,6 +1465,12 @@ async fn utxo_lookup_timeouts_without_a_commit_restart_sync() {
                 .handle_block_response(utxo_timeout(i as u8))
                 .is_ok(),
             "UTXO lookup timeouts below the lookahead limit should not restart sync (#11168)"
+        );
+        assert!(
+            chain_sync
+                .reobtain_hashes
+                .contains(&block::Hash::from([i as u8; 32])),
+            "a dropped UTXO-race block must be re-requested, not left for a tip walk"
         );
     }
 
@@ -1512,6 +1520,20 @@ async fn verify_timeout_elapsed_does_not_restart_sync() {
             tower::timeout::error::Elapsed::new().into()
         )),
         "the tower block verify timeout should still trigger sync restart (#5709)"
+    );
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+    assert!(chain_sync
+        .handle_block_response(Err(make_error(tokio_elapsed.into())))
+        .is_ok());
+    assert!(
+        chain_sync
+            .reobtain_hashes
+            .contains(&block::Hash::from([0xCD; 32])),
+        "a block dropped on the post-checkpoint verify timeout must be re-requested"
     );
 }
 
