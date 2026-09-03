@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "`Transaction::sprout_value_balance`, which returns the checked aggregate JoinSplit value balance, erroring with `ValueBalanceError::Sprout` when the aggregate is outside the valid monetary range."
+time: 2026-09-03T12:00:00.000000000-03:00

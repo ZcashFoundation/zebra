@@ -1,1 +1,5 @@
 type-complexity-threshold = 999999
+
+disallowed-methods = [
+    { path = "zcash_primitives::transaction::components::sprout::Bundle::value_balance", reason = "collapses an out-of-range aggregate to None, which callers conflate with 'no bundle'; use Transaction::sprout_value_balance" },
+]
