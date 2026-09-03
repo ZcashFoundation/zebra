@@ -677,16 +677,26 @@ impl Transaction {
     }
 
     /// Return the sprout value balance.
-    pub fn sprout_value_balance(&self) -> ValueBalance<NegativeAllowed> {
-        let balance = self
-            .sprout_bundle()
-            .and_then(|b| b.value_balance())
-            .unwrap_or(ZatBalance::zero());
+    ///
+    /// Errors when the aggregate JoinSplit value balance (or any prefix of it, matching the
+    /// pre-refactor fold) leaves the valid monetary range. Aggregated here because
+    /// `zcash_primitives` collapses that case to `None`, conflating it with "no Sprout
+    /// bundle". The net-sum bound matches zcashd from Canopy onward, where `vpub_old` is
+    /// always zero; pre-Canopy heights are checkpointed.
+    pub fn sprout_value_balance(
+        &self,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        let total = self
+            .sprout_joinsplit_descriptions()
+            .try_fold(Amount::<NegativeAllowed>::zero(), |total, js| {
+                // Not `js.net_value()`: its `expect` trusts upstream parse bounds. The
+                // subtraction can't overflow `i64`, each `vpub` is at most `MAX_MONEY`.
+                let net = Amount::try_from(i64::from(js.vpub_new()) - i64::from(js.vpub_old()))?;
+                total + net
+            })
+            .map_err(crate::value_balance::ValueBalanceError::Sprout)?;
 
-        let amount: Amount<NegativeAllowed> = Amount::try_from(i64::from(balance))
-            .expect("sprout value balance should be a valid Amount");
-
-        ValueBalance::from_sprout_amount(amount)
+        Ok(ValueBalance::from_sprout_amount(total))
     }
 
     /// Get the overall value balance for this transaction.
@@ -707,7 +717,7 @@ impl Transaction {
             .collect();
 
         let transparent = self.transparent_value_balance_from_outputs(&outputs)?;
-        let sprout = self.sprout_value_balance();
+        let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();
         let ironwood = self.ironwood_value_balance();
