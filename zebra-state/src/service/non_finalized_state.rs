@@ -935,6 +935,8 @@ impl NonFinalizedState {
                 .set(u64::from(value_pools.sapling_amount()) as f64);
             metrics::gauge!("zcash.pool.value.zatoshis", "name" => "orchard")
                 .set(u64::from(value_pools.orchard_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "ironwood")
+                .set(u64::from(value_pools.ironwood_amount()) as f64);
 
             metrics::gauge!("zcash.pool.notes.created", "name" => "sprout")
                 .set(best_chain.sprout_note_commitment_tree_for_tip().count() as f64);
@@ -942,6 +944,8 @@ impl NonFinalizedState {
                 .set(best_chain.sapling_note_commitment_tree_for_tip().count() as f64);
             metrics::gauge!("zcash.pool.notes.created", "name" => "orchard")
                 .set(best_chain.orchard_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "ironwood")
+                .set(best_chain.ironwood_note_commitment_tree_for_tip().count() as f64);
         }
     }
 
