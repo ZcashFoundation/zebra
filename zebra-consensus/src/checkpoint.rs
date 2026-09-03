@@ -1046,6 +1046,14 @@ impl VerifyCheckpointError {
             | VerifyCheckpointError::CoinbaseHeight { .. }
             | VerifyCheckpointError::DuplicateTransaction
             | VerifyCheckpointError::AmountError(_) => 100,
+            // Checkpoint verification only checks the block hash, which doesn't
+            // commit to the authorizing data, so a forged body reaches contextual
+            // validation in the finalized state. Like `is_duplicate_request()`, the
+            // boxed `zs::CommitCheckpointVerifiedError` newtype must be unwrapped
+            // for the state's suggested score to reach the peer that served it.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .map_or(0, |commit_err| commit_err.inner().misbehavior_score()),
             _other => 0,
         }
     }

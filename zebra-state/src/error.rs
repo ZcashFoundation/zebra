@@ -128,7 +128,10 @@ impl CommitBlockError {
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
-        0
+        match self {
+            CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => 0,
+        }
     }
 }
 
@@ -511,6 +514,23 @@ pub enum ValidateContextError {
     },
 }
 
+impl ValidateContextError {
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        match self {
+            // From NU5 onward, the block header hash and merkle root don't commit to
+            // the authorizing data, so a peer can serve a forged body for a canonical
+            // header without changing the block hash. A mismatched authorizing data
+            // commitment proves the served body doesn't belong to its header, and an
+            // honest peer never serves such a body, so the serving peer is misbehaving.
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
+            ) => 100,
+            _other => 0,
+        }
+    }
+}
+
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {
     fn from(value: sprout::tree::NoteCommitmentTreeError) -> Self {
         ValidateContextError::NoteCommitmentTreeError(value.into())
@@ -579,5 +599,17 @@ mod tests {
             location: KnownBlock::BestChain,
         };
         assert_eq!(dup_err.misbehavior_score(), 0);
+
+        // A mismatched authorizing data commitment means the served body doesn't
+        // belong to its header, so the serving peer must be scored.
+        let auth_commitment_err = CommitBlockError::ValidateContextError(Box::new(
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                    expected: [1; 32],
+                    actual: [2; 32],
+                },
+            ),
+        ));
+        assert_eq!(auth_commitment_err.misbehavior_score(), 100);
     }
 }
