@@ -1154,10 +1154,27 @@ where
             } else {
                 result.expect("commit_checkpoint_verified should not panic")
             };
-            if result.is_err() {
-                // If there was an error committing the block, then this verifier
-                // will be out of sync with the state. In that case, reset
-                // its progress back to the state tip.
+            // Only reset the verifier's progress when a block that the verifier
+            // accepted failed to commit to the state. Then the verifier's
+            // progress can be ahead of the state's committed blocks, so it must
+            // be re-aligned to the state tip.
+            //
+            // Other errors are rejections of this specific block (side-chain
+            // fork candidates, duplicates, or invalid block data). They don't
+            // change the committed chain, so the verifier's progress stays in
+            // sync with the state, and resetting would be harmful:
+            //
+            // # Correctness
+            //
+            // Verified checkpoint ranges commit to the state in height order,
+            // so the state tip can temporarily lag the verifier's progress
+            // while a range is still committing. Resetting to that lagging tip
+            // on unrelated errors rewinds the verifier below the last verified
+            // checkpoint. The blocks in between have already been consumed
+            // from the verifier's queue, so verification would stall until
+            // they are submitted again. The syncer re-downloads them, but
+            // other submitters (like the zcashd state migration) don't.
+            if let Err(VerifyCheckpointError::CommitCheckpointVerified(_)) = result {
                 let tip = match state_service
                     .oneshot(zs::Request::Tip)
                     .await
