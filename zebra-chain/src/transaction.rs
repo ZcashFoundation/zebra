@@ -159,17 +159,17 @@ impl Transaction {
     ///
     /// Returns `None` if the transaction is Sprout, or if `nExpiryHeight == 0`
     /// (which means "no expiry" per the Zcash protocol spec).
+    ///
+    /// Returns the raw wire value, which can exceed [`block::Height::MAX`]: the ZIP-203
+    /// maximum of 499,999,999 is a verifier rule, not a limit of this accessor, so an
+    /// out-of-range value must reach the verifier to be rejected.
     pub fn expiry_height(&self) -> Option<block::Height> {
         match self.tx_version() {
             TxVersion::Sprout(_) => None,
-            _ => {
-                let bh = self.0.expiry_height();
-                if bh == zcash_protocol::consensus::BlockHeight::from_u32(0) {
-                    None
-                } else {
-                    compat::block_height_to_height(bh).ok()
-                }
-            }
+            _ => match u32::from(self.0.expiry_height()) {
+                0 => None,
+                raw => Some(block::Height(raw)),
+            },
         }
     }
 
