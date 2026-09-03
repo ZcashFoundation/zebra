@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: "The expiry height maximum check rejects `nExpiryHeight` values in the out-of-range band [2^31, 2^32 - 1] instead of treating them as \"no expiry\"."
+time: 2026-09-02T12:00:01.000000000-03:00

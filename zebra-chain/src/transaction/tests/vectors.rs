@@ -1601,3 +1601,32 @@ fn coinbase_script_len_bounds_enforced_at_parse() {
     Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
         .expect("genesis block must deserialize");
 }
+
+/// `expiry_height()` returns the raw `nExpiryHeight` wire value, including values above
+/// `Height::MAX`, and the value survives a serialization round trip; `0` means "no expiry".
+#[test]
+fn expiry_height_preserves_out_of_range_values() {
+    let _init_guard = zebra_test::init();
+
+    for raw in [0, 499_999_999, 500_000_000, 2_147_483_648, u32::MAX] {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            Vec::new(),
+            Vec::new(),
+            LockTime::min_lock_time_timestamp(),
+            block::Height(raw),
+        );
+
+        let expected = (raw != 0).then_some(Height(raw));
+        assert_eq!(tx.expiry_height(), expected);
+
+        // The wire value survives a serialization round trip unchanged.
+        let serialized = tx
+            .zcash_serialize_to_vec()
+            .expect("transaction must serialize");
+        let parsed = serialized
+            .zcash_deserialize_into::<Transaction>()
+            .expect("parsing does not enforce the expiry maximum, the verifier does");
+        assert_eq!(parsed.expiry_height(), expected);
+    }
+}

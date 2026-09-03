@@ -1822,6 +1822,178 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
     );
 }
 
+/// A non-coinbase V4/V5/V6 transaction with an expiry height in the out-of-range wire band
+/// [2^31, 2^32 - 1] is rejected: `expiry_height()` maps these values to `None`, so the check
+/// must read the raw wire value instead of treating them as "no expiry".
+#[tokio::test]
+async fn transaction_with_out_of_range_expiry_height() {
+    let network = Network::Mainnet;
+    // The rejection happens before any state request, so no responses are mocked.
+    let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+
+    // 2^31 is the first value above `block::Height::MAX`; `u32::MAX` is the last.
+    for raw_expiry in [0x8000_0000_u32, u32::MAX] {
+        let expiry_height = block::Height(raw_expiry);
+
+        for version in [4_u32, 5, 6] {
+            let verifier = BlockTxVerifier::new(&network, state.clone());
+
+            // Verify at a height whose branch ID matches the one in the transaction.
+            let (network_upgrade, block_height) = match version {
+                4 => (NetworkUpgrade::Canopy, block::Height::MAX),
+                5 => (
+                    NetworkUpgrade::Nu5,
+                    NetworkUpgrade::Nu5
+                        .activation_height(&network)
+                        .expect("NU5 height must be set"),
+                ),
+                6 => (
+                    NetworkUpgrade::Nu6_3,
+                    NetworkUpgrade::Nu6_3
+                        .activation_height(&network)
+                        .expect("NU6.3 height must be set"),
+                ),
+                _ => unreachable!("no other versions tested"),
+            };
+
+            let fund_height =
+                (block_height - 1).expect("fake source fund block height is too small");
+            let (input, output, known_utxos) = mock_transparent_transfer(
+                fund_height,
+                true,
+                0,
+                Amount::try_from(1).expect("invalid value"),
+            );
+
+            let transaction = match version {
+                4 => Transaction::test_v4(
+                    vec![input],
+                    vec![output],
+                    LockTime::unlocked(),
+                    expiry_height,
+                ),
+                5 => Transaction::test_v5(
+                    network_upgrade,
+                    vec![input],
+                    vec![output],
+                    LockTime::unlocked(),
+                    expiry_height,
+                ),
+                6 => Transaction::test_v6(
+                    network_upgrade,
+                    vec![input],
+                    vec![output],
+                    LockTime::unlocked(),
+                    expiry_height,
+                ),
+                _ => unreachable!("no other versions tested"),
+            };
+
+            let result = verifier
+                .oneshot(BlockRequest {
+                    transaction_hash: transaction.hash(),
+                    transaction: Arc::new(transaction.clone()),
+                    known_utxos: Arc::new(known_utxos),
+                    height: block_height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await;
+
+            assert_eq!(
+                result,
+                Err(TransactionError::MaximumExpiryHeight {
+                    expiry_height,
+                    is_coinbase: false,
+                    block_height,
+                    transaction_hash: transaction.hash(),
+                }),
+                "V{version} with nExpiryHeight {raw_expiry} must be rejected by block verification"
+            );
+
+            // The check runs in `check_common_consensus_rules`, so the mempool path must
+            // reject the same transaction.
+            let mempool_verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+            let mempool_result = mempool_verifier
+                .oneshot(MempoolRequest {
+                    transaction: Arc::new(transaction.clone()).into(),
+                    height: block_height,
+                })
+                .await;
+            assert_eq!(
+                mempool_result,
+                Err(TransactionError::MaximumExpiryHeight {
+                    expiry_height,
+                    is_coinbase: false,
+                    block_height,
+                    transaction_hash: transaction.hash(),
+                }),
+                "V{version} with nExpiryHeight {raw_expiry} must be rejected by the mempool"
+            );
+        }
+    }
+}
+
+/// A coinbase transaction with an expiry height in the out-of-range wire band is rejected:
+/// pre-NU5 by the expiry maximum, NU5 onward by the must-equal-block-height rule.
+#[tokio::test]
+async fn coinbase_with_out_of_range_expiry_height() {
+    let network = Network::Mainnet;
+    // The rejection happens before any state request, so no responses are mocked.
+    let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+
+    let nu5_activation = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 height must be set");
+
+    for raw_expiry in [0x8000_0000_u32, u32::MAX] {
+        let expiry_height = block::Height(raw_expiry);
+
+        for block_height in [
+            (nu5_activation - 1).expect("does not underflow"),
+            nu5_activation,
+        ] {
+            let (input, output) = mock_coinbase_transparent_output(block_height);
+            let transaction = Transaction::test_v4(
+                vec![input],
+                vec![output],
+                LockTime::unlocked(),
+                expiry_height,
+            );
+
+            let verifier = BlockTxVerifier::new(&network, state.clone());
+            let result = verifier
+                .oneshot(BlockRequest {
+                    transaction_hash: transaction.hash(),
+                    transaction: Arc::new(transaction.clone()),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height: block_height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await;
+
+            let expected = if block_height < nu5_activation {
+                TransactionError::MaximumExpiryHeight {
+                    expiry_height,
+                    is_coinbase: true,
+                    block_height,
+                    transaction_hash: transaction.hash(),
+                }
+            } else {
+                TransactionError::CoinbaseExpiryBlockHeight {
+                    expiry_height: Some(expiry_height),
+                    block_height,
+                    transaction_hash: transaction.hash(),
+                }
+            };
+            assert_eq!(
+                result,
+                Err(expected),
+                "coinbase with nExpiryHeight {raw_expiry} at height {block_height:?}"
+            );
+        }
+    }
+}
+
 /// Test if V4 coinbase transaction is accepted.
 #[tokio::test]
 async fn v4_coinbase_transaction_is_accepted() {
@@ -5017,4 +5189,25 @@ fn script_sig_args_expected_values() {
     let ms_kind = check::standard_script_kind(&ms_kind)
         .expect("1-of-1 multisig should be a standard script kind");
     assert_eq!(check::script_sig_args_expected(&ms_kind), Some(2));
+}
+
+/// `nExpiryHeight` of `0` ("no expiry") and the spec maximum `499,999,999` pass the
+/// non-coinbase expiry checks.
+#[test]
+fn non_coinbase_expiry_height_accepts_zero_and_spec_max() {
+    let block_height = block::Height(1_000_000);
+
+    for raw in [0, 499_999_999] {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            Vec::new(),
+            Vec::new(),
+            LockTime::unlocked(),
+            block::Height(raw),
+        );
+        assert_eq!(
+            check::non_coinbase_expiry_height(&block_height, &tx),
+            Ok(())
+        );
+    }
 }
