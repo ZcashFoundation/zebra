@@ -159,17 +159,22 @@ impl Transaction {
     ///
     /// Returns `None` if the transaction is Sprout, or if `nExpiryHeight == 0`
     /// (which means "no expiry" per the Zcash protocol spec).
+    ///
+    /// Also returns `None` for invalid wire values above [`block::Height::MAX`]:
+    /// consensus checks enforcing the ZIP-203 maximum must use [`Self::raw_expiry_height`].
     pub fn expiry_height(&self) -> Option<block::Height> {
+        match self.raw_expiry_height() {
+            None | Some(0) => None,
+            Some(raw) => compat::block_height_to_height(raw.into()).ok(),
+        }
+    }
+
+    /// Get the raw `nExpiryHeight` wire value (V3+) without range conversion; `0` means
+    /// "no expiry". Returns `None` only for V1/V2 (Sprout), which have no expiry field.
+    pub fn raw_expiry_height(&self) -> Option<u32> {
         match self.tx_version() {
             TxVersion::Sprout(_) => None,
-            _ => {
-                let bh = self.0.expiry_height();
-                if bh == zcash_protocol::consensus::BlockHeight::from_u32(0) {
-                    None
-                } else {
-                    compat::block_height_to_height(bh).ok()
-                }
-            }
+            _ => Some(self.0.expiry_height().into()),
         }
     }
 

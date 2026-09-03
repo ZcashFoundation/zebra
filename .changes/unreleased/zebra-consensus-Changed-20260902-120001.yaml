@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: "The expiry height maximum check reads the transaction's raw `nExpiryHeight` wire value, so values in the out-of-range band [2^31, 2^32 - 1] are rejected instead of being treated as no expiry."
+time: 2026-09-02T12:00:01.000000000-03:00
