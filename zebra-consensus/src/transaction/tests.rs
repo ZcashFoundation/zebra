@@ -3006,6 +3006,92 @@ fn v4_with_sapling_outputs_and_no_spends() {
     })
 }
 
+/// Test that a V4 transaction with a small-order Sapling spend `rk` parses but fails verification.
+/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
+/// `check_spend` — pinned here at its new layer.
+#[test]
+fn v4_with_small_order_rk_sapling_spend() {
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, mut transaction) = test_transactions(&network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase()
+                    && transaction.inputs().is_empty()
+                    && transaction.joinsplit_count() == 0
+            })
+            .find(|(_, transaction)| transaction.sapling_spends_count() > 0)
+            .expect("No transaction found with Sapling spends");
+
+        // Parsing must accept the small-order rk; only verification may reject it.
+        set_first_sapling_spend_rk(
+            Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
+            small_order_point_bytes(),
+        );
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = BlockTxVerifier::new(&network, state_service);
+
+        let result = verifier
+            .oneshot(BlockRequest {
+                transaction_hash: transaction.hash(),
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
+
+        assert_eq!(result, Err(TransactionError::SaplingVerificationFailed));
+    });
+}
+
+/// Test that a V4 transaction with a small-order Sapling output `epk` parses but fails verification.
+/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
+/// `check_output` — pinned here at its new layer.
+#[test]
+fn v4_with_small_order_epk_sapling_output() {
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+
+        let (height, mut transaction) = test_transactions(&network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase()
+                    && transaction.inputs().is_empty()
+                    && transaction.joinsplit_count() == 0
+            })
+            .find(|(_, transaction)| transaction.sapling_outputs().next().is_some())
+            .expect("No transaction found with Sapling outputs");
+
+        // Parsing must accept the small-order epk; only verification may reject it.
+        set_first_sapling_output_epk(
+            Arc::get_mut(&mut transaction).expect("Transaction only has one active reference"),
+            small_order_point_bytes(),
+        );
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = BlockTxVerifier::new(&network, state_service);
+
+        let result = verifier
+            .oneshot(BlockRequest {
+                transaction_hash: transaction.hash(),
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
+
+        assert_eq!(result, Err(TransactionError::SaplingVerificationFailed));
+    });
+}
+
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
 #[tokio::test]
 async fn v5_with_sapling_spends() {
@@ -3083,6 +3169,83 @@ async fn v5_with_duplicate_sapling_spends() {
             Err(TransactionError::DuplicateSaplingNullifier(
                 duplicate_nullifier
             ))
+        );
+    }
+}
+
+/// Test that a V5 transaction with a small-order Sapling spend `rk` parses but fails verification.
+/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
+/// `check_spend` — pinned here at its new layer.
+#[tokio::test]
+async fn v5_with_small_order_rk_sapling_spend() {
+    let _init_guard = zebra_test::init();
+
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
+            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .find(|tx| tx.sapling_spends_count() > 0)
+            .expect("V5 tx with Sapling spends");
+
+        let height = tx.expiry_height().expect("expiry height");
+
+        // Parsing must accept the small-order rk; only verification may reject it.
+        set_first_sapling_spend_rk(&mut tx, small_order_point_bytes());
+
+        let verifier = BlockTxVerifier::new(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
+
+        assert_eq!(
+            verifier
+                .oneshot(BlockRequest {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
+            Err(TransactionError::SaplingVerificationFailed)
+        );
+    }
+}
+
+/// Test that a V5 transaction with a small-order Sapling output `epk` parses but fails verification.
+/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
+/// `check_output` — pinned here at its new layer.
+#[tokio::test]
+async fn v5_with_small_order_epk_sapling_output() {
+    let _init_guard = zebra_test::init();
+
+    // Only Mainnet: the Testnet vectors have no V5 tx with Sapling outputs and no transparent inputs.
+    for net in [Network::Mainnet] {
+        let mut tx = v5_transactions(net.block_iter())
+            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .find(|tx| tx.sapling_outputs().next().is_some())
+            .expect("V5 tx with Sapling outputs");
+
+        let height = tx.expiry_height().expect("expiry height");
+
+        // Parsing must accept the small-order epk; only verification may reject it.
+        set_first_sapling_output_epk(&mut tx, small_order_point_bytes());
+
+        let verifier = BlockTxVerifier::new(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
+
+        assert_eq!(
+            verifier
+                .oneshot(BlockRequest {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
+            Err(TransactionError::SaplingVerificationFailed)
         );
     }
 }
@@ -4234,6 +4397,126 @@ fn duplicate_sapling_spend(transaction: &mut Transaction) -> sapling::Nullifier 
     }
 }
 
+/// Returns the encoding of the jubjub identity point, a small-order point.
+fn small_order_point_bytes() -> [u8; 32] {
+    let bytes = jubjub::AffinePoint::identity().to_bytes();
+    let point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
+    assert!(bool::from(point.is_small_order()));
+    bytes
+}
+
+/// Skip past the V4 header and transparent sections, returning the position of nLockTime.
+fn skip_v4_header_and_transparent(tx_bytes: &[u8]) -> usize {
+    let mut pos = 8usize; // nVersion(4) + nVersionGroupId(4)
+
+    // Parse transparent inputs
+    let n_inputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_inputs {
+        pos += 36;
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        // cast is safe: a script length in a parseable test vector fits in usize
+        pos += script_len as usize + 4;
+    }
+
+    // Parse transparent outputs
+    let n_outputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_outputs {
+        pos += 8;
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        // cast is safe: a script length in a parseable test vector fits in usize
+        pos += script_len as usize;
+    }
+
+    pos
+}
+
+/// Replace the first Sapling spend's `rk` in a transaction with the given bytes.
+///
+/// Serializes the transaction, overwrites the rk bytes in place, and re-deserializes;
+/// panics if the mutated transaction fails to parse.
+fn set_first_sapling_spend_rk(transaction: &mut Transaction, rk_bytes: [u8; 32]) {
+    let mut tx_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+
+    let rk_pos = if transaction.version() >= 5 {
+        let mut pos = skip_v5_header_and_transparent(&tx_bytes);
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_spends > 0, "expected sapling spends");
+        // Compact spend: cv(32) + nullifier(32) + rk(32)
+        pos + 64
+    } else {
+        // nLockTime(4) + nExpiryHeight(4) + valueBalanceSapling(8)
+        let mut pos = skip_v4_header_and_transparent(&tx_bytes) + 16;
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_spends > 0, "expected sapling spends");
+        // V4 spend: cv(32) + anchor(32) + nullifier(32) + rk(32) + zkproof(192) + spendAuthSig(64)
+        pos + 96
+    };
+
+    tx_bytes[rk_pos..rk_pos + 32].copy_from_slice(&rk_bytes);
+
+    *transaction = Transaction::zcash_deserialize(tx_bytes.as_slice())
+        .expect("modified transaction with small-order rk should deserialize");
+
+    // Drift guard: prove the mutation landed on the rk field. If a serialization change
+    // moves the offset, this fails instead of the test silently pinning nothing.
+    let parsed_rk: [u8; 32] = (*transaction
+        .sapling_spends()
+        .next()
+        .expect("mutated transaction keeps its sapling spend")
+        .rk())
+    .into();
+    assert_eq!(parsed_rk, rk_bytes, "rk offset drifted");
+}
+
+/// Replace the first Sapling output's `epk` in a transaction with the given bytes.
+///
+/// Serializes the transaction, overwrites the epk bytes in place, and re-deserializes;
+/// panics if the mutated transaction fails to parse.
+fn set_first_sapling_output_epk(transaction: &mut Transaction, epk_bytes: [u8; 32]) {
+    let mut tx_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+
+    let epk_pos = if transaction.version() >= 5 {
+        let mut pos = skip_v5_header_and_transparent(&tx_bytes);
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        // cast is safe: a spend count in a parseable test vector fits in usize
+        pos += n_spends as usize * 96; // compact spends: cv(32) + nf(32) + rk(32)
+        let n_outputs = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_outputs > 0, "expected sapling outputs");
+        // Compact output: cv(32) + cmu(32) + epk(32) + enc(580) + out(80)
+        pos + 64
+    } else {
+        // nLockTime(4) + nExpiryHeight(4) + valueBalanceSapling(8)
+        let mut pos = skip_v4_header_and_transparent(&tx_bytes) + 16;
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        // V4 spend: cv(32) + anchor(32) + nullifier(32) + rk(32) + zkproof(192) + spendAuthSig(64)
+        // cast is safe: a spend count in a parseable test vector fits in usize
+        pos += n_spends as usize * 384;
+        let n_outputs = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_outputs > 0, "expected sapling outputs");
+        // V4 output: cv(32) + cmu(32) + epk(32) + enc(580) + out(80) + zkproof(192)
+        pos + 64
+    };
+
+    tx_bytes[epk_pos..epk_pos + 32].copy_from_slice(&epk_bytes);
+
+    *transaction = Transaction::zcash_deserialize(tx_bytes.as_slice())
+        .expect("modified transaction with small-order epk should deserialize");
+
+    // Drift guard: prove the mutation landed on the epk field. If a serialization change
+    // moves the offset, this fails instead of the test silently pinning nothing.
+    let parsed_epk = transaction
+        .sapling_outputs()
+        .next()
+        .expect("mutated transaction keeps its sapling output")
+        .ephemeral_key()
+        .0;
+    assert_eq!(parsed_epk, epk_bytes, "epk offset drifted");
+}
+
 /// Graft orchard data from a donor V5 transaction onto a target V5 transaction.
 ///
 /// Finds a V5 non-coinbase transaction with orchard data from the network's test blocks,
@@ -5189,6 +5472,148 @@ fn script_sig_args_expected_values() {
     let ms_kind = check::standard_script_kind(&ms_kind)
         .expect("1-of-1 multisig should be a standard script kind");
     assert_eq!(check::script_sig_args_expected(&ms_kind), Some(2));
+}
+
+/// A V5 transaction with a pre-NU5 branch ID and a V6 with a pre-NU6.3 branch ID are rejected
+/// on both the block and mempool paths. Rejected at parse time before the `zcash_primitives`
+/// refactor, now by `check::consensus_branch_id` — pinned so a dependency bump can't drop it.
+#[tokio::test]
+async fn tx_with_pre_activation_branch_id_is_rejected() {
+    let network = Network::Mainnet;
+    let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+
+    // (transaction network upgrade, verification height network upgrade)
+    let cases = [
+        // V5 with a Canopy (pre-NU5) branch ID, verified at the NU5 activation height.
+        (5_u32, NetworkUpgrade::Canopy, NetworkUpgrade::Nu5),
+        // V6 with an NU5 (pre-NU6.3) branch ID, verified at the NU6.3 activation height.
+        (6_u32, NetworkUpgrade::Nu5, NetworkUpgrade::Nu6_3),
+    ];
+
+    for (version, tx_nu, height_nu) in cases {
+        let height = height_nu
+            .activation_height(&network)
+            .expect("activation height must be set");
+        let fund_height = (height - 1).expect("fake source fund block height is too small");
+        let (input, output, known_utxos) = mock_transparent_transfer(
+            fund_height,
+            true,
+            0,
+            Amount::try_from(1).expect("invalid value"),
+        );
+
+        let tx = match version {
+            5 => Transaction::test_v5(
+                tx_nu,
+                vec![input],
+                vec![output],
+                LockTime::unlocked(),
+                height,
+            ),
+            6 => Transaction::test_v6(
+                tx_nu,
+                vec![input],
+                vec![output],
+                LockTime::unlocked(),
+                height,
+            ),
+            _ => unreachable!("no other versions tested"),
+        };
+
+        let block_verifier = BlockTxVerifier::new(&network, state.clone());
+        let block_rsp = block_verifier
+            .oneshot(BlockRequest {
+                transaction_hash: tx.hash(),
+                transaction: Arc::new(tx.clone()),
+                known_utxos: Arc::new(known_utxos),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
+        assert_eq!(
+            block_rsp,
+            Err(TransactionError::WrongConsensusBranchId),
+            "block verification of V{version} with {tx_nu:?} branch ID at {height_nu:?} height"
+        );
+
+        let mempool_verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+        let mempool_rsp = mempool_verifier
+            .oneshot(MempoolRequest {
+                transaction: Arc::new(tx.clone()).into(),
+                height,
+            })
+            .await;
+        assert_eq!(
+            mempool_rsp,
+            Err(TransactionError::WrongConsensusBranchId),
+            "mempool verification of V{version} with {tx_nu:?} branch ID at {height_nu:?} height"
+        );
+    }
+}
+
+/// An input with a null prevout hash and an index other than `0xFFFFFFFF` is not a coinbase
+/// input: it parses as a regular `PrevOut` input, is rejected in the coinbase position of a
+/// block, and is a spend of a nonexistent UTXO otherwise. Rejected at parse time before the
+/// `zcash_primitives` refactor ("Wrong index in coinbase") — pinned here at its new layer.
+#[tokio::test]
+async fn null_prevout_hash_with_other_index_is_not_coinbase() {
+    let network = Network::Mainnet;
+
+    // A raw V1 transaction with one input: null prevout hash, index 5.
+    let mut raw_tx = Vec::new();
+    raw_tx.extend_from_slice(&1_u32.to_le_bytes()); // version
+    raw_tx.push(1); // input count
+    raw_tx.extend_from_slice(&[0; 32]); // null prevout hash
+    raw_tx.extend_from_slice(&5_u32.to_le_bytes()); // prevout index != 0xFFFFFFFF
+    raw_tx.push(0); // empty unlock script
+    raw_tx.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes()); // sequence
+    raw_tx.push(1); // output count
+    raw_tx.extend_from_slice(&1_u64.to_le_bytes()); // value
+    raw_tx.push(0); // empty lock script
+    raw_tx.extend_from_slice(&0_u32.to_le_bytes()); // lock time
+
+    let tx: Transaction = raw_tx
+        .zcash_deserialize_into()
+        .expect("null prevout hash with another index parses as a regular input");
+
+    assert!(!tx.is_coinbase(), "must not be detected as coinbase");
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("must parse as a PrevOut input"),
+    };
+    assert_eq!(input_outpoint.hash, Hash([0; 32]));
+    assert_eq!(input_outpoint.index, 5);
+
+    // As the first transaction of a block, it is rejected by the coinbase position rule.
+    let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+        .expect("block should deserialize");
+    let mut block = block;
+    block.transactions[0] = Arc::new(tx.clone());
+    assert_eq!(
+        crate::block::check::coinbase_is_first(&block)
+            .expect_err("a block whose first transaction is not a coinbase must be rejected"),
+        crate::error::BlockError::Transaction(TransactionError::CoinbasePosition),
+    );
+
+    // As a later (free-standing) transaction, it is a spend of a nonexistent UTXO.
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 height must be set");
+
+    let state_req = state
+        .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+        .map(|responder| responder.respond(zebra_state::Response::UnspentBestChainUtxo(None)));
+
+    let verifier_req = verifier.oneshot(MempoolRequest {
+        transaction: Arc::new(tx).into(),
+        height,
+    });
+
+    let (rsp, _) = futures::join!(verifier_req, state_req);
+    assert_eq!(rsp, Err(TransactionError::TransparentInputNotFound));
 }
 
 /// `nExpiryHeight` of `0` ("no expiry") and the spec maximum `499,999,999` pass the
