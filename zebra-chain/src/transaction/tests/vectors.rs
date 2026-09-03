@@ -9,13 +9,16 @@ use rand::{seq::IteratorRandom, thread_rng};
 use std::sync::Arc;
 
 use crate::{
+    amount::MAX_MONEY,
     block::{Block, Height, MAX_BLOCK_BYTES},
     orchard,
     parameters::Network,
-    primitives::zcash_primitives::PrecomputedTxData,
+    primitives::{x25519, zcash_primitives::PrecomputedTxData, Groth16Proof},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    sprout,
     transaction::sighash::SigHasher,
     transparent::Script,
+    value_balance::ValueBalanceError,
 };
 
 use zebra_test::{
@@ -1629,4 +1632,65 @@ fn expiry_height_preserves_out_of_range_values() {
             .expect("parsing does not enforce the expiry maximum, the verifier does");
         assert_eq!(parsed.expiry_height(), expected);
     }
+}
+
+/// A transaction whose aggregate Sprout JoinSplit value balance is outside the valid
+/// monetary range must report a value-balance error, not a zero Sprout balance.
+/// Each `vpub_new` is individually valid; only the aggregate is out of range.
+#[test]
+fn sprout_aggregate_value_balance_out_of_range_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let zero = Amount::zero();
+    let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid nonnegative amount");
+    let mac = sprout::note::Mac::from([0u8; 32]);
+
+    // A dummy JoinSplit moving MAX_MONEY into the transparent pool: individually in range.
+    let joinsplit = sprout::JoinSplit {
+        vpub_old: zero,
+        vpub_new: max_money,
+        anchor: sprout::tree::Root::default(),
+        nullifiers: [
+            sprout::note::Nullifier([0u8; 32].into()),
+            sprout::note::Nullifier([1u8; 32].into()),
+        ],
+        commitments: [sprout::commitment::NoteCommitment::from([0u8; 32]); 2],
+        ephemeral_key: x25519::PublicKey::from([0u8; 32]),
+        random_seed: sprout::RandomSeed::from([0u8; 32]),
+        vmacs: [mac.clone(), mac],
+        zkproof: Groth16Proof([0u8; 192]),
+        enc_ciphertexts: [sprout::note::EncryptedNote([0u8; 601]); 2],
+    };
+
+    // One JoinSplit: the aggregate is exactly MAX_MONEY, still in range.
+    let in_range = Transaction::test_v4_with_joinsplit_data(Some(&JoinSplitData {
+        first: joinsplit.clone(),
+        rest: vec![],
+        pub_key: [0u8; 32].into(),
+        sig: [0u8; 64].into(),
+    }));
+    in_range
+        .sprout_value_balance()
+        .expect("an aggregate of MAX_MONEY is in range");
+
+    // Two JoinSplits: the aggregate is 2 * MAX_MONEY, out of range.
+    let out_of_range = Transaction::test_v4_with_joinsplit_data(Some(&JoinSplitData {
+        first: joinsplit.clone(),
+        rest: vec![joinsplit],
+        pub_key: [0u8; 32].into(),
+        sig: [0u8; 64].into(),
+    }));
+    assert!(
+        matches!(
+            out_of_range.sprout_value_balance(),
+            Err(ValueBalanceError::Sprout(_))
+        ),
+        "an out-of-range Sprout aggregate must error, not zero"
+    );
+    assert!(
+        out_of_range
+            .value_balance(&std::collections::HashMap::new())
+            .is_err(),
+        "the transaction value balance must propagate the error"
+    );
 }
