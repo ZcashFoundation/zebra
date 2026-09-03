@@ -924,6 +924,25 @@ impl NonFinalizedState {
         metrics::gauge!("state.memory.chain.count").set(self.chain_set.len() as f64);
         metrics::gauge!("state.memory.best.chain.length",)
             .set(self.best_chain_len().unwrap_or_default() as f64);
+
+        if let Some(best_chain) = self.best_chain() {
+            let value_pools = best_chain.chain_value_pools;
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "transparent")
+                .set(u64::from(value_pools.transparent_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "sprout")
+                .set(u64::from(value_pools.sprout_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "sapling")
+                .set(u64::from(value_pools.sapling_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "orchard")
+                .set(u64::from(value_pools.orchard_amount()) as f64);
+
+            metrics::gauge!("zcash.pool.notes.created", "name" => "sprout")
+                .set(best_chain.sprout_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "sapling")
+                .set(best_chain.sapling_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "orchard")
+                .set(best_chain.orchard_note_commitment_tree_for_tip().count() as f64);
+        }
     }
 
     /// Update the progress bars after any chain is modified.
