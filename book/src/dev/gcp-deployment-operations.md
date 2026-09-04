@@ -21,7 +21,7 @@ Each `deploy-nodes` matrix cell reports two sequential signals:
 - **Template rollout** waits up to 10 minutes for the requested template to reach the zonal MIG. A failure means the deployment infrastructure did not converge.
 - **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. A failure means the node took longer than that to establish peers and catch up to chain tip; on-call action is usually "wait, or investigate why sync is slow".
 
-The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `S-ci-fail-release-auto-issue`.
+The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `ci-fail/release`.
 
 ## Quick reference
 
