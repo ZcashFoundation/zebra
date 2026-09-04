@@ -4598,7 +4598,7 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
         .activation_height(&Network::Mainnet)
         .expect("Nu6 activation height is specified");
     let fund_height = (height - 1).expect("too small");
-    let (input, output, _known_utxos) = mock_transparent_transfer(
+    let (input, output, known_utxos) = mock_transparent_transfer(
         fund_height,
         true,
         0,
@@ -4620,19 +4620,31 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
     let garbage_tx = with_garbage_orchard_authorization(tx.clone());
     assert_eq!(tx.hash(), garbage_tx.hash());
 
-    // submit garbage version as block tx, must be rejected
+    // Submit the garbage version as a block tx, which must be rejected.
+    //
+    // The funding UTXO has to be in `known_utxos`: the mock state never answers a lookup, so
+    // without it the request fails on `UTXO_LOOKUP_TIMEOUT` six minutes later and never reaches
+    // proof verification, which would make this test pass without checking any proof.
     let resp = verifier
         .clone()
         .oneshot(BlockRequest {
             transaction_hash: tx_hash,
             transaction: Arc::new(garbage_tx),
-            known_utxos: Arc::new(HashMap::new()),
+            known_utxos: Arc::new(known_utxos),
             height,
             time: Utc::now(),
         })
         .await;
 
-    assert!(resp.is_err(), "garbage proof must be rejected");
+    // Buffer boxes the service error, so downcast to check the specific variant.
+    let err = resp.expect_err("garbage proof must be rejected");
+    let tx_err = err
+        .downcast::<TransactionError>()
+        .expect("error should downcast to TransactionError");
+    assert!(
+        matches!(*tx_err, TransactionError::Halo2VerificationFailed),
+        "expected Halo2VerificationFailed for garbage Orchard proofs; got: {tx_err:?}"
+    );
 }
 
 /// Regression test for the mempool-cache expiry bypass vulnerability.
