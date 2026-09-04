@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "6.3.0"
+version = "7.0.0"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -157,20 +157,20 @@ tokio-console = ["console-subscriber"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "12.0.0" }
-zebra-consensus = { path = "../zebra-consensus", version = "15.0.0" }
-zebra-network = { path = "../zebra-network", version = "12.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "10.0.0", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "16.0.0" }
-zebra-state = { path = "../zebra-state", version = "13.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "13.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "16.0.0" }
+zebra-network = { path = "../zebra-network", version = "13.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "10.0.1", features = ["rpc-client"] }
+zebra-rpc = { path = "../zebra-rpc", version = "17.0.0" }
+zebra-state = { path = "../zebra-state", version = "14.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "11.0.0" }
+zebra-script = { path = "../zebra-script", version = "12.0.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "10.0.1", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "10.0.2", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }

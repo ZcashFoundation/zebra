@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: "Zebra's `Transaction` type is now a newtype wrapping `zcash_primitives::transaction::Transaction`, replacing Zebra's own transaction enum and its duplicated serialization. Transaction parsing, serialization and transaction ID computation are now performed by `zcash_primitives` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00

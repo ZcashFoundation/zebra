@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [12.0.0] - 2026-09-04
+
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- `Sigops::scripts` returns `Vec<Vec<u8>>` instead of an iterator. Transaction inputs and outputs are rebuilt from `zcash_primitives` on each call, so the scripts cannot borrow from the transaction ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed `CachedFfiTransaction::inputs()` since it returned a copy of the inputs which could cause quadratic memory consumption, and it is no longer needed inside Zebra. Eventually it might be replaced by a method that returns a reference to the original zcash_transparent Inputs ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+
 ## [11.0.0] - 2026-08-10
 
 ### Breaking Changes

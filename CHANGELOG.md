@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-09-04
+
+### Breaking Changes
+
+- Zebra's `Transaction` type is now a newtype wrapping `zcash_primitives::transaction::Transaction`, replacing Zebra's own transaction enum and its duplicated serialization. Transaction parsing, serialization and transaction ID computation are now performed by `zcash_primitives` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed the `[patch.crates-io]` overrides that pinned the `librustzcash` crates to a git branch. Zebra builds against the published `zcash_primitives` 0.30 ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- `rpc.max_response_body_size` is now limited to 4,294,967,295 bytes. Configurations with larger values must reduce the limit; they are rejected during configuration loading instead of causing an RPC server startup panic ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
+
+### Added
+
+- Zebra can now serve Zcash light clients directly: a new experimental gRPC server implements the lightwalletd `CompactTxStreamer` interface, enabled by setting `rpc.lightwalletd_listen_addr` in the config ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
+
+### Changed
+
+- Updated the `nix` dependency to 0.31 ([#11267](https://github.com/ZcashFoundation/zebra/pull/11267)).
+- Zebra no longer includes the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).
+- Peer connection limiting is now applied per IPv6 `/64` subnet instead of per individual IPv6 address, so one machine can no longer bypass `network.max_connections_per_ip` by connecting from many addresses in the same `/64` allocation. IPv4 connections are unchanged, and are still limited per address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Fixed
+
+- The syncer no longer restarts when a block's transparent input lookup times out near the tip, or when the short post-checkpoint verify timeout fires. Both are transient UTXO races, and restarting cancelled the in-flight parent commit, causing a sync restart loop ([#11168](https://github.com/ZcashFoundation/zebra/issues/11168), [#11132](https://github.com/ZcashFoundation/zebra/issues/11132)).
+
 ## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
 ### Added

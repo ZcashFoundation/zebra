@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Fixed
-body: '`NonFinalizedBlocksListener` no longer sends blocks that several non-finalized chains share once per chain. Forks share every block below their fork point, so an initial send could queue up to `MAX_NON_FINALIZED_CHAIN_FORKS` copies of a chain up to `MAX_BLOCK_REORG_HEIGHT` blocks long, overflowing the channel buffer ([#11265](https://github.com/ZcashFoundation/zebra/issues/11265)).'
-time: 2026-08-17T17:12:09.334838413Z
