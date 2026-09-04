@@ -5575,3 +5575,98 @@ fn non_coinbase_expiry_height_accepts_zero_and_spec_max() {
         );
     }
 }
+
+/// Returns a raw v1 transaction with two inputs: a null prevout carrying a valid height-1
+/// coinbase script, and a regular spend of a nonexistent UTXO.
+fn non_coinbase_tx_with_null_prevout_input() -> Transaction {
+    let mut raw = Vec::new();
+    raw.extend_from_slice(&1_u32.to_le_bytes()); // version 1
+    raw.push(2); // input count
+    raw.extend_from_slice(&[0; 32]); // null prevout hash
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes()); // null prevout index
+    raw.push(2); // coinbase script: height 1, one data byte
+    raw.extend_from_slice(&[0x51, 0x00]);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes()); // sequence
+    raw.extend_from_slice(&[1; 32]); // regular prevout hash
+    raw.extend_from_slice(&0_u32.to_le_bytes()); // regular prevout index
+    raw.push(0); // empty unlock script
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes()); // sequence
+    raw.push(1); // output count
+    raw.extend_from_slice(&1_u64.to_le_bytes()); // value
+    raw.push(0); // empty lock script
+    raw.extend_from_slice(&0_u32.to_le_bytes()); // lock time
+
+    raw.zcash_deserialize_into()
+        .expect("a null-prevout input with a valid height script parses")
+}
+
+/// A non-coinbase transaction with a null-prevout input is rejected by the transaction
+/// verifier before any UTXO lookup, and as a later block transaction by `coinbase_is_first`.
+///
+/// # Consensus
+///
+/// > A transparent input in a non-coinbase transaction MUST NOT have a null prevout.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// This rule was silently disabled when `Transaction::is_valid_non_coinbase` became
+/// `!is_coinbase()` in the `zcash_primitives` newtype refactor.
+#[tokio::test]
+async fn non_coinbase_with_null_prevout_input_is_rejected() {
+    let network = Network::Mainnet;
+    let tx = non_coinbase_tx_with_null_prevout_input();
+
+    assert!(!tx.is_coinbase(), "two inputs is never a coinbase");
+    assert!(
+        matches!(tx.inputs()[0], transparent::Input::Coinbase { .. }),
+        "the null-prevout input is parsed as a coinbase input"
+    );
+
+    // As the first block transaction, it is rejected by the coinbase position rule.
+    let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_434873_BYTES[..])
+        .expect("block should deserialize");
+    let mut first_block = block.clone();
+    first_block.transactions[0] = Arc::new(tx.clone());
+    assert_eq!(
+        crate::block::check::coinbase_is_first(&first_block)
+            .expect_err("a first transaction that is not a coinbase must be rejected"),
+        crate::error::BlockError::Transaction(TransactionError::CoinbasePosition),
+    );
+
+    // As a later block transaction, it is rejected by the block structure check, which the
+    // block verifier runs before handing any transaction to the transaction verifier.
+    let mut later_block = block;
+    later_block.transactions.push(Arc::new(tx.clone()));
+    assert_eq!(
+        crate::block::check::coinbase_is_first(&later_block)
+            .expect_err("a later transaction with a null-prevout input must be rejected"),
+        crate::error::BlockError::Transaction(TransactionError::CoinbaseAfterFirst),
+    );
+
+    // Both transaction verifiers reject it before any UTXO lookup: the state service is a
+    // mock with no expectations, so a lookup could never be answered.
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 height must be set");
+
+    let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let rsp = BlockTxVerifier::new(&network, state)
+        .oneshot(BlockRequest {
+            transaction_hash: tx.hash(),
+            transaction: Arc::new(tx.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+    assert_eq!(rsp, Err(TransactionError::NonCoinbaseHasCoinbaseInput));
+
+    let state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let rsp = MempoolTxVerifier::new_for_tests(&network, state)
+        .oneshot(MempoolRequest {
+            transaction: Arc::new(tx).into(),
+            height,
+        })
+        .await;
+    assert_eq!(rsp, Err(TransactionError::NonCoinbaseHasCoinbaseInput));
+}

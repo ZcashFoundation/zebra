@@ -1636,3 +1636,57 @@ fn raw_expiry_height_preserves_out_of_range_values() {
         assert_eq!(parsed.raw_expiry_height(), Some(raw));
     }
 }
+
+/// A non-coinbase transaction with a null-prevout input alongside a regular input parses
+/// through the production entry point, is not a coinbase, and is not a valid non-coinbase.
+///
+/// # Consensus
+///
+/// > A transparent input in a non-coinbase transaction MUST NOT have a null prevout.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+#[test]
+fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
+    let mut raw = Vec::new();
+    raw.extend_from_slice(&1_u32.to_le_bytes()); // version 1
+    raw.push(2); // input count
+                 // Input 0: null prevout with a valid height-1 coinbase script.
+    raw.extend_from_slice(&[0; 32]);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    raw.push(2);
+    raw.extend_from_slice(&[0x51, 0x00]);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    // Input 1: a regular spend.
+    raw.extend_from_slice(&[1; 32]);
+    raw.extend_from_slice(&0_u32.to_le_bytes());
+    raw.push(0);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    raw.push(1); // output count
+    raw.extend_from_slice(&1_u64.to_le_bytes());
+    raw.push(0);
+    raw.extend_from_slice(&0_u32.to_le_bytes()); // lock time
+
+    let tx: Transaction = raw
+        .zcash_deserialize_into()
+        .expect("a null-prevout input with a valid height script parses");
+
+    assert!(
+        matches!(tx.inputs()[0], crate::transparent::Input::Coinbase { .. }),
+        "the null-prevout input is parsed as a coinbase input"
+    );
+    assert!(!tx.is_coinbase(), "two inputs is never a coinbase");
+    assert!(
+        !tx.is_valid_non_coinbase(),
+        "a non-coinbase transaction with a null-prevout input is invalid"
+    );
+
+    // The regular shape of a non-coinbase transaction stays valid.
+    let mut regular = raw.clone();
+    regular[4] = 1; // input count
+    regular.drain(5..5 + 32 + 4 + 1 + 2 + 4); // drop input 0
+    let tx: Transaction = regular
+        .zcash_deserialize_into()
+        .expect("a single regular input parses");
+    assert!(!tx.is_coinbase());
+    assert!(tx.is_valid_non_coinbase());
+}
