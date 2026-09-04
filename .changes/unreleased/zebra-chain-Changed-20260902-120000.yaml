@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: "`Transaction::expiry_height` returns the raw `nExpiryHeight` wire value as a height, even above `block::Height::MAX`, so the verifier's ZIP-203 maximum check rejects out-of-range values instead of treating them as \"no expiry\"."
+time: 2026-09-02T12:00:00.000000000-03:00

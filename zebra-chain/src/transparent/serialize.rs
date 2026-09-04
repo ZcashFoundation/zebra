@@ -29,9 +29,12 @@ pub const GENESIS_COINBASE_SCRIPT_SIG: [u8; 77] = [
 ];
 
 /// Parses the BIP-34 block-height prefix of a non-genesis coinbase script and returns the height
-/// along with the trailing miner data.
+/// along with the trailing miner data. Also enforces the coinbase script length bound, since
+/// every production parse path for coinbase inputs goes through this function.
 ///
 /// # Consensus
+///
+/// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
 ///
 /// > A coinbase transaction for a block at block height greater than 0 MUST have a script that, as
 /// > its first item, encodes the block height `height` as follows. For `height` in the range
@@ -59,6 +62,13 @@ pub(crate) fn parse_coinbase_height(
     script_sig: &[u8],
 ) -> Result<(Height, Vec<u8>), SerializationError> {
     let parse_err = SerializationError::Parse;
+
+    // Length bound from the doc comment above; `zcash_transparent::TxIn::read` doesn't enforce it.
+    if script_sig.len() < MIN_COINBASE_SCRIPT_LEN {
+        return Err(parse_err("Coinbase script is too short"));
+    } else if script_sig.len() > MAX_COINBASE_SCRIPT_LEN {
+        return Err(parse_err("Coinbase script is too long"));
+    }
 
     // Read a candidate height directly off the wire. The first byte tells us where the height
     // bytes are; we don't validate them yet — the oracle below catches any non-canonical input.
@@ -167,6 +177,8 @@ impl ZcashSerialize for Input {
 }
 
 impl ZcashDeserialize for Input {
+    /// This impl is retained for tests and fixtures only: production transaction parsing
+    /// goes through `zcash_primitives`, which does not use it.
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // This inlines the OutPoint deserialization to peek at the hash value and detect whether we
         // have a coinbase input.
@@ -185,6 +197,10 @@ impl ZcashDeserialize for Input {
             // bytes for an attacker-controlled CompactSize length and only reject
             // afterwards, letting a peer force multi-MiB transient allocations per
             // bogus block.
+            //
+            // The production transaction parse path enforces the same bound in
+            // `parse_coinbase_height`, which is the authoritative site; this early
+            // copy is pre-allocation hardening for this deserializer.
             //
             // # Consensus
             //
