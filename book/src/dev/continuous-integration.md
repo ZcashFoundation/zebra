@@ -54,12 +54,7 @@ Some PRs don't use the queue:
 
 ### Holding a Pull Request Back
 
-> **Not enforced until the queue is activated.** Both checks below exist — the
-> Merge Freeze app is installed and `merge-policy` runs on every pull request — but
-> neither is a required status check yet, so neither holds anything. See
-> [Activating the queue](#activating-the-queue).
-
-Two independent hold checks:
+Two independent hold checks, both required by the ruleset:
 
 - **`merge-policy`**: fails while a PR has the `do-not-merge` label. Remove the
   label to release it. Label changes re-run only this small workflow.
@@ -67,11 +62,14 @@ Two independent hold checks:
   fails this status during a release window. Repository admins and members with
   write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
 
-The release PR is meant to pass a freeze through Merge Freeze's **Unfreeze 1 pull
-request** action; the `A-release` label controls Zebra's release checks but does not
-bypass a freeze. That action has been reported returning an error, and Merge Freeze's
-documentation ties it to the _Push a status update to all PRs_ freeze method, so
-confirm which method the installation uses before relying on it for a release.
+The release PR passes a freeze through Merge Freeze's **Unblock 1 pull request**
+action; the `A-release` label controls Zebra's release checks but does not bypass a
+freeze. That action needs the project's freeze method to be _Push a status update to
+all PRs_, which is the method this installation uses.
+
+That method writes a status to every open pull request, one at a time, at roughly a
+second per pull request. A freeze or a thaw therefore takes a little while to reach
+them all, and is not stuck.
 
 `do-not-merge` also reaches a pull request that is already enrolled. A merge group
 carries no pull request metadata, so `merge-policy` reads the queued numbers back out
@@ -106,30 +104,27 @@ Unlike the previous Mergify queue, the native queue does not provide automatic
 enrollment, label-based high and low priority, CI batch construction and bisection,
 or Mergify's dashboard and queue statistics. The simpler policy is intentional.
 
-### Activating the queue
+### Queue configuration
 
-The workflows in this repository are the whole of the change that lives in git. The
-queue itself is repository configuration, so it is applied separately, and until it
-is the sections above describe the intended end state rather than the current one.
+The queue is repository configuration rather than anything in git, so it is changed in
+the `PR Requirements` ruleset, not in a pull request. It currently requires six status
+checks — `lint`, `unit-tests`, `test-crates`, `pr-gate-result`, `merge-policy` and
+`mergefreeze` — each pinned to the app that produces it, so nothing else can report a
+passing result in their name.
 
-An admin applies these, in order:
+The queue itself uses merge method `MERGE`, build concurrency `5`, `ALLGREEN`, minimum
+and maximum pull requests to merge of `1`, a two-minute minimum wait, and a
+**180-minute check response timeout**. That last one matters: the default is 60
+minutes and unit tests take up to 69, so at the default every entry that touches Rust
+would be dropped from the queue as assumed-failed while its checks were still running.
 
-1. Set the ruleset's `allowed_merge_methods` to `["merge"]`, and enable
-   `allow_auto_merge`. _(Both already applied.)_
-2. Add the `merge_queue` rule to the `PR Requirements` ruleset with the settings
-   listed above. Set the check timeout to **180 minutes**: the default is 60 and unit
-   tests take up to 69, so every Rust entry would be dequeued as assumed-failed.
-3. Add `merge-policy` and `mergefreeze` to the required status checks. Merge Freeze
-   [requires both](https://docs.mergefreeze.com/github-merge-queue) its status and
-   `Require merge queue` to be selected. Not before this merge, though: `merge-policy`
-   does not exist on `main` until then, and every open pull request would block on a
-   check nothing produces.
-4. Remove Mergify's bypass actor from the ruleset, then uninstall the app.
+Merge Freeze needs its `mergefreeze` status among the required checks, and
+`Require merge queue` selected, for the freeze to gate anything — see
+[their merge queue guide](https://docs.mergefreeze.com/github-merge-queue).
 
-Steps 2 and 3 must follow the merge that puts these workflows on `main`, and step 4
-should follow immediately: Mergify reads its configuration from the default branch,
-so it stops the moment `mergify.yml` is gone, while the native queue does not start
-until step 2.
+Adding a required check that pull requests do not already produce blocks every open
+one until each is pushed to or rebased, so land the workflow first and require it
+afterwards.
 
 Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
 
