@@ -832,6 +832,57 @@ fn block_error_misbehavior_scores() {
         BlockError::MissingHeight(zebra_chain::block::Hash([0; 32])).misbehavior_score(),
         100
     );
+    assert_eq!(BlockError::DuplicateTransaction.misbehavior_score(), 100);
+}
+
+/// A block with duplicate transaction hashes must score misbehaviour through both
+/// verifier paths, because both of them run `merkle_root_validity()`: the semantic
+/// verifier at `block.rs`, and the checkpoint verifier before it queues a block.
+///
+/// The syncer only forwards a score to the misbehaviour channel when it is
+/// non-zero, and it reads that score from the wrapping error, not from
+/// [`BlockError`] itself. So the score has to survive the wrappers to have any
+/// effect on the peer that advertised the block.
+#[test]
+fn duplicate_transaction_scores_misbehavior_through_both_verifier_paths() {
+    use crate::{checkpoint::VerifyCheckpointError, router::RouterError};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES[..])
+        .expect("block should deserialize");
+
+    // Duplicate the coinbase transaction, then recompute the Merkle root from the
+    // duplicated list, so the block passes the `BadMerkleRoot` check and reaches the
+    // duplicate-hash check.
+    let duplicate = block
+        .transactions
+        .first()
+        .expect("block has coinbase")
+        .clone();
+    block.transactions.push(duplicate);
+
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut block.header).merkle_root = transaction_hashes.iter().cloned().collect();
+
+    let block_error = check::merkle_root_validity(&network, &block, &transaction_hashes)
+        .expect_err("duplicate transaction hashes must be rejected");
+    assert_eq!(block_error, BlockError::DuplicateTransaction);
+
+    // The semantic verifier path: `BlockError` -> `VerifyBlockError` -> `RouterError`.
+    let verify_block_error = VerifyBlockError::from(block_error.clone());
+    assert_eq!(verify_block_error.misbehavior_score(), 100);
+    assert_eq!(
+        RouterError::from(verify_block_error).misbehavior_score(),
+        100
+    );
+
+    // The checkpoint verifier path: `BlockError` -> `VerifyCheckpointError` -> `RouterError`.
+    let checkpoint_error = VerifyCheckpointError::from(block_error);
+    assert_eq!(checkpoint_error.misbehavior_score(), 100);
+    assert_eq!(RouterError::from(checkpoint_error).misbehavior_score(), 100);
 }
 
 #[test]
