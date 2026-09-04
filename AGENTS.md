@@ -75,6 +75,10 @@ SECURITY.md's "Before You Report" section:
   exact release version or `main` commit hash tested in the report.
 - Do not submit speculative findings. "This code looks vulnerable" without a
   reproduction against current code wastes triage time and may be dismissed.
+- A finding that exists only in unreleased code (`main` or an unmerged PR) will
+  not get a security advisory or CVE, but it is still worth reporting and the
+  reporter is credited in the issue, the fixing PR, and the release notes. See
+  SECURITY.md, "Advisories, CVEs, and Credit".
 
 ## AI Disclosure
 
