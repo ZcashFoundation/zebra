@@ -83,7 +83,8 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     let coinbase = Transaction::test_v1(
         vec![transparent::Input::Coinbase {
             height: Height(1),
-            data: vec![],
+            // 1 byte of data keeps the scriptSig at the 2-byte consensus minimum.
+            data: vec![0],
             sequence: 0xFFFF_FFFF,
         }],
         vec![

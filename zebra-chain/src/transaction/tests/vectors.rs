@@ -1536,3 +1536,103 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
         "unexpected error: {err}"
     );
 }
+
+/// Build a serialized transaction with one coinbase input whose scriptSig is a height push
+/// followed by `data_len` bytes of miner data, then deserialize it through the production
+/// parse path (`Transaction::zcash_deserialize`).
+fn deserialize_coinbase_tx_with_data(
+    height: u32,
+    data_len: usize,
+) -> Result<Transaction, SerializationError> {
+    let tx = Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height: Height(height),
+            data: vec![0x5a; data_len],
+            sequence: 0xFFFF_FFFF,
+        }],
+        vec![transparent::Output {
+            value: crate::amount::Amount::try_from(1).expect("valid amount"),
+            lock_script: Script::new(&[]),
+        }],
+        LockTime::min_lock_time_timestamp(),
+    );
+    let serialized = tx
+        .zcash_serialize_to_vec()
+        .expect("coinbase transaction must serialize");
+    serialized.zcash_deserialize_into::<Transaction>()
+}
+
+/// The coinbase scriptSig length must be in {2 .. 100} bytes on the production parse path.
+/// The check lived in `Input::zcash_deserialize`, which the `zcash_primitives` parsing
+/// refactor left without production callers.
+#[test]
+fn coinbase_script_len_bounds_enforced_at_parse() {
+    let _init_guard = zebra_test::init();
+
+    // Height 1 encodes as a single `OP_1` byte; height 500_000 as a 4-byte push.
+    const ONE_BYTE_PUSH_HEIGHT: u32 = 1;
+    const FOUR_BYTE_PUSH_HEIGHT: u32 = 500_000;
+
+    // Undersized: a bare `OP_1` script is 1 byte, below the 2-byte minimum.
+    assert!(
+        matches!(
+            deserialize_coinbase_tx_with_data(ONE_BYTE_PUSH_HEIGHT, 0),
+            Err(SerializationError::Parse("Coinbase script is too short"))
+        ),
+        "1-byte coinbase script must be rejected"
+    );
+
+    // Oversized: a 4-byte height push + 97 bytes of data is 101 bytes, above the maximum.
+    assert!(
+        matches!(
+            deserialize_coinbase_tx_with_data(FOUR_BYTE_PUSH_HEIGHT, 97),
+            Err(SerializationError::Parse("Coinbase script is too long"))
+        ),
+        "101-byte coinbase script must be rejected"
+    );
+
+    // The boundary lengths 2 and 100 are accepted.
+    deserialize_coinbase_tx_with_data(ONE_BYTE_PUSH_HEIGHT, 1)
+        .expect("2-byte coinbase script must be accepted");
+    deserialize_coinbase_tx_with_data(FOUR_BYTE_PUSH_HEIGHT, 96)
+        .expect("100-byte coinbase script must be accepted");
+
+    // The genesis coinbase script (77 bytes, no height prefix) still parses.
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+        .expect("genesis block must deserialize");
+}
+
+/// An out-of-range `nExpiryHeight` wire value must be readable through `raw_expiry_height`
+/// and preserved by round-trip serialization, even though `expiry_height()` cannot
+/// represent values above `Height::MAX` and maps them to `None`.
+#[test]
+fn raw_expiry_height_preserves_out_of_range_values() {
+    let _init_guard = zebra_test::init();
+
+    for raw in [0, 499_999_999, 500_000_000, 2_147_483_648, u32::MAX] {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            Vec::new(),
+            Vec::new(),
+            LockTime::min_lock_time_timestamp(),
+            block::Height(raw),
+        );
+
+        assert_eq!(tx.raw_expiry_height(), Some(raw));
+        if raw == 0 || raw > Height::MAX.0 {
+            // `0` means "no expiry"; over-range values cannot be represented as a `Height`.
+            assert_eq!(tx.expiry_height(), None);
+        } else {
+            assert_eq!(tx.expiry_height(), Some(Height(raw)));
+        }
+
+        // The wire value survives a serialization round trip unchanged.
+        let serialized = tx
+            .zcash_serialize_to_vec()
+            .expect("transaction must serialize");
+        let parsed = serialized
+            .zcash_deserialize_into::<Transaction>()
+            .expect("parsing does not enforce the expiry maximum, the verifier does");
+        assert_eq!(parsed.raw_expiry_height(), Some(raw));
+    }
+}

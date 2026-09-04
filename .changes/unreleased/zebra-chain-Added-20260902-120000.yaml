@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "`Transaction::raw_expiry_height`, which returns the raw `nExpiryHeight` wire value without range conversion, so consensus checks can reject out-of-range values that `expiry_height()` maps to `None`."
+time: 2026-09-02T12:00:00.000000000-03:00
