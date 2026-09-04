@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- `NonFinalizedState::with_backup` no longer panics when the non-finalized state backup path cannot
+  be created or read (for example, it already exists as a regular file, or as a directory Zebra
+  cannot read). It now logs an error and starts without the non-finalized backup instead of aborting
+  the process ([#10544](https://github.com/ZcashFoundation/zebra/issues/10544)).
+
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
   `ephemeral = true`, even when the configured `cache_dir` is missing or unreadable. Previously the
   cache directory was checked first, so this configuration error surfaced as
