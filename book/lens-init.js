@@ -37,11 +37,14 @@ function configureLens(script) {
   script.dataset.draggable = "true";
 }
 
+// Opting in carries across pages but not across browsing sessions: it lives in
+// sessionStorage, so it expires when the tab closes rather than persisting for
+// whoever uses the browser profile next. It is first-party only, never leaves
+// the browser, and is not the vendor's `lens.distinctId.v1` identifier, which
+// we avoid creating at all.
 function rememberOptIn() {
-  // First-party only: this never leaves the browser, and is not the vendor's
-  // `lens.distinctId.v1` identifier, which we avoid creating at all.
   try {
-    localStorage.setItem(LENS_OPT_IN_KEY, "1");
+    sessionStorage.setItem(LENS_OPT_IN_KEY, "1");
   } catch {
     // Private browsing, or storage disabled. The reader just opts in again.
   }
@@ -49,7 +52,7 @@ function rememberOptIn() {
 
 function hasOptedIn() {
   try {
-    return localStorage.getItem(LENS_OPT_IN_KEY) === "1";
+    return sessionStorage.getItem(LENS_OPT_IN_KEY) === "1";
   } catch {
     return false;
   }
@@ -99,10 +102,14 @@ function renderOptInButton() {
   button.addEventListener("click", () => {
     button.disabled = true;
     button.textContent = "Loading…";
-    rememberOptIn();
     loadLens(true, {
-      // The vendor renders its own launcher once booted, so ours steps aside.
-      onSuccess: () => button.remove(),
+      onSuccess: () => {
+        // Only record the opt-in once the widget is actually running, so a
+        // failed load doesn't silently arm auto-loading on later pages.
+        rememberOptIn();
+        // The vendor renders its own launcher once booted, so ours steps aside.
+        button.remove();
+      },
       onFailure: () => {
         button.disabled = false;
         button.textContent = "Ask the docs";
@@ -113,8 +120,13 @@ function renderOptInButton() {
   document.body.append(button);
 }
 
-if (hasOptedIn()) {
-  loadLens(false);
-} else {
-  renderOptInButton();
+// Only the top-level page offers the assistant. A cross-origin site can frame
+// the book, and could position the frame so an unrelated-looking click lands
+// on the opt-in button, loading the vendor script without a real decision.
+if (window.top === window.self) {
+  if (hasOptedIn()) {
+    loadLens(false);
+  } else {
+    renderOptInButton();
+  }
 }
