@@ -329,6 +329,21 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    /// The order in which this node received this block, relative to the other blocks in the
+    /// non-finalized state (like `zcashd`'s `nSequenceId`).
+    ///
+    /// Used by `Chain::cmp` to prefer the first-received chain when cumulative works are equal:
+    ///
+    /// > To break ties between leaf blocks, a node will prefer the block that it received first.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
+    ///
+    /// This is node-local, in-memory metadata, not consensus data: it is assigned once when the
+    /// block is committed to the non-finalized state, is never persisted (blocks restored from
+    /// the non-finalized backup are re-stamped in replay order), and is 0 for blocks constructed
+    /// outside a commit (tests).
+    pub(crate) receipt_sequence: u64,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -526,6 +541,8 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
             )?,
+            // Stamped by the non-finalized state when the block is committed.
+            receipt_sequence: 0,
         })
     }
 }

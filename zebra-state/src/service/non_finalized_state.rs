@@ -62,6 +62,15 @@ pub struct NonFinalizedState {
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
+    /// The receipt sequence number assigned to the next block committed to this
+    /// non-finalized state (like `zcashd`'s `nBlockSequenceId` counter).
+    ///
+    /// `Chain::cmp` breaks equal-work ties by preferring the chain whose tip block has the
+    /// lowest receipt sequence, implementing the consensus rule that a node prefers the
+    /// block it received first. Node-local and in-memory only; starts at 1 so that 0 marks
+    /// blocks constructed outside a commit (tests).
+    next_receipt_sequence: u64,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -96,6 +105,8 @@ impl std::fmt::Debug for NonFinalizedState {
         f.field("chain_set", &self.chain_set)
             .field("network", &self.network);
 
+        f.field("next_receipt_sequence", &self.next_receipt_sequence);
+
         f.field("should_count_metrics", &self.should_count_metrics);
 
         f.finish()
@@ -108,6 +119,7 @@ impl Clone for NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            next_receipt_sequence: self.next_receipt_sequence,
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -125,6 +137,7 @@ impl NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
             invalidated_blocks: Default::default(),
+            next_receipt_sequence: 1,
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -250,6 +263,9 @@ impl NonFinalizedState {
     pub fn eq_internal_state(&self, other: &NonFinalizedState) -> bool {
         // this method must be updated every time a consensus-critical field is added to NonFinalizedState
         // (diagnostic fields can be ignored)
+        //
+        // `next_receipt_sequence` is deliberately excluded: it is node-local receipt-order
+        // metadata, and a failed commit advances it without changing any chain.
 
         self.chain_set.len() == other.chain_set.len()
             && self
@@ -273,7 +289,18 @@ impl NonFinalizedState {
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
     {
-        self.chain_set.insert(chain);
+        // If a chain with this tip is already tracked, keep the incumbent: it was received
+        // first. Before receipt sequences, such chains compared `Equal` and this insert was
+        // a silent `BTreeSet` no-op (see the `Chain::cmp` docs and the tests for #10586);
+        // with sequences, a re-committed duplicate tip could otherwise carry a fresh
+        // sequence and add a second chain for the same tip.
+        let duplicate_tip = self
+            .chain_set
+            .iter()
+            .any(|tracked| tracked.non_finalized_tip_hash() == chain.non_finalized_tip_hash());
+        if !duplicate_tip {
+            self.chain_set.insert(chain);
+        }
 
         chain_filter(&mut self.chain_set);
 
@@ -293,8 +320,8 @@ impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
-        // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
-        // Neither of these fields has interior mutability.
+        // Chain::cmp uses the partial cumulative work, the tip block's receipt sequence,
+        // and the hash of the tip block. None of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
         #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
@@ -560,7 +587,7 @@ impl NonFinalizedState {
     /// or the finalized tip.
     #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
     fn validate_and_commit(
-        &self,
+        &mut self,
         new_chain: Arc<Chain>,
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
@@ -600,7 +627,7 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        let mut contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
             calculate_deferred_pool_balance_change(prepared.height, &self.network),
@@ -614,6 +641,14 @@ impl NonFinalizedState {
                 spent_utxo_count: spent_utxos.len(),
             }
         })?;
+
+        // Stamp the block's receipt order (like zcashd's `nSequenceId`), used by `Chain::cmp`
+        // to prefer the first-received chain on equal-work ties. `reconsider_block` re-pushes
+        // stored blocks without passing through here, which preserves their original stamp.
+        // If validation fails below, the consumed sequence leaves a gap, which is harmless:
+        // only the relative order of accepted blocks matters.
+        contextual.receipt_sequence = self.next_receipt_sequence;
+        self.next_receipt_sequence += 1;
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
@@ -707,7 +742,7 @@ impl NonFinalizedState {
     /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
-    /// (Using the tip block hash tie-breaker.)
+    /// (Breaking ties by preferring the first-received tip block, then the tip block hash.)
     pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,

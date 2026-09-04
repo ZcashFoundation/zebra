@@ -30,6 +30,11 @@ pub(crate) const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_
 /// Looks for blocks above the finalized tip height in the backup directory (if a path was provided) and
 /// attempts to commit them to the non-finalized state.
 ///
+/// Restored blocks are re-stamped with fresh receipt sequences in replay order (ascending
+/// height, arbitrary order within a height), so equal-work sibling preference from before
+/// the restart is not preserved. This matches `zcashd`, where blocks loaded from disk all
+/// share `nSequenceId` 0.
+///
 /// Returns the resulting non-finalized state.
 pub(super) fn restore_backup(
     mut non_finalized_state: NonFinalizedState,
