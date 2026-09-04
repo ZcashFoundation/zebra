@@ -41,6 +41,9 @@ use super::{
     CoinbaseCache, MinerParams,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// How long `getblocktemplate` waits for [`run()`] to publish a template for a new chain tip,
 /// before building a template itself.
 ///
@@ -63,6 +66,24 @@ impl Default for TemplateCache {
     }
 }
 
+/// A subscription to the templates [`run()`] publishes.
+pub(crate) struct TemplateChanges(watch::Receiver<Option<Arc<BlockTemplateResponse>>>);
+
+impl TemplateChanges {
+    /// Waits for a template published since this subscription was created, or since the last wait
+    /// returned.
+    ///
+    /// Returns immediately if one was published in the meantime, so a caller that reads the cache
+    /// and then waits cannot miss the publish in between.
+    pub(crate) async fn changed(&mut self) {
+        if self.0.changed().await.is_err() {
+            // No sender, so no template will ever be published. Waiting forever lets the caller's
+            // other wait conditions drive it, where returning would spin it.
+            std::future::pending::<()>().await
+        }
+    }
+}
+
 impl TemplateCache {
     /// Returns `true` if the precomputed template extends `tip_hash`.
     fn holds_tip(&self, tip_hash: block::Hash) -> bool {
@@ -75,6 +96,16 @@ impl TemplateCache {
     /// Returns `true` if no [`run()`] task has published a template yet.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.borrow().is_none()
+    }
+
+    /// Subscribes to the templates [`run()`] publishes from now on.
+    ///
+    /// Subscribe before reading the cache, and keep the subscription across the wait:
+    /// `watch::Sender::subscribe()` marks the current template as seen and everything published
+    /// after it as unseen, so a template published while the caller decides what to do with the
+    /// one it just read still wakes it.
+    pub(crate) fn subscribe(&self) -> TemplateChanges {
+        TemplateChanges(self.0.subscribe())
     }
 
     /// Publishes `template` as the precomputed template.

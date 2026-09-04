@@ -1036,8 +1036,19 @@ where
     /// them up. But it always extends the current tip, so miners never work on a chain that Zebra
     /// has already seen a block for.
     ///
+    /// A long polling client waits here until the updater publishes a template it doesn't have
+    /// yet, the chain tip changes, or `max_time` is reached.
+    ///
+    /// # Correctness
+    ///
+    /// Long polling must not fall through to the synchronous path below while this cache is
+    /// serving. That path derives its own long poll ID from a fresh state and mempool read, so
+    /// with two independent ID sources neither side ever matches the other: the client alternates
+    /// between a cached template and a freshly built one, each call returning immediately, and it
+    /// never waits. Its work is cancelled on every response, so it mines nothing.
+    ///
     /// Returns `None` if there is no updater task, if it hasn't caught up with a recent chain tip
-    /// change, or if the client is long polling on this exact template.
+    /// change, or if the chain tip channel closed.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
@@ -1050,6 +1061,76 @@ where
             return None;
         }
 
+        // Subscribe before the first read below. A template published between reading the cache
+        // and waiting on it would otherwise be marked seen and skipped, and the only other wakes
+        // are a chain tip change and `max_time`, neither of which fires when the mempool alone
+        // changes: the caller would wait out the updater's backstop on a template it has already
+        // been told about.
+        let mut template_changes = cache.subscribe();
+
+        // Clone the chain tip once, and mark the current tip seen: a receiver created fresh on
+        // every iteration reports the tip it was created with as a change, so waiting on it would
+        // return immediately and spin this loop instead of parking it.
+        let mut tip_change = self.latest_chain_tip.clone();
+        tip_change.mark_best_tip_seen();
+
+        loop {
+            let template = self.precomputed_template_for_state_tip(cache).await?;
+
+            let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
+
+            if !is_client_template {
+                let mut template = (*template).clone();
+                template.submit_old = client_long_poll_id
+                    .as_ref()
+                    .map(|old_long_poll_id| template.long_poll_id.submit_old(old_long_poll_id));
+
+                return Some(template);
+            }
+
+            // The client is long polling on exactly this template, so wait for a reason to send
+            // another one.
+            let max_time = template.max_time;
+            let cur_time = template.cur_time;
+
+            // On Testnet the max time changes the block difficulty, so old shares become invalid.
+            // On Mainnet this means 90 minutes without a block or a mempool transaction.
+            let duration_until_max_time = max_time.saturating_duration_since(cur_time);
+            let wait_for_max_time: OptionFuture<_> = if duration_until_max_time.seconds() > 0 {
+                Some(tokio::time::sleep(duration_until_max_time.to_std()))
+            } else {
+                None
+            }
+            .into();
+
+            tokio::select! {
+                biased;
+
+                tip_changed = tip_change.best_tip_changed() => {
+                    // A closed chain tip channel means Zebra is shutting down.
+                    tip_changed.ok()?;
+                }
+
+                () = template_changes.changed() => {}
+
+                Some(()) = wait_for_max_time => {
+                    let template = self.precomputed_template_for_state_tip(cache).await?;
+                    let mut template = (*template).clone();
+                    template.submit_old = Some(false);
+
+                    return Some(template);
+                }
+            }
+        }
+    }
+
+    /// Returns the precomputed template, if it extends the tip the state has committed.
+    ///
+    /// Waits up to `NEW_TIP_TIMEOUT` for the updater task to catch up with a recent tip change.
+    async fn precomputed_template_for_state_tip(
+        &self,
+        cache: &precompute::TemplateCache,
+    ) -> Option<Arc<BlockTemplateResponse>> {
         // # Correctness
         //
         // The tip has to come from the state, not from `latest_chain_tip`. The state's write task
@@ -1070,20 +1151,7 @@ where
             return None;
         };
 
-        let template = cache.wait_for_tip(tip_hash).await?;
-
-        if Some(template.long_poll_id) == client_long_poll_id {
-            return None;
-        }
-
-        let submit_old = client_long_poll_id
-            .as_ref()
-            .map(|old_long_poll_id| template.long_poll_id.submit_old(old_long_poll_id));
-
-        let mut template = (*template).clone();
-        template.submit_old = submit_old;
-
-        Some(template)
+        cache.wait_for_tip(tip_hash).await
     }
 
     /// Returns a reference to the configured network.
