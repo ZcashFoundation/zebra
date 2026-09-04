@@ -173,6 +173,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
     let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
 
+    // Whether the last build failed, so a failing spell is logged once rather than every second.
+    let mut was_failing = false;
+
     loop {
         // `getblocktemplate` returns an error until Zebra is synced to the tip, so there's nothing
         // to precompute before then.
@@ -246,14 +249,35 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         };
 
         match built {
-            Ok(Some(template)) => cache.publish(template),
+            Ok(Some(template)) => {
+                if was_failing {
+                    tracing::info!("block template builds recovered");
+                    was_failing = false;
+                }
+
+                cache.publish(template)
+            }
             // The state and the mempool disagreed about the tip, so retry with fresh data.
             Ok(None) => {
                 sleep(RETRY_DELAY).await;
                 continue;
             }
             Err(error) => {
-                tracing::debug!(?error, "failed to build a block template");
+                // While this keeps failing the RPC serves the last template, so miners silently
+                // lose the fees of everything that has arrived since. Log the start of a failing
+                // spell loudly, then stay quiet: the retry delay is a second, so warning on every
+                // attempt would bury the rest of the log.
+                if was_failing {
+                    tracing::debug!(?error, "failed to build a block template");
+                } else {
+                    tracing::warn!(
+                        ?error,
+                        "failed to build a block template, serving the last one until this \
+                         recovers"
+                    );
+                    was_failing = true;
+                }
+
                 sleep(RETRY_DELAY).await;
                 continue;
             }
