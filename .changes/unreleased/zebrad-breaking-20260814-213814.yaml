@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: '`rpc.max_response_body_size` is now limited to 4,294,967,295 bytes. Configurations with larger values must reduce the limit; they are rejected during configuration loading instead of causing an RPC server startup panic ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).'
-time: 2026-08-14T21:38:14.567244223Z

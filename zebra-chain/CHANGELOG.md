@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [13.0.0] - 2026-09-04
+
+### Breaking Changes
+
+- `transaction::Transaction` is now a newtype wrapping `zcash_primitives::transaction::Transaction`, rather than an enum of Zebra-owned structs. Its variants and their fields are no longer public: use the accessor methods, and the `Transaction::test_v*` constructors under the `proptest-impl` feature to build transactions in tests ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Transaction and block accessors that returned references to shielded data now return owned values, because that data is owned by `zcash_primitives`. Callers no longer need `.cloned()` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Transaction serialization is delegated to `zcash_primitives`. The `ZcashSerialize` and `ZcashDeserialize` impls for Zebra's own `sapling`, `orchard` and `ironwood` shielded-data types are now compiled only for tests, so they are no longer part of the released API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed `transaction::txid::TxIdBuilder` and the `transaction::builder` module. Transaction IDs and coinbase construction now come from `zcash_primitives` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+
+### Added
+
+- `transaction::Transaction::ironwood_anchor`, `has_enough_ironwood_flags`, `orchard_proof_size_is_canonical` and `ironwood_proof_size_is_canonical` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- `transaction::sprout_joinsplit_key_and_ciphertexts`, which reads the `ephemeralKey` and `encCiphertexts` of a Sprout JoinSplit. `zcash_primitives` does not expose accessors for those two fields ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- With the `proptest-impl` feature: `transaction::arbitrary::shielded`, which builds Orchard and Ironwood bundles for tests, and `Transaction::test_v6`, `test_v5_with_orchard` and `test_v6_with_bundles` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+
 ## [12.0.0] - 2026-08-10
 
 ### Breaking Changes
