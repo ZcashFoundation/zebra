@@ -2,7 +2,7 @@
 #
 # 1. Deletes specific instances in GCP older than a defined number of days.
 # 2. Deletes instance templates older than a set number of days.
-# 3. Deletes older disks not currently in use, with certain ones prefixed by commit hashes or "zebrad-".
+# 3. Deletes older disks not currently in use: those whose name ends in a run id or a commit hash, and those prefixed with "zebrad-".
 # 4. Deletes cache images from GCP, retaining a specified number of the latest images for certain types like zebrad checkpoint cache, zebrad tip cache, and lightwalletd + zebrad tip cache.
 #
 # It uses the gcloud CLI for its operations and is scheduled to run daily at 0700 UTC against the dev project.
@@ -58,6 +58,9 @@ jobs:
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
+      # The selector must keep matching run-id-suffixed integration test resources:
+      # rationale in the script below, contract asserted in
+      # zfnd-deploy-integration-tests-gcp.yml's `determine-environment` guard.
       - name: Delete old instances
         run: |
           ./.github/workflows/scripts/gcp-delete-old-instances.sh
