@@ -14,3 +14,7 @@ command = "mdbook-mermaid"
 [output.html]
 additional-js = ["mermaid.min.js", "mermaid-init.js", "lens-init.js"]
 additional-css = ["theme/css/custom.css"]
+# These match mdBook's own defaults. Pinned because theme/css/custom.css only
+# restyles these two -- coal, ayu and rust are left stock in the theme picker.
+default-theme = "light"
+preferred-dark-theme = "navy"

@@ -1,0 +1,88 @@
+/* Zebra syntax highlighting -- dark themes.
+ *
+ * highlight.js classes, coloured to sit under the palette in
+ * theme/css/custom.css. Gold stays the page accent, so the code palette keeps
+ * to a small, low-saturation set that doesn't compete with it. */
+
+.hljs {
+    display: block;
+    overflow-x: auto;
+    background: transparent;
+    color: #E7E3DA;
+}
+
+.hljs-comment,
+.hljs-quote {
+    color: #6E7480;
+    font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-meta .hljs-keyword {
+    color: #E0A340;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+    color: #9CB380;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-template-variable,
+.hljs-variable {
+    color: #D08A6E;
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-title.function_ {
+    color: #8FB8D6;
+}
+
+.hljs-attr,
+.hljs-property,
+.hljs-params,
+.hljs-tag {
+    color: #E7E3DA;
+}
+
+.hljs-meta,
+.hljs-subst {
+    color: #8B909B;
+}
+
+.hljs-deletion {
+    color: #E97F76;
+}
+
+.hljs-emphasis {
+    font-style: italic;
+}
+
+.hljs-strong {
+    font-weight: 600;
+}
+
+.hljs-formula,
+.hljs-operator,
+.hljs-punctuation {
+    color: #8B909B;
+}
