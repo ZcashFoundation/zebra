@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'The non-finalized transparent `received` total (served by `getaddressbalance`) now saturates instead of overflowing. An address with enough non-finalized self-transfer churn could push its cumulative `received` counter past `u64::MAX`, panicking in debug builds and wrapping in release builds; it now matches the finalized path''s saturating accounting ([#10556](https://github.com/ZcashFoundation/zebra/issues/10556)).'
+time: 2026-08-19T00:01:00.000000000Z
