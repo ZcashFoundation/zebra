@@ -231,9 +231,25 @@ impl Transaction {
         self.transparent_bundle().is_some_and(|b| b.is_coinbase())
     }
 
-    /// Returns `true` if this is a valid non-coinbase transaction.
+    /// Returns `true` if this transaction has valid inputs for a non-coinbase
+    /// transaction, that is, none of its transparent inputs has a null prevout.
+    ///
+    /// # Consensus
+    ///
+    /// > A transparent input in a non-coinbase transaction MUST NOT have a null prevout.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    ///
+    /// Note that a transaction can return `false` from both [`Transaction::is_coinbase`] and
+    /// this method, for example a transaction with a null-prevout input alongside other
+    /// inputs. Such transactions are rejected by the verifier.
     pub fn is_valid_non_coinbase(&self) -> bool {
-        !self.is_coinbase()
+        self.transparent_bundle().is_none_or(|bundle| {
+            bundle
+                .vin
+                .iter()
+                .all(|txin| *txin.prevout() != zcash_transparent::bundle::OutPoint::NULL)
+        })
     }
 
     /// Returns the outpoints spent by this transaction's transparent inputs.
