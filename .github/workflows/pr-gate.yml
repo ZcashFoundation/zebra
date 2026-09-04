@@ -208,17 +208,7 @@ jobs:
           toolchain: 1.91.0
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
-        run: |
-          sudo timeout --kill-after=10s --foreground 180s apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            update
-          sudo timeout --kill-after=10s --foreground 180s apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            install -y libclang-dev
+        run: .github/scripts/apt-install.sh libclang-dev
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
