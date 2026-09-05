@@ -32,7 +32,7 @@ title prefix (`fix:`, `feat:`, `ci:`, `docs:`, and so on).
 | `blocked` | Waiting on something outside the issue or PR | The comment that applies it must say _what_ it is blocked on and give a **re-check date**; a label that is never revisited goes on describing a condition that fixed itself |
 | `do-not-merge` | Must not merge yet, even if approved and green | Removed by whoever applied it |
 | `needs-issue` | A PR that should have an issue behind it | Ask the author to open one, or open it for them |
-| `external-contribution` | Filed by someone outside the maintainer team | Lets maintainers find and follow up on outside contributions |
+| `external-contribution` | Filed by someone outside the maintainer team | Applied by `label-external.yml` when the author is not an owner, member or collaborator; lets maintainers find and follow up on outside contributions |
 | `help wanted` | Maintainers would welcome outside help | GitHub-native name; keep it spelled exactly like this |
 | `good first issue` | Suitable for a first contribution | GitHub-native name; keep it spelled exactly like this |
 | `nu-7` | NU7 network-upgrade work | Temporary, removed after the upgrade ships |
