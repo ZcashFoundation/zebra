@@ -100,7 +100,9 @@ Bad, multiple PRs on one line:
 
 ### Section order
 
-Use [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) section order:
+Sections appear in the order the `kinds` are listed in `.changie.yaml`: Zebra's
+own `breaking` kind first, then [Keep a
+Changelog](https://keepachangelog.com/en/1.0.0/) order:
 
 ```text
 ## [Version X.Y.Z](link) - YYYY-MM-DD
@@ -116,7 +118,8 @@ Use [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) section order:
 ### Security
 ```
 
-Only include sections that have entries.
+`changie merge` writes only the sections that have fragments, so a section
+without entries never appears.
 
 ### Section priority
 
@@ -130,7 +133,16 @@ When a single change touches multiple categories, place it in **one section only
 6. Added
 7. Fixed
 
-Exception for crate changelogs: a change that is both breaking and additive (for example, adding a variant to a public enum that is not `#[non_exhaustive]`) is listed under Breaking Changes for its impact and under Added for the new capability, so consumers see both signals.
+A change that is both breaking and additive (for example, adding a variant to a
+public enum that is not `#[non_exhaustive]`) still gets one fragment, filed
+under `Breaking Changes` by the priority order above and worded so it names the
+new capability too; two fragments for the same change render as two entries.
+
+A PR that makes several distinct changes is a different case: each one gets its
+own fragment. `zebra-chain` 12.0.0 lists the new `ValueBalanceError::Total`
+variant under `Breaking Changes` and the new `ValueBalance::total` method under
+`Added`, both from #10817, because those are two changes, not one change filed
+twice.
 
 Fixed vs Changed: use Fixed only when the fix is invisible, meaning the bug is gone but output looks the same. If users see anything different (error messages, logs, behavior), use Changed.
 
@@ -196,7 +208,7 @@ A change is breaking if upgrading `zebrad` could cause existing setups to fail:
 | Internal refactors | No operator-visible effect |
 | CI/workflow changes | No runtime impact |
 | Test changes | No runtime impact |
-| Dependency bumps | Unless security fixes |
+| Dependency bumps | Unless they carry a security fix. This row is about **this** file only — see [Dependency updates](#dependency-updates) for when a crate changelog needs an entry |
 
 Red flags an entry does not belong:
 
@@ -356,7 +368,7 @@ A change is breaking if code using the crate will fail to compile or behave diff
 | Visibility reduced | `pub const X` to `pub(crate) const X` | Copy constant or request re-export |
 | Error type changed | `ParseError` to `BlockParseError` | Update error handling |
 | Feature flag required | Function now behind `#[cfg(feature = "x")]` | Enable feature in Cargo.toml |
-| MSRV increased | 1.70 to 1.75 | Update toolchain |
+| MSRV increased | `rust-version` raised to a newer stable | Update toolchain |
 
 Adding a variant to a public enum that is not marked `#[non_exhaustive]` is also breaking: downstream `match` expressions that were exhaustive stop compiling.
 
@@ -370,6 +382,32 @@ Adding a variant to a public enum that is not marked `#[non_exhaustive]` is also
 | New optional parameter | Adding `Option<Config>` with default | Existing calls work |
 | Performance improvements | Internal optimization | Same API, faster |
 | Documentation changes | Better rustdoc | No code changes needed |
+
+### Dependency updates
+
+A crate changelog needs an entry when a dependency moves to a
+**semver-incompatible version and that dependency's types appear in the crate's
+public API**. Two semver-incompatible versions of a crate do not unify, so
+consumers have to move with the bump, even though none of this crate's own
+signatures changed.
+
+That lockstep is breaking, so the fragment kind is `breaking` and the release
+bumps the major version. Name the dependency, its new version, and where it
+surfaces:
+
+```sh
+changie new -j zebra-rpc -k breaking \
+  -b "Updated \`zcash_keys\` to 0.16, whose \`address::Address\` is returned by \`MinerParams::addr\` ([#11111](link))."
+```
+
+A semver-compatible bump does unify, so it needs an entry only when consumers
+can notice it — new behavior reaching them through a re-exported type, say —
+and then the kind is `Changed`.
+
+A dependency used only internally, or only as a dev-dependency, needs no entry:
+consumers never see it. The zebrad changelog is the other way round — it
+excludes dependency bumps entirely unless they carry a security fix, because
+operators do not compile against these crates.
 
 ### Release summary (crates)
 
@@ -458,6 +496,10 @@ Same PR, different perspectives:
 | Internal refactor | No | No |
 | Performance improvement | If API-relevant | If user-noticeable |
 | Bug fix | If API-relevant | If operator-noticeable |
+| Semver-incompatible bump of a dependency in the public API | Yes | Only if it carries a security fix |
+| Semver-compatible bump of a dependency in the public API | Only if consumers notice it | Only if it carries a security fix |
+| Dependency used only internally | No | Only if it carries a security fix |
+| MSRV increased | Yes | Yes, for anyone building from source |
 
 A change can appear in both if it affects both audiences. Document it appropriately for each:
 
@@ -535,10 +577,14 @@ Document what this release works with:
 | Component | Supported |
 |-----------|-----------|
 | Operating Systems | Linux (glibc 2.31+), macOS 13+ |
-| Zcash Protocol | All upgrades through NU6.1 |
+| Zcash Protocol | All upgrades through NU6.3 |
 | zcashd RPC Compatibility | 5.x compatible |
-| Minimum Rust (source builds) | 1.75+ |
+| Minimum Rust (source builds) | 1.91 for `zebrad`, 1.88 for the library crates |
 ```
+
+Take these values from the release you are documenting instead of copying them:
+the Rust versions are the `rust-version` fields in `zebrad/Cargo.toml` and in
+the workspace `Cargo.toml`, and an MSRV bump is itself a breaking change.
 
 ### Release templates
 
