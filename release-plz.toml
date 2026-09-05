@@ -25,7 +25,7 @@ release_commits = "^(feat|fix|perf|refactor|build)"
 
 # Release PR metadata. Keep the generated long-lived PR out of the urgent queue
 # until maintainers are ready to publish.
-pr_labels = ["A-release"]
+pr_labels = ["release"]
 pr_name = "chore: release{% if package and version %} v{{ version }}{% endif %}"
 
 pr_body = """

@@ -68,7 +68,7 @@ Two independent hold checks:
   write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
 
 The release PR is meant to pass a freeze through Merge Freeze's **Unfreeze 1 pull
-request** action; the `A-release` label controls Zebra's release checks but does not
+request** action; the `release` label controls Zebra's release checks but does not
 bypass a freeze. That action has been reported returning an error, and Merge Freeze's
 documentation ties it to the _Push a status update to all PRs_ freeze method, so
 confirm which method the installation uses before relying on it for a release.
