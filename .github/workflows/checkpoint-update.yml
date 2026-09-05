@@ -175,6 +175,6 @@ jobs:
             **Source:** [Integration test run #${{ steps.resolve-run.outputs.run_id }}](${{ steps.resolve-run.outputs.run_url }})
 
             Checkpoints are consensus-critical. Verify the new hashes against the source run before merging.
-          labels: A-release
+          labels: release
           commit-message: "chore(chain): update checkpoints"
           delete-branch: true
