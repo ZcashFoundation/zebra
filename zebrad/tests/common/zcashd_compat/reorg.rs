@@ -128,10 +128,21 @@ pub async fn deep_reorg_depth80() -> Result<()> {
 
 /// Verifies that zcashd follows a 150-block replacement branch.
 ///
-/// This depth is past the pre-`zebra-compat-v1.2.0` sidecar limit of 99 blocks,
-/// where zcashd shut itself down instead of reorging. Zebra's own
-/// `MAX_BLOCK_REORG_HEIGHT` is 1000, so the sidecar must follow this far.
-/// Requires the `zebra-compat-v1.2.0` sidecar or newer.
+/// Following the `depth80` convention, the branch length names the blocks mined,
+/// so this disconnects 149 blocks -- that disconnect depth is what has to clear
+/// the pre-`zebra-compat-v1.2.0` sidecar limit of 99, where zcashd shut itself
+/// down instead of reorging. Zebra's own `MAX_BLOCK_REORG_HEIGHT` is 1000, so
+/// the sidecar must follow at least this far.
+///
+/// Requires the `zebra-compat-v1.2.0` sidecar or newer. Against v1.1.0 zcashd
+/// exits mid-reorg, so this fails while polling a dead RPC port with
+/// `zcashd getblockchaininfo: expected value at line 1 column 1` rather than a
+/// clean assertion; that message means the sidecar is too old, not that the
+/// RPC is malformed.
+///
+/// `force_zebra_reorg` holds zcashd under SIGSTOP for the whole mine, about
+/// twice the depth-80 pause; on regtest there is no fallback peer, so a dropped
+/// connection surfaces here as a convergence timeout.
 pub async fn deep_reorg_depth150() -> Result<()> {
     let Some(setup) = setup_zcashd_compat().await? else {
         return Ok(());
