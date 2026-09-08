@@ -553,6 +553,26 @@ async fn duplicate_response_hashes_count_once() {
     assert_eq!(observer.try_outcome(), Ok(Some(true)));
 }
 
+/// One committed hash advances every response that advertised it.
+#[tokio::test]
+async fn shared_hash_credits_each_response() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (first, first_observer) = FindResponseFeedback::new_for_test();
+    let (second, second_observer) = FindResponseFeedback::new_for_test();
+
+    test.sync.track_find_response(&[hash], Some(first));
+    test.sync.track_find_response(&[hash], Some(second));
+    test.sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .unwrap();
+
+    assert_eq!(first_observer.try_outcome(), Ok(Some(true)));
+    assert_eq!(second_observer.try_outcome(), Ok(Some(true)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
