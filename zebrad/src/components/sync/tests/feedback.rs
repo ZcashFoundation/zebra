@@ -614,6 +614,21 @@ async fn verified_extend_hash_credits_response() {
     assert_eq!(observer.try_outcome(), Ok(Some(true)));
 }
 
+/// Cancelling active downloads releases their pending response feedback.
+#[tokio::test]
+async fn cancellation_releases_active_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+
+    let observer = test.hashes_for_obtain_tips(vec![Hash([2; 32])]).await;
+
+    test.sync.cancel_downloads();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(test.sync.downloads.in_flight(), 0);
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
