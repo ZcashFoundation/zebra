@@ -573,6 +573,30 @@ async fn shared_hash_credits_each_response() {
     assert_eq!(second_observer.try_outcome(), Ok(Some(true)));
 }
 
+/// A missing hash retains attribution while download retries remain.
+#[tokio::test]
+async fn retryable_missing_hash_keeps_feedback_pending() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+
+    let observer = test.hashes_for_obtain_tips(vec![hash]).await;
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::DownloadFailed {
+                error: "NotFound".into(),
+                hash,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+    assert!(test.sync.reobtain_hashes.contains(&hash));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
