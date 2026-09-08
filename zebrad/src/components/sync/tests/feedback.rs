@@ -501,6 +501,41 @@ async fn cancellation_releases_deferred_feedback() {
     assert!(test.sync.find_response_progress.is_empty());
 }
 
+/// A final committed singleton produces useful feedback before the round returns.
+#[tokio::test]
+async fn final_verified_download_credits_response() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    let obtain_responses = test.respond_to_obtain_tips(vec![hash], feedback);
+    let mock_responses = async {
+        obtain_responses.await;
+
+        test.peers
+            .expect_request(zn::Request::BlocksByHash([hash].into_iter().collect()))
+            .await
+            .respond(zn::Response::Blocks(vec![
+                zn::InventoryResponse::Available((block.clone(), None)),
+            ]));
+
+        test.verifier
+            .expect_request(zebra_consensus::Request::Commit(block))
+            .await
+            .respond(hash);
+    };
+
+    let (result, ()) = tokio::join!(test.sync.try_to_sync(), mock_responses);
+    result.unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
