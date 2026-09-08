@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use indexmap::IndexSet;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TryRecvError};
 use zebra_chain::{
     block::{Hash, Height},
     chain_tip::mock::MockChainTip,
@@ -15,16 +15,16 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use super::super::{ChainSync, CheckedTip, FANOUT};
 use crate::config::ZebradConfig;
 
-/// An obtain-tips response containing an unknown hash receives useful feedback.
+/// Queuing an obtain tips candidate must not credit an unverified block hash.
 #[tokio::test]
-async fn obtain_response_with_unknown_hash_reports_useful_feedback() {
+async fn obtain_tips_feedback_waits_for_verification() {
     let _test_guard = zebra_test::init();
 
     let mut test = TestScenario::new();
 
     let observer = test.hashes_for_obtain_tips(vec![Hash([2; 32])]).await;
 
-    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
 }
 
 /// An empty obtain-tips response receives stall feedback without queuing downloads.
