@@ -281,6 +281,32 @@ async fn exhausted_missing_hash_stalls_response_despite_committed_block() {
     );
 }
 
+/// A conclusively invalid block stalls its announcing response.
+#[tokio::test]
+async fn invalid_block_stalls_response() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+
+    let observer = test.hashes_for_obtain_tips(vec![hash]).await;
+
+    let _result = test.sync.handle_download_response(Err((
+        BlockDownloadVerifyError::Invalid {
+            error: zebra_consensus::VerifyBlockError::from(
+                zebra_consensus::BlockError::MissingHeight(hash),
+            )
+            .into(),
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        },
+        hash,
+    )));
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
