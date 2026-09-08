@@ -1,5 +1,7 @@
 //! Properties of response classification across hash counts and completion orders.
 
+use std::iter::once;
+
 use proptest::prelude::*;
 use tokio::sync::mpsc::error::TryRecvError;
 use zebra_network::FindResponseFeedback;
@@ -74,6 +76,30 @@ proptest! {
 
         prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
     }
+
+    /// Abandonment prevents useful credit and releases neutral feedback after all outcomes.
+    #[test]
+    fn abandoned_hash_releases_neutral_feedback(
+        before in prop::collection::vec(verified_or_abandoned(), 0..=5),
+        after in prop::collection::vec(verified_or_abandoned(), 0..=5),
+    ) {
+        let (feedback, observer) = FindResponseFeedback::new_for_test();
+        let hash_count = before.len() + 1 + after.len();
+        let progress = FindResponseProgress::new(hash_count, feedback);
+
+        let mut hashes = before.into_iter().chain(once(HashFeedback::Abandoned)).chain(after);
+        let last = hashes.next_back()
+            .expect("the sequence contains a guaranteed abandoned outcome");
+
+        for hash in hashes {
+            hash.apply(&progress);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+        }
+
+        last.apply(&progress);
+        prop_assert_eq!(observer.try_outcome(), Ok(None));
+        prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    }
 }
 
 /// One block hash's outcome reported to the response progress tracker.
@@ -82,6 +108,7 @@ enum HashFeedback {
     Verified,
     Missing,
     Invalid,
+    Abandoned,
 }
 
 impl HashFeedback {
@@ -91,6 +118,7 @@ impl HashFeedback {
             Self::Verified => progress.record_verified_hash(),
             Self::Missing => progress.record_missing_hash(),
             Self::Invalid => progress.record_invalid_hash(),
+            Self::Abandoned => progress.record_abandoned_hash(),
         }
     }
 }
@@ -101,5 +129,11 @@ fn any_hash_feedback() -> impl Strategy<Value = HashFeedback> {
         Just(HashFeedback::Verified),
         Just(HashFeedback::Missing),
         Just(HashFeedback::Invalid),
+        Just(HashFeedback::Abandoned),
     ]
+}
+
+/// Generates outcomes without evidence of missing or invalid blocks.
+fn verified_or_abandoned() -> impl Strategy<Value = HashFeedback> {
+    prop_oneof![Just(HashFeedback::Verified), Just(HashFeedback::Abandoned)]
 }
