@@ -1256,6 +1256,12 @@ where
                 self.block_reobtain_retries.remove(&hash);
                 self.utxo_race_drops = 0;
 
+                if let Some(responses) = self.find_response_progress.remove(&hash) {
+                    for response in responses {
+                        response.record_verified_hash();
+                    }
+                }
+
                 return Ok(());
             }
 
