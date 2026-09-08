@@ -165,7 +165,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
             next_block_hash: Some(hash),
         });
 
-    let error = downloads
+    let (error, _) = downloads
         .next()
         .await
         .expect("downloads is non-empty")
@@ -237,7 +237,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
             next_block_hash: Some(hash),
         });
 
-    let error = downloads
+    let (error, _) = downloads
         .next()
         .await
         .expect("downloads is non-empty")
@@ -290,7 +290,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
         .await
         .respond(Err(zn::BoxError::from("block not found in any chain")));
 
-    let error = downloads
+    let (error, _) = downloads
         .next()
         .await
         .expect("downloads is non-empty")
@@ -340,7 +340,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
         ))]));
 
     // The state service is deliberately never answered, so the lookup can only end by timing out.
-    let error = downloads
+    let (error, _) = downloads
         .next()
         .await
         .expect("downloads is non-empty")

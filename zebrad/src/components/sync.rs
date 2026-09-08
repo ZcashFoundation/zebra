@@ -686,7 +686,7 @@ where
             // Some temporary errors are ignored, and syncing continues with other blocks.
             // If it turns out they were actually important, syncing will run out of blocks, and
             // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
+            self.handle_download_response(rsp)?;
         }
         // Re-request any blocks that just failed with `NotFound`, before pausing
         // on the lookahead limit (#5709).
@@ -712,7 +712,7 @@ where
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
-            self.handle_block_response(response)?;
+            self.handle_download_response(response)?;
             // A block that just failed with `NotFound` is what unblocks the
             // verifier, so re-request it now rather than waiting for the pause
             // loop to clear — which it cannot until this block arrives (#5709).
@@ -1166,7 +1166,7 @@ where
 
         let response = self.downloads.next().await.expect("downloads is nonempty");
 
-        Ok(response)
+        Ok(response.map_err(|(error, _hash)| error))
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.
@@ -1236,6 +1236,14 @@ where
         } else {
             self.checkpoint_verify_concurrency_limit
         }
+    }
+
+    /// Handles an attributed result from the downloader stream.
+    fn handle_download_response(
+        &mut self,
+        response: Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        self.handle_block_response(response.map_err(|(error, _hash)| error))
     }
 
     /// Handles a response for a requested block.
