@@ -1,10 +1,15 @@
 //! Focused tests for feedback attribution across synchronization stages.
 
-use std::{collections::HashSet, future::Future, sync::Arc};
+use std::collections::HashSet;
+use std::future::Future;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures::StreamExt;
+use futures::{future::Ready, StreamExt};
 use indexmap::IndexSet;
 use tokio::sync::mpsc::{self, error::TryRecvError};
+use tokio::time::error::Elapsed;
+use tower::Service;
 use zebra_chain::{
     block::{Block, Hash, Height},
     chain_tip::mock::MockChainTip,
@@ -429,6 +434,54 @@ async fn final_missing_download_exhausts_retries() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// Final-download processing times out even when verifier readiness never completes.
+#[tokio::test(start_paused = true)]
+async fn final_download_bounds_verifier_readiness() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let (tip, _sender) = MockChainTip::new();
+    let read_state: Mock<zs::ReadRequest, zs::ReadResponse> = MockService::build().for_unit_tests();
+    let (misbehavior, _receiver) = mpsc::channel(1);
+    let (mut sync, _) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        test.peers.clone(),
+        NeverReadyVerifier,
+        test.state.clone(),
+        read_state,
+        tip,
+        misbehavior,
+    );
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let (feedback, _observer) = FindResponseFeedback::new_for_test();
+
+    let obtain_responses = test.respond_to_obtain_tips(vec![hash], feedback);
+    let mock_responses = async {
+        obtain_responses.await;
+
+        test.peers
+            .expect_request(zn::Request::BlocksByHash([hash].into_iter().collect()))
+            .await
+            .respond(zn::Response::Blocks(vec![
+                zn::InventoryResponse::Available((block, None)),
+            ]));
+    };
+
+    let (result, ()) = tokio::join!(
+        tokio::time::timeout(super::super::BLOCK_VERIFY_TIMEOUT * 2, sync.try_to_sync()),
+        mock_responses,
+    );
+
+    assert!(
+        matches!(&result, Ok(Err(error)) if error.is::<Elapsed>()),
+        "expected the syncer's timeout before the test deadline, got {result:?}",
+    );
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
@@ -588,5 +641,23 @@ impl TestScenario {
                     .respond(zs::Response::KnownBlock(None));
             }
         }
+    }
+}
+
+/// A verifier whose readiness deliberately never completes.
+#[derive(Clone)]
+struct NeverReadyVerifier;
+
+impl Service<zebra_consensus::Request> for NeverReadyVerifier {
+    type Response = Hash;
+    type Error = zn::BoxError;
+    type Future = Ready<Result<Hash, zn::BoxError>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Pending
+    }
+
+    fn call(&mut self, _request: zebra_consensus::Request) -> Self::Future {
+        unreachable!("this verifier never becomes ready")
     }
 }
