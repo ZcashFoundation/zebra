@@ -600,9 +600,11 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
-                self.cancel_downloads();
-            }
+            let _result = self.try_to_sync().await;
+
+            // Release any unresolved response feedback neutrally before restarting,
+            // including feedback for hashes never queued for download.
+            self.cancel_downloads();
 
             self.update_metrics();
 
@@ -620,9 +622,12 @@ where
         }
     }
 
-    /// Cancels active block downloads and verification tasks.
+    /// Cancels active work and releases attribution for queued and deferred hashes.
     fn cancel_downloads(&mut self) {
         self.downloads.cancel_all();
+        self.find_response_progress.clear();
+        self.reobtain_hashes.clear();
+        self.block_reobtain_retries.clear();
     }
 
     /// Tries to synchronize the chain as far as it can.
