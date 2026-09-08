@@ -1,7 +1,6 @@
 //! Focused tests for feedback attribution across synchronization stages.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, future::Future, sync::Arc};
 
 use futures::StreamExt;
 use indexmap::IndexSet;
@@ -447,45 +446,7 @@ impl TestScenario {
     async fn hashes_for_obtain_tips(&mut self, hashes: Vec<Hash>) -> FindResponseFeedbackObserver {
         let (feedback, observer) = FindResponseFeedback::new_for_test();
 
-        let mock_responses = async {
-            self.state
-                .expect_request(zs::Request::BlockLocator)
-                .await
-                .respond(zs::Response::BlockLocator(vec![Hash([0; 32])]));
-
-            self.peers
-                .expect_request(zn::Request::FindBlocks {
-                    known_blocks: vec![Hash([0; 32])],
-                    stop: None,
-                })
-                .await
-                .respond(zn::Response::BlockHashes {
-                    hashes: hashes.clone(),
-                    feedback: Some(feedback),
-                });
-
-            self.state
-                .expect_request(zs::Request::KnownBlock(hashes[0]))
-                .await
-                .respond(zs::Response::KnownBlock(None));
-
-            for _ in 1..FANOUT {
-                self.peers
-                    .expect_request(zn::Request::FindBlocks {
-                        known_blocks: vec![Hash([0; 32])],
-                        stop: None,
-                    })
-                    .await
-                    .respond(Err(zn::BoxError::from("unused fanout response")));
-            }
-
-            for hash in hashes.into_iter().collect::<IndexSet<_>>() {
-                self.state
-                    .expect_request(zs::Request::KnownBlock(hash))
-                    .await
-                    .respond(zs::Response::KnownBlock(None));
-            }
-        };
+        let mock_responses = self.respond_to_obtain_tips(hashes, feedback);
 
         let (result, ()) = tokio::join!(self.sync.obtain_tips(), mock_responses);
         result.expect("mocked obtain stage queues its hashes");
@@ -538,5 +499,57 @@ impl TestScenario {
         result.expect("mocked extend stage queues its hashes");
 
         observer
+    }
+
+    /// Supplies an obtain tips response and answers the corresponding state queries.
+    ///
+    /// Clones the mock handles before returning so the future does not borrow `self`.
+    fn respond_to_obtain_tips(
+        &self,
+        hashes: Vec<Hash>,
+        feedback: FindResponseFeedback,
+    ) -> impl Future<Output = ()> + 'static {
+        let mut peers = self.peers.clone();
+        let mut state = self.state.clone();
+
+        async move {
+            state
+                .expect_request(zs::Request::BlockLocator)
+                .await
+                .respond(zs::Response::BlockLocator(vec![Hash([0; 32])]));
+
+            peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![Hash([0; 32])],
+                    stop: None,
+                })
+                .await
+                .respond(zn::Response::BlockHashes {
+                    hashes: hashes.clone(),
+                    feedback: Some(feedback),
+                });
+
+            state
+                .expect_request(zs::Request::KnownBlock(hashes[0]))
+                .await
+                .respond(zs::Response::KnownBlock(None));
+
+            for _ in 1..FANOUT {
+                peers
+                    .expect_request(zn::Request::FindBlocks {
+                        known_blocks: vec![Hash([0; 32])],
+                        stop: None,
+                    })
+                    .await
+                    .respond(Err(zn::BoxError::from("unused fanout response")));
+            }
+
+            for hash in hashes.into_iter().collect::<IndexSet<_>>() {
+                state
+                    .expect_request(zs::Request::KnownBlock(hash))
+                    .await
+                    .respond(zs::Response::KnownBlock(None));
+            }
+        }
     }
 }
