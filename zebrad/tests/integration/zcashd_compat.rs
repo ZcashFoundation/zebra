@@ -195,6 +195,14 @@ async fn zcashd_compat_reorg_deep_depth80() -> Result<()> {
     common::zcashd_compat::reorg::deep_reorg_depth80().await
 }
 
+/// See [`common::zcashd_compat::reorg::deep_reorg_depth150`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_deep_depth150() -> Result<()> {
+    common::zcashd_compat::reorg::deep_reorg_depth150().await
+}
+
 /// See [`common::zcashd_compat::reorg::deep_reorg_restart_recovers`] for details.
 #[tokio::test]
 #[ignore]
