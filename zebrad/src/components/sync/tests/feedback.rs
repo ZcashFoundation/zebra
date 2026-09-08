@@ -15,7 +15,9 @@ use zebra_network::{self as zn, FindResponseFeedback, FindResponseFeedbackObserv
 use zebra_state as zs;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use super::super::{ChainSync, CheckedTip, FANOUT};
+use super::super::{
+    downloads::BlockDownloadVerifyError, ChainSync, CheckedTip, FANOUT, MAX_BLOCK_REOBTAIN_RETRIES,
+};
 use crate::config::ZebradConfig;
 
 /// Queuing an obtain tips candidate must not credit an unverified block hash.
@@ -235,6 +237,48 @@ async fn failed_download_preserves_hash() {
     let (_, actual_hash) = test.sync.downloads.next().await.unwrap().unwrap_err();
 
     assert_eq!(actual_hash, hash);
+}
+
+/// Exhausted retries stall a response even when another advertised block commits.
+///
+/// Both hashes come from the same response. Committing one block must not hide
+/// the failure to obtain the other after all `NotFound` retries are exhausted.
+#[tokio::test]
+async fn exhausted_missing_hash_stalls_response_despite_committed_block() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let committed_hash = Hash([2; 32]);
+    let missing_hash = Hash([3; 32]);
+
+    let observer = test
+        .hashes_for_obtain_tips(vec![committed_hash, missing_hash])
+        .await;
+
+    test.sync
+        .handle_block_response(Ok((Height(1), committed_hash)))
+        .unwrap();
+
+    // Report the initial failure and each permitted retry's failure.
+    for _ in 0..=MAX_BLOCK_REOBTAIN_RETRIES {
+        // Simulate taking the hash from the retry queue for another attempt.
+        test.sync.reobtain_hashes.shift_remove(&missing_hash);
+        test.sync
+            .handle_download_response(Err((
+                BlockDownloadVerifyError::DownloadFailed {
+                    error: "NotFound".into(),
+                    hash: missing_hash,
+                },
+                missing_hash,
+            )))
+            .unwrap();
+    }
+
+    assert_eq!(
+        observer.try_outcome(),
+        Ok(Some(false)),
+        "a committed block must not hide an exhausted missing hash in the same response",
+    );
 }
 
 /// A mock service with strict request assertions.
