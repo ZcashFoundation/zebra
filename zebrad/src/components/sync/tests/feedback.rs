@@ -135,16 +135,16 @@ async fn obtain_response_with_only_known_hashes_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
-/// An extend-tips response with the expected overlap and a continuation receives useful feedback.
+/// Queuing an extend continuation must not credit an unverified block hash.
 #[tokio::test]
-async fn extend_response_with_continuation_reports_useful_feedback() {
+async fn extend_feedback_waits_for_verification() {
     let _test_guard = zebra_test::init();
 
     let mut test = TestScenario::new();
 
     let observer = test.hashes_for_extend_tips(vec![Hash([2; 32])]).await;
 
-    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
 }
 
 /// An empty extend-tips response receives stall feedback.
