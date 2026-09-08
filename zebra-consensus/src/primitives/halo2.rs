@@ -17,7 +17,10 @@ use orchard::{
 };
 use rand::thread_rng;
 use zcash_protocol::value::ZatBalance;
-use zebra_chain::{parameters::NetworkUpgrade, transaction::SigHash};
+use zebra_chain::{
+    parameters::NetworkUpgrade,
+    transaction::{SigHash, UnminedTxId, WtxId},
+};
 
 use crate::{error::TransactionError, BoxError};
 use thiserror::Error;
@@ -26,7 +29,10 @@ use tower::Service;
 use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
-use super::spawn_fifo;
+use super::{
+    cache::{CacheKey, Cached, CachedItem, ShieldedPool, CACHE_CAPACITY},
+    spawn_fifo,
+};
 
 #[cfg(test)]
 mod tests;
@@ -110,9 +116,11 @@ lazy_static::lazy_static! {
 
 /// A Halo2 verification item, used as the request type of the service.
 ///
-/// An [`Item`] is key-agnostic: it carries only the bundle and sighash. The circuit era's verifying
-/// key is supplied by whichever [`Verifier`] processes the item, so an item is always validated
-/// against exactly one key and eras are never mixed within a batch.
+/// An [`Item`] is key-agnostic: the circuit era's verifying key is supplied by whichever
+/// [`Verifier`] processes the item, so an item is always validated against exactly one key and
+/// eras are never mixed within a batch. Items built by the transaction verifier also carry a
+/// cache key derived from their transaction's [`WtxId`], sighash, and bundle pool, so a bundle
+/// verified from the mempool is not verified again when the block that mines it arrives.
 #[derive(Clone, Debug)]
 pub struct Item {
     // `Arc`-wrapped so cloning an `Item` — which `tower-fallback` does eagerly for every request —
@@ -120,6 +128,7 @@ pub struct Item {
     // needs `&Bundle`.
     bundle: Arc<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>>,
     sighash: SigHash,
+    cache_key: Option<CacheKey>,
 }
 
 impl RequestWeight for Item {
@@ -130,6 +139,10 @@ impl RequestWeight for Item {
 
 impl Item {
     /// Creates a new [`Item`] from a bundle and sighash.
+    ///
+    /// Items constructed without their transaction's [`WtxId`] are verified normally but are not
+    /// cached. The transaction verifier supplies the witnessed transaction ID through a
+    /// crate-private constructor so its items can reuse successful results.
     pub fn new(
         bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
         sighash: SigHash,
@@ -137,6 +150,29 @@ impl Item {
         Self {
             bundle: Arc::new(bundle),
             sighash,
+            cache_key: None,
+        }
+    }
+
+    /// Creates a cacheable item using its already-computed witnessed transaction ID.
+    ///
+    /// `wtx_id` must identify the transaction containing `bundle`. The transaction verifier
+    /// passes the ID it derived from its own request, whose caller must preserve this invariant.
+    pub(crate) fn new_with_wtx_id(
+        bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+        sighash: SigHash,
+        wtx_id: WtxId,
+    ) -> Self {
+        let pool = ShieldedPool::from(bundle.bundle_version().value_pool());
+
+        Self {
+            bundle: Arc::new(bundle),
+            sighash,
+            cache_key: Some(CacheKey::new(
+                UnminedTxId::Witnessed(wtx_id),
+                sighash.0,
+                pool,
+            )),
         }
     }
 
@@ -156,12 +192,35 @@ impl Item {
     }
 }
 
+impl CachedItem for Item {
+    /// Returns this item's cache key, if it was constructed with a witnessed transaction ID.
+    ///
+    /// [`WtxId`] commits to the transaction's effecting and authorizing data. The sighash
+    /// additionally commits to the amounts and scripts of spent transparent outputs, which are
+    /// supplied by the verification context and are not part of the `WtxId`. The pool selects one
+    /// of the two Orchard-shaped bundles a v6 transaction can carry. The verifying key is absent
+    /// on purpose: each Orchard circuit era has its own cache, so an entry is only read back
+    /// under the key it was written against (see [`orchard_v5_verifier_for`]).
+    ///
+    /// The txid alone is insufficient because it excludes authorizing data under ZIP 244
+    /// (CVE-2026-34377). The pool is also required because both bundles in a v6 transaction share
+    /// the same [`WtxId`].
+    fn cache_key(&self) -> Option<CacheKey> {
+        self.cache_key
+    }
+}
+
 trait QueueBatchVerify {
     fn queue(&mut self, item: Item) -> Result<(), orchard::bundle::BatchError>;
 }
 
 impl QueueBatchVerify for BatchValidator<'_> {
-    fn queue(&mut self, Item { bundle, sighash }: Item) -> Result<(), orchard::bundle::BatchError> {
+    fn queue(
+        &mut self,
+        Item {
+            bundle, sighash, ..
+        }: Item,
+    ) -> Result<(), orchard::bundle::BatchError> {
         self.add_bundle(bundle.as_ref(), sighash.0)
     }
 }
@@ -221,13 +280,17 @@ impl Service<Item> for OrchardFallback {
     }
 }
 
+/// The batching-and-fallback stack for one Orchard circuit version, before caching.
+type BatchFallbackService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
+
 /// The concrete type of a global Halo2 verification service.
 ///
 /// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
-/// [`VERIFIER_NU6_2`], and [`VERIFIER_NU6_3_ONWARD`] — so that batches, fallbacks, and verifying
-/// keys are fully separated per circuit version. The Orchard verifier routing functions
-/// ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the matching one.
-pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
+/// [`VERIFIER_NU6_2`], and [`VERIFIER_NU6_3_ONWARD`] — so that batches, fallbacks, verifying
+/// keys, and caches are fully separated per circuit version. The Orchard verifier routing
+/// functions ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the
+/// matching one.
+pub type VerifierService = Cached<BatchFallbackService>;
 
 /// Builds a global Halo2 verifier that validates every item against `vk`.
 ///
@@ -236,7 +299,19 @@ pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
 /// passed here, so an item built by this verifier is always checked against exactly one era's key.
 /// Callers select the correct era's key by which `VERIFYING_KEY_*` they pass (see the two statics
 /// below); there is no runtime key resolution.
-fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
+///
+/// The stack is wrapped in a [`Cached`] so that a proof verified when its transaction was
+/// gossiped into the mempool does not have to be verified again when the block that mines it
+/// arrives. Because each circuit version builds its own verifier here, each also gets its own
+/// cache, which is what binds a remembered result to the `vk` it was produced under.
+/// `verifier_name` is the era's `verifier` metrics label, so each era's cache reports its own hit
+/// rate.
+fn batch_verifier(vk: &'static ItemVerifyingKey, verifier_name: &'static str) -> VerifierService {
+    Cached::new(batch_fallback_verifier(vk), CACHE_CAPACITY, verifier_name)
+}
+
+/// Builds the uncached batching-and-fallback stack for `vk`.
+fn batch_fallback_verifier(vk: &'static ItemVerifyingKey) -> BatchFallbackService {
     Fallback::new(
         Batch::new(
             Verifier::new(vk),
@@ -257,7 +332,7 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2, "halo2_pre_nu6_2"));
 
 /// Global batch verification context for **NU6.2-until-NU6.3** Halo2 Action proofs.
 ///
@@ -268,7 +343,7 @@ pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2, "halo2_nu6_2"));
 
 /// Global batch verification context for **NU6.3-onward** Halo2 Action proofs.
 ///
@@ -281,7 +356,7 @@ pub static VERIFIER_NU6_2: Lazy<VerifierService> =
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_NU6_3_ONWARD: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD, "halo2_nu6_3_onward"));
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
 /// block at `network_upgrade`.
@@ -335,6 +410,15 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         #[cfg(zcash_unstable = "zfuture")]
         ZFuture => &VERIFIER_NU6_3_ONWARD,
     }
+}
+
+/// Returns how many times `item` has reached the inner Halo2 verifier of the circuit version
+/// `network_upgrade` routes v5 Orchard bundles to.
+///
+/// Test-only. See [`Cached::inner_calls_for`].
+#[cfg(test)]
+pub(crate) fn inner_calls_for(network_upgrade: NetworkUpgrade, item: &Item) -> usize {
+    orchard_v5_verifier_for(network_upgrade).inner_calls_for(item)
 }
 
 /// Returns the global Halo2 verifier for **v6** Orchard-pool and Ironwood-pool bundles.

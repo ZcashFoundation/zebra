@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'Orchard and Sapling bundle verification results are cached, so a proof or signature verified when its transaction entered the mempool is not verified again when the block that mines it arrives. `halo2::VerifierService` now names a caching wrapper around the batch-and-fallback stack, and each cache reports hits, misses, inserts, evictions and size under `zebra.consensus.cache.*` ([#11380](https://github.com/ZcashFoundation/zebra/pull/11380)).'
+time: 2026-09-02T12:00:00.000000000Z
