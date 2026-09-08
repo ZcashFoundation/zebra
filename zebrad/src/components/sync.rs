@@ -1083,9 +1083,7 @@ where
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
 
-                        if let Some(feedback) = feedback.take() {
-                            feedback.mark_useful();
-                        }
+                        self.track_find_response(unknown_hashes, feedback.take());
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
