@@ -16,7 +16,7 @@ on:
 
   schedule:
     # Run this job every Friday at mid-day UTC
-    # This is limited to the Zebra and lightwalletd Full Sync jobs
+    # The full syncs run only here and in manual runs; the Go lightwalletd cached-state jobs also run on labeled PRs
     - cron: 0 12 * * 5
 
   #! Only this repository runs the weekly `schedule`. A copy of this workflow in any other
@@ -479,8 +479,11 @@ jobs:
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
+  # - on schedule, as defined at the top of the workflow
+  # - in manual workflow runs
+  # - on PRs labeled `run-stateful-tests`
+  #
+  # Not on `main` pushes: the Go lightwalletd jobs run weekly (#9941).
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -491,7 +494,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     secrets:
       GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
@@ -537,8 +540,11 @@ jobs:
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
   #
   # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
+  # - on schedule, as defined at the top of the workflow
+  # - in manual workflow runs
+  # - on PRs labeled `run-stateful-tests`
+  #
+  # Not on `main` pushes: the Go lightwalletd jobs run weekly (#9941).
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -549,7 +555,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     secrets:
       GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
@@ -564,8 +570,11 @@ jobs:
   # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
   #
   # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
+  # - on schedule, as defined at the top of the workflow
+  # - in manual workflow runs
+  # - on PRs labeled `run-stateful-tests`
+  #
+  # Not on `main` pushes: the Go lightwalletd jobs run weekly (#9941).
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -576,7 +585,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     secrets:
       GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
