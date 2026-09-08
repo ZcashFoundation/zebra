@@ -1243,7 +1243,27 @@ where
         &mut self,
         response: Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>,
     ) -> Result<(), BlockDownloadVerifyError> {
-        self.handle_block_response(response.map_err(|(error, _hash)| error))
+        let (error, hash) = match response {
+            Ok(success) => return self.handle_block_response(Ok(success)),
+            Err(error_details) => error_details,
+        };
+
+        let missing = matches!(&error, BlockDownloadVerifyError::DownloadFailed { error, .. }
+            if format!("{error:?}").contains("NotFound"));
+
+        let result = self.handle_block_response(Err(error));
+
+        if missing && !self.block_reobtain_retries.contains_key(&hash) {
+            self.reobtain_hashes.shift_remove(&hash);
+
+            if let Some(responses) = self.find_response_progress.remove(&hash) {
+                for response in responses {
+                    response.record_missing_hash();
+                }
+            }
+        }
+
+        result
     }
 
     /// Handles a response for a requested block.
