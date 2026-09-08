@@ -49,6 +49,7 @@ mod status;
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
+use find_response_progress::FindResponseProgress;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
@@ -430,6 +431,9 @@ where
     /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     block_reobtain_retries: HashMap<block::Hash, u8>,
 
+    /// Response classifications waiting for the outcome of each accepted hash.
+    find_response_progress: HashMap<block::Hash, Vec<FindResponseProgress>>,
+
     /// `TransparentInputNotFound` drops since the last verified block, bounded by the
     /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
     utxo_race_drops: usize,
@@ -581,6 +585,7 @@ where
             misbehavior_sender,
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
+            find_response_progress: HashMap::new(),
             utxo_race_drops: 0,
         };
 
@@ -904,9 +909,7 @@ where
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
 
-                    if let Some(feedback) = feedback.take() {
-                        feedback.mark_useful();
-                    }
+                    self.track_find_response(unknown_hashes, feedback.take());
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -1392,6 +1395,27 @@ where
             BlockDownloadVerifyError::ValidationRequestError { error, .. }
                 if error.is::<tokio::time::error::Elapsed>()
         )
+    }
+
+    /// Associates each unique accepted hash with its response's pending feedback.
+    fn track_find_response(
+        &mut self,
+        hashes: &[block::Hash],
+        feedback: Option<zn::FindResponseFeedback>,
+    ) {
+        let Some(feedback) = feedback else {
+            return;
+        };
+
+        let unique_hashes = HashSet::<_>::from_iter(hashes.iter().copied());
+        let progress = FindResponseProgress::new(unique_hashes.len(), feedback);
+
+        for hash in unique_hashes {
+            self.find_response_progress
+                .entry(hash)
+                .or_default()
+                .push(progress.clone());
+        }
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.
