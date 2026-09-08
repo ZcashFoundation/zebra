@@ -536,6 +536,23 @@ async fn final_verified_download_credits_response() {
     assert_eq!(observer.try_outcome(), Ok(Some(true)));
 }
 
+/// Repeated hashes in one response require only one successful commitment.
+#[tokio::test]
+async fn duplicate_response_hashes_count_once() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    test.sync.track_find_response(&[hash, hash], Some(feedback));
+    test.sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
