@@ -30,7 +30,10 @@ refactor does not repeat that.
 - **Audit fallible conversions that feed consensus checks.** Any `.ok()`, `unwrap_or`, or
   defaulted `try_from` between the wire format and a value a check reads can turn an invalid
   wire value into one the check treats as benign. A check that skips `None` is only correct
-  if `None` can never mean "an invalid value was collapsed".
+  if `None` can never mean "an invalid value was collapsed". A shared default is the same
+  trap: `unwrap_or(default)` conflates "absent" with "failed". Audit look-alike accessors
+  individually — the second instance of this class (#11386) differed from its three correct
+  siblings by a single `and_then`.
 - **Pick test boundaries from the types, not only the spec.** Cover the maximum wire value,
   the first value each conversion cannot represent, and the largest honest value — not just
   the values the specification names.
