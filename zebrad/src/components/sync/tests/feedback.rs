@@ -27,6 +27,23 @@ async fn obtain_tips_feedback_waits_for_verification() {
     assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
 }
 
+/// A committed hash credits the obtain response that advertised it.
+#[tokio::test]
+async fn verified_obtain_hash_credits_response() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+
+    let observer = test.hashes_for_obtain_tips(vec![hash]).await;
+
+    test.sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(Some(true)));
+}
+
 /// An empty obtain-tips response receives stall feedback without queuing downloads.
 #[tokio::test]
 async fn empty_obtain_response_reports_stall() {
