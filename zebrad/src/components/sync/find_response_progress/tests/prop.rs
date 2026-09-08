@@ -136,6 +136,38 @@ proptest! {
         }
         prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
     }
+
+    /// Only the final progress owner releases an unfinished response neutrally.
+    ///
+    /// Partial verification must not earn useful credit or release feedback while owners remain.
+    #[test]
+    fn final_progress_owner_drop_releases_feedback(
+        owner_count in 1usize..=6,
+        verified_count in 0usize..=5,
+        unresolved_count in 1usize..=5,
+    ) {
+        let _test_guard = zebra_test::init();
+
+        let (feedback, observer) = FindResponseFeedback::new_for_test();
+        let progress = FindResponseProgress::new(verified_count + unresolved_count, feedback);
+        let other_owners: Vec<_> = (1..owner_count).map(|_| progress.clone()).collect();
+
+        for _ in 0..verified_count {
+            HashFeedback::Verified.apply(&progress);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+        }
+
+        for owner in other_owners {
+            drop(owner);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+        }
+
+        prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+
+        drop(progress);
+        prop_assert_eq!(observer.try_outcome(), Ok(None));
+        prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    }
 }
 
 /// One block hash's outcome reported to the response progress tracker.
