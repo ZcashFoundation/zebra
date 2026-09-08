@@ -482,6 +482,23 @@ async fn final_download_bounds_verifier_readiness() {
     );
 }
 
+/// Cancelling downloads releases feedback for hashes not yet queued as well.
+#[tokio::test]
+async fn cancellation_releases_deferred_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    test.sync
+        .track_find_response(&[Hash([2; 32])], Some(feedback));
+
+    test.sync.cancel_downloads();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert!(test.sync.find_response_progress.is_empty());
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
