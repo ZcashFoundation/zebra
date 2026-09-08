@@ -4,6 +4,25 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use super::*;
 
+/// Distinguishes an unclassified event from feedback that is still pending.
+#[test]
+fn observer_distinguishes_unclassified_feedback() {
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    assert_eq!(
+        observer.try_outcome(),
+        Err(mpsc::error::TryRecvError::Empty)
+    );
+
+    drop(feedback);
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(
+        observer.try_outcome(),
+        Err(mpsc::error::TryRecvError::Disconnected)
+    );
+}
+
 fn test_addr(last_octet: u8) -> PeerSocketAddr {
     SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(127, 0, 0, last_octet),
