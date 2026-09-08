@@ -653,6 +653,29 @@ async fn behind_tip_limit_releases_neutral_feedback() {
     assert_eq!(observer.try_outcome(), Ok(None));
 }
 
+/// A local lookahead rejection releases feedback without classifying the response.
+#[tokio::test]
+async fn lookahead_limit_releases_neutral_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    test.sync.track_find_response(&[hash], Some(feedback));
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+                height: Height(1),
+                hash,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
