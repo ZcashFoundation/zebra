@@ -208,30 +208,31 @@ impl FindResponseFeedbackObserver {
     /// Returns `Some(true)` for [`FindResponseOutcome::Useful`], `Some(false)`
     /// for [`FindResponseOutcome::Stalled`], and `None` while unclassified.
     pub fn outcome(&self) -> Option<bool> {
+        self.try_outcome().ok().flatten()
+    }
+
+    /// Receives one classification, preserving pending and disconnected states.
+    ///
+    /// `Ok(None)` means an explicit unclassified event was received.
+    pub fn try_outcome(&self) -> Result<Option<bool>, mpsc::error::TryRecvError> {
         let mut receiver = self.receiver.lock().unwrap_or_else(|_| {
             panic!("the test receiver mutex is not held across panicking operations")
         });
 
-        match receiver.try_recv() {
-            Ok(FindResponseEvent {
+        Ok(match receiver.try_recv()? {
+            FindResponseEvent {
                 outcome: FindResponseOutcome::Useful,
                 ..
-            }) => Some(true),
-            Ok(FindResponseEvent {
+            } => Some(true),
+            FindResponseEvent {
                 outcome: FindResponseOutcome::Stalled,
                 ..
-            }) => Some(false),
-            Ok(FindResponseEvent {
+            } => Some(false),
+            FindResponseEvent {
                 outcome: FindResponseOutcome::Unclassified,
                 ..
-            }) => None,
-            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => None,
-        }
-    }
-
-    /// Reports pending feedback until classification observation is implemented.
-    pub fn try_outcome(&self) -> Result<Option<bool>, mpsc::error::TryRecvError> {
-        Err(mpsc::error::TryRecvError::Empty)
+            } => None,
+        })
     }
 }
 
