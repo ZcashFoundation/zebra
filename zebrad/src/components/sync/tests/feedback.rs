@@ -15,7 +15,8 @@ use zebra_state as zs;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::super::{
-    downloads::BlockDownloadVerifyError, ChainSync, CheckedTip, FANOUT, MAX_BLOCK_REOBTAIN_RETRIES,
+    downloads::BlockDownloadVerifyError, ChainSync, CheckedTip, BLOCK_DOWNLOAD_RETRY_LIMIT, FANOUT,
+    MAX_BLOCK_REOBTAIN_RETRIES,
 };
 use crate::config::ZebradConfig;
 
@@ -390,6 +391,42 @@ async fn superseded_request_releases_neutral_feedback() {
         .unwrap();
 
     assert_eq!(observer.try_outcome(), Ok(None));
+}
+
+/// A final missing download exhausts its retries even without prospective tips.
+#[tokio::test]
+async fn final_missing_download_exhausts_retries() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    let obtain_responses = test.respond_to_obtain_tips(vec![hash], feedback);
+    let mock_responses = async {
+        obtain_responses.await;
+
+        let block_retries =
+            (usize::from(MAX_BLOCK_REOBTAIN_RETRIES) + 1) * (BLOCK_DOWNLOAD_RETRY_LIMIT + 1);
+        for _ in 0..block_retries {
+            test.peers
+                .expect_request(zn::Request::BlocksByHash([hash].into_iter().collect()))
+                .await
+                .respond(Err(zn::BoxError::from("NotFound")));
+        }
+    };
+
+    let round = test.sync.try_to_sync();
+    tokio::pin!(round);
+    tokio::select! { biased;
+        () = mock_responses => {}
+        result = &mut round => {
+            panic!("sync returned before completing missing-block retries: {result:?}");
+        }
+    }
+    round.await.unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
 /// A mock service with strict request assertions.
