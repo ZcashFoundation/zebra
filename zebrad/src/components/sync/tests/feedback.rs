@@ -629,6 +629,30 @@ async fn cancellation_releases_active_feedback() {
     assert_eq!(test.sync.downloads.in_flight(), 0);
 }
 
+/// A locally outdated height releases feedback without implying invalidity.
+#[tokio::test]
+async fn behind_tip_limit_releases_neutral_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    test.sync.track_find_response(&[hash], Some(feedback));
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::BehindTipHeightLimit {
+                height: Height(1),
+                hash,
+                advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
