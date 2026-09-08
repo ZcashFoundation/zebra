@@ -226,6 +226,15 @@ impl TestScenario {
 
     /// Queues an extend response with the expected overlap and supplied continuation.
     async fn hashes_for_extend_tips(&mut self, hashes: Vec<Hash>) -> FindResponseFeedbackObserver {
+        self.raw_hashes_for_extend_tips([vec![Hash([1; 32])], hashes].concat())
+            .await
+    }
+
+    /// Supplies one extend response without assuming that it contains valid overlap.
+    async fn raw_hashes_for_extend_tips(
+        &mut self,
+        hashes: Vec<Hash>,
+    ) -> FindResponseFeedbackObserver {
         let (feedback, observer) = FindResponseFeedback::new_for_test();
 
         self.sync.prospective_tips = HashSet::from([CheckedTip {
@@ -241,7 +250,7 @@ impl TestScenario {
                 })
                 .await
                 .respond(zn::Response::BlockHashes {
-                    hashes: [vec![Hash([1; 32])], hashes].concat(),
+                    hashes,
                     feedback: Some(feedback),
                 });
 
