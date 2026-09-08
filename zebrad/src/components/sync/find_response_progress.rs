@@ -19,3 +19,6 @@ impl FindResponseProgress {
     /// Leaves feedback pending until verified-hash accounting is implemented.
     pub(super) fn record_verified_hash(&self) {}
 }
+
+#[cfg(test)]
+mod tests;
