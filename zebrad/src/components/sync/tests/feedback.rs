@@ -1,12 +1,15 @@
 //! Focused tests for feedback attribution across synchronization stages.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use futures::StreamExt;
 use indexmap::IndexSet;
 use tokio::sync::mpsc::{self, error::TryRecvError};
 use zebra_chain::{
-    block::{Hash, Height},
+    block::{Block, Hash, Height},
     chain_tip::mock::MockChainTip,
+    serialization::ZcashDeserializeInto,
 };
 use zebra_network::{self as zn, FindResponseFeedback, FindResponseFeedbackObserver};
 use zebra_state as zs;
@@ -205,6 +208,35 @@ async fn extend_response_without_continuation_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// A downloader error preserves the requested hash for response attribution.
+#[tokio::test]
+async fn failed_download_preserves_hash() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+
+    test.sync.downloads.download_and_verify(hash).await.unwrap();
+
+    test.peers
+        .expect_request(zn::Request::BlocksByHash([hash].into_iter().collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![
+            zn::InventoryResponse::Available((block.clone(), None)),
+        ]));
+
+    test.verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await
+        .respond(Err(zn::BoxError::from("local verifier failure")));
+    let (_, actual_hash) = test.sync.downloads.next().await.unwrap().unwrap_err();
+
+    assert_eq!(actual_hash, hash);
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
@@ -222,6 +254,7 @@ struct TestScenario {
     sync: TestSync,
     peers: Mock<zn::Request, zn::Response>,
     state: Mock<zs::Request, zs::Response>,
+    verifier: Mock<zebra_consensus::Request, Hash>,
 }
 
 impl TestScenario {
@@ -239,14 +272,19 @@ impl TestScenario {
             &ZebradConfig::default(),
             Height(0),
             peers.clone(),
-            verifier,
+            verifier.clone(),
             state.clone(),
             read_state,
             tip,
             misbehavior,
         );
 
-        Self { sync, peers, state }
+        Self {
+            sync,
+            peers,
+            state,
+            verifier,
+        }
     }
 
     /// Queues an obtain response whose hashes are absent from local state.
