@@ -337,6 +337,33 @@ async fn invalid_height_stalls_response() {
     );
 }
 
+/// A wrapped local state error releases feedback without accusing the peer.
+#[tokio::test]
+async fn state_service_failure_releases_neutral_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+
+    let observer = test.hashes_for_obtain_tips(vec![hash]).await;
+
+    let _result = test.sync.handle_download_response(Err((
+        BlockDownloadVerifyError::Invalid {
+            error: zebra_consensus::VerifyBlockError::StateService {
+                source: "state unavailable".into(),
+                hash,
+            }
+            .into(),
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        },
+        hash,
+    )));
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
