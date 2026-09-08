@@ -126,6 +126,28 @@ jobs:
           # `fetch-depth: 0` populates the base branch without persisting credentials.
           echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
+      # cargo-semver-checks builds each crate in a placeholder project with a fresh
+      # dependency resolution: it deletes any Cargo.lock it finds there and runs
+      # `cargo update` on purpose (obi1kenobi/cargo-semver-checks#675, #991), so the
+      # workspace lockfile is not honoured. `libzcash_script` accepts any bindgen
+      # `>=0.69.5`, so that resolution picks the newest bindgen next to the `^0.72`
+      # that `librocksdb-sys` needs, and the two copies unify clang-sys features in a
+      # way that makes the rocksdb build script panic ("a `libclang` shared library is
+      # not loaded on this thread"). Patching bindgen to the exact version in
+      # Cargo.lock satisfies both requirements with a single copy, and follows the
+      # lockfile whenever dependabot bumps it. The placeholder lives under `target/`,
+      # inside the workspace, so this config applies to it.
+      - name: Pin bindgen to the workspace lockfile for the placeholder builds
+        run: |
+          BINDGEN=$(awk '$0 == "name = \"bindgen\"" { found = 1; next }
+                         found && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+          test -n "${BINDGEN}"
+          cat >> .cargo/config.toml <<EOF
+
+          [patch.crates-io]
+          bindgen = { git = "https://github.com/rust-lang/rust-bindgen", tag = "v${BINDGEN}" }
+          EOF
+          echo "Pinned bindgen ${BINDGEN} for cargo-semver-checks"
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
           # Gate the consumer-facing library crates only. zebrad is a binary whose build script
