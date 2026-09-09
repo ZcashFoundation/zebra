@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`ValidateContextError::is_auth_commitment_mismatch()`, which reports whether a block was rejected because its authorizing data does not match its header commitment. It is a dedicated predicate rather than a `misbehavior_score()` test, so callers are not coupled to scoring policy.'
+time: 2026-09-17T20:22:41.000000000Z

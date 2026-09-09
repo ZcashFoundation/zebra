@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: 'The syncer no longer restarts its sync round when a peer serves a block body whose authorizing data does not match the header commitment. The failure was an ordinary `Invalid` verification error, so it cancelled the round and idled the syncer for `SYNC_RESTART_DELAY`, and the block hash was dropped instead of being re-requested. The hash is canonical and only the served body was forged, so the syncer now continues the round and re-requests the body from another peer, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`.'
+time: 2026-09-17T20:22:41.000000000Z
