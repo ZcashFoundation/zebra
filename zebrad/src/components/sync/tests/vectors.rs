@@ -1639,6 +1639,228 @@ async fn behind_tip_height_limit_requeue_is_bounded() {
     }
 }
 
+/// Builds the error the syncer sees when a peer serves a body that doesn't match the
+/// authorizing data commitment in the header it was served under.
+///
+/// The error is wrapped exactly as the production stack wraps it: the state's contextual
+/// validation failure, unwrapped by `map_commit_error` into `VerifyBlockError::Commit`,
+/// boxed by the router into `RouterError::Block`, and reported by the downloader as
+/// `BlockDownloadVerifyError::Invalid`.
+fn auth_commitment_mismatch_error(
+    hash: block::Hash,
+    advertiser_addr: Option<PeerSocketAddr>,
+) -> BlockDownloadVerifyError {
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        ),
+    ));
+
+    BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Commit(commit_error)),
+        },
+        height: block::Height(42),
+        hash,
+        advertiser_addr,
+    }
+}
+
+/// A body that fails the authorizing data commitment check must score the serving peer and
+/// re-request the hash, without cancelling the sync round.
+///
+/// The hash is still canonical and still needed — only the served body was forged — so
+/// restarting the round would let one forgery idle the syncer for `SYNC_RESTART_DELAY`,
+/// and dropping the hash would leave it to a later round to rediscover.
+#[tokio::test]
+async fn auth_commitment_mismatch_scores_peer_and_requeues_hash_without_restart() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x1A; 32]);
+
+    chain_sync
+        .handle_block_response(Err(auth_commitment_mismatch_error(hash, Some(advertiser))))
+        .expect("a forged body is non-fatal and must not restart the syncer");
+
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        Some((advertiser, 100)),
+        "the peer that served the forged body must be scored at the ban threshold"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "the hash is still canonical and still needed, so it must be re-requested"
+    );
+}
+
+/// The forged-body re-request is bounded, so a peer cannot turn it into an unbounded
+/// download loop.
+///
+/// Misbehaviour reports only reach the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so
+/// the first re-request can briefly land on the same peer again. This bound is what makes
+/// that acceptable.
+#[tokio::test]
+async fn auth_commitment_mismatch_requeue_is_bounded() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x2B; 32]);
+
+    for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+        chain_sync
+            .handle_block_response(Err(auth_commitment_mismatch_error(hash, Some(advertiser))))
+            .expect("a forged body is non-fatal and must not restart the syncer");
+
+        if attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES {
+            assert!(
+                chain_sync.reobtain_hashes.contains(&hash),
+                "attempt {attempt} of {} must re-queue the hash",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+        } else {
+            assert!(
+                chain_sync.reobtain_hashes.is_empty(),
+                "the hash must not be re-queued after {} retries",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+        }
+
+        // Stand in for `reobtain_missing_blocks()`, which drains the set each sync round.
+        chain_sync.reobtain_hashes.clear();
+    }
+}
+
+/// A forged body served over an isolated connection has no address to score, but the hash
+/// is still missing, so it is still re-requested.
+#[tokio::test]
+async fn auth_commitment_mismatch_without_advertiser_is_still_requeued() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x3C; 32]);
+
+    chain_sync
+        .handle_block_response(Err(auth_commitment_mismatch_error(hash, None)))
+        .expect("a forged body is non-fatal and must not restart the syncer");
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "an unattributed forged body must not score any peer"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "an unattributed forged body must still re-queue the hash"
+    );
+}
+
+/// The new handling is scoped to the commitment mismatch: every other consensus failure
+/// still restarts the sync round and is not re-requested.
+///
+/// A genuinely invalid block was rejected by the network, so re-downloading it is
+/// pointless. Only the commitment mismatch proves the *body* was forged while the hash
+/// stayed valid.
+#[tokio::test]
+async fn other_invalid_errors_still_restart_sync_and_are_not_requeued() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x4D; 32]);
+
+    let err = BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Subsidy(SubsidyError::NoCoinbase)),
+        },
+        height: block::Height(42),
+        hash,
+        advertiser_addr: Some(advertiser),
+    };
+
+    assert!(
+        chain_sync.handle_block_response(Err(err)).is_err(),
+        "an ordinary consensus failure must still restart the syncer"
+    );
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&hash),
+        "a block the network rejected must not be re-requested"
+    );
+}
+
+/// An honest body whose authorizing data matches its header must not be classified as a
+/// forgery, whatever else went wrong with it.
+///
+/// This is the guard against over-banning and over-re-requesting: the errors a
+/// behind-tip or far-ahead honest body produces, and the other contextual validation
+/// failures, must all stay outside the new arm.
+#[tokio::test]
+async fn honest_bodies_are_not_classified_as_forgeries() {
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    // A duplicate commit is the benign case the syncer already tolerated.
+    let duplicate = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::BestChain,
+    };
+    assert!(
+        !duplicate.is_auth_commitment_mismatch(),
+        "a duplicate block is not a forged body"
+    );
+
+    // A sibling commitment failure, which doesn't prove the *serving* peer forged
+    // anything: the chain history root is the node's own view of the chain, so a
+    // mismatch there can be a local disagreement rather than a forged body.
+    let other_context = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryRoot {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        ),
+    ));
+    assert!(
+        !other_context.is_auth_commitment_mismatch(),
+        "an unrelated commitment failure is not a forged body"
+    );
+    assert_eq!(
+        other_context.misbehavior_score(),
+        0,
+        "an unrelated contextual failure must not score the serving peer"
+    );
+
+    // The height-limit errors an honest behind-tip or far-ahead body produces are not
+    // `Invalid`, so they never reach the new arm.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let above_hash = block::Hash::from([0x5E; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+            height: block::Height(60_000),
+            hash: above_hash,
+        }))
+        .expect("a far-ahead block is non-fatal and must not restart the syncer");
+    assert!(
+        chain_sync.reobtain_hashes.is_empty(),
+        "a far-ahead honest body must not be re-requested as a forgery"
+    );
+
+    let behind_hash = block::Hash::from([0x6F; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+            height: block::Height(1),
+            hash: behind_hash,
+            advertiser_addr: Some(advertiser),
+        }))
+        .expect("a behind-tip block is non-fatal and must not restart the syncer");
+    assert!(
+        chain_sync.reobtain_hashes.contains(&behind_hash),
+        "the behind-tip re-request is unchanged by the forged-body arm"
+    );
+}
+
 /// The pre-existing `NotFound` re-request (#5709) still works, and only fires for `NotFound`.
 ///
 /// Both cases now share one bounded re-queue, so this pins the behavior the behind-tip fix reuses.

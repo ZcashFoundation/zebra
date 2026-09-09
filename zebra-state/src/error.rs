@@ -126,6 +126,20 @@ impl CommitBlockError {
         matches!(self, CommitBlockError::Duplicate { .. })
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`ValidateContextError::is_auth_commitment_mismatch()`] for why this is
+    /// tracked separately from the misbehaviour score: the served body is invalid, but
+    /// the block hash is still valid and still wanted, so the syncer re-requests it
+    /// instead of restarting the sync round.
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
@@ -515,14 +529,28 @@ pub enum ValidateContextError {
 }
 
 impl ValidateContextError {
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// From NU5 onward, the block header hash and merkle root don't commit to the
+    /// authorizing data, so a peer can serve a forged body for a canonical header
+    /// without changing the block hash. A mismatched authorizing data commitment proves
+    /// the served body doesn't belong to its header, and an honest peer never serves
+    /// such a body, so the serving peer is misbehaving and the hash is still wanted.
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        matches!(
+            self,
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
+            )
+        )
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
-            // From NU5 onward, the block header hash and merkle root don't commit to
-            // the authorizing data, so a peer can serve a forged body for a canonical
-            // header without changing the block hash. A mismatched authorizing data
-            // commitment proves the served body doesn't belong to its header, and an
-            // honest peer never serves such a body, so the serving peer is misbehaving.
+            // A forged body proves the serving peer misbehaved, see
+            // `is_auth_commitment_mismatch()`.
             ValidateContextError::InvalidBlockCommitment(
                 block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
             ) => 100,

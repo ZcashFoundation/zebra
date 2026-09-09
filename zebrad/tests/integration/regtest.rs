@@ -4,7 +4,7 @@ use color_eyre::eyre::{eyre, Result};
 use tower::ServiceExt;
 
 use zebra_chain::{
-    block::{genesis::regtest_genesis_block, Height},
+    block::{genesis::regtest_genesis_block, Block, Height},
     parameters::{testnet::ConfiguredActivationHeights, Network},
     serialization::ZcashSerialize as _,
     transparent,
@@ -202,6 +202,53 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     Ok(())
 }
 
+/// Extra coinbase data the same-hash forging helper edits.
+const FORGED_BODY_EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
+
+/// Returns a copy of `block` whose authorizing data differs, but whose header hash does not.
+///
+/// From NU5 onward `hashMerkleRoot` commits only to txids, and under [ZIP-244][zip-244] the
+/// authorizing data — including the coinbase scriptSig this edits — is excluded from the txid
+/// and committed only via `hashBlockCommitments`, which is checked during contextual
+/// validation. So flipping one authorizing-only byte yields a different body under the same
+/// block hash: exactly what an unauthenticated peer can serve.
+///
+/// [zip-244]: https://zips.z.cash/zip-0244
+fn forge_authorizing_data(block: &Block) -> Block {
+    let mut forged = block.clone();
+    let coinbase = Arc::make_mut(
+        forged
+            .transactions
+            .first_mut()
+            .expect("block templates contain a coinbase transaction"),
+    );
+    // The transaction's inputs are owned by `zcash_primitives`, so the coinbase input is edited
+    // in a detached copy and the transaction rebuilt from it.
+    let mut inputs = coinbase.inputs();
+    let transparent::Input::Coinbase { data, .. } = inputs
+        .first_mut()
+        .expect("coinbase transactions contain a transparent input")
+    else {
+        panic!("the first coinbase transaction input must be a coinbase input");
+    };
+    assert!(
+        data.ends_with(FORGED_BODY_EXTRA_COINBASE_DATA.as_bytes()),
+        "the coinbase transaction must contain the configured extra data"
+    );
+    *data
+        .last_mut()
+        .expect("configured extra coinbase data is non-empty") = b'a';
+    *coinbase = coinbase.clone().with_transparent_inputs(inputs);
+
+    assert_eq!(
+        forged.hash(),
+        block.hash(),
+        "changing a NU5 coinbase scriptSig must not change the block header hash"
+    );
+
+    forged
+}
+
 /// A rejected block body must not poison the children of a later valid block with the same header
 /// hash.
 ///
@@ -215,7 +262,7 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
 /// [zip-244]: https://zips.z.cash/zip-0244
 #[tokio::test]
 async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()> {
-    const EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
+    const EXTRA_COINBASE_DATA: &str = FORGED_BODY_EXTRA_COINBASE_DATA;
 
     let _init_guard = zebra_test::init();
 
@@ -264,37 +311,7 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
 
     let valid_block = blocks[2].clone();
 
-    let mut poisoned_block = valid_block.clone();
-    let coinbase = Arc::make_mut(
-        poisoned_block
-            .transactions
-            .first_mut()
-            .expect("block templates contain a coinbase transaction"),
-    );
-    // The transaction's inputs are owned by `zcash_primitives`, so the coinbase input is edited
-    // in a detached copy and the transaction rebuilt from it.
-    let mut inputs = coinbase.inputs();
-    let transparent::Input::Coinbase { data, .. } = inputs
-        .first_mut()
-        .expect("coinbase transactions contain a transparent input")
-    else {
-        panic!("the first coinbase transaction input must be a coinbase input");
-    };
-    assert!(
-        data.ends_with(EXTRA_COINBASE_DATA.as_bytes()),
-        "the coinbase transaction must contain the configured extra data"
-    );
-    let last_data_byte = data
-        .last_mut()
-        .expect("configured extra coinbase data is non-empty");
-    *last_data_byte = b'a';
-    *coinbase = coinbase.clone().with_transparent_inputs(inputs);
-
-    assert_eq!(
-        poisoned_block.hash(),
-        valid_block.hash(),
-        "changing a NU5 coinbase scriptSig must not change the block header hash"
-    );
+    let poisoned_block = forge_authorizing_data(&valid_block);
 
     let poisoned_block_data = hex::encode(poisoned_block.zcash_serialize_to_vec()?);
     let poisoned_response: SubmitBlockResponse = client
@@ -344,6 +361,140 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
     Ok(())
 }
 
+/// A real same-hash forged body must be attributed to the peer that served it, and must not
+/// take the honest block down with it.
+///
+/// The other tests in this area exercise the forged body over the `submitblock` RPC, and the
+/// unit tests in `zebra-consensus` and `zebrad` hand-build the error each wrapper is supposed
+/// to produce. Neither checks that a *real* mismatched body actually produces the error the
+/// syncer classifies on. This test drives the real block verifier router and state service
+/// with a real forged body, and asserts on the error they return:
+///
+/// - the rejection is classified as an authorizing data commitment mismatch, so the syncer
+///   re-requests the hash instead of cancelling the sync round,
+/// - it carries the ban-threshold misbehaviour score, so the serving peer is banned,
+/// - it is not classified as a duplicate request, which would make it benign, and
+/// - the honest body for the same hash still commits afterwards, along with its child.
+///
+/// The last assertion is also the guard that this classification has no consensus-side
+/// effect: a valid block, with the same header hash the forgery was rejected under, still
+/// validates and commits unchanged.
+// The in-process state service commits blocks with `block_in_place`, which requires a
+// multi-threaded runtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+    config.mining.extra_coinbase_data = Some(ExtraCoinbaseData::try_from(
+        FORGED_BODY_EXTRA_COINBASE_DATA.to_owned(),
+    )?);
+
+    // Mine a short chain with the configured extra coinbase data, so there is a byte to flip
+    // that is authorizing data only.
+    let mut block_builder = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for expected_height in 1..=4 {
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height.0, expected_height);
+        client.submit_block(block.clone()).await?;
+        blocks.push(Arc::new(block));
+    }
+
+    block_builder.kill(false)?;
+    let output = block_builder.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    // Replay the chain into a fresh in-process verifier and state, which is the stack the
+    // syncer drives, so the error the syncer classifies on is the one asserted below.
+    let state = zebra_state::init_test(&network);
+    let state = state.await;
+    let (block_verifier_router, _tx_verifier, _download_handles, _max_checkpoint_height) =
+        zebra_consensus::router::init_test(
+            zebra_consensus::Config::default(),
+            &network,
+            state.clone(),
+        )
+        .await;
+
+    let commit = |block: Arc<Block>| {
+        let router = block_verifier_router.clone();
+        async move {
+            router
+                .oneshot(zebra_consensus::Request::Commit(block))
+                .await
+        }
+    };
+
+    commit(regtest_genesis_block())
+        .await
+        .expect("the Regtest genesis block must commit");
+    for block in &blocks[..2] {
+        commit(block.clone())
+            .await
+            .expect("a mined block must commit");
+    }
+
+    let valid_block = blocks[2].clone();
+    let forged_block = Arc::new(forge_authorizing_data(&valid_block));
+
+    let error = commit(forged_block)
+        .await
+        .expect_err("a body that doesn't match its header commitment must be rejected");
+
+    // The buffered router boxes its error, and the syncer's downloader downcasts it back into
+    // `BlockDownloadVerifyError::Invalid`, so this test does the same downcast.
+    let error = error
+        .downcast::<zebra_consensus::RouterError>()
+        .expect("the block verifier router's errors must stay downcastable to `RouterError`");
+
+    assert!(
+        error.is_auth_commitment_mismatch(),
+        "a real forged body must be classified as an authorizing data commitment mismatch, \
+         so the syncer re-requests the hash instead of cancelling the sync round: got {error:?}"
+    );
+    assert_eq!(
+        error.misbehavior_score(),
+        100,
+        "a real forged body must score the serving peer at the ban threshold: got {error:?}"
+    );
+    assert!(
+        !error.is_duplicate_request(),
+        "a real forged body is not a duplicate request, so it must not be treated as benign"
+    );
+
+    // The block hash was never invalid, only the body served under it, so the honest body and
+    // its child must still commit.
+    let valid_hash = commit(valid_block.clone())
+        .await
+        .expect("the honest body for the same hash must still commit");
+    assert_eq!(
+        valid_hash,
+        valid_block.hash(),
+        "the honest body must commit under the hash the forgery was rejected under"
+    );
+    commit(blocks[3].clone())
+        .await
+        .expect("the honest body's child must not inherit the forgery's rejection");
+
+    Ok(())
+}
+
 /// A contextually rejected block must not remain known as sent.
 ///
 /// Sync checks [`zebra_state::Request::KnownBlock`] before downloading a block body. If a rejected
@@ -351,7 +502,7 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
 /// incorrectly reported as a duplicate and never reaches contextual verification.
 #[tokio::test]
 async fn rejected_block_is_not_known_as_sent() -> Result<()> {
-    const EXTRA_COINBASE_DATA: &str = "zebra-chain-stall-poc";
+    const EXTRA_COINBASE_DATA: &str = FORGED_BODY_EXTRA_COINBASE_DATA;
 
     let _init_guard = zebra_test::init();
 
@@ -399,36 +550,7 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
     client.submit_block(blocks[1].clone()).await?;
 
     let valid_block = blocks[2].clone();
-    let mut poisoned_block = valid_block.clone();
-    let coinbase = Arc::make_mut(
-        poisoned_block
-            .transactions
-            .first_mut()
-            .expect("block templates contain a coinbase transaction"),
-    );
-    // The transaction's inputs are owned by `zcash_primitives`, so the coinbase input is edited
-    // in a detached copy and the transaction rebuilt from it.
-    let mut inputs = coinbase.inputs();
-    let transparent::Input::Coinbase { data, .. } = inputs
-        .first_mut()
-        .expect("coinbase transactions contain a transparent input")
-    else {
-        panic!("the first coinbase transaction input must be a coinbase input");
-    };
-    assert!(
-        data.ends_with(EXTRA_COINBASE_DATA.as_bytes()),
-        "the coinbase transaction must contain the configured extra data"
-    );
-    *data
-        .last_mut()
-        .expect("configured extra coinbase data is non-empty") = b'a';
-    *coinbase = coinbase.clone().with_transparent_inputs(inputs);
-
-    assert_eq!(
-        poisoned_block.hash(),
-        valid_block.hash(),
-        "changing a NU5 coinbase scriptSig must not change the block header hash"
-    );
+    let poisoned_block = forge_authorizing_data(&valid_block);
 
     let poisoned_block_data = hex::encode(poisoned_block.zcash_serialize_to_vec()?);
     let poisoned_response: SubmitBlockResponse = client

@@ -105,6 +105,17 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`zs::ValidateContextError::is_auth_commitment_mismatch()`].
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            VerifyBlockError::Commit(commit_err) => commit_err.is_auth_commitment_mismatch(),
+            _ => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         use VerifyBlockError::*;

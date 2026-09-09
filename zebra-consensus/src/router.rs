@@ -143,6 +143,17 @@ impl RouterError {
         }
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`zebra_state::ValidateContextError::is_auth_commitment_mismatch()`].
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            RouterError::Checkpoint { source, .. } => source.is_auth_commitment_mismatch(),
+            RouterError::Block { source, .. } => source.is_auth_commitment_mismatch(),
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).

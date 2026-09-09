@@ -1267,6 +1267,11 @@ where
         //   only applies misbehavior reports in batches.
         // - UTXO races (#11168): the block was never rejected, and the state parks its
         //   children until it arrives, so re-request it instead of waiting for a tip walk.
+        // - `Invalid` with a mismatched authorizing data commitment: the block itself is fine, only
+        //   the served body was forged, so the hash is still valid and still wanted. Misbehavior
+        //   reports are flushed to the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so the first
+        //   re-request can briefly land on the same peer again; `MAX_BLOCK_REOBTAIN_RETRIES` bounds
+        //   that.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1278,6 +1283,11 @@ where
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            Err(BlockDownloadVerifyError::Invalid { error, hash, .. })
+                if error.is_auth_commitment_mismatch() =>
             {
                 Some(*hash)
             }
@@ -1419,6 +1429,17 @@ where
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if error.is_auth_commitment_mismatch() =>
+            {
+                debug!(
+                    error = ?e,
+                    "served block body did not match the authorizing data commitment in its \
+                     header: the block hash is still valid and is re-requested, and the serving \
+                     peer is scored, continuing"
+                );
                 false
             }
             // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
