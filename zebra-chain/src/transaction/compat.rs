@@ -241,6 +241,38 @@ pub fn sprout_joinsplit_key_and_ciphertexts(
     (ephemeral_key, ciphertexts)
 }
 
+/// Returns the zero-knowledge proof bytes of a JoinSplit, for both proof variants:
+/// 192 bytes for Groth16 proofs (V4 transactions) and 296 bytes for PHGR13 proofs
+/// (V2/V3 transactions).
+pub fn sprout_joinsplit_proof_bytes(
+    joinsplit: &zcash_primitives::transaction::components::sprout::JsDescription,
+) -> Vec<u8> {
+    // Groth16 proofs are reachable through a public accessor.
+    if let Some(proof) = joinsplit.groth_proof_bytes() {
+        return proof.to_vec();
+    }
+
+    // PHGR13 proofs have no upstream accessor; read them back out of the wire
+    // serialization, as `sprout_joinsplit_key_and_ciphertexts` does for the other
+    // fields without accessors.
+    let mut bytes = Vec::new();
+    joinsplit
+        .write(&mut bytes)
+        .expect("writing a JoinSplit to a vec cannot fail");
+
+    // Guard the offsets against an upstream layout change: `anchor` sits before the
+    // field read below, and is the last one reachable through a public accessor.
+    debug_assert_eq!(
+        &bytes[JS_ANCHOR_OFFSET..JS_ANCHOR_OFFSET + 32],
+        &joinsplit.anchor()[..],
+        "the JoinSplit wire layout must match the offsets used here",
+    );
+
+    // `ephemeralKey`, `randomSeed`, then two `vmacs`, then the proof.
+    let proof_offset = JS_EPHEMERAL_KEY_OFFSET + 32 + 32 + (2 * 32);
+    bytes[proof_offset..proof_offset + PHGR_PROOF_SIZE].to_vec()
+}
+
 // ── Rebuilding transaction data ──────────────────────────────────────
 
 /// The transparent bundle of an authorized transaction.
