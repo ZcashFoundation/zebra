@@ -177,6 +177,10 @@ pub struct Config {
     /// The maximum number of peer connections Zebra will keep for a given IP address
     /// before it drops any additional peer connections with that IP.
     ///
+    /// IPv6 connections are grouped by `/64` prefix, so the limit applies per
+    /// `/64` subnet rather than per individual address. IPv4 connections are
+    /// limited per address.
+    ///
     /// The default and minimum value are 1.
     ///
     /// # Security
@@ -186,8 +190,8 @@ pub struct Config {
     /// If this config is greater than 1, Zebra can initiate multiple outbound handshakes to the same
     /// IP address.
     ///
-    /// This config does not currently limit the number of inbound connections that Zebra will accept
-    /// from the same IP address.
+    /// Inbound connection attempts sharing a connection limit key are also rate-limited
+    /// by this config within a short time window.
     ///
     /// If Zebra makes multiple inbound or outbound connections to the same IP, they will be dropped
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and

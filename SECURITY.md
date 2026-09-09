@@ -36,6 +36,11 @@ substantially longer to triage.
 In your report, state the exact release version or `main` commit hash you
 tested against.
 
+Reports against `main` are welcome and part of how we catch issues before they
+ship. Note that findings which exist only in unreleased code are handled
+differently from findings in a shipped release; see "Advisories, CVEs, and
+Credit" below.
+
 For critical vulnerabilities, notify us on Signal. Create a new Signal group
 (do not reuse a previous group for a separate issue) that includes all of the
 following handles:
@@ -77,6 +82,29 @@ jlOOQUwFoIKfgAk=
 =K4Oq
 -----END PGP PUBLIC KEY BLOCK-----
 ```
+
+### Advisories, CVEs, and Credit
+
+We publish a GitHub Security Advisory (GHSA), and request a CVE where
+appropriate, for vulnerabilities that affect a tagged Zebra release, including
+release candidates and other pre-release tags. Advisories exist to tell
+operators whether they are exposed and which version fixes the issue, so they
+are scoped to code that has actually been shipped.
+
+Vulnerabilities that exist only in unreleased code (the `main` branch or an
+unmerged pull request) and are fixed before appearing in any tagged release do
+not receive an advisory or CVE. This matches the practice of the CVE program
+and of most major open source projects, and avoids generating alerts for
+downstream users who were never affected. Such findings are fixed as ordinary
+public issues once a fix is ready, and we credit the reporter in the issue, the
+fixing pull request, and the release notes of the next release, unless they ask
+not to be named.
+
+If an unreleased vulnerability is later found to have shipped in a tagged
+release before the fix landed, we will publish an advisory for it at that
+point.
+
+We do not currently operate a bug bounty program and do not pay for reports.
 
 ## Sending Disclosures
 

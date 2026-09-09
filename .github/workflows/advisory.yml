@@ -172,6 +172,6 @@ jobs:
       - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
           title-template: "{{refname}} advisory checks failed: {{eventName}} in {{workflow}}"
-          label-name: S-ci-fail-auto-issue
+          label-name: ci-fail/advisory
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}

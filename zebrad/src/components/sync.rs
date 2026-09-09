@@ -29,6 +29,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
+use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
@@ -77,6 +78,10 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 /// through the tower-level `BLOCK_DOWNLOAD_RETRY_LIMIT` (and hedging), so this
 /// is a coarse, hash-scoped retry on top of an exhausted per-request retry.
 const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
+
+/// The fewest `TransparentInputNotFound` drops without a verified block before the sync
+/// restarts, so a low `full_verify_concurrency_limit` can't disable the #11168 exemption.
+const MIN_UTXO_RACE_DROPS_BEFORE_RESTART: usize = 4;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -423,6 +428,10 @@ where
     /// Per-hash count of how many times a `NotFound` block has been re-requested,
     /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     block_reobtain_retries: HashMap<block::Hash, u8>,
+
+    /// `TransparentInputNotFound` drops since the last verified block, bounded by the
+    /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
+    utxo_race_drops: usize,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -571,6 +580,7 @@ where
             misbehavior_sender,
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
+            utxo_race_drops: 0,
         };
 
         (new_syncer, sync_status)
@@ -622,6 +632,7 @@ where
 
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
+        self.utxo_race_drops = 0;
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -1200,6 +1211,7 @@ where
 
                 // The block arrived, so forget any re-request bookkeeping for it.
                 self.block_reobtain_retries.remove(&hash);
+                self.utxo_race_drops = 0;
 
                 return Ok(());
             }
@@ -1253,8 +1265,10 @@ where
         //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
         //   be attributed, and covers the window before a score reaches the address book, which
         //   only applies misbehavior reports in batches.
-        // Consensus failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
-        // re-downloading a block the network already rejected is pointless.
+        // - UTXO races (#11168): the block was never rejected, and the state parks its
+        //   children until it arrives, so re-request it instead of waiting for a tip walk.
+        // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
+        // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
             Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
                 if format!("{error:?}").contains("NotFound") =>
@@ -1262,6 +1276,16 @@ where
                 Some(*hash)
             }
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
+            Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
+                if Self::is_utxo_lookup_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            Err(e @ BlockDownloadVerifyError::ValidationRequestError { hash, .. })
+                if Self::is_post_checkpoint_verify_timeout(e) =>
+            {
+                Some(*hash)
+            }
             _ => None,
         };
 
@@ -1284,7 +1308,50 @@ where
             }
         }
 
+        // A UTXO race resolves as soon as the parent commits. A whole lookahead wave of
+        // timeouts with no commit isn't the race, so restart instead of draining the batch.
+        if let Err(error) = &response {
+            if Self::is_utxo_lookup_timeout(error) {
+                self.utxo_race_drops += 1;
+                if self.utxo_race_drops
+                    >= self
+                        .full_verify_concurrency_limit
+                        .max(MIN_UTXO_RACE_DROPS_BEFORE_RESTART)
+                {
+                    warn!(
+                        drops = self.utxo_race_drops,
+                        "no block verified across a full wave of UTXO lookup timeouts, restarting sync"
+                    );
+                    return response.map(|_| ());
+                }
+            }
+        }
+
         Self::handle_response(response)
+    }
+
+    /// Returns `true` for the `AwaitUtxo` timeout that `should_restart_sync` exempts (#11168).
+    fn is_utxo_lookup_timeout(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } if matches!(
+                **source,
+                VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+            )
+        )
+    }
+
+    /// Returns `true` for the short post-final-checkpoint verify timeout (#5125) that
+    /// `should_restart_sync` exempts; the 8-minute tower timeout is a different type.
+    fn is_post_checkpoint_verify_timeout(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::ValidationRequestError { error, .. }
+                if error.is::<tokio::time::error::Elapsed>()
+        )
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.
@@ -1354,6 +1421,12 @@ where
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
+            // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
+            // commit a restart would cancel, looping near the tip (#11168, #11132).
+            e if Self::is_utxo_lookup_timeout(e) => {
+                debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting, continuing");
+                false
+            }
 
             // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload { .. }
@@ -1404,6 +1477,13 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+
+            // The short post-final-checkpoint verify timeout is a UTXO race (#5125), not an
+            // invalid block; the 8-minute tower timeout stays in the catch-all (#5709).
+            e if Self::is_post_checkpoint_verify_timeout(e) => {
+                debug!(error = ?e, "initial fully verified block timed out waiting for its parent's outputs, re-requesting, continuing");
                 false
             }
 

@@ -9,13 +9,16 @@ use rand::{seq::IteratorRandom, thread_rng};
 use std::sync::Arc;
 
 use crate::{
+    amount::MAX_MONEY,
     block::{Block, Height, MAX_BLOCK_BYTES},
     orchard,
     parameters::Network,
-    primitives::zcash_primitives::PrecomputedTxData,
+    primitives::{x25519, zcash_primitives::PrecomputedTxData, Groth16Proof},
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    sprout,
     transaction::sighash::SigHasher,
     transparent::Script,
+    value_balance::ValueBalanceError,
 };
 
 use zebra_test::{
@@ -1535,4 +1538,213 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
             .contains("coinbase transaction must not have Sapling spends"),
         "unexpected error: {err}"
     );
+}
+
+/// Build a serialized transaction with one coinbase input whose scriptSig is a height push
+/// followed by `data_len` bytes of miner data, then deserialize it through the production
+/// parse path (`Transaction::zcash_deserialize`).
+fn deserialize_coinbase_tx_with_data(
+    height: u32,
+    data_len: usize,
+) -> Result<Transaction, SerializationError> {
+    let tx = Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height: Height(height),
+            data: vec![0x5a; data_len],
+            sequence: 0xFFFF_FFFF,
+        }],
+        vec![transparent::Output {
+            value: crate::amount::Amount::try_from(1).expect("valid amount"),
+            lock_script: Script::new(&[]),
+        }],
+        LockTime::min_lock_time_timestamp(),
+    );
+    let serialized = tx
+        .zcash_serialize_to_vec()
+        .expect("coinbase transaction must serialize");
+    serialized.zcash_deserialize_into::<Transaction>()
+}
+
+/// The coinbase scriptSig length must be in {2 .. 100} bytes on the production parse path.
+/// The check lived in `Input::zcash_deserialize`, which the `zcash_primitives` parsing
+/// refactor left without production callers.
+#[test]
+fn coinbase_script_len_bounds_enforced_at_parse() {
+    let _init_guard = zebra_test::init();
+
+    // Height 1 encodes as a single `OP_1` byte; height 500_000 as a 4-byte push.
+    const ONE_BYTE_PUSH_HEIGHT: u32 = 1;
+    const FOUR_BYTE_PUSH_HEIGHT: u32 = 500_000;
+
+    // Undersized: a bare `OP_1` script is 1 byte, below the 2-byte minimum.
+    assert!(
+        matches!(
+            deserialize_coinbase_tx_with_data(ONE_BYTE_PUSH_HEIGHT, 0),
+            Err(SerializationError::Parse("Coinbase script is too short"))
+        ),
+        "1-byte coinbase script must be rejected"
+    );
+
+    // Oversized: a 4-byte height push + 97 bytes of data is 101 bytes, above the maximum.
+    assert!(
+        matches!(
+            deserialize_coinbase_tx_with_data(FOUR_BYTE_PUSH_HEIGHT, 97),
+            Err(SerializationError::Parse("Coinbase script is too long"))
+        ),
+        "101-byte coinbase script must be rejected"
+    );
+
+    // The boundary lengths 2 and 100 are accepted.
+    deserialize_coinbase_tx_with_data(ONE_BYTE_PUSH_HEIGHT, 1)
+        .expect("2-byte coinbase script must be accepted");
+    deserialize_coinbase_tx_with_data(FOUR_BYTE_PUSH_HEIGHT, 96)
+        .expect("100-byte coinbase script must be accepted");
+
+    // The genesis coinbase script (77 bytes, no height prefix) still parses.
+    Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+        .expect("genesis block must deserialize");
+}
+
+/// `expiry_height()` returns the raw `nExpiryHeight` wire value, including values above
+/// `Height::MAX`, and the value survives a serialization round trip; `0` means "no expiry".
+#[test]
+fn expiry_height_preserves_out_of_range_values() {
+    let _init_guard = zebra_test::init();
+
+    for raw in [0, 499_999_999, 500_000_000, 2_147_483_648, u32::MAX] {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            Vec::new(),
+            Vec::new(),
+            LockTime::min_lock_time_timestamp(),
+            block::Height(raw),
+        );
+
+        let expected = (raw != 0).then_some(Height(raw));
+        assert_eq!(tx.expiry_height(), expected);
+
+        // The wire value survives a serialization round trip unchanged.
+        let serialized = tx
+            .zcash_serialize_to_vec()
+            .expect("transaction must serialize");
+        let parsed = serialized
+            .zcash_deserialize_into::<Transaction>()
+            .expect("parsing does not enforce the expiry maximum, the verifier does");
+        assert_eq!(parsed.expiry_height(), expected);
+    }
+}
+
+/// A transaction whose aggregate Sprout JoinSplit value balance is outside the valid
+/// monetary range must report a value-balance error, not a zero Sprout balance.
+/// Each `vpub_new` is individually valid; only the aggregate is out of range.
+#[test]
+fn sprout_aggregate_value_balance_out_of_range_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let zero = Amount::zero();
+    let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid nonnegative amount");
+    let mac = sprout::note::Mac::from([0u8; 32]);
+
+    // A dummy JoinSplit moving MAX_MONEY into the transparent pool: individually in range.
+    let joinsplit = sprout::JoinSplit {
+        vpub_old: zero,
+        vpub_new: max_money,
+        anchor: sprout::tree::Root::default(),
+        nullifiers: [
+            sprout::note::Nullifier([0u8; 32].into()),
+            sprout::note::Nullifier([1u8; 32].into()),
+        ],
+        commitments: [sprout::commitment::NoteCommitment::from([0u8; 32]); 2],
+        ephemeral_key: x25519::PublicKey::from([0u8; 32]),
+        random_seed: sprout::RandomSeed::from([0u8; 32]),
+        vmacs: [mac.clone(), mac],
+        zkproof: Groth16Proof([0u8; 192]),
+        enc_ciphertexts: [sprout::note::EncryptedNote([0u8; 601]); 2],
+    };
+
+    // One JoinSplit: the aggregate is exactly MAX_MONEY, still in range.
+    let in_range = Transaction::test_v4_with_joinsplit_data(Some(&JoinSplitData {
+        first: joinsplit.clone(),
+        rest: vec![],
+        pub_key: [0u8; 32].into(),
+        sig: [0u8; 64].into(),
+    }));
+    in_range
+        .sprout_value_balance()
+        .expect("an aggregate of MAX_MONEY is in range");
+
+    // Two JoinSplits: the aggregate is 2 * MAX_MONEY, out of range.
+    let out_of_range = Transaction::test_v4_with_joinsplit_data(Some(&JoinSplitData {
+        first: joinsplit.clone(),
+        rest: vec![joinsplit],
+        pub_key: [0u8; 32].into(),
+        sig: [0u8; 64].into(),
+    }));
+    assert!(
+        matches!(
+            out_of_range.sprout_value_balance(),
+            Err(ValueBalanceError::Sprout(_))
+        ),
+        "an out-of-range Sprout aggregate must error, not zero"
+    );
+    assert!(
+        out_of_range
+            .value_balance(&std::collections::HashMap::new())
+            .is_err(),
+        "the transaction value balance must propagate the error"
+    );
+}
+
+/// A non-coinbase transaction with a null-prevout input alongside a regular input parses
+/// through the production entry point, is not a coinbase, and is not a valid non-coinbase.
+///
+/// # Consensus
+///
+/// > A transparent input in a non-coinbase transaction MUST NOT have a null prevout.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+#[test]
+fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
+    let mut raw = Vec::new();
+    raw.extend_from_slice(&1_u32.to_le_bytes()); // version 1
+    raw.push(2); // input count
+                 // Input 0: null prevout with a valid height-1 coinbase script.
+    raw.extend_from_slice(&[0; 32]);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    raw.push(2);
+    raw.extend_from_slice(&[0x51, 0x00]);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    // Input 1: a regular spend.
+    raw.extend_from_slice(&[1; 32]);
+    raw.extend_from_slice(&0_u32.to_le_bytes());
+    raw.push(0);
+    raw.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    raw.push(1); // output count
+    raw.extend_from_slice(&1_u64.to_le_bytes());
+    raw.push(0);
+    raw.extend_from_slice(&0_u32.to_le_bytes()); // lock time
+
+    let tx: Transaction = raw
+        .zcash_deserialize_into()
+        .expect("a null-prevout input with a valid height script parses");
+
+    assert!(
+        matches!(tx.inputs()[0], crate::transparent::Input::Coinbase { .. }),
+        "the null-prevout input is parsed as a coinbase input"
+    );
+    assert!(!tx.is_coinbase(), "two inputs is never a coinbase");
+    assert!(
+        !tx.is_valid_non_coinbase(),
+        "a non-coinbase transaction with a null-prevout input is invalid"
+    );
+
+    // The regular shape of a non-coinbase transaction stays valid.
+    let mut regular = raw.clone();
+    regular[4] = 1; // input count
+    regular.drain(5..5 + 32 + 4 + 1 + 2 + 4); // drop input 0
+    let tx: Transaction = regular
+        .zcash_deserialize_into()
+        .expect("a single regular input parses");
+    assert!(!tx.is_coinbase());
+    assert!(tx.is_valid_non_coinbase());
 }
