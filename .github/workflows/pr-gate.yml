@@ -39,14 +39,10 @@ env:
 
 jobs:
   changes:
-    # Only the release label affects gate results, and only a title or base edit
-    # can change the declaration this gate reads. Every other label and edit event
-    # is a no-op, so it must not spend a runner or replace the required check.
-    if: >-
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
+    # Runs for every trigger, including the labels and edits that cannot change the
+    # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
+    # report it, and it can only report an honest verdict if the cheap policy jobs
+    # re-evaluate the declaration. Only `semver-checks` is expensive enough to skip.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -105,8 +101,15 @@ jobs:
     needs: changes
     # Real work runs only on contributor pull requests that change Rust and do not already declare
     # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # An unrelated label, or an edit that leaves the title and the base branch alone, cannot change the
+    # API delta of a head commit that did not move, so it must not spend 45 minutes of runner time.
+    # `pr-gate-result` tolerates the resulting skip.
     if: >-
       github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
       needs.changes.outputs.semver == 'true' &&
       needs.changes.outputs.breaking == 'false'
     runs-on: ubuntu-latest
@@ -267,26 +270,15 @@ jobs:
           fi
 
   pr-gate-result:
-    # Keep skipped unrelated-label and unrelated-edit runs from replacing the
-    # required check.
-    name: >-
-      ${{
-        (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-        github.event.label.name != 'release' &&
-        'Label does not affect the PR gate' ||
-        github.event.action == 'edited' &&
-        github.event.changes.title == null &&
-        github.event.changes.base == null &&
-        'Edit does not affect the PR gate' ||
-        'pr-gate-result'
-      }}
+    # The ruleset requires the `pr-gate-result` context, and GitHub resolves it against
+    # the check runs of the newest PR Gate run for the head commit. So the job keeps a
+    # fixed name and runs for every trigger: a run that reports nothing under this name
+    # leaves the required check waiting for a status that never arrives, which is what a
+    # renamed or skipped result job did. Renaming also never worked as written, because
+    # GitHub does not evaluate `name` expressions for a job it skips, so those runs
+    # reported the raw expression text.
     runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
+    if: always()
     needs: [changes, semver-checks, changelog-gate, release-readiness]
     timeout-minutes: 5
     steps:
@@ -298,6 +290,9 @@ jobs:
           # entries are good enough. `allowed-failures` also tolerates a skip, and
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
-          # Temporarily keep semver checks advisory until #11409 is resolved.
+          # Temporarily keep semver checks advisory until #11409 is resolved. When it stops
+          # being advisory, move it to `allowed-skips` instead of dropping it from both
+          # lists: no-op label and edit runs skip it, and an intolerant list would turn
+          # every one of those runs into a failed required check.
           allowed-failures: changelog-gate, semver-checks
           allowed-skips: release-readiness
