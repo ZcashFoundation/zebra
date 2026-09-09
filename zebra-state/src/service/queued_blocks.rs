@@ -88,9 +88,9 @@ impl QueuedBlocks {
     }
 
     /// Returns `true` if there is a block with the provided hash present.
-    #[instrument(skip(self), fields(%parent_hash))]
-    pub fn has(&self, parent_hash: block::Hash) -> bool {
-        self.blocks.contains_key(&parent_hash)
+    #[instrument(skip(self), fields(%hash))]
+    pub fn has(&self, hash: block::Hash) -> bool {
+        self.blocks.contains_key(&hash)
     }
 
     /// Dequeue and return all blocks that were waiting for the arrival of
