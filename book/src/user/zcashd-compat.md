@@ -174,7 +174,7 @@ Zebra's embedded release manifest; use `zcashd_source = "path"` plus
 > [!WARNING]
 > The `embedded` source is **experimental**: it downloads a pinned `zcashd`
 > build from [ZcashFoundation/zcashd](https://github.com/ZcashFoundation/zcashd)
-> releases. The current `zebra-compat-v1.1.0` artifact is built by the
+> releases. The current `zebra-compat-v1.2.0` artifact is built by the
 > foundation's own CI from the `zcashd-compat` branch. Production deployments
 > that need stronger guarantees should still build the sidecar from source (or
 > otherwise verify it) and use `zcashd_source = "path"`.
