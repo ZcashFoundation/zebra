@@ -255,7 +255,7 @@ impl ValueBalance<NonNegative> {
         // transaction value balances (inputs - outputs)
         let tx = transaction.borrow();
         let transparent = tx.transparent_value_balance_from_outputs(utxos)?;
-        let sprout = tx.sprout_value_balance();
+        let sprout = tx.sprout_value_balance()?;
         let sapling = tx.sapling_value_balance();
         let orchard = tx.orchard_value_balance();
         let ironwood = tx.ironwood_value_balance();

@@ -203,9 +203,9 @@ gh api 'repos/ZcashFoundation/zebra/actions/caches?per_page=100' \
 - Every required-check workflow must keep its `merge_group` trigger and its aggregator
   job name, or the queue stalls waiting for a check that is never reported
 - `merge-policy` holds a pull request carrying `do-not-merge`; the Merge Freeze app's
-  `mergefreeze` status holds the repository during a release window. Neither is
-  enforced until the queue is activated — see [Activating the
-  queue](../../book/src/dev/continuous-integration.md#activating-the-queue)
+  `mergefreeze` status holds the repository during a release window. Both are required
+  status checks — see [Queue
+  configuration](../../book/src/dev/continuous-integration.md#queue-configuration)
 
 GitHub's queue is FIFO, with a manual jump-to-top operation that rebuilds affected
 entries. Moving from Mergify intentionally removes automatic enrollment, high and low

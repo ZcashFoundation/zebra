@@ -165,17 +165,17 @@ impl Transaction {
     ///
     /// Returns `None` if the transaction is Sprout, or if `nExpiryHeight == 0`
     /// (which means "no expiry" per the Zcash protocol spec).
+    ///
+    /// Returns the raw wire value, which can exceed [`block::Height::MAX`]: the ZIP-203
+    /// maximum of 499,999,999 is a verifier rule, not a limit of this accessor, so an
+    /// out-of-range value must reach the verifier to be rejected.
     pub fn expiry_height(&self) -> Option<block::Height> {
         match self.tx_version() {
             TxVersion::Sprout(_) => None,
-            _ => {
-                let bh = self.0.expiry_height();
-                if bh == zcash_protocol::consensus::BlockHeight::from_u32(0) {
-                    None
-                } else {
-                    compat::block_height_to_height(bh).ok()
-                }
-            }
+            _ => match u32::from(self.0.expiry_height()) {
+                0 => None,
+                raw => Some(block::Height(raw)),
+            },
         }
     }
 
@@ -232,9 +232,25 @@ impl Transaction {
         self.transparent_bundle().is_some_and(|b| b.is_coinbase())
     }
 
-    /// Returns `true` if this is a valid non-coinbase transaction.
+    /// Returns `true` if this transaction has valid inputs for a non-coinbase
+    /// transaction, that is, none of its transparent inputs has a null prevout.
+    ///
+    /// # Consensus
+    ///
+    /// > A transparent input in a non-coinbase transaction MUST NOT have a null prevout.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    ///
+    /// Note that a transaction can return `false` from both [`Transaction::is_coinbase`] and
+    /// this method, for example a transaction with a null-prevout input alongside other
+    /// inputs. Such transactions are rejected by the verifier.
     pub fn is_valid_non_coinbase(&self) -> bool {
-        !self.is_coinbase()
+        self.transparent_bundle().is_none_or(|bundle| {
+            bundle
+                .vin
+                .iter()
+                .all(|txin| *txin.prevout() != zcash_transparent::bundle::OutPoint::NULL)
+        })
     }
 
     /// Returns the outpoints spent by this transaction's transparent inputs.
@@ -683,16 +699,26 @@ impl Transaction {
     }
 
     /// Return the sprout value balance.
-    pub fn sprout_value_balance(&self) -> ValueBalance<NegativeAllowed> {
-        let balance = self
-            .sprout_bundle()
-            .and_then(|b| b.value_balance())
-            .unwrap_or(ZatBalance::zero());
+    ///
+    /// Errors when the aggregate JoinSplit value balance (or any prefix of it, matching the
+    /// pre-refactor fold) leaves the valid monetary range. Aggregated here because
+    /// `zcash_primitives` collapses that case to `None`, conflating it with "no Sprout
+    /// bundle". The net-sum bound matches zcashd from Canopy onward, where `vpub_old` is
+    /// always zero; pre-Canopy heights are checkpointed.
+    pub fn sprout_value_balance(
+        &self,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        let total = self
+            .sprout_joinsplit_descriptions()
+            .try_fold(Amount::<NegativeAllowed>::zero(), |total, js| {
+                // Not `js.net_value()`: its `expect` trusts upstream parse bounds. The
+                // subtraction can't overflow `i64`, each `vpub` is at most `MAX_MONEY`.
+                let net = Amount::try_from(i64::from(js.vpub_new()) - i64::from(js.vpub_old()))?;
+                total + net
+            })
+            .map_err(crate::value_balance::ValueBalanceError::Sprout)?;
 
-        let amount: Amount<NegativeAllowed> = Amount::try_from(i64::from(balance))
-            .expect("sprout value balance should be a valid Amount");
-
-        ValueBalance::from_sprout_amount(amount)
+        Ok(ValueBalance::from_sprout_amount(total))
     }
 
     /// Get the overall value balance for this transaction.
@@ -713,7 +739,7 @@ impl Transaction {
             .collect();
 
         let transparent = self.transparent_value_balance_from_outputs(&outputs)?;
-        let sprout = self.sprout_value_balance();
+        let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();
         let ironwood = self.ironwood_value_balance();
@@ -822,12 +848,14 @@ impl crate::serialization::ZcashSerialize for Transaction {
 impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus::BranchId>
     for Transaction
 {
+    /// Deserialize a transaction with a known consensus branch ID.
+    ///
+    /// Runs the same parse-time consensus checks as [`Transaction::zcash_deserialize`].
     fn zcash_deserialize_with_context<R: std::io::Read>(
         reader: R,
         &branch_id: &zcash_protocol::consensus::BranchId,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        let inner = zp_tx::Transaction::read(reader, branch_id)?;
-        Ok(Transaction(inner))
+        deserialize_and_check(reader, branch_id)
     }
 }
 
@@ -853,91 +881,104 @@ impl crate::serialization::ZcashDeserialize for Transaction {
     fn zcash_deserialize<R: std::io::Read>(
         reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        use std::io::Read as _;
-
-        let branch_id = zcash_protocol::consensus::BranchId::Canopy;
-
-        // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
-        let mut limited = reader.take(crate::block::MAX_BLOCK_BYTES);
-
-        // Only V4 transactions need their bytes recorded, for the `valueBalanceSapling` check
-        // below. Reading the 4-byte header up front and putting it back lets every other
-        // version parse without copying the transaction a second time, which matters during
-        // the initial block download.
-        let mut header = [0u8; 4];
-        limited.read_exact(&mut header)?;
-        let is_v4 = {
-            let header = u32::from_le_bytes(header);
-            let overwintered = header & 0x8000_0000 != 0;
-            overwintered && (header & 0x7FFF_FFFF) == 4
-        };
-        let with_header = std::io::Read::chain(&header[..], limited);
-
-        let (inner, raw_bytes) = if is_v4 {
-            let mut recording = RecordingReader::new(with_header);
-            let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
-            (inner, recording.into_recorded())
-        } else {
-            (
-                zp_tx::Transaction::read(with_header, branch_id)?,
-                Vec::new(),
-            )
-        };
-
-        // Validate coinbase inputs: the height encoding must parse correctly.
-        // zcash_primitives accepts raw bytes without validating the height encoding,
-        // so we validate it explicitly here to preserve Zebra's parse-time check.
-        if let Some(bundle) = inner.transparent_bundle() {
-            for txin in &bundle.vin {
-                if *txin.prevout() == zcash_transparent::bundle::OutPoint::NULL {
-                    let script_bytes = txin.script_sig().0 .0.clone();
-                    transparent::serialize::parse_coinbase_height(&script_bytes)?;
-                }
-            }
-        }
-
-        // # Consensus
-        //
-        // > A coinbase transaction MUST NOT have any Spend descriptions.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        //
-        // `zcash_primitives` does not enforce this while parsing, so it is checked here to keep
-        // Zebra's parse-time rejection (GHSA-rgwx-8r98-p34c). Upstream decodes spend descriptions
-        // one at a time rather than pre-allocating from the claimed count, so a rejected
-        // transaction cannot force an outsized allocation before reaching this check.
-        if inner
-            .transparent_bundle()
-            .is_some_and(|bundle| bundle.is_coinbase())
-            && inner
-                .sapling_bundle()
-                .is_some_and(|bundle| !bundle.shielded_spends().is_empty())
-        {
-            return Err(crate::serialization::SerializationError::Parse(
-                "coinbase transaction must not have Sapling spends",
-            ));
-        }
-
-        // # Consensus
-        //
-        // > [Sapling onward] If effectiveVersion < 5 and nSpendsSapling + nOutputsSapling > 0,
-        // > then valueBalanceSapling MUST be 0.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        //
-        // `zcash_primitives` reads `valueBalanceSapling` but discards it when there are no
-        // Sapling spends or outputs, so the value is not recoverable from the parsed
-        // transaction and has to be read back out of the bytes that were consumed.
-        if inner.version() == TxVersion::V4 && inner.sapling_bundle().is_none() {
-            if let Some(value_balance) = v4_empty_sapling_value_balance(&raw_bytes, &inner) {
-                if value_balance != 0 {
-                    return Err(crate::serialization::SerializationError::BadTransactionBalance);
-                }
-            }
-        }
-
-        Ok(Transaction(inner))
+        deserialize_and_check(reader, zcash_protocol::consensus::BranchId::Canopy)
     }
+}
+
+/// Parses a transaction and runs the parse-time consensus checks that `zcash_primitives`
+/// does not enforce. Both deserialization impls go through this function, so a transaction
+/// cannot reach a [`Transaction`] value without passing the checks.
+fn deserialize_and_check<R: std::io::Read>(
+    reader: R,
+    branch_id: zcash_protocol::consensus::BranchId,
+) -> Result<Transaction, crate::serialization::SerializationError> {
+    use std::io::Read as _;
+
+    // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
+    let mut limited = reader.take(crate::block::MAX_BLOCK_BYTES);
+
+    // Only V4 transactions need their bytes recorded, for the `valueBalanceSapling` check
+    // below. Reading the 4-byte header up front and putting it back lets every other
+    // version parse without copying the transaction a second time, which matters during
+    // the initial block download.
+    let mut header = [0u8; 4];
+    limited.read_exact(&mut header)?;
+    let is_v4 = {
+        let header = u32::from_le_bytes(header);
+        let overwintered = header & 0x8000_0000 != 0;
+        overwintered && (header & 0x7FFF_FFFF) == 4
+    };
+    let with_header = std::io::Read::chain(&header[..], limited);
+
+    let (inner, raw_bytes) = if is_v4 {
+        let mut recording = RecordingReader::new(with_header);
+        let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
+        (inner, recording.into_recorded())
+    } else {
+        (
+            zp_tx::Transaction::read(with_header, branch_id)?,
+            Vec::new(),
+        )
+    };
+
+    // Validate coinbase inputs: the script length must be in bounds and the height
+    // encoding must parse correctly. zcash_primitives accepts raw bytes without
+    // validating either, so we validate explicitly here to preserve Zebra's
+    // parse-time checks.
+    if let Some(bundle) = inner.transparent_bundle() {
+        for txin in &bundle.vin {
+            if *txin.prevout() == zcash_transparent::bundle::OutPoint::NULL {
+                let script_bytes = &txin.script_sig().0 .0;
+                // The genesis coinbase predates BIP-34: its 77-byte script has no height
+                // prefix, so skip the height parse, matching `compat::txin_to_input`.
+                if script_bytes.as_slice() != transparent::serialize::GENESIS_COINBASE_SCRIPT_SIG {
+                    transparent::serialize::parse_coinbase_height(script_bytes)?;
+                }
+            }
+        }
+    }
+
+    // # Consensus
+    //
+    // > A coinbase transaction MUST NOT have any Spend descriptions.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    //
+    // `zcash_primitives` does not enforce this while parsing, so it is checked here to keep
+    // Zebra's parse-time rejection (GHSA-rgwx-8r98-p34c). Upstream decodes spend descriptions
+    // one at a time rather than pre-allocating from the claimed count, so a rejected
+    // transaction cannot force an outsized allocation before reaching this check.
+    if inner
+        .transparent_bundle()
+        .is_some_and(|bundle| bundle.is_coinbase())
+        && inner
+            .sapling_bundle()
+            .is_some_and(|bundle| !bundle.shielded_spends().is_empty())
+    {
+        return Err(crate::serialization::SerializationError::Parse(
+            "coinbase transaction must not have Sapling spends",
+        ));
+    }
+
+    // # Consensus
+    //
+    // > [Sapling onward] If effectiveVersion < 5 and nSpendsSapling + nOutputsSapling > 0,
+    // > then valueBalanceSapling MUST be 0.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    //
+    // `zcash_primitives` reads `valueBalanceSapling` but discards it when there are no
+    // Sapling spends or outputs, so the value is not recoverable from the parsed
+    // transaction and has to be read back out of the bytes that were consumed.
+    if inner.version() == TxVersion::V4 && inner.sapling_bundle().is_none() {
+        if let Some(value_balance) = v4_empty_sapling_value_balance(&raw_bytes, &inner) {
+            if value_balance != 0 {
+                return Err(crate::serialization::SerializationError::BadTransactionBalance);
+            }
+        }
+    }
+
+    Ok(Transaction(inner))
 }
 
 /// Reads the `valueBalanceSapling` field of a V4 transaction that has no Sapling spends or
