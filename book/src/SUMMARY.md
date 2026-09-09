@@ -42,6 +42,7 @@
   - [Generating Zebra Checkpoints](dev/zebra-checkpoints.md)
   - [Doing Mass Renames](dev/mass-renames.md)
   - [Updating the ECC dependencies](dev/ecc-updates.md)
+  - [Refactoring Consensus-Critical Code](dev/consensus-refactors.md)
   - [Running a Private Testnet Test](dev/private-testnet.md)
   - [Zebra crates](dev/crate-owners.md)
   - [Zebra RFCs](dev/rfcs.md)

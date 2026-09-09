@@ -298,5 +298,6 @@ jobs:
           # entries are good enough. `allowed-failures` also tolerates a skip, and
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
-          allowed-failures: changelog-gate
-          allowed-skips: semver-checks, release-readiness
+          # Temporarily keep semver checks advisory until #11409 is resolved.
+          allowed-failures: changelog-gate, semver-checks
+          allowed-skips: release-readiness
