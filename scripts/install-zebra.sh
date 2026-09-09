@@ -34,7 +34,7 @@ TARGET_TRIPLE="x86_64-pc-linux-gnu"
 ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
 ZCASHD_RUNTIME_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
-ZCASHD_DEFAULT_DOCKER_IMAGE="zfnd/zcashd:zebra-compat-v1.1.0"
+ZCASHD_DEFAULT_DOCKER_IMAGE="zakuracore/zcashd:v1.2.0"
 
 INSTALL_PROFILE=""
 MODE=""
