@@ -31,8 +31,8 @@ ZEBRA_DOCKER_RUNTIME_GID=10001
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
-ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz"
-ZCASHD_RUNTIME_ARCHIVE_SHA256="92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
 ZCASHD_DEFAULT_DOCKER_IMAGE="zfnd/zcashd:zebra-compat-v1.1.0"
 

@@ -1,0 +1,10 @@
+project: zebrad
+kind: Fixed
+body: 'The `zcashd_source = "embedded"` sidecar is now pinned to `zebra-compat-v1.2.0`,
+  which raises the zcashd reorg limit from 99 to 1000 blocks to match Zebra''s
+  `MAX_BLOCK_REORG_HEIGHT`. The previous `zebra-compat-v1.1.0` sidecar shut itself
+  down on any reorg deeper than 99 blocks while Zebra kept following the chain.
+  Wallets holding shielded notes should expect the witness cache and `wallet.dat`
+  to grow roughly 10x, reached gradually over about 900 blocks
+  ([#11403](https://github.com/ZcashFoundation/zebra/issues/11403)).'
+time: 2026-09-08T22:00:00.000000000Z
