@@ -100,6 +100,42 @@ proptest! {
         prop_assert_eq!(observer.try_outcome(), Ok(None));
         prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
     }
+
+    /// Invalidity overrides earlier abandonment, and no later outcome changes the stall.
+    ///
+    /// Abandonment must not finalize neutral feedback while an unresolved hash can prove invalid.
+    #[test]
+    fn invalid_hash_overrides_abandonment(
+        before in prop::collection::vec(Just(HashFeedback::Verified), 0..=5),
+        between in prop::collection::vec(verified_or_abandoned(), 0..=5),
+        after in prop::collection::vec(any_hash_feedback(), 0..=5),
+    ) {
+        let (feedback, observer) = FindResponseFeedback::new_for_test();
+        let hash_count = before.len() + 1 + between.len() + 1 + after.len();
+        let progress = FindResponseProgress::new(hash_count, feedback);
+
+        for hash in before {
+            hash.apply(&progress);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+        }
+
+        HashFeedback::Abandoned.apply(&progress);
+        prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+
+        for hash in between {
+            hash.apply(&progress);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+        }
+
+        HashFeedback::Invalid.apply(&progress);
+        prop_assert_eq!(observer.try_outcome(), Ok(Some(false)));
+
+        for hash in after {
+            hash.apply(&progress);
+            prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+        }
+        prop_assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    }
 }
 
 /// One block hash's outcome reported to the response progress tracker.
