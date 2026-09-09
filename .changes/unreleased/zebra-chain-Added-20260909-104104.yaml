@@ -1,0 +1,3 @@
+project: zebra-chain
+kind: Added
+body: "Add `sprout_joinsplit_proof_bytes` to extract JoinSplit proof bytes for both Groth16 (V4) and PHGR13 (V2/V3) proof variants ([#11415](https://github.com/ZcashFoundation/zebra/pull/11415))"

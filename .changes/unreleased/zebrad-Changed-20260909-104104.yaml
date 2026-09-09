@@ -1,0 +1,3 @@
+project: zebrad
+kind: Changed
+body: "`getrawtransaction` verbose mode now returns the 296-byte PHGR13 proof in the `vjoinsplit[].proof` field for V2/V3 transactions; it was previously returned as an empty byte string ([#11415](https://github.com/ZcashFoundation/zebra/pull/11415))"
