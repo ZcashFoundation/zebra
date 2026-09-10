@@ -190,7 +190,7 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
-       contains(github.event.pull_request.labels.*.name, 'A-release'))
+       contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -254,11 +254,11 @@ jobs:
             const pr = result.repository.pullRequest;
             const isReleasePr =
               pr?.headRefName.startsWith("release-plz-") &&
-              pr.labels.nodes.some(({ name }) => name === "A-release");
+              pr.labels.nodes.some(({ name }) => name === "release");
 
             if (!isReleasePr || (pr.state !== "OPEN" && !pr.merged)) {
               throw new Error(
-                `PR #${prNumber} is not a release-plz A-release PR`,
+                `PR #${prNumber} does not carry the release label`,
               );
             }
             if (pr.baseRefName !== "main") {

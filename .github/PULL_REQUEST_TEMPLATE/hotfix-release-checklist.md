@@ -2,7 +2,7 @@
 name: "Hotfix Release Checklist Template"
 about: "Checklist to create and publish a hotfix Zebra release"
 title: "release: Zebra (version)"
-labels: "A-release"
+labels: "release"
 assignees: ""
 ---
 
@@ -14,7 +14,7 @@ A hotfix release should only be created when a bug or critical issue is discover
       for example: `hotfix-v2.3.1` - this needs to be different to the tag name
 - [ ] Make the required changes
 - [ ] Create a hotfix release PR by adding `&template=hotfix-release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=hotfix-release-checklist.md)).
-- [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
+- [ ] Add the `release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 - [ ] Add the `do-not-merge` tag to keep the PR out of the merge queue, since after PR approval
       the release is done from the branch itself.
 - [ ] Ensure the `check-no-git-dependencies` check passes.
