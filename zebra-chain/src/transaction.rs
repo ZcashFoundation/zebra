@@ -844,7 +844,8 @@ impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus
 {
     /// Deserialize a transaction with a known consensus branch ID.
     ///
-    /// Runs the same parse-time consensus checks as [`Transaction::zcash_deserialize`].
+    /// Runs the same parse-time consensus checks as
+    /// [`Transaction::zcash_deserialize`](crate::serialization::ZcashDeserialize::zcash_deserialize).
     fn zcash_deserialize_with_context<R: std::io::Read>(
         reader: R,
         &branch_id: &zcash_protocol::consensus::BranchId,
