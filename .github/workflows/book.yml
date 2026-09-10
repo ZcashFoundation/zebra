@@ -56,7 +56,11 @@ jobs:
           use-mermaid: true
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: nightly
+          # This job needs nightly for the unstable rustdoc flags below.
+          # Pinned: nightly >= 2026-09-08 ICEs in rustdoc's auto-trait synthesis
+          # while documenting zebra-consensus, so `cargo doc` cannot complete.
+          # Regressed by https://github.com/rust-lang/rust/pull/162182.
+          toolchain: nightly-2026-09-04
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
 
