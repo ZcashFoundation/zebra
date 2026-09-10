@@ -6,10 +6,12 @@ use color_eyre::eyre::{eyre, Result};
 use tonic::{Code, Status, Streaming};
 
 use zebra_chain::{
-    block,
-    parameters::{testnet::ConfiguredActivationHeights, Network},
+    amount::Amount,
+    block::{self, Height},
+    parameters::{testnet::ConfiguredActivationHeights, Network, NetworkKind},
     serialization::ZcashSerialize as _,
-    transaction,
+    transaction::{self, Transaction, TransparentSigningKey},
+    transparent,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
@@ -19,11 +21,11 @@ use zebra_rpc::{
     },
     lightwalletd::{
         compact_tx_streamer_client::CompactTxStreamerClient, Address as LightwalletdAddress,
-        AddressList, BlockId, BlockRange, ChainSpec, Duration as PingDuration, Empty,
-        GetAddressUtxosArg, GetSubtreeRootsArg, ShieldedProtocol, TransparentAddressBlockFilter,
-        TxFilter,
+        AddressList, BlockId, BlockRange, ChainSpec, Duration as PingDuration, Empty, Exclude,
+        GetAddressUtxosArg, GetSubtreeRootsArg, RawTransaction, ShieldedProtocol,
+        TransparentAddressBlockFilter, TxFilter,
     },
-    server::{OPENED_LIGHTWALLETD_ENDPOINT_MSG, OPENED_RPC_ENDPOINT_MSG},
+    server::{error::LegacyCode, OPENED_LIGHTWALLETD_ENDPOINT_MSG, OPENED_RPC_ENDPOINT_MSG},
 };
 use zebra_test::{args, prelude::*};
 
@@ -48,7 +50,7 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 /// transactions just as they would on Mainnet. This replaces the GCP `lwd-grpc-wallet`
 /// job, which drove the Go `lightwalletd` binary against a cached Mainnet state.
 ///
-/// Mempool methods are not covered here, because they need a signed transaction.
+/// The mempool methods are covered by [`lightwalletd_grpc_serves_the_mempool`].
 #[tokio::test]
 async fn lightwalletd_grpc_serves_a_regtest_chain() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -575,6 +577,285 @@ async fn lightwalletd_grpc_serves_a_regtest_chain() -> Result<()> {
     output.assert_failure()?.assert_was_killed()?;
 
     Ok(())
+}
+
+/// The mempool methods of Zebra's `CompactTxStreamer` server must accept a transaction,
+/// stream it while it is unmined, and drop it once it is mined, agreeing with the JSON-RPC
+/// mempool view at every step.
+///
+/// A signed transparent transaction spending a mature Regtest coinbase is enough to drive
+/// `SendTransaction`, `GetMempoolStream`, and the mempool branch of `GetTransaction`
+/// through their success and failure paths, and to prove that a `GetMempoolStream` opened
+/// on an empty mempool delivers the transaction live and closes on the next block. This
+/// replaces the GCP `lwd-rpc-send-tx` job, which drove the Go `lightwalletd` binary
+/// against a cached Mainnet state.
+///
+/// `GetMempoolTx` only gets its limit and empty cases: it serves compact transactions,
+/// and a transparent-only transaction has no compact data. Its positive case needs a
+/// shielded Regtest transaction, which the signing helper does not build yet (see #9941).
+#[tokio::test]
+async fn lightwalletd_grpc_serves_the_mempool() -> Result<()> {
+    /// Coinbase outputs can be spent once this many blocks are on top of them.
+    const COINBASE_MATURITY: u32 = transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
+
+    /// The height of the first block mined after the transaction is sent.
+    const MINED_HEIGHT: u32 = COINBASE_MATURITY + 2;
+
+    /// The server's `GetMempoolTx` exclude list limit, matching lightwalletd.
+    const MAX_EXCLUDE_ENTRIES: usize = 20_000;
+
+    /// How long to wait for a sent transaction to show up in `getrawmempool`.
+    const MEMPOOL_TIMEOUT: Duration = Duration::from_secs(10);
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let key = TransparentSigningKey::random();
+    let miner_address = key.address(NetworkKind::Regtest);
+
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.rpc.lightwalletd_listen_addr = Some("127.0.0.1:0".parse()?);
+    config.mempool.debug_enable_at_height = Some(0);
+    config.mining.miner_address = Some(miner_address.into());
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+
+    // The JSON-RPC server is started before the gRPC server, so the log lines come in this order.
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    let grpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_LIGHTWALLETD_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let rpc = RpcRequestClient::new(rpc_address);
+
+    // Mine a coinbase to our key at height 1, then enough blocks for it to mature.
+    rpc.generate(COINBASE_MATURITY + 1).await?;
+
+    let block_1 = rpc
+        .get_block(1)
+        .await
+        .map_err(|err| eyre!(err))?
+        .ok_or_else(|| eyre!("block 1 must exist after generate"))?;
+    let coinbase = &block_1.transactions[0];
+    let (index, coinbase_output) = coinbase
+        .outputs()
+        .into_iter()
+        .enumerate()
+        .find(|(_, output)| output.lock_script == miner_address.script())
+        .ok_or_else(|| eyre!("the coinbase must pay the configured miner address"))?;
+    let coinbase_outpoint = transparent::OutPoint {
+        hash: coinbase.hash(),
+        index: index as u32,
+    };
+
+    // The transaction under test spends the mature coinbase. The double spend pays a
+    // different amount from the same output, so it has a different ID and must be rejected.
+    let tx = Transaction::signed_transparent(
+        &network,
+        Height(MINED_HEIGHT),
+        &key,
+        &[(coinbase_outpoint, coinbase_output.clone())],
+        &[(miner_address, Amount::try_from(100_000_000)?)],
+    )
+    .map_err(|err| eyre!(err))?;
+    let double_spend = Transaction::signed_transparent(
+        &network,
+        Height(MINED_HEIGHT),
+        &key,
+        &[(coinbase_outpoint, coinbase_output)],
+        &[(miner_address, Amount::try_from(50_000_000)?)],
+    )
+    .map_err(|err| eyre!(err))?;
+    assert_ne!(tx.hash(), double_spend.hash());
+
+    let txid = tx.hash();
+    let tx_bytes = tx.zcash_serialize_to_vec()?;
+
+    let endpoint = tonic::transport::Endpoint::new(format!("http://{grpc_address}"))?
+        .timeout(RESPONSE_TIMEOUT);
+    let mut grpc = CompactTxStreamerClient::connect(endpoint).await?;
+
+    // GetMempoolStream on an empty mempool: the stream stays open, so it is drained after
+    // the next block below, where it must have delivered the sent transaction live.
+    assert!(raw_mempool(&rpc).await?.is_empty());
+    let live_stream = grpc.get_mempool_stream(Empty {}).await?.into_inner();
+
+    // SendTransaction: a success carries the transaction ID as its message.
+    let sent = grpc
+        .send_transaction(RawTransaction {
+            data: tx_bytes.clone(),
+            height: 0,
+        })
+        .await?
+        .into_inner();
+    assert_eq!(sent.error_code, 0, "send failed: {}", sent.error_message);
+    assert_eq!(sent.error_message.parse::<transaction::Hash>()?, txid);
+
+    let deadline = std::time::Instant::now() + MEMPOOL_TIMEOUT;
+    loop {
+        let mempool = raw_mempool(&rpc).await?;
+        if mempool == [txid.to_string()] {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the sent transaction must reach the mempool within {MEMPOOL_TIMEOUT:?}, got {mempool:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    let GetRawTransactionResponse::Raw(raw_mempool_tx) = rpc
+        .json_result_from_call("getrawtransaction", format!(r#"["{txid}", 0]"#))
+        .await
+        .map_err(|err| eyre!(err))?
+    else {
+        panic!("getrawtransaction with verbosity 0 must return raw bytes");
+    };
+    let raw_mempool_tx: &[u8] = raw_mempool_tx.as_ref();
+    assert_eq!(raw_mempool_tx, tx_bytes);
+
+    // Mempool transactions are served with a height of 0, like lightwalletd.
+    let expected_raw_tx = RawTransaction {
+        data: tx_bytes.clone(),
+        height: 0,
+    };
+
+    // GetTransaction: the mempool branch, before the transaction has a height.
+    let unmined = grpc
+        .get_transaction(tx_filter_for_hash(txid))
+        .await?
+        .into_inner();
+    assert_eq!(unmined, expected_raw_tx);
+
+    // GetMempoolStream after sending: the snapshot carries the transaction, and the
+    // stream stays open until the next block, where it is drained below.
+    let snapshot_stream = grpc.get_mempool_stream(Empty {}).await?.into_inner();
+
+    // GetMempoolTx: empty and not an error, because a transparent-only transaction has
+    // no compact data (see `has_compact_data`), then the exclude list limit.
+    let (compact_txs, status) = drain_stream(
+        grpc.get_mempool_tx(Exclude { txid: vec![] })
+            .await?
+            .into_inner(),
+    )
+    .await?;
+    assert!(status.is_none(), "mempool tx stream failed: {status:?}");
+    assert!(compact_txs.is_empty());
+
+    let status = match grpc
+        .get_mempool_tx(Exclude {
+            txid: vec![vec![0]; MAX_EXCLUDE_ENTRIES + 1],
+        })
+        .await
+    {
+        Err(status) => status,
+        Ok(response) => drain_stream(response.into_inner())
+            .await?
+            .1
+            .expect("an oversized exclude list must be rejected"),
+    };
+    assert_eq!(status.code(), Code::InvalidArgument);
+
+    // SendTransaction failure paths: rejections are reported inside the response, with
+    // the JSON-RPC error code, and leave the mempool as it was.
+    let rejected = grpc
+        .send_transaction(RawTransaction {
+            data: double_spend.zcash_serialize_to_vec()?,
+            height: 0,
+        })
+        .await?
+        .into_inner();
+    assert_eq!(rejected.error_code, LegacyCode::Verify as i32);
+    assert!(!rejected.error_message.is_empty());
+
+    let undecodable = grpc
+        .send_transaction(RawTransaction {
+            data: vec![0; 10],
+            height: 0,
+        })
+        .await?
+        .into_inner();
+    assert_eq!(undecodable.error_code, LegacyCode::Deserialization as i32);
+    assert!(!undecodable.error_message.is_empty());
+
+    // A transaction larger than a block is the one submission rejected before the RPC.
+    let status = grpc
+        .send_transaction(RawTransaction {
+            data: vec![0; block::MAX_BLOCK_BYTES as usize + 1],
+            height: 0,
+        })
+        .await
+        .expect_err("a transaction larger than a block must be rejected");
+    assert_eq!(status.code(), Code::InvalidArgument);
+
+    assert_eq!(raw_mempool(&rpc).await?, [txid.to_string()]);
+
+    // Mining a block takes the transaction out of the mempool and closes both streams,
+    // each having delivered the transaction exactly once.
+    let mined_hashes = rpc.generate(1).await?;
+    assert_eq!(mined_hashes.len(), 1);
+
+    let (live, status) = drain_stream(live_stream).await?;
+    assert!(status.is_none(), "live mempool stream failed: {status:?}");
+    assert_eq!(live, std::slice::from_ref(&expected_raw_tx));
+
+    let (snapshot, status) = drain_stream(snapshot_stream).await?;
+    assert!(
+        status.is_none(),
+        "mempool snapshot stream failed: {status:?}"
+    );
+    assert_eq!(snapshot, [expected_raw_tx]);
+
+    assert!(raw_mempool(&rpc).await?.is_empty());
+
+    let mined_block = rpc
+        .get_block(MINED_HEIGHT as i32)
+        .await
+        .map_err(|err| eyre!(err))?
+        .ok_or_else(|| eyre!("the mined block must be readable at its height"))?;
+    assert_eq!(mined_block.hash(), mined_hashes[0]);
+    let mined_txids: Vec<_> = mined_block
+        .transactions
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+    assert_eq!(mined_txids[1..], [txid]);
+
+    // GetTransaction: the confirmed branch, now with the height it was mined at.
+    let mined = grpc
+        .get_transaction(tx_filter_for_hash(txid))
+        .await?
+        .into_inner();
+    assert_eq!(mined.data, tx_bytes);
+    assert_eq!(mined.height, u64::from(MINED_HEIGHT));
+
+    // GetMempoolStream on the emptied mempool: nothing until the next block closes it.
+    let empty_stream = grpc.get_mempool_stream(Empty {}).await?.into_inner();
+    rpc.generate(1).await?;
+    let (empty, status) = drain_stream(empty_stream).await?;
+    assert!(status.is_none(), "empty mempool stream failed: {status:?}");
+    assert!(empty.is_empty());
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
+/// The transaction IDs in the mempool, in display order, as reported by `getrawmempool`.
+async fn raw_mempool(rpc: &RpcRequestClient) -> Result<Vec<String>> {
+    rpc.json_result_from_call("getrawmempool", "[]")
+        .await
+        .map_err(|err| eyre!(err))
 }
 
 /// Reads a server stream to its end, returning its messages and the status that ended
