@@ -12,5 +12,5 @@ command = "mdbook-mermaid"
 [output]
 
 [output.html]
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
+additional-js = ["mermaid.min.js", "mermaid-init.js", "lens-init.js"]
 additional-css = ["theme/css/custom.css"]
