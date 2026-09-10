@@ -14,18 +14,20 @@ on:
     types: [checks_requested]
 
 # Cancel obsolete gate runs after new commits. Events that cannot change the gate
-# outcome use separate groups so they cannot cancel the required PR Gate run:
-# unrelated labels, and edits that leave the title and the base branch alone.
+# outcome get a group of their own, keyed by run id, so they can cancel neither the
+# required PR Gate run nor each other: unrelated labels, and edits that leave the
+# title and the base branch alone. Cancelling one of those runs would report the
+# required check as failed, because `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'release' &&
-      'ignored-label' ||
+      format('ignored-label-{0}', github.run_id) ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
       github.event.changes.base == null &&
-      'ignored-edit' ||
+      format('ignored-edit-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
