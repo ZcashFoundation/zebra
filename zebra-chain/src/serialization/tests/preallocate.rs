@@ -5,7 +5,11 @@ use proptest::{collection::size_range, prelude::*};
 use std::matches;
 
 use crate::serialization::{
-    arbitrary::max_allocation_is_big_enough, zcash_deserialize::MAX_U8_ALLOCATION,
+    arbitrary::max_allocation_is_big_enough,
+    zcash_deserialize::{
+        zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
+        MAX_U8_ALLOCATION,
+    },
     SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     MAX_PROTOCOL_MESSAGE_LEN,
 };
@@ -93,4 +97,53 @@ fn u8_max_allocation_is_correct() {
     assert_eq!(largest_allowed_vec_len, MAX_U8_ALLOCATION);
     // Check that our largest_allowed_vec is the size of a maximal protocol message
     assert_eq!(largest_allowed_serialized_len, MAX_PROTOCOL_MESSAGE_LEN);
+}
+
+#[test]
+/// Confirm that a peer-supplied byte count larger than the bytes actually
+/// available fails closed with `UnexpectedEof`.
+///
+/// The bounded, incremental allocation must not change the error semantics of
+/// the previous `vec![0u8; external_count]; read_exact(..)` implementation: an
+/// `external_count` at the (still-allowed) `MAX_U8_ALLOCATION` ceiling paired
+/// with a near-empty reader must not pre-allocate the full claimed count, and
+/// must still surface the same `UnexpectedEof` error.
+fn bytes_external_count_rejects_short_reader() {
+    let data = [0u8; 4];
+    let result =
+        zcash_deserialize_bytes_external_count(MAX_U8_ALLOCATION, std::io::Cursor::new(&data[..]));
+
+    match result {
+        Err(SerializationError::Io(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof)
+        }
+        other => panic!("expected an UnexpectedEof io error, got {other:?}"),
+    }
+}
+
+#[test]
+/// Round-trip a byte vector larger than the internal reservation step so the
+/// incremental-growth loop is exercised across multiple steps.
+///
+/// This guards against off-by-one or boundary regressions in the bounded read
+/// that replaced the single `read_exact` over a fully pre-allocated buffer.
+fn bytes_external_count_roundtrips_across_reservation_steps() {
+    // 2055 spans three ~1 KiB reservation steps (the internal cap is 1024).
+    let input: Vec<u8> = (0..2055u32).map(|i| i as u8).collect();
+    let deserialized =
+        zcash_deserialize_bytes_external_count(input.len(), std::io::Cursor::new(&input))
+            .expect("deserialization must succeed when all bytes are present");
+
+    assert_eq!(deserialized, input);
+}
+
+#[test]
+/// Confirm the `String` specialisation inherits the same bound and fail-closed
+/// behaviour, since it delegates to `zcash_deserialize_bytes_external_count`.
+fn string_external_count_rejects_short_reader() {
+    let data = [0u8; 4];
+    let result =
+        zcash_deserialize_string_external_count(MAX_U8_ALLOCATION, std::io::Cursor::new(&data[..]));
+
+    assert!(matches!(result, Err(SerializationError::Io(_))));
 }
