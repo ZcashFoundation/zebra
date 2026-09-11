@@ -1179,3 +1179,136 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for the equal-work tie-break in `Chain::cmp`.
+///
+/// Sibling blocks always have equal work on Zcash (`nBits` is fully determined by their
+/// ancestors), and the spec breaks equal-work ties by preferring the block received
+/// first. Commits two equal-work siblings with controlled receipt times in both receipt
+/// orders and checks that the first-received sibling stays best both times; one of the
+/// two orders fails under hash tie-breaking by construction. Then extends the losing
+/// sibling and checks that strictly more cumulative work still overrides receipt order.
+#[test]
+fn equal_work_ties_prefer_first_received() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    // Same parent and work, different commitment bytes: the siblings tie on cumulative
+    // work with distinct hashes.
+    let sibling_a = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x01; 32]);
+    let sibling_b = block1
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([0x02; 32]);
+    assert_ne!(
+        sibling_a.hash(),
+        sibling_b.hash(),
+        "siblings must have distinct hashes"
+    );
+
+    for (first, second) in [(&sibling_a, &sibling_b), (&sibling_b, &sibling_a)] {
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+        state
+            .commit_new_chain(block1.clone().prepare(), &finalized_state)
+            .expect("fake root block should commit to an empty non-finalized state");
+
+        // Control the verifier receipt stamp so construction order can't leak in:
+        // `first` was received before `second`, regardless of commit order below.
+        let earlier = std::time::Instant::now();
+        let later = earlier + Duration::from_secs(1);
+
+        let mut first_prepared = (*first).clone().prepare();
+        first_prepared.received_time = Some(earlier);
+        let mut second_prepared = (*second).clone().prepare();
+        second_prepared.received_time = Some(later);
+
+        state
+            .commit_block(first_prepared, &finalized_state)
+            .expect("first sibling should commit");
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            first.hash(),
+            "the first-received sibling is adopted as the best tip"
+        );
+
+        state
+            .commit_block(second_prepared, &finalized_state)
+            .expect("second sibling should commit");
+        assert_eq!(2, state.chain_set.len(), "both sibling chains are tracked");
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            first.hash(),
+            "a later equal-work sibling must not displace the adopted tip"
+        );
+
+        // Strictly more cumulative work still overrides receipt order.
+        let second_child = second.make_fake_child().set_work(10);
+        state
+            .commit_block(second_child.clone().prepare(), &finalized_state)
+            .expect("child of the second sibling should commit");
+        assert_eq!(
+            state.best_chain().unwrap().non_finalized_tip_hash(),
+            second_child.hash(),
+            "more cumulative work must override receipt order"
+        );
+    }
+
+    Ok(())
+}
+
+/// Check that `Chain::received_time` mirrors the tip block's receipt stamp across
+/// pushes and fork truncation, since `Chain::cmp` reads the field directly.
+#[test]
+fn chain_received_time_tracks_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    let child = block1.make_fake_child().set_work(10);
+    let grandchild = child.make_fake_child().set_work(10);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state
+        .commit_new_chain(block1.clone().prepare(), &finalized_state)
+        .expect("fake root block should commit to an empty non-finalized state");
+
+    let earlier = std::time::Instant::now();
+    let later = earlier + Duration::from_secs(1);
+
+    let mut child_prepared = child.clone().prepare();
+    child_prepared.received_time = Some(earlier);
+    state
+        .commit_block(child_prepared, &finalized_state)
+        .expect("child block should commit");
+
+    let mut grandchild_prepared = grandchild.clone().prepare();
+    grandchild_prepared.received_time = Some(later);
+    state
+        .commit_block(grandchild_prepared, &finalized_state)
+        .expect("grandchild block should commit");
+
+    let chain = state.best_chain().expect("chain was just committed");
+    assert_eq!(
+        chain.received_time,
+        Some(later),
+        "chain receipt time mirrors its tip block's stamp"
+    );
+
+    // Truncating the tip moves the chain's receipt time back to the new tip's stamp.
+    let forked = chain.fork(child.hash()).expect("child is in the chain");
+    assert_eq!(
+        forked.received_time,
+        Some(earlier),
+        "fork receipt time mirrors the fork tip's stamp"
+    );
+
+    Ok(())
+}

@@ -201,6 +201,10 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        // Stamp the time the verifier received this block: the non-finalized state's
+        // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
+        let received_time = std::time::Instant::now();
+
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
@@ -366,6 +370,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
+                received_time: Some(received_time),
             };
 
             // Return early for proposal requests.
