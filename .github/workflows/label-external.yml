@@ -1,0 +1,35 @@
+# Labels issues and PRs opened by people outside the maintainer team, so outside work can be
+# filtered. GitHub already classifies every author (`author_association`); this only turns that
+# into the `external-contribution` label, which used to be applied by hand and drifted.
+name: Label External Contributions
+
+on:
+  issues:
+    types: [opened]
+  # zizmor: ignore[dangerous-triggers] -- nothing is checked out and no PR code runs; the job
+  # reads the trusted event payload and applies a label.
+  pull_request_target:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  label:
+    name: Label outside author
+    # Owners, members and collaborators are the team; bots (dependabot, release-plz, CI) are not
+    # contributions.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                github.event.issue.author_association || github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Add the external-contribution label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: gh issue edit "${NUMBER}" --repo "${REPOSITORY}" --add-label external-contribution
