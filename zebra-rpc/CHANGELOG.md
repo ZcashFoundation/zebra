@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+### Changed
+
+- The JSON-RPC version compatibility middleware no longer copies the request body an extra time when
+  building the rewritten request; the buffer is reclaimed in place when uniquely owned
+  ([#10574](https://github.com/ZcashFoundation/zebra/issues/10574)).
+
 ## [16.0.0] - 2026-08-10
 
 ### Breaking Changes
