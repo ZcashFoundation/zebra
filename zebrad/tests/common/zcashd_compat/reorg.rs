@@ -20,6 +20,10 @@ const DEFAULT_REORG_CHURN_ITERATIONS: u32 = 30;
 const CHAIN_HEIGHT_DEEP: u32 = 295;
 const STANDARD_SYNC_TIMEOUT: Duration = Duration::from_secs(90);
 const DEEP_REORG_SYNC_TIMEOUT: Duration = Duration::from_secs(120);
+/// Convergence budget for reorgs past the pre-`zebra-compat-v1.2.0` sidecar
+/// limit of 99 blocks. [`DEEP_REORG_SYNC_TIMEOUT`] was tuned for 80-block
+/// branches, so deeper replacements get proportionally more time.
+const VERY_DEEP_REORG_SYNC_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long zcashd gets to (wrongly) follow an equal-work replacement tip
 /// before we assert it held its first-seen chain.
 const EQUAL_WORK_SETTLE: Duration = Duration::from_secs(10);
@@ -118,6 +122,41 @@ pub async fn deep_reorg_depth80() -> Result<()> {
 
     force_zebra_reorg(&setup, 11, 80).await?;
     wait_for_tips_match(&setup, DEEP_REORG_SYNC_TIMEOUT).await?;
+
+    setup.teardown()
+}
+
+/// Verifies that zcashd follows a 150-block replacement branch.
+///
+/// Following the `depth80` convention, the branch length names the blocks mined,
+/// so this disconnects 149 blocks -- that disconnect depth is what has to clear
+/// the pre-`zebra-compat-v1.2.0` sidecar limit of 99, where zcashd shut itself
+/// down instead of reorging. Zebra's own `MAX_BLOCK_REORG_HEIGHT` is 1000, so
+/// the sidecar must follow at least this far.
+///
+/// Requires the `zebra-compat-v1.2.0` sidecar or newer. Against v1.1.0 zcashd
+/// exits mid-reorg, so this fails while polling a dead RPC port with
+/// `zcashd getblockchaininfo: expected value at line 1 column 1` rather than a
+/// clean assertion; that message means the sidecar is too old, not that the
+/// RPC is malformed.
+///
+/// `force_zebra_reorg` holds zcashd under SIGSTOP for the whole mine, about
+/// twice the depth-80 pause; on regtest there is no fallback peer, so a dropped
+/// connection surfaces here as a convergence timeout.
+pub async fn deep_reorg_depth150() -> Result<()> {
+    let Some(setup) = setup_zcashd_compat().await? else {
+        return Ok(());
+    };
+
+    if !setup.can_mutate() {
+        return setup.teardown();
+    }
+
+    setup.zebra_client.generate(160).await?;
+    wait_for_tips_match(&setup, VERY_DEEP_REORG_SYNC_TIMEOUT).await?;
+
+    force_zebra_reorg(&setup, 11, 150).await?;
+    wait_for_tips_match(&setup, VERY_DEEP_REORG_SYNC_TIMEOUT).await?;
 
     setup.teardown()
 }
