@@ -7,7 +7,10 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse, PeerSocketAddr};
+use crate::{
+    meta_addr::MetaAddr, protocol::internal::InventoryResponse, FindResponseFeedback,
+    PeerSocketAddr,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -45,7 +48,13 @@ pub enum Response {
     /// The list contains zero or more block hashes.
     //
     // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
-    BlockHashes(Vec<block::Hash>),
+    BlockHashes {
+        /// The [`block::Hash`] values returned by the peer.
+        hashes: Vec<block::Hash>,
+        #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        /// Opaque [`FindResponseFeedback`] for classifying this response.
+        feedback: Option<FindResponseFeedback>,
+    },
 
     /// An ordered list of block headers.
     ///
@@ -92,7 +101,9 @@ impl fmt::Display for Response {
 
             Response::Pong(duration) => format!("Pong {{ latency: {duration:?} }}"),
 
-            Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
+            Response::BlockHashes { hashes, .. } => {
+                format!("BlockHashes {{ hashes: {} }}", hashes.len())
+            }
             Response::BlockHeaders(headers) => {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
             }
@@ -138,7 +149,7 @@ impl Response {
 
             Response::Pong(_) => "Pong",
 
-            Response::BlockHashes(_) => "BlockHashes",
+            Response::BlockHashes { .. } => "BlockHashes",
             Response::BlockHeaders(_) => "BlockHeaders",
             Response::TransactionIds(_) => "TransactionIds",
 

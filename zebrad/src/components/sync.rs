@@ -830,11 +830,17 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes(hashes)) => {
+                Ok(zn::Response::BlockHashes {
+                    hashes,
+                    mut feedback,
+                }) => {
                     trace!(?hashes);
 
                     let hashes = hashes.as_slice();
                     if hashes.is_empty() {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     }
 
@@ -851,6 +857,9 @@ where
                     let unknown_hashes = if let Some(index) = first_unknown {
                         &hashes[index..]
                     } else {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     };
 
@@ -893,6 +902,10 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+
+                    if let Some(feedback) = feedback.take() {
+                        feedback.mark_useful();
+                    }
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -958,7 +971,10 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
+                    Ok(zn::Response::BlockHashes {
+                        hashes,
+                        mut feedback,
+                    }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -980,12 +996,20 @@ where
                                 rest
                             }
                             // We ignore these responses
-                            [] => continue,
+                            [] => {
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
+                                continue;
+                            }
                             [single_hash] => {
                                 debug!(?single_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                             [first_hash, second_hash, rest @ ..] => {
@@ -995,12 +1019,23 @@ where
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response that starts with two unexpected hashes");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                         };
 
                         if unknown_hashes.is_empty() {
-                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
+                            debug!(
+                                ?tip.tip,
+                                "response contained no new hashes after the expected overlap",
+                            );
+
+                            if let Some(feedback) = feedback.take() {
+                                feedback.mark_stalled();
+                            }
+
                             continue;
                         }
 
@@ -1043,6 +1078,10 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_useful();
+                        }
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
