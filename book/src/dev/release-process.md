@@ -123,7 +123,7 @@ The normal release path requires 2 maintainer actions:
 1. Review the latest Release PR after every required check passes.
 2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `A-release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 

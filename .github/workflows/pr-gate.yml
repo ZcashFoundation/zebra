@@ -20,7 +20,7 @@ concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-      github.event.label.name != 'A-release' &&
+      github.event.label.name != 'release' &&
       'ignored-label' ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
@@ -39,12 +39,12 @@ env:
 
 jobs:
   changes:
-    # Only the A-release label affects gate results, and only a title or base edit
+    # Only the release label affects gate results, and only a title or base edit
     # can change the declaration this gate reads. Every other label and edit event
     # is a no-op, so it must not spend a runner or replace the required check.
     if: >-
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     runs-on: ubuntu-latest
@@ -167,11 +167,11 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
-      contains(github.event.pull_request.labels.*.name, 'A-release')
+      contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest-xl
     timeout-minutes: 90
     steps:
@@ -272,7 +272,7 @@ jobs:
     name: >-
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-        github.event.label.name != 'A-release' &&
+        github.event.label.name != 'release' &&
         'Label does not affect the PR gate' ||
         github.event.action == 'edited' &&
         github.event.changes.title == null &&
@@ -284,7 +284,7 @@ jobs:
     if: >-
       always() &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'A-release') &&
+      github.event.label.name == 'release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     needs: [changes, semver-checks, changelog-gate, release-readiness]
