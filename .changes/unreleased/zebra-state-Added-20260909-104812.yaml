@@ -1,0 +1,3 @@
+project: zebra-state
+kind: Added
+body: '`NonFinalizedState` now reports `zcash.pool.value.zatoshis` and `zcash.pool.notes.created` gauges, labeled by pool `name`, for the best chain tip rather than the finalized state ([#11391](https://github.com/ZcashFoundation/zebra/pull/11391)).'
