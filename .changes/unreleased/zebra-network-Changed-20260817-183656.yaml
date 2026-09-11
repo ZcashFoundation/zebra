@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Concurrent reconnection-candidate selection can no longer hand the same peer to two connection attempts: a candidate is now chosen and marked `AttemptPending` in a single atomic step. `init()`, the public API, and network-visible behavior are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).'
-time: 2026-08-17T18:36:56.000000000Z

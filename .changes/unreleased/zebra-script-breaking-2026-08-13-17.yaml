@@ -1,4 +1,0 @@
-project: zebra-script
-kind: breaking
-body: "`Sigops::scripts` returns `Vec<Vec<u8>>` instead of an iterator. Transaction inputs and outputs are rebuilt from `zcash_primitives` on each call, so the scripts cannot borrow from the transaction ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00
