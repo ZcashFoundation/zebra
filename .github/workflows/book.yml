@@ -79,10 +79,14 @@ jobs:
           mkdir -p target/docs/internal
           cp -r target/internal/doc/* target/docs/internal/
         env:
-          # Keep in sync with ./lint.yml:jobs.docs
-          # The -A and -W settings must be the same as the `rustdocflags` in:
+          # No `-D warnings` here: rustdoc lints must not block publishing the
+          # docs site. A broken intra-doc link kept the deploy skipped for days
+          # in September 2026. The blocking `-D warnings` policy lives in
+          # ./advisory.yml:jobs.docs ("Nightly documentation"), where #10968 put
+          # it. A real `cargo doc` failure still fails this step.
+          # The -A settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-          RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
+          RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Include benchmark dashboard
         # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into
