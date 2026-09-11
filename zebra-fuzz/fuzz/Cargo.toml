@@ -55,6 +55,9 @@ hex = "0.4.3"
 # p2p_*/addr_message_fuzz: wire Codec Decoder/Encoder traits + BytesMut buffer
 bytes = "1.10"
 tokio-util = { version = "0.7.14", features = ["codec"] }
+# generate_v6_seeds bundle types
+orchard = "0.15.0"
+zcash_protocol = "0.10.0"
 
 [[bin]]
 name = "rpc_handler_fuzz"
