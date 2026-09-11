@@ -245,3 +245,44 @@ fn dequeue_children_preserves_same_height_siblings() -> Result<()> {
 
     Ok(())
 }
+
+/// Children of the same parent must dequeue in arrival order: the non-finalized state
+/// stamps receipt sequences at commit, and equal-work chain ties are broken by
+/// preferring the first-received block, so the queue must not reorder siblings that
+/// were waiting for a missing parent (the receipt-order half of
+/// <https://github.com/ZcashFoundation/zebra/issues/11240>).
+#[test]
+fn dequeue_children_returns_siblings_in_arrival_order() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let parent_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+
+    // Five siblings of the same parent with distinct hashes, queued in a known order.
+    let siblings: Vec<Arc<Block>> = (1u8..=5)
+        .map(|index| {
+            parent_block
+                .make_fake_child()
+                .set_block_commitment([index; 32])
+        })
+        .collect();
+
+    let mut queue = QueuedBlocks::default();
+    for sibling in &siblings {
+        queue.queue(sibling.clone().into_queued());
+    }
+
+    let dequeued: Vec<_> = queue
+        .dequeue_children(parent_block.hash())
+        .into_iter()
+        .map(|(block, _)| block.hash)
+        .collect();
+    let expected: Vec<_> = siblings.iter().map(|sibling| sibling.hash()).collect();
+
+    assert_eq!(
+        dequeued, expected,
+        "siblings of the same parent must dequeue in the order they were queued"
+    );
+
+    Ok(())
+}

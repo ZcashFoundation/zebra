@@ -5,6 +5,7 @@ use std::{
     iter, mem,
 };
 
+use indexmap::IndexSet;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
@@ -37,7 +38,12 @@ pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
     blocks: HashMap<block::Hash, QueuedSemanticallyVerified>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
-    by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
+    ///
+    /// The per-parent set preserves insertion order, so children of the same parent are
+    /// dequeued in the order they arrived: the non-finalized state stamps receipt
+    /// sequences at commit, and this keeps commit order equal to arrival order for
+    /// equal-work siblings that were queued while their parent was missing.
+    by_parent: HashMap<block::Hash, IndexSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
     /// Known UTXOs.
@@ -88,7 +94,11 @@ impl QueuedBlocks {
     }
 
     /// Dequeue and return all blocks that were waiting for the arrival of
-    /// `parent`.
+    /// `parent`, in the order they arrived.
+    ///
+    /// The arrival order matters: these blocks are committed in the returned order, and
+    /// the non-finalized state breaks equal-work chain ties by preferring the block
+    /// committed first (see `receipt_sequence` in `ContextuallyVerifiedBlock`).
     #[instrument(skip(self), fields(%parent_hash))]
     pub fn dequeue_children(
         &mut self,
@@ -181,7 +191,8 @@ impl QueuedBlocks {
                 );
             } else {
                 assert!(
-                    parent_list.remove(&hash),
+                    // `shift_remove` keeps the remaining children in arrival order.
+                    parent_list.shift_remove(&hash),
                     "hash must be present in parent hash list"
                 );
             }

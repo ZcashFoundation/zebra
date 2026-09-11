@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Equal-work chain ties now prefer the first-received chain, per the protocol specification, instead of the higher tip hash. Each block committed to the non-finalized state is stamped with a receipt sequence (like zcashd''s `nSequenceId`), `Chain::cmp` breaks work ties on the tip''s sequence, and blocks queued while their parent was missing are committed in arrival order, so an already-adopted tip is no longer displaced by a later-arriving equal-work sibling ([#11240](https://github.com/ZcashFoundation/zebra/issues/11240)).'
+time: 2026-08-18T18:04:34.000000000Z
