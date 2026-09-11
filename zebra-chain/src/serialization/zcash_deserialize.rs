@@ -112,7 +112,8 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
 
 /// `zcash_deserialize_external_count`, specialised for raw bytes.
 ///
-/// This allows us to optimize the inner loop into a single call to `read_exact()`.
+/// This lets us read the bytes in bulk with `read_exact()`, instead of
+/// deserializing one element at a time, while bounding the upfront allocation.
 ///
 /// This function has a `zcash_` prefix to alert the reader that the
 /// serialization in use is consensus-critical serialization, rather than
@@ -126,8 +127,24 @@ pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
             "Byte vector longer than MAX_U8_ALLOCATION",
         ));
     }
-    let mut vec = vec![0u8; external_count];
-    reader.read_exact(&mut vec)?;
+    // Bound the upfront allocation. `external_count` is peer-supplied, so rather
+    // than reserving all of it before reading a single byte (`vec![0u8; external_count]`),
+    // cap the initial reservation and grow the buffer in `MAX_INITIAL_ALLOCATION`-sized
+    // steps as real bytes arrive. `read_exact` keeps the original `UnexpectedEof`
+    // semantics when the reader ends early, so a lying `external_count` can never force
+    // more than the delivered bytes (plus one step) to be allocated. This is the
+    // bytes-path counterpart of the cap added to `zcash_deserialize_external_count`
+    // in PR #10563, and also bounds `zcash_deserialize_string_external_count`, which
+    // delegates here.
+    let mut vec = Vec::with_capacity(external_count.min(MAX_INITIAL_ALLOCATION));
+    let mut remaining = external_count;
+    while remaining > 0 {
+        let step = remaining.min(MAX_INITIAL_ALLOCATION);
+        let filled = vec.len();
+        vec.resize(filled + step, 0);
+        reader.read_exact(&mut vec[filled..])?;
+        remaining -= step;
+    }
     Ok(vec)
 }
 
