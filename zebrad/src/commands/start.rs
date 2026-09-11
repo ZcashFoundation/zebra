@@ -497,7 +497,7 @@ impl StartCmd {
         let block_template_task_handle =
             if config.rpc.listen_addr.is_some() || is_internal_miner_enabled {
                 rpc_impl
-                    .spawn_block_template_updater()
+                    .spawn_block_template_updater(mempool_transaction_subscriber.clone())
                     .inspect(|_| info!("spawned block template updater task"))
             } else {
                 None

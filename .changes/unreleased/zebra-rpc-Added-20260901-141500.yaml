@@ -1,6 +1,7 @@
 project: zebra-rpc
 kind: Added
-body: 'Method `RpcImpl::spawn_block_template_updater()`, which spawns a task that keeps a block
-  template precomputed for the current chain tip, and returns `None` when mining isn''t configured
+body: 'Method `RpcImpl::spawn_block_template_updater()`, which takes a
+  `MempoolTxSubscriber` and spawns a task that keeps a block template precomputed for the current
+  chain tip, and returns `None` when mining isn''t configured
   ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).'
 time: 2026-09-01T14:15:00.000000000Z
