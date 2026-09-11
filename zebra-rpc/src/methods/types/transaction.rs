@@ -1027,10 +1027,7 @@ impl TransactionObject {
                         one_time_pubkey: display_order(&ephemeral_key),
                         random_seed: display_order(joinsplit.random_seed()),
                         macs: joinsplit.macs().iter().map(display_order).collect(),
-                        proof: joinsplit
-                            .groth_proof_bytes()
-                            .map(|proof| proof.to_vec())
-                            .unwrap_or_default(),
+                        proof: transaction::sprout_joinsplit_proof_bytes(joinsplit),
                         ciphertexts: ciphertexts.iter().map(|c| c.to_vec()).collect(),
                     }
                 })
@@ -1161,6 +1158,49 @@ mod tests {
 
         // V4 JoinSplits carry Groth16 proofs.
         assert_eq!(rendered.proof.len(), 192);
+    }
+
+    /// The `proof` field must carry the 296-byte PHGR13 proof for V2/V3 transactions.
+    ///
+    /// The sibling test above only covers V4 (Groth16) JoinSplits. PHGR13 proofs have no
+    /// upstream accessor, so a Groth16-only extraction silently renders them as empty; this
+    /// uses testnet block 141,042, whose non-coinbase transactions are V2 with one JoinSplit
+    /// each.
+    #[test]
+    fn vjoinsplit_proof_is_populated_for_phgr13_transactions() {
+        let block: Block = zebra_test::vectors::BLOCK_TESTNET_141042_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let tx = block
+            .transactions
+            .iter()
+            .find(|tx| tx.sprout_joinsplit_descriptions().next().is_some())
+            .expect("block 141,042 contains transactions with JoinSplits")
+            .clone();
+
+        assert_eq!(tx.version(), 2, "the fixture must exercise a PHGR13 proof");
+
+        let object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &Network::new_default_testnet(),
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+
+        assert!(!object.joinsplits.is_empty());
+        for rendered in &object.joinsplits {
+            // V2/V3 JoinSplits carry PHGR13 proofs.
+            assert_eq!(
+                rendered.proof.len(),
+                296,
+                "the PHGR13 proof must be rendered, not replaced with an empty vector",
+            );
+        }
     }
 
     /// The `Default` impl and coinbase path legitimately have no JoinSplits.

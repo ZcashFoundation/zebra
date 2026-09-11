@@ -1,0 +1,3 @@
+project: zebra-rpc
+kind: Changed
+body: "The `proof` field in verbose JoinSplit output now contains the 296-byte PHGR13 proof for V2/V3 transactions; it was previously empty ([#11415](https://github.com/ZcashFoundation/zebra/pull/11415))"
