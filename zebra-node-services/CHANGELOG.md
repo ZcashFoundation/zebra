@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+### Changed
+
+- The `rpc-client` `RpcRequestClient` now issues a distinct id per request and, in
+  `json_result_from_call`, rejects a response whose `jsonrpc` version is missing or whose `id`
+  doesn't match the request, instead of accepting any well-formed response
+  ([#10687](https://github.com/ZcashFoundation/zebra/issues/10687)).
+
 ## [10.0.0] - 2026-08-10
 
 ### Breaking Changes
