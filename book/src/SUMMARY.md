@@ -13,6 +13,7 @@
   - [Tracing Zebra](user/tracing.md)
   - [Zebra Metrics](user/metrics.md)
   - [Zebra Health Endpoints](user/health.md)
+  - [zcashd API Migration Guide](user/zcashd-api-migration-guide.md)
   - [zcashd-compat Mode](user/zcashd-compat.md)
     - [Migrating an Existing zcashd Node](user/zcashd-compat-migration.md)
   - [Lightwalletd](user/lightwalletd.md)
