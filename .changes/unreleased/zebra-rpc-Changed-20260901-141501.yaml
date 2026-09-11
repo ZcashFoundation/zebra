@@ -1,0 +1,10 @@
+project: zebra-rpc
+kind: Changed
+body: 'The `getblocktemplate` RPC answers from the template precomputed by
+  `RpcImpl::spawn_block_template_updater()`, so a call validates the chain tip against the state
+  instead of reading the mempool, selecting transactions, and building a coinbase transaction. A
+  long polling call waits on that template, and returns when the task publishes a new one, when the
+  chain tip changes, or when `max_time` is reached. A precomputed template''s transactions can be a
+  few seconds behind the mempool, but it always extends the tip the state has committed
+  ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).'
+time: 2026-09-01T14:15:01.000000000Z
