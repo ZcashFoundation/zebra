@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Security
+body: '`misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity violations. The score reported by `router::RouterError`, `VerifyBlockError`, and `VerifyCheckpointError` for this error changes from 0 to 100 ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).'
+time: 2026-08-18T00:03:01.000000000Z
