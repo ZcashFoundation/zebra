@@ -308,8 +308,15 @@ fn adjust_difficulty_and_time_for_testnet(
         .try_into()
         .expect("valid blocks have in-range times");
 
+    // Use the candidate (next) block's height, not the previous block's. At a network
+    // upgrade activation boundary that changes the target spacing, the candidate block
+    // is governed by the new upgrade's rules, so the spacing must be looked up at its
+    // height. See #10621.
+    let candidate_block_height =
+        (previous_block_height + 1).expect("candidate block height is in range");
+
     let Some(minimum_difficulty_spacing) =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, candidate_block_height)
     else {
         // Returns early if the testnet minimum difficulty consensus rule is not active
         return;
@@ -548,5 +555,71 @@ mod tests {
             result.max_time,
             DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN)
         );
+    }
+
+    /// Regression test for #10621: at a network-upgrade boundary that changes the target
+    /// spacing, the minimum-difficulty gap must be looked up at the candidate (next) block's
+    /// height, not the previous block's.
+    ///
+    /// Blossom activates exactly at the candidate height, so the previous block is pre-Blossom
+    /// (150 s spacing, `6 * 150 = 900` s gap) while the candidate is Blossom (75 s spacing,
+    /// `6 * 75 = 450` s gap). With `cur_time` at `PREV + 500` — past the candidate's 450 s gap
+    /// but well within the previous block's stale 900 s gap — the candidate is a
+    /// minimum-difficulty template. The old code looked the gap up at the previous height and so
+    /// wrongly left it at standard difficulty.
+    #[test]
+    fn spacing_uses_candidate_height_across_nu_boundary() {
+        use zebra_chain::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+        // A candidate height well above the minimum-difficulty start height (299188).
+        let previous_block_height = Height(1_000_000);
+        let candidate_block_height = Height(1_000_001);
+
+        let network = Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                before_overwinter: Some(1),
+                sapling: Some(2),
+                blossom: Some(candidate_block_height.0),
+                // Canopy must be set for `to_network` (it defines the mandatory checkpoint); put
+                // it just above the boundary so it doesn't affect the two heights under test.
+                heartwood: Some(candidate_block_height.0 + 1),
+                canopy: Some(candidate_block_height.0 + 2),
+                ..Default::default()
+            })
+            .expect("activation heights are valid")
+            .clear_funding_streams()
+            .to_network()
+            .expect("configured testnet is valid");
+
+        // The boundary this test depends on: the spacing changes between the two heights.
+        assert_eq!(
+            NetworkUpgrade::current(&network, previous_block_height),
+            NetworkUpgrade::Sapling
+        );
+        assert_eq!(
+            NetworkUpgrade::current(&network, candidate_block_height),
+            NetworkUpgrade::Blossom
+        );
+
+        // Past the candidate's 450 s gap, but within the previous block's stale 900 s gap.
+        let cur = PREV + 500;
+        let mut result = chain_info(cur);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            previous_block_height,
+            recent_block_data(&network),
+        );
+
+        // The candidate is a minimum-difficulty template: difficulty recomputed to the PoWLimit
+        // and min_time raised past the candidate's 450 s gap (PREV + 451). The buggy code, using
+        // the previous block's 900 s gap, left this at standard difficulty with the sentinel
+        // difficulty unchanged.
+        assert_eq!(
+            result.expected_difficulty,
+            network.target_difficulty_limit().to_compact()
+        );
+        assert_eq!(result.min_time, DateTime32::from(PREV + 6 * 75 + 1));
     }
 }
