@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: '`getblocktemplate` builds the shielded coinbase with the Sapling prover shared with `zebra-consensus` instead of parsing the bundled Sapling parameters on every build, which removes a parameter parse from every coinbase construction, transparent miner addresses included.'
-time: 2026-08-26T15:26:55.000000000Z
