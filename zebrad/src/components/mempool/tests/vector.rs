@@ -5,7 +5,10 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use tokio::time::{self, timeout};
+use tokio::{
+    sync::Notify,
+    time::{self, timeout},
+};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
@@ -25,7 +28,7 @@ use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
-    mempool::{self, *},
+    mempool::{self, queue_checker::RATE_LIMIT_DELAY, *},
     sync::{RecentSyncLengths, SyncStatus},
 };
 
@@ -1128,6 +1131,7 @@ async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), 
         mut tx_verifier,
         mut recent_syncs,
         mempool_transaction_receiver,
+        _transaction_verified,
     ) = setup_with_mempool_config(&network, mempool_config, true, false).await;
 
     drop(mempool_transaction_receiver);
@@ -1184,6 +1188,115 @@ async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), 
             .unbox_mempool_error(),
         MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
+
+    Ok(())
+}
+
+/// Checks that a verified transaction is stored and announced because verification told the queue
+/// checker, rather than because the queue checker's rate limit elapsed.
+///
+/// The clock is paused, so the only way the rate limit can contribute is by advancing time. If the
+/// change arrives before [`RATE_LIMIT_DELAY`] of virtual time passes, verification is what
+/// prompted it.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit(
+) -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mempool_config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    };
+
+    let (
+        mut mempool,
+        mut peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mut mempool_transaction_receiver,
+        transaction_verified,
+    ) = setup_with_mempool_config(&network, mempool_config, true, false).await;
+
+    mempool.enable(&mut recent_syncs).await;
+
+    let tx = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("mainnet test vectors contain transactions")
+        .transaction;
+
+    // The queue checker holds the only handle that will call the mempool from here on, so nothing
+    // else can drain the verification result on its behalf.
+    let mempool = Buffer::new(BoxService::new(mempool), 1);
+    let queue_checker = QueueChecker::spawn(mempool.clone(), transaction_verified);
+
+    let mut queueing_mempool = mempool.clone();
+    let queued = queueing_mempool
+        .ready()
+        .await
+        .expect("mempool is ready")
+        .call(Request::Queue(vec![tx.id.into()]));
+
+    let download = peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available((tx.clone(), None)),
+            ]));
+        });
+
+    let (queued, ()) = futures::join!(queued, download);
+    assert!(matches!(
+        queued.expect("queue request succeeds"),
+        Response::Queued(_)
+    ));
+
+    // Everything up to here polled the mempool, so measure from the point where only the queue
+    // checker is left to notice the verification.
+    let queued_at = time::Instant::now();
+
+    tx_verifier
+        .expect_request_that(|_| true)
+        .map(|responder| {
+            let transaction = responder.request().clone().transaction;
+
+            responder.respond(transaction::MempoolResponse::from(
+                VerifiedUnminedTx::new(
+                    transaction,
+                    Amount::try_from(1_000_000).expect("valid fee"),
+                    0,
+                    0,
+                    Arc::new(vec![]),
+                )
+                .expect("transaction passes ZIP-317 checks"),
+            ));
+        })
+        .await;
+
+    let change = timeout(
+        time::Duration::from_secs(60),
+        mempool_transaction_receiver.recv(),
+    )
+    .await
+    .expect("the queue checker should store and announce the transaction")
+    .expect("the change channel stays open");
+
+    assert_eq!(
+        change,
+        MempoolChange::added([tx.id].into_iter().collect()),
+        "storing a verified transaction should announce it",
+    );
+
+    assert!(
+        queued_at.elapsed() < RATE_LIMIT_DELAY,
+        "the announcement should follow verification, not the queue checker's {RATE_LIMIT_DELAY:?} \
+         rate limit, but it took {:?}",
+        queued_at.elapsed(),
+    );
+
+    queue_checker.abort();
 
     Ok(())
 }
@@ -1715,6 +1828,7 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
         _tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
+        _transaction_verified,
     ) = setup_with_mempool_config(&network, mempool_config, true, true).await;
 
     service.enable(&mut recent_syncs).await;
@@ -2214,7 +2328,26 @@ async fn setup(
         ..Default::default()
     };
 
-    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block, true).await
+    let (
+        mempool,
+        peer_set,
+        state_service,
+        chain_tip_change,
+        tx_verifier,
+        recent_syncs,
+        mempool_transaction_receiver,
+        _transaction_verified,
+    ) = setup_with_mempool_config(network, mempool_config, should_commit_genesis_block, true).await;
+
+    (
+        mempool,
+        peer_set,
+        state_service,
+        chain_tip_change,
+        tx_verifier,
+        recent_syncs,
+        mempool_transaction_receiver,
+    )
 }
 
 async fn setup_with_mempool_config(
@@ -2230,6 +2363,7 @@ async fn setup_with_mempool_config(
     MockTxVerifier,
     RecentSyncLengths,
     tokio::sync::broadcast::Receiver<MempoolChange>,
+    Arc<Notify>,
 ) {
     let peer_set = MockService::build().for_unit_tests();
 
@@ -2243,7 +2377,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, transaction_verified) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2295,6 +2429,7 @@ async fn setup_with_mempool_config(
         tx_verifier,
         recent_syncs,
         mempool_transaction_subscriber.subscribe(),
+        transaction_verified,
     )
 }
 
@@ -2328,6 +2463,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2416,6 +2552,7 @@ async fn verification_timeout_releases_peer_slot() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");

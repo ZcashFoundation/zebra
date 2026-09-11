@@ -420,7 +420,7 @@ impl StartCmd {
         );
 
         info!("initializing mempool");
-        let (mempool, mempool_transaction_subscriber) = Mempool::new(
+        let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
             &config.network.network,
             &config.mempool,
             peer_set.clone(),
@@ -599,7 +599,8 @@ impl StartCmd {
             };
 
         info!("spawning mempool queue checker task");
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
+        let mempool_queue_checker_task_handle =
+            mempool::QueueChecker::spawn(mempool.clone(), mempool_transaction_verified);
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
