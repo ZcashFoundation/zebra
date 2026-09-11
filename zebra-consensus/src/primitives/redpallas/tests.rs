@@ -81,3 +81,27 @@ async fn batch_flushes_on_max_latency() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for #10598: dropping a verifier flushes its batch
+/// synchronously (via `rayon::scope`), so the result is sent before `drop`
+/// returns, rather than on a detached `spawn_fifo` task that could be abandoned
+/// on shutdown.
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_flushes_batch_synchronously() {
+    let verifier = Verifier::default();
+    let mut rx = verifier.tx.subscribe();
+
+    // No batch result has been sent yet.
+    assert!(rx.borrow_and_update().is_none());
+
+    drop(verifier);
+
+    // With `rayon::scope`, `flush_blocking` blocks until the batch is verified and
+    // the result sent, so it is present synchronously without awaiting. Under the
+    // old `spawn_fifo` the send happened after `drop` returned, so this could still
+    // be `None`.
+    assert!(
+        rx.borrow().is_some(),
+        "dropping the verifier must flush the batch before returning"
+    );
+}
