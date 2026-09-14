@@ -157,6 +157,7 @@ pub fn height_to_block_height(h: block::Height) -> zcash_protocol::consensus::Bl
 }
 
 /// Returns an error if the height is out of the valid Zebra range.
+#[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
 pub fn block_height_to_height(
     bh: zcash_protocol::consensus::BlockHeight,
 ) -> Result<block::Height, SerializationError> {

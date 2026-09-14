@@ -27,7 +27,9 @@ delete_disks() {
     done <<< "${disks}"
 }
 
-# Disks from PR jobs and other jobs that use a commit hash.
+# Disks from PR jobs and other jobs whose name ends in a run id or a commit hash.
+# Same selector contract as gcp-delete-old-instances.sh: decimal run ids match
+# `[0-9a-f]` only incidentally - do not tighten this to a hex commit hash.
 delete_disks 'name~-[0-9a-f]{7,}$'
 # Disks prefixed with "zebrad-", but never the persistent "zebrad-cache-*" chain-state disks.
 delete_disks 'name~^zebrad- AND NOT name~^zebrad-cache'
