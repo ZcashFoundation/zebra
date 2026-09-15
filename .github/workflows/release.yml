@@ -321,6 +321,7 @@ jobs:
           cache-workspaces: release-source -> target
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
+        working-directory: release-source
         run: .github/scripts/apt-install.sh libclang-dev
       - name: Check desired release state
         id: cargo-release
@@ -405,6 +406,7 @@ jobs:
           cache-workspaces: release-source -> target
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
+        working-directory: release-source
         run: .github/scripts/apt-install.sh libclang-dev
       - name: Generate release app token
         id: app-token
