@@ -106,6 +106,57 @@ async fn failed_retry_enqueue_releases_neutral_feedback() {
     assert_eq!(sync.downloads.in_flight(), 0);
 }
 
+/// Round cleanup releases unattempted retry feedback after an enqueue failure.
+#[tokio::test]
+async fn failed_retry_cleanup_releases_remaining_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut sync = ChainSync::with_unavailable_network();
+
+    let (failed_feedback, failed_observer) = zn::FindResponseFeedback::new_for_test();
+    let (remaining_feedback, remaining_observer) = zn::FindResponseFeedback::new_for_test();
+
+    let failed_hash = Hash([2; 32]);
+    let remaining_hash = Hash([3; 32]);
+
+    sync.track_find_response(&[failed_hash], Some(failed_feedback));
+    sync.track_find_response(&[remaining_hash], Some(remaining_feedback));
+
+    sync.reobtain_hashes.insert(failed_hash);
+    sync.reobtain_hashes.insert(remaining_hash);
+
+    sync.block_reobtain_retries.insert(remaining_hash, 1);
+
+    let result = timeout(BLOCK_VERIFY_TIMEOUT, sync.finish_pending_download())
+        .await
+        .expect("the first enqueue failure must stop retry scheduling");
+
+    assert!(matches!(
+        result,
+        Err(BlockDownloadVerifyError::NetworkServiceError { .. })
+    ));
+    assert_eq!(failed_observer.try_outcome(), Ok(None));
+    assert_eq!(
+        failed_observer.try_outcome(),
+        Err(TryRecvError::Disconnected)
+    );
+    assert_eq!(remaining_observer.try_outcome(), Err(TryRecvError::Empty));
+    assert!(sync.find_response_progress.contains_key(&remaining_hash));
+
+    // Run the round-error cleanup explicitly, without dropping the syncer.
+    sync.cancel_downloads();
+
+    assert_eq!(remaining_observer.try_outcome(), Ok(None));
+    assert_eq!(
+        remaining_observer.try_outcome(),
+        Err(TryRecvError::Disconnected)
+    );
+    assert!(sync.find_response_progress.is_empty());
+    assert!(sync.reobtain_hashes.is_empty());
+    assert!(sync.block_reobtain_retries.is_empty());
+    assert_eq!(sync.downloads.in_flight(), 0);
+}
+
 /// A syncer whose block network fails before a request can be queued.
 type UnavailableNetworkSync = ChainSync<
     UnavailableNetwork,
