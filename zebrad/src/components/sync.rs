@@ -687,7 +687,7 @@ where
 
     /// Drives final retries and processes one remaining download outcome.
     async fn finish_pending_download(&mut self) -> Result<(), BlockDownloadVerifyError> {
-        self.reobtain_missing_blocks().await;
+        self.reobtain_missing_blocks().await?;
 
         if let Some(response) = self.downloads.next().await {
             self.handle_download_response(response)?;
@@ -719,7 +719,7 @@ where
         }
         // Re-request any blocks that just failed with `NotFound`, before pausing
         // on the lookahead limit (#5709).
-        self.reobtain_missing_blocks().await;
+        self.reobtain_missing_blocks().await?;
         self.update_metrics();
 
         // Pause new downloads while the syncer or downloader are past their lookahead limits.
@@ -745,7 +745,7 @@ where
             // A block that just failed with `NotFound` is what unblocks the
             // verifier, so re-request it now rather than waiting for the pause
             // loop to clear — which it cannot until this block arrives (#5709).
-            self.reobtain_missing_blocks().await;
+            self.reobtain_missing_blocks().await?;
             self.update_metrics();
         }
 
@@ -789,19 +789,28 @@ where
     /// checkpoint verifier from advancing. Waiting for the lookahead pause to
     /// clear would deadlock — the pause cannot clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
-    async fn reobtain_missing_blocks(&mut self) {
+    ///
+    /// Non-duplicate enqueue failures resolve the hash's feedback and propagate
+    /// according to the existing sync restart policy.
+    async fn reobtain_missing_blocks(&mut self) -> Result<(), BlockDownloadVerifyError> {
         if self.reobtain_hashes.is_empty() {
-            return;
+            return Ok(());
         }
 
         for hash in std::mem::take(&mut self.reobtain_hashes) {
             // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it. A residual duplicate/queue error is
-            // benign — it means the block is already being handled.
-            if let Err(error) = self.downloads.download_and_verify(hash).await {
-                trace!(?hash, ?error, "re-download of missing block not queued");
+            // failed, so this re-queues it. Only a duplicate guarantees that
+            // an existing task still owns the work and can resolve feedback.
+            match self.downloads.download_and_verify(hash).await {
+                Ok(()) => {}
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                    trace!(?hash, "re-download of missing block already queued");
+                }
+                Err(error) => self.handle_download_response(Err((error, hash)))?,
             }
         }
+
+        Ok(())
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to

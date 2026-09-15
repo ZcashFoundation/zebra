@@ -44,9 +44,10 @@ async fn retry_during_active_download_preserves_feedback() {
     // Queue a retry while the original download is still in progress.
     test.sync.reobtain_hashes.insert(hash);
 
-    let () = timeout(BLOCK_VERIFY_TIMEOUT, test.sync.reobtain_missing_blocks())
+    timeout(BLOCK_VERIFY_TIMEOUT, test.sync.reobtain_missing_blocks())
         .await
-        .expect("queuing a duplicate retry must not wait for the existing download");
+        .expect("queuing a duplicate retry must not wait for the existing download")
+        .expect("an existing download makes a duplicate retry harmless");
 
     assert!(test.sync.reobtain_hashes.is_empty());
     assert_eq!(test.sync.downloads.in_flight(), 1);
