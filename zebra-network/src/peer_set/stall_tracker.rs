@@ -228,6 +228,11 @@ impl FindResponseFeedbackObserver {
             Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => None,
         }
     }
+
+    /// Reports pending feedback until classification observation is implemented.
+    pub fn try_outcome(&self) -> Result<Option<bool>, mpsc::error::TryRecvError> {
+        Err(mpsc::error::TryRecvError::Empty)
+    }
 }
 
 #[cfg(test)]
