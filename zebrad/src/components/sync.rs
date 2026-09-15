@@ -1261,16 +1261,20 @@ where
 
         let result = self.handle_block_response(Err(error));
 
-        if invalid || (missing && !self.block_reobtain_retries.contains_key(&hash)) {
-            self.reobtain_hashes.shift_remove(&hash);
+        if missing && self.block_reobtain_retries.contains_key(&hash) {
+            return result;
+        }
 
-            if let Some(responses) = self.find_response_progress.remove(&hash) {
-                for response in responses {
-                    if missing {
-                        response.record_missing_hash();
-                    } else {
-                        response.record_invalid_hash();
-                    }
+        self.reobtain_hashes.shift_remove(&hash);
+
+        if let Some(responses) = self.find_response_progress.remove(&hash) {
+            for response in responses {
+                if missing {
+                    response.record_missing_hash();
+                } else if invalid {
+                    response.record_invalid_hash();
+                } else {
+                    response.record_abandoned_hash();
                 }
             }
         }
