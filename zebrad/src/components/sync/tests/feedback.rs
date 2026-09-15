@@ -25,6 +25,8 @@ use super::super::{
 };
 use crate::config::ZebradConfig;
 
+mod retries;
+
 /// Queuing an obtain tips candidate must not credit an unverified block hash.
 #[tokio::test]
 async fn obtain_tips_feedback_waits_for_verification() {
