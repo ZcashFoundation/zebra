@@ -49,6 +49,13 @@ const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 /// re-subscribing immediately turns that into a full-speed busy loop that saturates the logs.
 const COMMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// How long to wait before re-subscribing after a subscription stream ends or returns an error.
+///
+/// A stream ending isn't necessarily a connection failure: the server can drop a subscription while
+/// it's still reachable, and re-subscribing then succeeds and is dropped again. Without this delay
+/// that becomes a full-speed subscribe/drop loop that saturates the logs on both sides.
+const STREAM_RESTART_DELAY: Duration = Duration::from_secs(1);
+
 /// How long to wait for a single `get_block` fetch while bridging the finalized gap before giving
 /// up. A single block fetch from a co-located node should return promptly, so this bounds a wedged
 /// connection without false-triggering; the bridge retries on the next subscription.
@@ -135,11 +142,13 @@ async fn update_finalized_chain_tip(
             Ok(Ok(None)) => {
                 tracing::warn!("chain_tip_change stream ended unexpectedly");
                 chain_tip_change_stream = None;
+                tokio::time::sleep(STREAM_RESTART_DELAY).await;
                 continue;
             }
             Ok(Err(err)) => {
                 tracing::warn!(?err, "error receiving chain tip change");
                 chain_tip_change_stream = None;
+                tokio::time::sleep(STREAM_RESTART_DELAY).await;
                 continue;
             }
             Err(_) => {
@@ -305,11 +314,13 @@ impl TrustedChainSync {
                 Ok(Ok(None)) => {
                     tracing::warn!("non-finalized state change stream ended unexpectedly");
                     non_finalized_blocks_listener = None;
+                    tokio::time::sleep(STREAM_RESTART_DELAY).await;
                     continue;
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(?err, "error receiving non-finalized state change");
                     non_finalized_blocks_listener = None;
+                    tokio::time::sleep(STREAM_RESTART_DELAY).await;
                     continue;
                 }
                 Err(_) => {
@@ -322,6 +333,7 @@ impl TrustedChainSync {
             let Some((block, hash)) = message.decode() else {
                 tracing::warn!("received malformed non-finalized state change message");
                 non_finalized_blocks_listener = None;
+                tokio::time::sleep(STREAM_RESTART_DELAY).await;
                 continue;
             };
 

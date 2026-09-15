@@ -56,7 +56,9 @@ pub use block::{subsidy::funding_stream_address, Request, VerifyBlockError, MAX_
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;
-pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
+pub use primitives::{
+    ed25519, groth16, halo2, redjubjub, redpallas, sapling::prover as sapling_prover,
+};
 pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].

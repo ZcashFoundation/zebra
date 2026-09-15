@@ -83,15 +83,15 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         hash: transaction::Hash([0x00; 32]),
         index: 0,
     };
-    let t0 = Arc::new(Transaction::V1 {
-        inputs: vec![Input::PrevOut {
+    let t0 = Arc::new(Transaction::test_v1(
+        vec![Input::PrevOut {
             outpoint: existing_outpoint,
             unlock_script: Script::new(&[]),
             sequence: 0xffff_ffff,
         }],
-        outputs: vec![Output::new(value, address.script())],
-        lock_time: LockTime::unlocked(),
-    });
+        vec![Output::new(value, address.script())],
+        LockTime::unlocked(),
+    ));
     let t0_hash = t0.hash();
 
     // T1 spends T0's output and creates V back to A.
@@ -99,15 +99,15 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         hash: t0_hash,
         index: 0,
     };
-    let t1 = Arc::new(Transaction::V1 {
-        inputs: vec![Input::PrevOut {
+    let t1 = Arc::new(Transaction::test_v1(
+        vec![Input::PrevOut {
             outpoint: t0_output_outpoint,
             unlock_script: Script::new(&[]),
             sequence: 0xffff_ffff,
         }],
-        outputs: vec![Output::new(value, address.script())],
-        lock_time: LockTime::unlocked(),
-    });
+        vec![Output::new(value, address.script())],
+        LockTime::unlocked(),
+    ));
 
     // Synthetic block. The header is a dummy from zebra-test (round-tripped); the writer
     // doesn't validate the header — only the transactions and the block height matter.

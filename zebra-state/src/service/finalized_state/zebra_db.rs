@@ -178,8 +178,13 @@ impl ZebraDb {
             db: disk_db,
         };
 
-        let zero_location_utxos =
-            db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
+        // One entry is enough to detect the corruption, and the height range has to start at
+        // zero, because the corrupt entries are exactly the ones at the zero address location.
+        let zero_location_utxos = db.address_utxo_locations(
+            AddressLocation::from_usize(Height(0), 0, 0),
+            Height(0)..=Height::MAX,
+            Some(1),
+        );
         if !zero_location_utxos.is_empty() {
             warn!(
                 "You have been impacted by the Zebra 2.4.0 address indexer corruption bug. \

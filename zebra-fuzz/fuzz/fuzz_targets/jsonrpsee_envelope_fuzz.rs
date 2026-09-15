@@ -532,7 +532,7 @@ fn build_envelope(data: &[u8]) -> Option<String> {
 ///   z_listunifiedreceivers(address: String)
 ///   getaddressbalance(req: GetAddressBalanceRequest)  // {"addresses":[...]}
 ///   getaddresstxids(req: GetAddressTxIdsRequest)      // {"addresses":[...], "start":N, "end":N}
-///   getaddressutxos(req: GetAddressUtxosRequest)      // {"addresses":[...]} OR {"chainInfo": false, "addresses":[...]}
+///   getaddressutxos(req: GetAddressUtxosRequest)      // {"addresses":[...]} OR {"chainInfo": false, "addresses":[...], "startHeight": 0, "maxEntries": 0}
 ///   z_gettreestate(hash_or_height: String)
 ///   z_getsubtreesbyindex(pool: String, start_index: u16, limit: Option<u16>)
 ///   invalidateblock(block_hash: String)

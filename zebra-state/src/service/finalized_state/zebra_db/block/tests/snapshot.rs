@@ -512,14 +512,16 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         let stored_address_location = stored_address_balance_location.address_location();
 
         let mut stored_utxo_locations = Vec::new();
-        for address_utxo_loc in state.address_utxo_locations(stored_address_location) {
+        for address_utxo_loc in
+            state.address_utxo_locations(stored_address_location, Height(0)..=Height::MAX, None)
+        {
             assert_eq!(address_utxo_loc.address_location(), stored_address_location);
 
             stored_utxo_locations.push(address_utxo_loc.unspent_output_location());
         }
 
         let mut stored_utxos = Vec::new();
-        for (utxo_loc, utxo) in state.address_utxos(&address) {
+        for (utxo_loc, utxo) in state.address_utxos(&address, Height(0)..=Height::MAX, None) {
             assert!(stored_utxo_locations.contains(&utxo_loc));
 
             stored_utxos.push(utxo);

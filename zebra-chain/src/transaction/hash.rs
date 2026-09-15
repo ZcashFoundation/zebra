@@ -40,7 +40,7 @@ use crate::serialization::{
     ZcashSerialize,
 };
 
-use super::{txid::TxIdBuilder, AuthDigest, Transaction};
+use super::{AuthDigest, Transaction};
 
 /// A transaction ID, which uniquely identifies mined v5 transactions,
 /// and all v1-v4 transactions.
@@ -68,25 +68,13 @@ impl AsRef<[u8; 32]> for Hash {
     }
 }
 
+// `From<&Transaction> for Hash` is defined in transaction.rs, where the txid is
+// delegated to `zcash_primitives`.
+
 impl From<Transaction> for Hash {
     fn from(transaction: Transaction) -> Self {
         // use the ref implementation, to avoid cloning the transaction
         Hash::from(&transaction)
-    }
-}
-
-impl From<&Transaction> for Hash {
-    fn from(transaction: &Transaction) -> Self {
-        let hasher = TxIdBuilder::new(transaction);
-        hasher
-            .txid()
-            .expect("zcash_primitives and Zebra transaction formats must be compatible")
-    }
-}
-
-impl From<Arc<Transaction>> for Hash {
-    fn from(transaction: Arc<Transaction>) -> Self {
-        Hash::from(transaction.as_ref())
     }
 }
 
@@ -222,18 +210,6 @@ impl WtxId {
     }
 }
 
-impl From<Transaction> for WtxId {
-    /// Computes the witnessed transaction ID for a transaction.
-    ///
-    /// # Panics
-    ///
-    /// If passed a pre-v5 transaction.
-    fn from(transaction: Transaction) -> Self {
-        // use the ref implementation, to avoid cloning the transaction
-        WtxId::from(&transaction)
-    }
-}
-
 impl From<&Transaction> for WtxId {
     /// Computes the witnessed transaction ID for a transaction.
     ///
@@ -242,18 +218,15 @@ impl From<&Transaction> for WtxId {
     /// If passed a pre-v5 transaction.
     fn from(transaction: &Transaction) -> Self {
         Self {
-            id: transaction.into(),
-            auth_digest: transaction.into(),
+            id: transaction.hash(),
+            auth_digest: transaction
+                .auth_digest()
+                .expect("WtxId requires a V5+ transaction with an auth digest"),
         }
     }
 }
 
 impl From<Arc<Transaction>> for WtxId {
-    /// Computes the witnessed transaction ID for a transaction.
-    ///
-    /// # Panics
-    ///
-    /// If passed a pre-v5 transaction.
     fn from(transaction: Arc<Transaction>) -> Self {
         transaction.as_ref().into()
     }

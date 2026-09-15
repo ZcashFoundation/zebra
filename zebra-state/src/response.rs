@@ -240,26 +240,37 @@ impl NonFinalizedBlocksListener {
     /// at the first block that fails it, so it sends the blocks a listener hasn't been sent yet by
     /// stopping at the first block it already has.
     ///
+    /// Blocks below a fork point belong to every chain that forked there, so each block is only
+    /// sent once, as part of the highest-work chain that contains it.
+    ///
     /// Returns an error if the receiver has been dropped.
     async fn take_and_send_blocks<'a>(
         sender: &tokio::sync::mpsc::Sender<(block::Hash, Arc<Block>)>,
         non_finalized_state: &'a NonFinalizedState,
         take_cond: impl Fn(&&ContextuallyVerifiedBlock) -> bool + Copy + 'a,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<(block::Hash, Arc<Block>)>> {
-        let new_blocks = non_finalized_state
-            .chain_iter()
-            .flat_map(move |chain| {
-                // Take blocks from the chain in reverse height order until we reach a block the
-                // listener already has, then restore ascending height order.
-                let mut blocks: Vec<_> =
-                    chain.blocks.values().rev().take_while(take_cond).collect();
-                blocks.reverse();
-                blocks
-            })
-            .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
+        let new_blocks = non_finalized_state.chain_iter().flat_map(move |chain| {
+            // Take blocks from the chain in reverse height order until we reach a block the
+            // listener already has, then restore ascending height order.
+            let mut blocks: Vec<_> = chain.blocks.values().rev().take_while(take_cond).collect();
+            blocks.reverse();
+            blocks
+        });
 
-        for new_block_with_hash in new_blocks {
-            sender.send(new_block_with_hash).await?;
+        // Chains share every block below their fork point, so without this the shared blocks would
+        // be sent once per chain: up to `MAX_NON_FINALIZED_CHAIN_FORKS` copies of a chain that can
+        // be `MAX_BLOCK_REORG_HEIGHT` blocks long, which overflows the channel buffer and makes the
+        // listener wait on the consumer during an ordinary initial send. `chain_iter()` yields the
+        // highest-work chain first, so a fork's remaining blocks still follow the shared ancestors
+        // they build on.
+        let mut sent_hashes = HashSet::new();
+
+        for cv_block in new_blocks {
+            if !sent_hashes.insert(cv_block.hash) {
+                continue;
+            }
+
+            sender.send((cv_block.hash, cv_block.block.clone())).await?;
         }
 
         Ok(())

@@ -80,18 +80,19 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     let max_money: Amount<NonNegative> = MAX_MONEY.try_into().expect("MAX_MONEY is a valid amount");
     // Two `MAX_MONEY` transparent outputs make the transaction-level output
     // sum exceed `MAX_MONEY`, so `value_balance` returns `Err`.
-    let coinbase = Transaction::V1 {
-        inputs: vec![transparent::Input::Coinbase {
+    let coinbase = Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
             height: Height(1),
-            data: vec![],
+            // 1 byte of data keeps the scriptSig at the 2-byte consensus minimum.
+            data: vec![0],
             sequence: 0xFFFF_FFFF,
         }],
-        outputs: vec![
+        vec![
             transparent::Output::new(max_money, transparent::Script::new(&[])),
             transparent::Output::new(max_money, transparent::Script::new(&[])),
         ],
-        lock_time: LockTime::unlocked(),
-    };
+        LockTime::unlocked(),
+    );
     let utxos = HashMap::new();
 
     assert!(

@@ -47,6 +47,16 @@ pub const EXTENDED_LAUNCH_DELAY: Duration = Duration::from_secs(45);
 /// it is using for its RPCs.
 pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 
+/// After we launch `lightwalletd`, wait this long for its startup logs.
+///
+/// `lightwalletd` logs its launch message immediately, but it retries `getblockchaininfo`
+/// with a backoff that adds up to about 6 minutes before it gives up and exits, so this must
+/// be longer than that.
+///
+/// This bounds the startup log checks, so a `lightwalletd` log format change fails in minutes
+/// instead of blocking for the full test timeout, which is up to 11 hours for the sync tests.
+pub const LIGHTWALLETD_STARTUP_DELAY: Duration = Duration::from_secs(10 * 60);
+
 /// The amount of time we wait between launching two conflicting nodes.
 ///
 /// We use a longer time to make sure the first node has launched before the second starts,

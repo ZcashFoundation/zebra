@@ -45,6 +45,7 @@ proptest-impl = [
     "rand_chacha",
     "tokio/tracing",
     "zebra-test",
+    "nonempty",
 ]
 
 bench = ["zebra-test"]
@@ -84,6 +85,7 @@ zcash_script.workspace = true
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
+nonempty = { workspace = true, optional = true }
 zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = { workspace = true }
@@ -148,6 +150,8 @@ tracing = { workspace = true }
 # Make the optional testing dependencies required
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
+nonempty = { workspace = true }
+serde_json = { workspace = true }
 
 rand = { workspace = true }
 rand_chacha = { workspace = true }

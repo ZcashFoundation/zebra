@@ -36,7 +36,7 @@ pub use write_zcash::WriteZcashExt;
 pub use zcash_deserialize::{
     zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
     zcash_deserialize_string_external_count, TrustedPreallocate, ZcashDeserialize,
-    ZcashDeserializeInto,
+    ZcashDeserializeInto, ZcashDeserializeWithContext,
 };
 pub use zcash_serialize::{
     zcash_serialize_bytes, zcash_serialize_bytes_external_count, zcash_serialize_empty_list,

@@ -1423,10 +1423,22 @@ pub enum ReadRequest {
     #[cfg(feature = "indexer")]
     SpendingTransactionId(Spend),
 
-    /// Looks up utxos for the provided addresses.
+    /// Looks up utxos for the provided addresses, in the provided height range,
+    /// returning at most `max_entries` of them.
     ///
     /// Returns a type with found utxos and transaction information.
-    UtxosByAddresses(HashSet<transparent::Address>),
+    UtxosByAddresses {
+        /// The addresses to look up utxos for.
+        addresses: HashSet<transparent::Address>,
+
+        /// The blocks to be queried for utxos.
+        height_range: RangeInclusive<block::Height>,
+
+        /// The maximum number of utxos to return, or `None` for no limit.
+        ///
+        /// The limit bounds the index scan, not just the response.
+        max_entries: Option<usize>,
+    },
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
@@ -1525,7 +1537,7 @@ impl ReadRequest {
             ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
-            ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
+            ReadRequest::UtxosByAddresses { .. } => "utxos_by_addresses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }

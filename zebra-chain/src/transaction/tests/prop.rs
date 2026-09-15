@@ -21,8 +21,7 @@ use crate::{
 /// Assert that `tx` round-trips through the wire format, or is rejected by the parser if it
 /// is a coinbase transaction with Sapling spends.
 fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
-    let has_coinbase_sapling_spends =
-        tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0;
+    let has_coinbase_sapling_spends = tx.is_coinbase() && tx.sapling_spends().count() > 0;
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
 
@@ -228,14 +227,9 @@ fn arbitrary_transaction_versions_cover_each_era() -> Result<()> {
 
             seen_versions.insert(transaction.version());
 
-            if let Transaction::V6 {
-                orchard_shielded_data,
-                ironwood_shielded_data,
-                ..
-            } = &transaction
-            {
-                seen_v6_orchard_bundle |= orchard_shielded_data.is_some();
-                seen_ironwood_bundle |= ironwood_shielded_data.is_some();
+            if transaction.version() == 6 {
+                seen_v6_orchard_bundle |= transaction.has_orchard_shielded_data();
+                seen_ironwood_bundle |= transaction.has_ironwood_shielded_data();
             }
         }
 
@@ -277,7 +271,15 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     });
 
     proptest!(|((network, block) in strategy)| {
-        block.check_transaction_network_upgrade_consistency(&network)?;
+        // Only check consistency at heights where the network upgrade has a known
+        // consensus branch ID. V5 transactions at pre-Overwinter heights are a
+        // proptest artifact — in consensus these wouldn't exist, and they can't
+        // carry a matching branch ID since no branch ID is defined for those upgrades.
+        let coinbase_height = block.coinbase_height().expect("block has a coinbase");
+        let block_nu = crate::parameters::NetworkUpgrade::current(&network, coinbase_height);
+        if block_nu.branch_id().is_some() {
+            block.check_transaction_network_upgrade_consistency(&network)?;
+        }
     });
 
     Ok(())

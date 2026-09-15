@@ -9,6 +9,7 @@
 #![allow(unknown_lints)]
 #![allow(semicolon_in_expressions_from_macros)]
 #![allow(semicolon_in_expressions_from_non_local_macros)]
+#![allow(deprecated)]
 
 use uint::construct_uint;
 

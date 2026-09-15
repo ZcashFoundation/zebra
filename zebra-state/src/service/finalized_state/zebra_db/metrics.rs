@@ -15,14 +15,14 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
     let transparent_prevout_count = block
         .transactions
         .iter()
-        .flat_map(|t| t.inputs().iter())
+        .flat_map(|t| t.inputs().into_iter())
         .count()
         // Each block has a single coinbase input which is not a previous output.
         - 1;
     let transparent_newout_count = block
         .transactions
         .iter()
-        .flat_map(|t| t.outputs().iter())
+        .flat_map(|t| t.outputs().into_iter())
         .count();
 
     let sprout_nullifier_count = block.sprout_nullifiers().count();
