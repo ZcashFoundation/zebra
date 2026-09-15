@@ -307,6 +307,36 @@ async fn invalid_block_stalls_response() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// A downloader height rejection stalls the response that advertised the block.
+///
+/// This exercises [`BlockDownloadVerifyError::InvalidHeight`] rather than an
+/// error returned by the consensus verifier.
+#[tokio::test]
+async fn invalid_height_stalls_response() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+
+    let observer = test.hashes_for_obtain_tips(vec![hash]).await;
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::InvalidHeight {
+                hash,
+                advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(
+        observer.try_outcome(),
+        Ok(Some(false)),
+        "an invalid block height must stall the announcing response",
+    );
+}
+
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
 
