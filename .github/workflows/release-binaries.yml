@@ -20,9 +20,31 @@ permissions:
   contents: read
 
 jobs:
+  # A patch release cut from a release branch can publish after a higher version,
+  # so the `latest` tag follows the release GitHub marks as latest.
+  is-latest-release:
+    name: Check for the highest stable release
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      is_latest_release: ${{ steps.compare.outputs.is_latest_release }}
+    steps:
+      - name: Compare this release with the latest release
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          echo "is_latest_release=$([[ "${latest_tag}" == "${RELEASE_TAG}" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
+    needs: is-latest-release
     if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
     permissions:
       contents: read
@@ -48,6 +70,7 @@ jobs:
       # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
       publish_to_dockerhub: true
+      publish_latest_tag: ${{ needs.is-latest-release.outputs.is_latest_release == 'true' }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -134,6 +157,7 @@ jobs:
         startsWith(github.event.release.tag_name, 'v')
       }}
     needs:
+      - is-latest-release
       - build
       - binary-version
       - prepare-binaries
@@ -148,7 +172,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, binary-version, prepare-binaries, attach-binaries ]
+    needs: [ is-latest-release, build, binary-version, prepare-binaries, attach-binaries ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest

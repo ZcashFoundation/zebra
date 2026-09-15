@@ -51,6 +51,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_latest_tag:
+        description: "Also publish the `latest` tag. Set only for the highest stable release."
+        required: false
+        type: boolean
+        default: false
       environment:
         description: "Environment to use for the build (commonly dev)"
         required: false
@@ -179,13 +184,16 @@ jobs:
             zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease && github.repository == 'ZcashFoundation/zebra' }}
           labels: |
             org.opencontainers.image.revision=${{ inputs.source_sha }}
+          flavor: |
+            latest=false
           # generate Docker tags based on the following events/attributes
           tags: |
             # These DockerHub release tags support the following use cases:
-            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
+            # - `latest`: Points to the highest stable Zebra release, so users who pull without a tag get that version.
             # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
             #
             type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ inputs.publish_latest_tag }}
             # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
             # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
             # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
@@ -335,8 +343,11 @@ jobs:
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
             zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease && github.repository == 'ZcashFoundation/zebra' }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ inputs.publish_latest_tag }}
             type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=edge,enable={{is_default_branch}}

@@ -136,7 +136,19 @@ jobs:
       log_file: ${{ steps.set-matrix.outputs.log_file }}
       verify: ${{ steps.set-matrix.outputs.verify }}
       use_reserved_ip: ${{ steps.set-matrix.outputs.use_reserved_ip }}
+      is_latest_release: ${{ steps.latest-release.outputs.is_latest_release }}
     steps:
+      # A patch release cut from a release branch can publish after a higher
+      # version, so production follows the release GitHub marks as latest.
+      - id: latest-release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          echo "is_latest_release=$([[ "${latest_tag}" == "${RELEASE_TAG}" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
       - id: set-matrix
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -219,13 +231,13 @@ jobs:
     # - Pull requests
     # - Manual workflow_dispatch
     # - Push to main branch
-    # - Releases
+    # - The highest stable release, which is the only one that deploys production
     if: >-
       ${{
         (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && github.ref_name == 'main') ||
-        (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+        (github.event_name == 'release' && needs.set-matrix.outputs.is_latest_release == 'true')
       }}
     with:
       source_sha: ${{ github.sha }}
@@ -249,7 +261,7 @@ jobs:
         github.repository == 'ZcashFoundation/zebra' &&
         (
           (github.event_name == 'push' && github.ref_name == 'main') ||
-          (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
+          (github.event_name == 'release' && needs.set-matrix.outputs.is_latest_release == 'true') ||
           github.event_name == 'workflow_dispatch'
         )
       }}
