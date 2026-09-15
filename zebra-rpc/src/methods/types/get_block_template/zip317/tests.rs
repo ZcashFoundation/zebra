@@ -41,6 +41,7 @@ fn excludes_tx_with_unselected_dependencies() {
             vec![unmined_tx],
             mempool_tx_deps,
             None,
+            None,
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -80,6 +81,7 @@ fn includes_tx_with_selected_dependencies() {
         &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
+        None,
         None,
     );
 
@@ -149,6 +151,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx.clone()],
             TransactionDependencies::default(),
             None,
+            None,
         )
         .len(),
         1,
@@ -164,6 +167,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
             &miner_params,
             vec![unmined_tx],
             TransactionDependencies::default(),
+            None,
             None,
         ),
         vec![],

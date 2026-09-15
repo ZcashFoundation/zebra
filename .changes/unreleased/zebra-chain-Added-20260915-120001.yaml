@@ -1,4 +1,4 @@
 project: zebra-chain
 kind: Added
-body: "`parameters::subsidy::{subsidy_is_valid, miner_fees_are_valid, funding_stream_address}`, moved from `zebra-consensus` so contextual validation can use them, and `parameters::subsidy::CoinbaseTransactionError`, which they return."
+body: "`parameters::subsidy::{subsidy_is_valid, miner_fees_are_valid, funding_stream_address}` and `CoinbaseTransactionError`, moved from `zebra-consensus` so that contextual validation can use them ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
 time: 2026-09-15T12:00:01.000000000-06:00

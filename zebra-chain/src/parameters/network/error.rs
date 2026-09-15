@@ -88,4 +88,9 @@ pub enum ParametersBuilderError {
     )]
     #[non_exhaustive]
     InsufficientCheckpointCoverage,
+
+    #[error("the ZIP 234 deployment height must be at or after the NU7 activation height")]
+    #[non_exhaustive]
+    #[cfg(zcash_unstable = "zip234")]
+    Zip234DeploymentHeightBeforeNu7,
 }

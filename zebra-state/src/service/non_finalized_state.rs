@@ -600,10 +600,17 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+            prepared.height,
+            &self.network,
+            new_chain.chain_value_pools,
+        );
+
+        #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
+        let mut contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
+            deferred_pool_balance_change,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {
@@ -614,6 +621,34 @@ impl NonFinalizedState {
                 spent_utxo_count: spent_utxos.len(),
             }
         })?;
+
+        // The NSM value balance is credited at NU7 activation, and debited by the block's
+        // additional subsidy from the ZIP 234 deployment height.
+        #[cfg(zcash_unstable = "zip234")]
+        contextual.chain_value_pool_change.set_nsm_amount(
+            zebra_chain::parameters::subsidy::nsm_value_balance_change(
+                prepared.height,
+                &self.network,
+                new_chain.chain_value_pools,
+            ),
+        );
+
+        // Quick check that doesn't read from disk
+        //
+        // From the ZIP 234 deployment height, the block verifier leaves the
+        // subsidy checks to contextual validation, because the block subsidy depends on the NSM
+        // value balance after the parent block.
+        #[cfg(zcash_unstable = "zip234")]
+        if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(
+            prepared.height,
+            &self.network,
+        ) {
+            check::zip234_subsidy_is_valid(
+                &contextual,
+                &self.network,
+                new_chain.chain_value_pools,
+            )?;
+        }
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }

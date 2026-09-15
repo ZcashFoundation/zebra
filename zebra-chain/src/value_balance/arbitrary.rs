@@ -12,8 +12,11 @@ impl Arbitrary for ValueBalance<NegativeAllowed> {
             any::<Amount<NegativeAllowed>>(),
             any::<Amount<NegativeAllowed>>(),
             any::<Amount<NegativeAllowed>>(),
+            #[cfg(zcash_unstable = "zip234")]
+            any::<Amount<NegativeAllowed>>(),
         )
             .prop_map(
+                #[cfg(not(zcash_unstable = "zip234"))]
                 |(transparent, sprout, sapling, orchard, deferred, ironwood)| Self {
                     transparent,
                     sprout,
@@ -21,6 +24,16 @@ impl Arbitrary for ValueBalance<NegativeAllowed> {
                     orchard,
                     deferred,
                     ironwood,
+                },
+                #[cfg(zcash_unstable = "zip234")]
+                |(transparent, sprout, sapling, orchard, deferred, ironwood, nsm)| Self {
+                    transparent,
+                    sprout,
+                    sapling,
+                    orchard,
+                    deferred,
+                    ironwood,
+                    nsm,
                 },
             )
             .boxed()
@@ -40,8 +53,11 @@ impl Arbitrary for ValueBalance<NonNegative> {
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
             any::<Amount<NonNegative>>(),
+            #[cfg(zcash_unstable = "zip234")]
+            any::<Amount<NonNegative>>(),
         )
             .prop_map(
+                #[cfg(not(zcash_unstable = "zip234"))]
                 |(transparent, sprout, sapling, orchard, deferred, ironwood)| Self {
                     transparent,
                     sprout,
@@ -49,6 +65,16 @@ impl Arbitrary for ValueBalance<NonNegative> {
                     orchard,
                     deferred,
                     ironwood,
+                },
+                #[cfg(zcash_unstable = "zip234")]
+                |(transparent, sprout, sapling, orchard, deferred, ironwood, nsm)| Self {
+                    transparent,
+                    sprout,
+                    sapling,
+                    orchard,
+                    deferred,
+                    ironwood,
+                    nsm,
                 },
             )
             .boxed()

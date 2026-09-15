@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: "Behind `--cfg zcash_unstable=\"zip234\"`, from the ZIP 234 deployment height the block verifier leaves the block subsidy, funding stream and miner fee checks to contextual validation in `zebra-state`, which has the parent block's NSM value balance ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:04.000000000-06:00

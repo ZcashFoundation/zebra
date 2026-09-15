@@ -329,6 +329,11 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
+        #[cfg(zcash_unstable = "zip234")]
+        let parent_nsm_value_balance = Some(chain_info.chain_value_pools.nsm_amount());
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let parent_nsm_value_balance = None;
+
         // Prefer the long-poll precomputed coinbase, then the per-block cache, and only build (and
         // re-prove, for a shielded address) as a last resort — caching the result so subsequent
         // short-poll requests for the same height and fees reuse it.
@@ -336,15 +341,25 @@ impl BlockTemplateResponse {
             .or_else(|| {
                 coinbase_cache
                     .as_ref()
-                    .and_then(|cache| cache.get(height, txs_fee))
+                    .and_then(|cache| cache.get(height, txs_fee, parent_nsm_value_balance))
             })
             .unwrap_or_else(|| {
-                let coinbase_txn =
-                    TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
-                        .expect("valid coinbase tx");
+                let coinbase_txn = TransactionTemplate::new_coinbase_with_parent_pools(
+                    net,
+                    height,
+                    miner_params,
+                    txs_fee,
+                    parent_nsm_value_balance,
+                )
+                .expect("valid coinbase tx");
 
                 if let Some(cache) = &coinbase_cache {
-                    cache.store(height, txs_fee, coinbase_txn.clone());
+                    cache.store(
+                        height,
+                        txs_fee,
+                        parent_nsm_value_balance,
+                        coinbase_txn.clone(),
+                    );
                 }
 
                 coinbase_txn
@@ -559,12 +574,14 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     }
 }
 
-/// Caches recently built coinbase transactions for the next block, keyed on `(height, fee)`.
+/// Caches recently built coinbase transactions for the next block, keyed on
+/// `(height, fee, parent_nsm_value_balance)`.
 ///
 /// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
 /// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
-/// depends on `(height, fees)` for a given miner configuration, so repeated requests within the
-/// same block can reuse the cached transaction instead of re-proving it on every call.
+/// depends on `(height, fees)` for a given miner configuration, plus the parent block's NSM value
+/// balance from the ZIP 234 deployment height, so repeated requests within the same block can reuse
+/// the cached transaction instead of re-proving it on every call.
 ///
 /// Each `getblocktemplate` call needs two coinbase transactions at the same height: a zero-fee
 /// "fake" coinbase for ZIP-317 weight estimation, and the real coinbase with actual fees. Entries
@@ -574,7 +591,11 @@ pub(crate) struct CoinbaseCache(
     Arc<
         Mutex<
             HashMap<
-                (block::Height, Amount<NonNegative>),
+                (
+                    block::Height,
+                    Amount<NonNegative>,
+                    Option<Amount<NonNegative>>,
+                ),
                 TransactionTemplate<amount::NegativeOrZero>,
             >,
         >,
@@ -582,24 +603,28 @@ pub(crate) struct CoinbaseCache(
 );
 
 impl CoinbaseCache {
-    /// Returns the cached coinbase transaction if it was built for `height` and `fee`.
+    /// Returns the cached coinbase transaction if it was built for `height`, `fee`, and
+    /// `parent_nsm_value_balance`.
     fn get(
         &self,
         height: block::Height,
         fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&(height, fee))
+            .get(&(height, fee, parent_nsm_value_balance))
             .cloned()
     }
 
-    /// Stores `coinbase` as the cached transaction for `height` and `fee`.
+    /// Stores `coinbase` as the cached transaction for `height`, `fee`, and
+    /// `parent_nsm_value_balance`.
     fn store(
         &self,
         height: block::Height,
         fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
         let mut map = self
@@ -608,21 +633,22 @@ impl CoinbaseCache {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         // Evict entries from previous heights so the map stays bounded.
-        map.retain(|&(h, _), _| h == height);
+        map.retain(|&(h, _, _), _| h == height);
         // Only 2 entries are ever useful (zero-fee fake + current real-fee coinbase), but mempool
         // fee churn can accumulate stale entries within a block. Cap at 4 to stay well above the
         // useful set while preventing unbounded growth. When evicting, preserve the zero-fee sizing
         // coinbase — losing it recreates the churn this cache exists to prevent.
-        if !map.contains_key(&(height, fee)) && map.len() >= 4 {
+        let key = (height, fee, parent_nsm_value_balance);
+        if !map.contains_key(&key) && map.len() >= 4 {
             let evict_key = map
                 .keys()
                 .copied()
-                .find(|&(_, f)| f != Amount::<NonNegative>::zero());
+                .find(|&(_, f, _)| f != Amount::<NonNegative>::zero());
             if let Some(key) = evict_key {
                 map.remove(&key);
             }
         }
-        map.insert((height, fee), coinbase);
+        map.insert(key, coinbase);
     }
 
     /// Discards all cached coinbases, forcing the next request to rebuild them.

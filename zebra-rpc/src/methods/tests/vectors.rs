@@ -92,6 +92,8 @@ async fn rpc_getinfo() {
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
             max_time: zebra_chain::serialization::DateTime32::now(),
+            #[cfg(zcash_unstable = "zip234")]
+            chain_value_pools: Default::default(),
         },
     ));
 
@@ -2530,6 +2532,8 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     min_time: fake_min_time,
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
+                    #[cfg(zcash_unstable = "zip234")]
+                    chain_value_pools: Default::default(),
                 }));
         }
     };
@@ -3223,6 +3227,8 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
+                #[cfg(zcash_unstable = "zip234")]
+                chain_value_pools: Default::default(),
             }));
     };
 
@@ -3249,6 +3255,8 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
+                #[cfg(zcash_unstable = "zip234")]
+                chain_value_pools: Default::default(),
             }));
     };
 
@@ -3272,6 +3280,8 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
+                #[cfg(zcash_unstable = "zip234")]
+                chain_value_pools: Default::default(),
             }));
     };
 
@@ -3295,6 +3305,8 @@ async fn rpc_getdifficulty() {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 chain_history_root: fake_history_tree(&Mainnet).hash(),
+                #[cfg(zcash_unstable = "zip234")]
+                chain_value_pools: Default::default(),
             }));
     };
 
@@ -3699,4 +3711,104 @@ async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
             "{upgrade:?} at height {height:?} must use the {expected_recipient:?} label"
         );
     }
+}
+
+/// From the ZIP 234 deployment height, `getblocksubsidy` returns the scheduled
+/// block subsidy plus the additional subsidy for the NSM value balance after the parent block, and
+/// returns an error if the parent block isn't in the state yet.
+#[cfg(zcash_unstable = "zip234")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocksubsidy_zip234() {
+    use zebra_chain::{
+        block::Height,
+        parameters::{
+            subsidy::{additional_block_subsidy, scheduled_block_subsidy},
+            testnet::{ConfiguredActivationHeights, RegtestParameters},
+        },
+        value_balance::ValueBalance,
+    };
+
+    use crate::methods::types::zec::Zec;
+
+    let _init_guard = zebra_test::init();
+
+    let network = zebra_chain::parameters::Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        network.clone(),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let height = Height(12);
+    let parent = (height - 1).unwrap();
+    let nsm_value_balance = Amount::<NonNegative>::try_from(1_000_000_000).unwrap();
+    let mut parent_pools = ValueBalance::<NonNegative>::zero();
+    parent_pools.set_nsm_amount(nsm_value_balance);
+
+    let get_block_subsidy = tokio::spawn({
+        let rpc = rpc.clone();
+        async move { rpc.get_block_subsidy(Some(height.0)).await }
+    });
+    read_state
+        .expect_request(ReadRequest::BlockInfo(parent.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(BlockInfo::new(
+            parent_pools,
+            0,
+        ))));
+    let subsidy = get_block_subsidy
+        .await
+        .expect("getblocksubsidy should not panic")
+        .expect("getblocksubsidy should succeed after activation");
+
+    assert_eq!(
+        subsidy.total_block_subsidy,
+        Zec::from(
+            (scheduled_block_subsidy(height, &network).unwrap()
+                + additional_block_subsidy(height, &network, nsm_value_balance))
+            .unwrap()
+        ),
+    );
+
+    // The parent of a height more than one past the tip isn't in the state yet.
+    let get_block_subsidy =
+        tokio::spawn(async move { rpc.get_block_subsidy(Some(height.0 + 10)).await });
+    read_state
+        .expect_request(ReadRequest::BlockInfo(Height(height.0 + 9).into()))
+        .await
+        .respond(ReadResponse::BlockInfo(None));
+    let error = get_block_subsidy
+        .await
+        .expect("getblocksubsidy should not panic")
+        .expect_err("getblocksubsidy should fail without the parent block");
+
+    assert!(error
+        .message()
+        .contains("only known up to the block after the best chain tip"));
 }

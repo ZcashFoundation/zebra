@@ -2599,13 +2599,31 @@ where
                     })
                 };
 
-                let precomputed_coinbase = precompute_coinbase(
-                    self.network.clone(),
-                    precomputed_height,
-                    miner_params.clone(),
-                )
-                .await
-                .expect("valid coinbase tx");
+                // From the ZIP 234 deployment height, the coinbase depends on the
+                // NSM value balance after the new tip, which isn't known until that block
+                // arrives, so it can't be precomputed.
+                #[cfg(zcash_unstable = "zip234")]
+                let can_precompute_coinbase =
+                    !zebra_chain::parameters::subsidy::zip234_reissuance_is_active(
+                        precomputed_height,
+                        &self.network,
+                    );
+                #[cfg(not(zcash_unstable = "zip234"))]
+                let can_precompute_coinbase = true;
+
+                let precomputed_coinbase = if can_precompute_coinbase {
+                    Some(
+                        precompute_coinbase(
+                            self.network.clone(),
+                            precomputed_height,
+                            miner_params.clone(),
+                        )
+                        .await
+                        .expect("valid coinbase tx"),
+                    )
+                } else {
+                    None
+                };
 
                 let _ = wait_for_new_tip.await;
 
@@ -2673,8 +2691,8 @@ where
                     // (multi-block advance, reorg, or spurious notification) — its
                     // BIP-34 height and subsidies wouldn't match the block.
                     let next_height = chain_info.tip_height.next().map_misc_error()?;
-                    let precomputed_coinbase = (next_height == precomputed_height)
-                        .then_some(precomputed_coinbase);
+                    let precomputed_coinbase =
+                        precomputed_coinbase.filter(|_| next_height == precomputed_height);
 
                     // Respond instantly with an empty block upon a chain tip change so that
                     // the miner doesn't waste their effort trying to extend a shorter
@@ -2727,6 +2745,11 @@ where
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
+        #[cfg(zcash_unstable = "zip234")]
+        let parent_nsm_value_balance = Some(chain_info.chain_value_pools.nsm_amount());
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let parent_nsm_value_balance = None;
+
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
@@ -2734,6 +2757,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             Some(&coinbase_cache),
+            parent_nsm_value_balance,
         );
 
         tracing::debug!(
@@ -3026,6 +3050,41 @@ where
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
+        // From the ZIP 234 deployment height, the block subsidy depends on the NSM
+        // value balance after the parent block, so it is only known up to the block after the
+        // best chain tip.
+        #[cfg(zcash_unstable = "zip234")]
+        let subsidy = if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &net)
+        {
+            let parent_height = (height - 1).ok_or_misc_error("height 0 has no parent block")?;
+
+            let zebra_state::ReadResponse::BlockInfo(parent_block_info) = self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::BlockInfo(parent_height.into()))
+                .await
+                .map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockInfo request")
+            };
+
+            let parent_chain_value_pools = *parent_block_info
+                .ok_or_misc_error(
+                    "the block subsidy is only known up to the block after the best chain tip \
+                     from the ZIP 234 deployment height",
+                )?
+                .value_pools();
+
+            zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
+                height,
+                &net,
+                parent_chain_value_pools,
+            )
+            .map_misc_error()?
+        } else {
+            block_subsidy(height, &net).map_misc_error()?
+        };
+        #[cfg(not(zcash_unstable = "zip234"))]
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
