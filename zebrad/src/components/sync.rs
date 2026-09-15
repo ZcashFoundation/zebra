@@ -601,7 +601,7 @@ where
 
         loop {
             if self.try_to_sync().await.is_err() {
-                self.downloads.cancel_all();
+                self.cancel_downloads();
             }
 
             self.update_metrics();
@@ -618,6 +618,11 @@ where
             );
             sleep(restart_delay).await;
         }
+    }
+
+    /// Cancels active block downloads and verification tasks.
+    fn cancel_downloads(&mut self) {
+        self.downloads.cancel_all();
     }
 
     /// Tries to synchronize the chain as far as it can.
