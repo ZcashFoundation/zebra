@@ -1255,6 +1255,7 @@ where
         // Other verifier errors can reflect local failures or superseded requests.
         let invalid = match &error {
             BlockDownloadVerifyError::Invalid { error, .. } => error.misbehavior_score() != 0,
+            BlockDownloadVerifyError::InvalidHeight { .. } => true,
             _ => false,
         };
 
