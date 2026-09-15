@@ -1251,14 +1251,25 @@ where
         let missing = matches!(&error, BlockDownloadVerifyError::DownloadFailed { error, .. }
             if format!("{error:?}").contains("NotFound"));
 
+        // Only consensus errors with an established peer penalty prove invalidity.
+        // Other verifier errors can reflect local failures or superseded requests.
+        let invalid = match &error {
+            BlockDownloadVerifyError::Invalid { error, .. } => error.misbehavior_score() != 0,
+            _ => false,
+        };
+
         let result = self.handle_block_response(Err(error));
 
-        if missing && !self.block_reobtain_retries.contains_key(&hash) {
+        if invalid || (missing && !self.block_reobtain_retries.contains_key(&hash)) {
             self.reobtain_hashes.shift_remove(&hash);
 
             if let Some(responses) = self.find_response_progress.remove(&hash) {
                 for response in responses {
-                    response.record_missing_hash();
+                    if missing {
+                        response.record_missing_hash();
+                    } else {
+                        response.record_invalid_hash();
+                    }
                 }
             }
         }
