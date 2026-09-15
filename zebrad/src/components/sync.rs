@@ -664,7 +664,26 @@ where
                 .and_then(convert::identity)?;
         }
 
+        // Finish pending block work so its outcomes classify response feedback,
+        // even if later rounds find no new tips and never poll these downloads.
+        while self.downloads.in_flight() > 0 || !self.reobtain_hashes.is_empty() {
+            timeout(BLOCK_VERIFY_TIMEOUT, self.finish_pending_download()).await??;
+        }
+
         info!("exhausted prospective tip set");
+
+        Ok(())
+    }
+
+    /// Drives final retries and processes one remaining download outcome.
+    async fn finish_pending_download(&mut self) -> Result<(), BlockDownloadVerifyError> {
+        self.reobtain_missing_blocks().await;
+
+        if let Some(response) = self.downloads.next().await {
+            self.handle_download_response(response)?;
+        }
+
+        self.update_metrics();
 
         Ok(())
     }
