@@ -7,7 +7,7 @@ on:
   # re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
-    branches: [main]
+    branches: [main, "release/**"]
   push:
     branches: [main]
   merge_group:
@@ -189,7 +189,7 @@ jobs:
           base_tip="$(git rev-parse "origin/${BASE_REF}")"
           base_sha="$(git merge-base "${base_tip}" "${TARGET_SHA}")"
           if [[ "${base_sha}" != "${base_tip}" ]]; then
-            echo "::error title=Release PR is behind main::Wait for release-plz to update this PR before review."
+            echo "::error title=Release PR is behind ${BASE_REF}::Wait for release-plz to update this PR before review."
             exit 1
           fi
           echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"

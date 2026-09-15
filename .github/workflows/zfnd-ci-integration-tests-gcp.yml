@@ -72,7 +72,7 @@ on:
         default: false
 
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
     types: [labeled, synchronize, reopened]
 
   push:
