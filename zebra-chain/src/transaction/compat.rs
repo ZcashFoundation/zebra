@@ -194,43 +194,62 @@ const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
 /// `vpub_old` and `vpub_new` (8 bytes each), `anchor`, two `nullifiers`, two `commitments`.
 const JS_EPHEMERAL_KEY_OFFSET: usize = 8 + 8 + 32 + (2 * 32) + (2 * 32);
 
-/// The offset of `anchor`, used to self-check the layout below.
-const JS_ANCHOR_OFFSET: usize = 8 + 8;
-
-/// Returns the `ephemeralKey` and `encCiphertexts` of a Sprout JoinSplit description.
+/// Returns the `ephemeralKey`, proof, and `encCiphertexts` of a Sprout JoinSplit description.
 ///
 /// [`JsDescription`](zcash_primitives::transaction::components::sprout::JsDescription) exposes
-/// accessors for its other fields, but keeps these two private, so they are read back out of its
-/// serialization. If upstream gains accessors for them, this can be deleted.
+/// accessors for its other fields, but keeps `ephemeralKey` and `encCiphertexts` private, and only
+/// exposes the proof for the Groth16 variant, so all three are read back out of its serialization.
+/// If upstream gains accessors for them, this can be deleted.
 ///
-/// The returned values are in wire order; callers that render them for RPCs must reverse them,
-/// as they do for every other 32-byte JoinSplit field.
-pub fn sprout_joinsplit_key_and_ciphertexts(
+/// The proof is 192 bytes for Groth16 (V4 transactions) and 296 bytes for PHGR13 (V2/V3
+/// transactions).
+///
+/// The returned 32-byte values are in wire order; callers that render them for RPCs must reverse
+/// them, as they do for every other 32-byte JoinSplit field. The proof and the ciphertexts are not
+/// reversed by `zcashd`, so they are rendered in the wire order returned here.
+pub fn sprout_joinsplit_key_proof_and_ciphertexts(
     joinsplit: &zcash_primitives::transaction::components::sprout::JsDescription,
-) -> ([u8; 32], [[u8; SPROUT_CIPHERTEXT_SIZE]; ZC_NUM_JS_OUTPUTS]) {
-    let mut bytes = Vec::new();
+) -> (
+    [u8; 32],
+    Vec<u8>,
+    [[u8; SPROUT_CIPHERTEXT_SIZE]; ZC_NUM_JS_OUTPUTS],
+) {
+    // `ephemeralKey`, `randomSeed`, then two `vmacs`, then the proof, then the ciphertexts.
+    let proof_offset = JS_EPHEMERAL_KEY_OFFSET + 32 + 32 + (2 * 32);
+    let proof_size = if joinsplit.groth_proof_bytes().is_some() {
+        GROTH_PROOF_SIZE
+    } else {
+        PHGR_PROOF_SIZE
+    };
+    let ciphertexts_offset = proof_offset + proof_size;
+    let joinsplit_size = ciphertexts_offset + (ZC_NUM_JS_OUTPUTS * SPROUT_CIPHERTEXT_SIZE);
+
+    let mut bytes = Vec::with_capacity(joinsplit_size);
     joinsplit
         .write(&mut bytes)
         .expect("writing a JoinSplit to a vec cannot fail");
 
-    // Guard the offsets against an upstream layout change: `anchor` sits immediately before the
-    // fields read below, and is the last one reachable through a public accessor.
+    // Guard the offsets against an upstream layout change. The total length pins the size of every
+    // field, and `vmacs[1]` is the last field before the proof that is reachable through a public
+    // accessor, so finding it immediately before `proof_offset` pins the offsets read below.
+    //
+    // Checking the length first keeps the slicing below in range if upstream ever shortens the
+    // encoding.
     debug_assert_eq!(
-        &bytes[JS_ANCHOR_OFFSET..JS_ANCHOR_OFFSET + 32],
-        &joinsplit.anchor()[..],
+        bytes.len(),
+        joinsplit_size,
+        "the JoinSplit wire layout must match the offsets used here",
+    );
+    debug_assert_eq!(
+        &bytes[proof_offset - 32..proof_offset],
+        &joinsplit.macs()[1][..],
         "the JoinSplit wire layout must match the offsets used here",
     );
 
     let mut ephemeral_key = [0u8; 32];
     ephemeral_key.copy_from_slice(&bytes[JS_EPHEMERAL_KEY_OFFSET..JS_EPHEMERAL_KEY_OFFSET + 32]);
 
-    // `ephemeralKey`, `randomSeed`, then two `vmacs`, then the proof.
-    let proof_size = if joinsplit.groth_proof_bytes().is_some() {
-        GROTH_PROOF_SIZE
-    } else {
-        PHGR_PROOF_SIZE
-    };
-    let ciphertexts_offset = JS_EPHEMERAL_KEY_OFFSET + 32 + 32 + (2 * 32) + proof_size;
+    let proof = bytes[proof_offset..ciphertexts_offset].to_vec();
 
     let mut ciphertexts = [[0u8; SPROUT_CIPHERTEXT_SIZE]; ZC_NUM_JS_OUTPUTS];
     for (i, ciphertext) in ciphertexts.iter_mut().enumerate() {
@@ -238,39 +257,7 @@ pub fn sprout_joinsplit_key_and_ciphertexts(
         ciphertext.copy_from_slice(&bytes[start..start + SPROUT_CIPHERTEXT_SIZE]);
     }
 
-    (ephemeral_key, ciphertexts)
-}
-
-/// Returns the zero-knowledge proof bytes of a JoinSplit, for both proof variants:
-/// 192 bytes for Groth16 proofs (V4 transactions) and 296 bytes for PHGR13 proofs
-/// (V2/V3 transactions).
-pub fn sprout_joinsplit_proof_bytes(
-    joinsplit: &zcash_primitives::transaction::components::sprout::JsDescription,
-) -> Vec<u8> {
-    // Groth16 proofs are reachable through a public accessor.
-    if let Some(proof) = joinsplit.groth_proof_bytes() {
-        return proof.to_vec();
-    }
-
-    // PHGR13 proofs have no upstream accessor; read them back out of the wire
-    // serialization, as `sprout_joinsplit_key_and_ciphertexts` does for the other
-    // fields without accessors.
-    let mut bytes = Vec::new();
-    joinsplit
-        .write(&mut bytes)
-        .expect("writing a JoinSplit to a vec cannot fail");
-
-    // Guard the offsets against an upstream layout change: `anchor` sits before the
-    // field read below, and is the last one reachable through a public accessor.
-    debug_assert_eq!(
-        &bytes[JS_ANCHOR_OFFSET..JS_ANCHOR_OFFSET + 32],
-        &joinsplit.anchor()[..],
-        "the JoinSplit wire layout must match the offsets used here",
-    );
-
-    // `ephemeralKey`, `randomSeed`, then two `vmacs`, then the proof.
-    let proof_offset = JS_EPHEMERAL_KEY_OFFSET + 32 + 32 + (2 * 32);
-    bytes[proof_offset..proof_offset + PHGR_PROOF_SIZE].to_vec()
+    (ephemeral_key, proof, ciphertexts)
 }
 
 // ── Rebuilding transaction data ──────────────────────────────────────

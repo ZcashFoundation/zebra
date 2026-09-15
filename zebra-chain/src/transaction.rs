@@ -25,9 +25,7 @@ mod tests;
 
 pub use crate::sapling::FieldNotPresent;
 pub use auth_digest::AuthDigest;
-pub use compat::{
-    sprout_joinsplit_key_and_ciphertexts, sprout_joinsplit_proof_bytes, SPROUT_CIPHERTEXT_SIZE,
-};
+pub use compat::{sprout_joinsplit_key_proof_and_ciphertexts, SPROUT_CIPHERTEXT_SIZE};
 pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;

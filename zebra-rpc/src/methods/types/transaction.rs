@@ -1006,8 +1006,8 @@ impl TransactionObject {
                         bytes
                     };
 
-                    let (ephemeral_key, ciphertexts) =
-                        transaction::sprout_joinsplit_key_and_ciphertexts(joinsplit);
+                    let (ephemeral_key, proof, ciphertexts) =
+                        transaction::sprout_joinsplit_key_proof_and_ciphertexts(joinsplit);
 
                     let vpub_old = i64::from(joinsplit.vpub_old());
                     let vpub_new = i64::from(joinsplit.vpub_new());
@@ -1027,7 +1027,7 @@ impl TransactionObject {
                         one_time_pubkey: display_order(&ephemeral_key),
                         random_seed: display_order(joinsplit.random_seed()),
                         macs: joinsplit.macs().iter().map(display_order).collect(),
-                        proof: transaction::sprout_joinsplit_proof_bytes(joinsplit),
+                        proof,
                         ciphertexts: ciphertexts.iter().map(|c| c.to_vec()).collect(),
                     }
                 })
@@ -1168,6 +1168,8 @@ mod tests {
     /// each.
     #[test]
     fn vjoinsplit_proof_is_populated_for_phgr13_transactions() {
+        const PHGR_PROOF_SIZE: usize = 296;
+
         let block: Block = zebra_test::vectors::BLOCK_TESTNET_141042_BYTES
             .zcash_deserialize_into()
             .expect("hard-coded test vector must deserialize");
@@ -1179,7 +1181,17 @@ mod tests {
             .expect("block 141,042 contains transactions with JoinSplits")
             .clone();
 
-        assert_eq!(tx.version(), 2, "the fixture must exercise a PHGR13 proof");
+        let joinsplit = tx
+            .sprout_joinsplit_descriptions()
+            .next()
+            .expect("the transaction has JoinSplits");
+
+        // The proof variant is what selects the extraction path, so assert on it directly rather
+        // than on the transaction version that implies it.
+        assert!(
+            joinsplit.groth_proof_bytes().is_none(),
+            "the fixture must exercise a PHGR13 proof, not a Groth16 one",
+        );
 
         let object = TransactionObject::from_transaction(
             tx.clone(),
@@ -1192,15 +1204,37 @@ mod tests {
             tx.hash(),
         );
 
-        assert!(!object.joinsplits.is_empty());
-        for rendered in &object.joinsplits {
-            // V2/V3 JoinSplits carry PHGR13 proofs.
-            assert_eq!(
-                rendered.proof.len(),
-                296,
-                "the PHGR13 proof must be rendered, not replaced with an empty vector",
-            );
-        }
+        assert_eq!(object.joinsplits.len(), 1);
+        let rendered = &object.joinsplits[0];
+
+        assert_eq!(
+            rendered.proof.len(),
+            PHGR_PROOF_SIZE,
+            "the PHGR13 proof must be rendered, not replaced with an empty vector",
+        );
+
+        // The length alone would hold even if the proof were read from the wrong offset, because
+        // the extracted slice is always `PHGR_PROOF_SIZE` bytes wide. Pin the bytes instead: the
+        // proof must appear verbatim in the transaction's wire encoding, immediately after
+        // `vmacs[1]` and immediately before the first ciphertext.
+        let raw = tx
+            .zcash_serialize_to_vec()
+            .expect("a parsed transaction re-serializes");
+        let proof_offset = raw
+            .windows(PHGR_PROOF_SIZE)
+            .position(|window| window == rendered.proof.as_slice())
+            .expect("the rendered proof must appear verbatim in the wire encoding");
+
+        assert_eq!(
+            &raw[proof_offset - 32..proof_offset],
+            &joinsplit.macs()[1][..],
+            "the proof must be read from immediately after `vmacs[1]`",
+        );
+        assert_eq!(
+            &raw[proof_offset + PHGR_PROOF_SIZE..proof_offset + PHGR_PROOF_SIZE + 601],
+            rendered.ciphertexts[0].as_slice(),
+            "the proof must be read from immediately before the first ciphertext",
+        );
     }
 
     /// The `Default` impl and coinbase path legitimately have no JoinSplits.
