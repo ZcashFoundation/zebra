@@ -15,6 +15,7 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     serialization::ZcashDeserializeInto,
 };
+use zebra_consensus::{error::TransactionError, VerifyBlockError};
 use zebra_network::{self as zn, FindResponseFeedback};
 use zebra_state as zs;
 use zebra_test::mock_service::MockService;
@@ -170,6 +171,36 @@ async fn behind_tip_retry_keeps_feedback_pending() {
     test.sync
         .handle_download_response(Err((
             BlockDownloadVerifyError::BehindTipHeightLimit {
+                height: Height(1),
+                hash,
+                advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert!(
+        test.sync.reobtain_hashes.contains(&hash),
+        "the retry must remain queued after feedback processing",
+    );
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+}
+
+/// A UTXO lookup timeout keeps its retry queued and response feedback pending.
+#[tokio::test]
+async fn utxo_timeout_retry_keeps_feedback_pending() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.track_find_response(&[hash], Some(feedback));
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::Invalid {
+                error: VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+                    .into(),
                 height: Height(1),
                 hash,
                 advertiser_addr: None,
