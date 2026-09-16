@@ -77,3 +77,4 @@ fn independent_per_peer() {
 }
 
 mod feedback;
+mod prop;
