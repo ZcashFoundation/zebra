@@ -436,26 +436,39 @@ jobs:
 
           echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
 
-          # Wait up to 60 seconds for container to start
-          for attempt in {1..30}; do
-            echo "Attempt ${attempt}/30: Checking for running container..."
+          # Wait for the container to start.
+          #
+          # The wait is bounded by wall clock, not by a fixed number of attempts:
+          # each `gcloud compute ssh` round trip costs a few seconds, so an
+          # attempt count is not a meaningful time budget.
+          #
+          # What we are really waiting for is konlet pulling the ~2GB test image
+          # onto a fresh VM, which routinely takes over 2 minutes. Give that a
+          # wide margin so a slow registry pull does not fail the whole test.
+          WAIT_SECONDS=600
+          DEADLINE=$(( SECONDS + WAIT_SECONDS ))
+          attempt=0
+          until [ -n "${CONTAINER_ID:-}" ]; do
+            if [ "${SECONDS}" -ge "${DEADLINE}" ]; then
+              echo "::error::Container ${CONTAINER_PREFIX} did not start within ${WAIT_SECONDS}s"
+              exit 1
+            fi
+            attempt=$(( attempt + 1 ))
+            echo "Attempt ${attempt} (${SECONDS}s elapsed): Checking for running container..."
             CONTAINER_ID=$(gcloud compute ssh "${INSTANCE_NAME}" \
               --zone ${{ steps.create-instance.outputs.instance_zone }} \
               --ssh-flag="-o ServerAliveInterval=5" \
               --ssh-flag="-o ConnectionAttempts=20" \
               --ssh-flag="-o ConnectTimeout=5" \
               --command="sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null || echo "")
-            if [ -n "${CONTAINER_ID}" ]; then
-              echo "Found running container: ${CONTAINER_ID}"
-              echo "CONTAINER_ID=${CONTAINER_ID}" >> "$GITHUB_OUTPUT"
-              exit 0
+            if [ -z "${CONTAINER_ID}" ]; then
+              echo "No running container found yet, waiting 5 seconds..."
+              sleep 5
             fi
-            echo "No running container found yet, waiting 2 seconds..."
-            sleep 2
           done
 
-          echo "Container not found after 60 seconds"
-          exit 1
+          echo "Found running container after ${SECONDS}s: ${CONTAINER_ID}"
+          echo "CONTAINER_ID=${CONTAINER_ID}" >> "$GITHUB_OUTPUT"
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
