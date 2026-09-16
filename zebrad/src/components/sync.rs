@@ -39,6 +39,7 @@ use crate::{
 
 mod downloads;
 pub mod end_of_support;
+mod find_response_progress;
 mod gossip;
 mod progress;
 mod recent_sync_lengths;
