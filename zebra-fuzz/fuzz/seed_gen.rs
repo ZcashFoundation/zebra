@@ -53,13 +53,7 @@ fn build_bundle(
     let value_balance =
         ZatBalance::from_i64(value_balance).expect("generator value balance is in range");
 
-    fake_orchard_bundle(
-        flags,
-        value_balance,
-        action_count,
-        seed,
-        bundle_version,
-    )
+    fake_orchard_bundle(flags, value_balance, action_count, seed, bundle_version)
 }
 
 fn main() {
@@ -70,10 +64,11 @@ fn main() {
 
     let nu = NetworkUpgrade::Nu6_3;
 
-    // These bytes cover each valid combination for its pool: Orchard reserves
-    // the cross-address bit, while Ironwood permits it.
+    // Cover every parseable flag combination: Orchard reserves the cross-address
+    // bit, while Ironwood permits it. Include combinations enabling neither
+    // spends nor outputs so the corpus also exercises consensus rejection.
     let orchard_flag_bytes: [u8; 4] = [0b000, 0b001, 0b010, 0b011];
-    let ironwood_flag_bytes: [u8; 5] = [0b001, 0b010, 0b011, 0b101, 0b111];
+    let ironwood_flag_bytes: [u8; 8] = [0b000, 0b001, 0b010, 0b011, 0b100, 0b101, 0b110, 0b111];
     let value_balances: [i64; 5] = [0, 1, -1, 1_000_000, -1_000_000];
     let action_counts: [usize; 3] = [1, 2, 5];
 

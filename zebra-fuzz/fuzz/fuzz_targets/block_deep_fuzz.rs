@@ -102,14 +102,10 @@ fuzz_target!(|data: &[u8]| {
     // ═══════════════════════════════════════════════════════════════════
 
     // block.hash() — fundamental block identity
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        block.hash()
-    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.hash()));
 
     // block.coinbase_height() — height extraction from coinbase
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        block.coinbase_height()
-    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
 
     // block.commitment() — exercises commitment parsing for both networks
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -161,9 +157,7 @@ fuzz_target!(|data: &[u8]| {
     }));
 
     // Auth data root — ZIP-244 Merkle tree computation
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        block.auth_data_root()
-    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.auth_data_root()));
 
     // chain_value_pool_change — arithmetic-heavy, potential overflow.
     // Passing an empty `utxos` map violates this function's documented
@@ -189,12 +183,12 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Header methods
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        block.header.hash()
-    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.header.hash()));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let now = chrono::Utc::now();
-        let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
+        let height = block
+            .coinbase_height()
+            .unwrap_or(zebra_chain::block::Height(0));
         let hash = block.hash();
         let _ = block.header.time_is_valid_at(now, &height, &hash);
     }));
@@ -206,11 +200,15 @@ fuzz_target!(|data: &[u8]| {
 
     // Header commitment parsing for both networks at various heights
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
+        let height = block
+            .coinbase_height()
+            .unwrap_or(zebra_chain::block::Height(0));
         let _ = block.header.commitment(&Network::Mainnet, height);
     }));
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
+        let height = block
+            .coinbase_height()
+            .unwrap_or(zebra_chain::block::Height(0));
         let _ = block.header.commitment(default_testnet(), height);
     }));
 
@@ -240,7 +238,9 @@ fuzz_target!(|data: &[u8]| {
 
     // difficulty_threshold_is_valid — PoW limit check
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
+        let height = block
+            .coinbase_height()
+            .unwrap_or(zebra_chain::block::Height(0));
         let hash = block.hash();
         let _ = zebra_consensus::block::check::difficulty_threshold_is_valid(
             &block.header,
@@ -264,11 +264,8 @@ fuzz_target!(|data: &[u8]| {
         if block.coinbase_height().is_none() || block.transactions.is_empty() {
             return;
         }
-        let tx_hashes: Vec<zebra_chain::transaction::Hash> = block
-            .transactions
-            .iter()
-            .map(|tx| tx.hash())
-            .collect();
+        let tx_hashes: Vec<zebra_chain::transaction::Hash> =
+            block.transactions.iter().map(|tx| tx.hash()).collect();
         let _ = zebra_consensus::block::check::merkle_root_validity(
             &Network::Mainnet,
             &block,
@@ -279,14 +276,11 @@ fuzz_target!(|data: &[u8]| {
     // time_is_valid_at
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let now = chrono::Utc::now();
-        let height = block.coinbase_height().unwrap_or(zebra_chain::block::Height(0));
+        let height = block
+            .coinbase_height()
+            .unwrap_or(zebra_chain::block::Height(0));
         let hash = block.hash();
-        let _ = zebra_consensus::block::check::time_is_valid_at(
-            &block.header,
-            now,
-            &height,
-            &hash,
-        );
+        let _ = zebra_consensus::block::check::time_is_valid_at(&block.header, now, &height, &hash);
     }));
 
     // ═══════════════════════════════════════════════════════════════════
@@ -343,15 +337,10 @@ fuzz_target!(|data: &[u8]| {
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(Height(0));
         for net in [Network::Mainnet, default_testnet().clone()] {
-            if let Ok(subsidy) =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &net)
-            {
-                let _ = zebra_chain::parameters::subsidy::miner_subsidy(
-                    height, &net, subsidy,
-                );
-                let _ = zebra_chain::parameters::subsidy::funding_stream_values(
-                    height, &net, subsidy,
-                );
+            if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(height, &net) {
+                let _ = zebra_chain::parameters::subsidy::miner_subsidy(height, &net, subsidy);
+                let _ =
+                    zebra_chain::parameters::subsidy::funding_stream_values(height, &net, subsidy);
             }
         }
     }));
@@ -380,9 +369,7 @@ fuzz_target!(|data: &[u8]| {
                 &hash,
             );
         }
-        let _ = zebra_consensus::block::check::equihash_solution_is_valid(
-            &block.header,
-        );
+        let _ = zebra_consensus::block::check::equihash_solution_is_valid(&block.header);
     }));
 
     // -------------------------------------------------------------------
@@ -531,12 +518,8 @@ fuzz_target!(|data: &[u8]| {
             &hash,
         );
         let now = chrono::Utc::now();
-        let _ = zebra_consensus::block::check::time_is_valid_at(
-            &block.header,
-            now,
-            &nu_height,
-            &hash,
-        );
+        let _ =
+            zebra_consensus::block::check::time_is_valid_at(&block.header, now, &nu_height, &hash);
         // Block-level consensus consistency at picked NU (skip if no
         // coinbase height — same guard as the earlier layer).
         if block.coinbase_height().is_some() {
@@ -550,9 +533,8 @@ fuzz_target!(|data: &[u8]| {
             for &(h, _name) in NU_FORK_HEIGHTS {
                 let height = Height(h);
                 for net in [&Network::Mainnet, &nu_network] {
-                    let _ = zebra_consensus::transaction::check::consensus_branch_id(
-                        tx, height, net,
-                    );
+                    let _ =
+                        zebra_consensus::transaction::check::consensus_branch_id(tx, height, net);
                     let _ = zebra_consensus::transaction::check::disabled_add_to_sprout_pool(
                         tx, height, net,
                     );
@@ -560,12 +542,13 @@ fuzz_target!(|data: &[u8]| {
                         &height, tx, net,
                     );
                 }
-                let _ = zebra_consensus::transaction::check::non_coinbase_expiry_height(
-                    &height, tx,
-                );
+                let _ =
+                    zebra_consensus::transaction::check::non_coinbase_expiry_height(&height, tx);
                 let now = chrono::Utc::now();
                 let _ = zebra_consensus::transaction::check::lock_time_has_passed(
-                    tx, height, Some(now),
+                    tx,
+                    height,
+                    Some(now),
                 );
             }
         }
@@ -577,12 +560,8 @@ fuzz_target!(|data: &[u8]| {
         for &(h, _name) in NU_FORK_HEIGHTS {
             let height = Height(h);
             for net in [&Network::Mainnet, &nu_network] {
-                if let Ok(subsidy) =
-                    zebra_chain::parameters::subsidy::block_subsidy(height, net)
-                {
-                    let _ = zebra_chain::parameters::subsidy::miner_subsidy(
-                        height, net, subsidy,
-                    );
+                if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(height, net) {
+                    let _ = zebra_chain::parameters::subsidy::miner_subsidy(height, net, subsidy);
                     let _ = zebra_chain::parameters::subsidy::funding_stream_values(
                         height, net, subsidy,
                     );
@@ -640,9 +619,8 @@ fuzz_target!(|data: &[u8]| {
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let mut hdr_bytes = Vec::new();
         if block.header.zcash_serialize(&mut hdr_bytes).is_ok() {
-            if let Ok(hdr2) = zebra_chain::block::Header::zcash_deserialize(
-                Cursor::new(&hdr_bytes),
-            ) {
+            if let Ok(hdr2) = zebra_chain::block::Header::zcash_deserialize(Cursor::new(&hdr_bytes))
+            {
                 let mut hdr_bytes2 = Vec::new();
                 if hdr2.zcash_serialize(&mut hdr_bytes2).is_ok() {
                     assert_eq!(
@@ -661,9 +639,9 @@ fn deep_fuzz_transaction(tx: &Transaction) {
     use std::panic;
 
     // --- Property Extraction ---
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.hash() }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.auth_digest() }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.unmined_id() }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.hash()));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.auth_digest()));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.unmined_id()));
 
     let _version = tx.version();
     let _is_overwintered = tx.is_overwintered();
@@ -694,22 +672,53 @@ fn deep_fuzz_transaction(tx: &Transaction) {
         for _c in tx.sprout_note_commitments() {}
     }));
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.sapling_anchors() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _s in tx.sapling_spends() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _o in tx.sapling_outputs() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.sapling_nullifiers() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.sapling_note_commitments() {} }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _a in tx.sapling_anchors() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| for _s in tx.sapling_spends() {}));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _o in tx.sapling_outputs() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _n in tx.sapling_nullifiers() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _c in tx.sapling_note_commitments() {}
+    }));
     let _has_sapling = tx.has_sapling_shielded_data();
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.orchard_actions() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.orchard_nullifiers() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.orchard_note_commitments() {} }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _a in tx.orchard_actions() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _n in tx.orchard_nullifiers() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _c in tx.orchard_note_commitments() {}
+    }));
     let _flags = tx.orchard_flags();
     let _has_orchard = tx.has_orchard_shielded_data();
+    let _ = tx.orchard_value_balance();
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.output_values_to_sprout() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.input_values_from_sprout() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.sapling_value_balance() }));
+    let _ = tx.ironwood_actions().count();
+    let _ = tx.ironwood_nullifiers().count();
+    let _ = tx.ironwood_note_commitments().count();
+    let _ = tx.ironwood_flags();
+    let _ = tx.ironwood_value_balance();
+
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _v in tx.output_values_to_sprout() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _v in tx.input_values_from_sprout() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.sapling_value_balance()));
 
     let _enough_flags = tx.has_enough_orchard_flags();
     let _valid_non_coinbase = tx.is_valid_non_coinbase();
@@ -733,16 +742,26 @@ fn deep_fuzz_transaction(tx: &Transaction) {
     }
     for h in [0u32, 419_200, 1_000_000, 1_687_104] {
         let _ = zebra_consensus::transaction::check::disabled_add_to_sprout_pool(
-            tx, Height(h), &Network::Mainnet,
+            tx,
+            Height(h),
+            &Network::Mainnet,
         );
     }
     {
         let height = Height(1_000_000);
-        let _ = zebra_consensus::transaction::check::coinbase_expiry_height(&height, tx, &Network::Mainnet);
+        let _ = zebra_consensus::transaction::check::coinbase_expiry_height(
+            &height,
+            tx,
+            &Network::Mainnet,
+        );
         let _ = zebra_consensus::transaction::check::non_coinbase_expiry_height(&height, tx);
     }
     for h in [0u32, 419_200, 903_000, 1_046_400, 1_687_104, 1_842_420] {
-        let _ = zebra_consensus::transaction::check::consensus_branch_id(tx, Height(h), &Network::Mainnet);
+        let _ = zebra_consensus::transaction::check::consensus_branch_id(
+            tx,
+            Height(h),
+            &Network::Mainnet,
+        );
     }
 
     // --- ZIP-317 Fee Calculations ---
