@@ -629,9 +629,9 @@ async fn cancellation_releases_active_feedback() {
     assert_eq!(test.sync.downloads.in_flight(), 0);
 }
 
-/// A locally outdated height releases feedback without implying invalidity.
+/// Exhausted behind-tip retries release feedback without implying invalidity.
 #[tokio::test]
-async fn behind_tip_limit_releases_neutral_feedback() {
+async fn exhausted_behind_tip_retries_release_neutral_feedback() {
     let _test_guard = zebra_test::init();
 
     let mut test = TestScenario::new();
@@ -639,6 +639,10 @@ async fn behind_tip_limit_releases_neutral_feedback() {
     let (feedback, observer) = FindResponseFeedback::new_for_test();
 
     test.sync.track_find_response(&[hash], Some(feedback));
+    test.sync
+        .block_reobtain_retries
+        .insert(hash, MAX_BLOCK_REOBTAIN_RETRIES);
+
     test.sync
         .handle_download_response(Err((
             BlockDownloadVerifyError::BehindTipHeightLimit {
@@ -651,6 +655,10 @@ async fn behind_tip_limit_releases_neutral_feedback() {
         .unwrap();
 
     assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    assert!(!test.sync.reobtain_hashes.contains(&hash));
+    assert!(!test.sync.block_reobtain_retries.contains_key(&hash));
+    assert!(!test.sync.find_response_progress.contains_key(&hash));
 }
 
 /// A local lookahead rejection releases feedback without classifying the response.
