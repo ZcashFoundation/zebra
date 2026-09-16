@@ -56,3 +56,5 @@ fn independent_per_peer() {
     assert!(!tracker.record_stall(addr_b));
     assert!(tracker.record_stall(addr_b));
 }
+
+mod feedback;
