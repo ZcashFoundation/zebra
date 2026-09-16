@@ -902,6 +902,8 @@ impl TestScenario {
     }
 
     /// Supplies one extend response without assuming that it contains valid overlap.
+    ///
+    /// Any queried continuation is absent from the mocked state.
     async fn raw_hashes_for_extend_tips(
         &mut self,
         hashes: Vec<Hash>,
@@ -936,7 +938,19 @@ impl TestScenario {
             }
         };
 
-        let (result, ()) = tokio::join!(self.sync.extend_tips(), mock_responses);
+        let state_responses = async {
+            loop {
+                self.state
+                    .expect_request_that(|request| matches!(request, zs::Request::KnownBlock(_)))
+                    .await
+                    .respond(zs::Response::KnownBlock(None));
+            }
+        };
+
+        let (result, ()) = tokio::select! {
+            result = async { tokio::join!(self.sync.extend_tips(), mock_responses) } => result,
+            () = state_responses => unreachable!("state responder runs until the extend stage ends"),
+        };
         result.expect("mocked extend stage queues its hashes");
 
         observer

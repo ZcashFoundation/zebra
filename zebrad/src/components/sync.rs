@@ -1035,7 +1035,7 @@ where
                         // Legacy zcashd nodes could prepend an unrelated hash
                         // to their response. Check the first hash against the
                         // previous response, and discard mismatches.
-                        let unknown_hashes = match hashes.as_slice() {
+                        let continuation_hashes = match hashes.as_slice() {
                             [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
                             }
@@ -1079,6 +1079,14 @@ where
                                 continue;
                             }
                         };
+
+                        let mut unknown_hashes = Vec::new();
+                        for &hash in continuation_hashes {
+                            if !self.state_contains(hash).await? {
+                                unknown_hashes.push(hash);
+                            }
+                        }
+                        let unknown_hashes = unknown_hashes.as_slice();
 
                         if unknown_hashes.is_empty() {
                             debug!(
