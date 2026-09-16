@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Use fresh proposal preflight nonces so mining can resume after block invalidation ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).
+time: 2026-10-08T22:02:11.683702789+02:00

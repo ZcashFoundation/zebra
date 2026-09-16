@@ -652,7 +652,7 @@ async fn setup(
     // State
     // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
-    let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
@@ -706,7 +706,13 @@ async fn setup(
     // Mempool
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
-    let (mut mempool_service, transaction_subscriber, _transaction_verified) = Mempool::new(
+    let (
+        mut mempool_service,
+        transaction_subscriber,
+        _transaction_verified,
+        _templates,
+        _template_requests,
+    ) = Mempool::new(
         &network,
         &mempool_config,
         peer_set.clone(),
@@ -716,6 +722,13 @@ async fn setup(
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
         misbehavior_tx,
+        ServiceBuilder::new()
+            .buffer(1)
+            .service(BoxService::new(read_only_state_service)),
+        ServiceBuilder::new()
+            .buffer(1)
+            .service(BoxService::new(buffered_block_verifier.clone())),
+        None,
     );
 
     // Enable the mempool

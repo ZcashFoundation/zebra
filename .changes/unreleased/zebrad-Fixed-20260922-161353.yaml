@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Retry caller-specific mining templates when the chain tip changes during construction, instead of failing mining RPC requests ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).
+time: 2026-09-22T16:13:53.282006193+02:00

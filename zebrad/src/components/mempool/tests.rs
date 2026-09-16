@@ -17,6 +17,7 @@ use zebra_chain::{
     transparent::{self, Address},
 };
 
+pub(super) mod admission;
 mod prop;
 mod vector;
 

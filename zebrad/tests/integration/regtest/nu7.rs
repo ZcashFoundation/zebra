@@ -327,8 +327,10 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         client.submit_block(boundary).await?;
         mempool(&client, &[]).await?;
         let empty_activation_template = template(&client, 105, &[]).await?;
-        let empty_activation =
+        let mut empty_activation =
             proposal_block_from_template(&empty_activation_template, None, &network)?;
+        // Actual miners choose a nonce; deterministic reconstruction only describes the family.
+        Arc::make_mut(&mut empty_activation.header).nonce = rand::random::<[u8; 32]>().into();
         assert_eq!(
             coinbase_value(&empty_activation)?,
             scheduled_block_subsidy(Height(105), &network)?,
@@ -351,7 +353,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             assert_eq!(u64::from(tx.fee()), 10_001);
         }
         assert_eq!(i64::from(fee_template.coinbase_txn().fee()), -8_001);
-        let fee_block = proposal_block_from_template(&fee_template, None, &network)?;
+        let mut fee_block = proposal_block_from_template(&fee_template, None, &network)?;
+        Arc::make_mut(&mut fee_block.header).nonce = rand::random::<[u8; 32]>().into();
         assert_eq!(
             coinbase_value(&fee_block)?,
             (scheduled_block_subsidy(Height(105), &network)? + Amount::try_from(8_001)?)?,
@@ -447,7 +450,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .map_err(|err| eyre!(err))?;
         let restored_template = template(&client, 106, &[]).await?;
         assert_eq!(restored_template.previous_block_hash(), fee_block.hash());
-        let restored = proposal_block_from_template(&restored_template, None, &network)?;
+        let mut restored = proposal_block_from_template(&restored_template, None, &network)?;
+        Arc::make_mut(&mut restored.header).nonce = rand::random::<[u8; 32]>().into();
         assert_eq!(coinbase_value(&restored)?, expected);
         assert_eq!(
             proposal(&client, &restored).await?,
@@ -467,6 +471,11 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             coinbase_value(&replacement)?,
             expected,
             "rollback restores reserve"
+        );
+        assert_eq!(
+            proposal(&client, &replacement).await?,
+            BlockProposalResponse::Valid,
+            "rollback restores a valid work family without reviving the invalidated solved hash",
         );
         let reconsidered: Vec<zebra_chain::block::Hash> = client
             .json_result_from_call("reconsiderblock", &params)
@@ -1259,10 +1268,19 @@ async fn lockbox_disbursements_at_activation_and_p2pkh_funding_stream() -> Resul
     .await?
 }
 
-/// No parameter validation bounds a disbursement by the lockbox pool: the template pays it, and
-/// the block is rejected when committing it would make the pool negative.
+/// Unfunded disbursements must neither be published as work nor pass proposal or commit checks.
 #[tokio::test(flavor = "multi_thread")]
 async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
+    use zebra_chain::{
+        history_tree::HistoryTree,
+        primitives::zcash_history::BlockCommitmentTreeRoots,
+        serialization::{DateTime32, Duration32},
+    };
+    use zebra_rpc::{
+        proposal_block_from_template, BlockTemplateResponse, CoinbaseCache, LongPollInput,
+        MinerParams,
+    };
+
     const NU6_1: u32 = 10;
 
     let _init_guard = zebra_test::init();
@@ -1275,16 +1293,76 @@ async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
         config.mining.miner_address = Some(miner.to_string().parse()?);
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
 
+        let mut history = HistoryTree::default();
+        let sapling_root = zebra_chain::sapling::tree::NoteCommitmentTree::default().root();
+        let orchard_root = zebra_chain::orchard::tree::NoteCommitmentTree::default().root();
+        let mut parent = regtest_genesis_block();
         for height in 1..NU6_1 {
-            mine_checked(&client, &network, &miner, height).await?;
+            let (block, _, _) = mine_checked(&client, &network, &miner, height).await?;
+            assert_eq!(block.transactions.len(), 1);
+            parent = Arc::new(block);
+            history.push(
+                &network,
+                parent.clone(),
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &orchard_root,
+                },
+            )?;
         }
-        let (block, height) = client.block_from_template(&network).await?;
-        assert_eq!(height, Height(NU6_1));
+        let unavailable: serde_json::Value =
+            serde_json::from_str(&client.text_from_call("getblocktemplate", "[]").await?)?;
+        assert!(
+            unavailable["error"].is_object() && unavailable["result"].is_null(),
+            "a proposal that would overdraw the lockbox must not be published: {unavailable}",
+        );
+
+        // Construct the invalid candidate locally: the provider correctly refuses to publish it.
+        // These blocks contain only transparent coinbases, so their note trees remain empty.
+        let time = DateTime32::try_from(parent.header.time)?
+            .saturating_add(Duration32::from_seconds(1))
+            .max(DateTime32::now());
+        let info = zebra_state::GetBlockTemplateChainInfo {
+            tip_height: Height(NU6_1 - 1),
+            tip_hash: parent.hash(),
+            chain_history_root: history.hash(),
+            expected_difficulty: parent.header.difficulty_threshold,
+            cur_time: time,
+            min_time: time,
+            max_time: time.saturating_add(Duration32::from_minutes(90)),
+            chain_value_pools: Default::default(),
+        };
+        let miner_params = MinerParams::from(
+            zcash_keys::address::Address::decode(&network, &miner.to_string())
+                .expect("the configured transparent miner address is valid"),
+        );
+        let cache = CoinbaseCache::default();
+        cache.select(Height(NU6_1), None);
+        let identity = LongPollInput::new(
+            info.tip_height,
+            info.tip_hash,
+            info.max_time,
+            std::iter::empty(),
+        )
+        .generate_id();
+        let candidate = BlockTemplateResponse::from_transactions(
+            &network,
+            &cache,
+            &miner_params,
+            &info,
+            identity,
+            vec![],
+            None,
+        );
+        let block = proposal_block_from_template(&candidate, None, &network)?;
+        assert_eq!(block.coinbase_height(), Some(Height(NU6_1)));
         let output = transparent::Output::new(Amount::try_from(600_000_000)?, recipient.script());
         assert!(block.transactions[0].outputs().contains(&output));
         // Proposals run the contextual checks on a copy of the state, so the pool error surfaces.

@@ -96,10 +96,12 @@ impl MiningRpcMethods for RpcRequestClient {
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
-        Ok((
-            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default(), net)?,
-            Height(block_template.height()),
-        ))
+        let mut block =
+            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default(), net)?;
+        Arc::get_mut(&mut block.header)
+            .expect("a newly constructed block has an unshared header")
+            .nonce = rand::random::<[u8; 32]>().into();
+        Ok((block, Height(block_template.height())))
     }
 
     async fn submit_block(&self, block: Block) -> Result<()> {

@@ -1,0 +1,7 @@
+project: zebra-rpc
+kind: Added
+body: 'Expose mempool-owned template construction: `BlockTemplateRequest`,
+  `BlockTemplateResponse::from_transactions`, `CoinbaseCache::{select, get, store}`,
+  `select_mempool_transactions`, and `nsm_value_balance_for_next_block`
+  ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
+time: 2026-09-01T14:15:00.000000000Z

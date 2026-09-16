@@ -91,26 +91,10 @@ fn includes_tx_with_selected_dependencies() {
         "should select the independent transaction and 1 of the dependent txs, selected: {selected_txs:?}"
     );
 
-    let selected_tx_by_id = |id| {
-        selected_txs
-            .iter()
-            .find(|(_, tx)| tx.transaction.id.mined_id() == id)
-    };
-
-    let (dependency_depth, _) =
-        selected_tx_by_id(independent_tx_id).expect("should select the independent tx");
-
+    assert_eq!(selected_txs[0].transaction.id.mined_id(), independent_tx_id);
     assert_eq!(
-        *dependency_depth, 0,
-        "should return a dependency depth of 0 for the independent tx"
-    );
-
-    let (dependency_depth, _) = selected_tx_by_id(dependent_tx1.transaction.id.mined_id())
-        .expect("should select dependent_tx1");
-
-    assert_eq!(
-        *dependency_depth, 1,
-        "should return a dependency depth of 1 for the dependent tx"
+        selected_txs[1].transaction.id, dependent_tx1.transaction.id,
+        "dependencies must precede their spenders in the block",
     );
 }
 
@@ -274,7 +258,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         (330 - coinbase_counts.shielded_cost()) / 4,
         "each candidate spends four units of the budget reserved after the coinbase",
     );
-    let counts = selected.iter().fold(coinbase_counts, |counts, (_, tx)| {
+    let counts = selected.iter().fold(coinbase_counts, |counts, tx| {
         counts.saturating_add(ShieldedActionCounts::from_transaction(
             &tx.transaction.transaction,
         ))
@@ -287,7 +271,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
 
     let fees = selected
         .iter()
-        .map(|(_, tx)| tx.miner_fee)
+        .map(|tx| tx.miner_fee)
         .sum::<zebra_chain::amount::Result<Amount<_>>>()
         .unwrap();
     let actual = TransactionTemplate::new_coinbase_with_parent_pools(

@@ -1,8 +1,7 @@
 //! Zebra Mempool queue checker.
 //!
-//! The queue checker sends a request to the mempool when a transaction finishes verifying, and
-//! periodically as a backstop, so that newly verified transactions are added to the mempool,
-//! and gossiped to peers.
+//! The queue checker drives completed downloads, retained background work, and chain-tip changes
+//! immediately, with a periodic fallback for queue maintenance and expiry.
 //!
 //! The mempool performs these actions on every request,
 //! but we can't guarantee that requests will arrive from peers
@@ -16,6 +15,9 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::Notify, task::JoinHandle, time::sleep};
 use tower::{BoxError, Service, ServiceExt};
 use tracing_futures::Instrument;
+
+use zebra_chain::chain_tip::ChainTip;
+use zebra_state::LatestChainTip;
 
 use crate::components::mempool;
 
@@ -38,9 +40,12 @@ pub(crate) const RATE_LIMIT_DELAY: Duration = Duration::from_secs(5);
 pub struct QueueChecker<Mempool> {
     /// The mempool service that receives crawled transaction IDs.
     mempool: Mempool,
-
     /// Notified when a transaction finishes verifying.
     transaction_verified: Arc<Notify>,
+    /// Wakes the service when its retained background futures can make progress.
+    background_work: Arc<mempool::BackgroundWork>,
+    /// Wakes the service when committed-chain notifications change.
+    latest_chain_tip: LatestChainTip,
 }
 
 impl<Mempool> QueueChecker<Mempool>
@@ -50,23 +55,23 @@ where
     Mempool::Future: Send,
 {
     /// Spawn an asynchronous task to run the mempool queue checker.
-    ///
-    /// `transaction_verified` is the notification the mempool's downloader sends when a
-    /// transaction finishes verifying.
-    pub fn spawn(
+    pub(crate) fn spawn(
         mempool: Mempool,
         transaction_verified: Arc<Notify>,
+        background_work: Arc<mempool::BackgroundWork>,
+        latest_chain_tip: LatestChainTip,
     ) -> JoinHandle<Result<(), BoxError>> {
         let queue_checker = QueueChecker {
             mempool,
             transaction_verified,
+            background_work,
+            latest_chain_tip,
         };
 
         tokio::spawn(queue_checker.run().in_current_span())
     }
 
-    /// Check if the mempool has newly verified transactions, when one finishes verifying and at
-    /// least every [`RATE_LIMIT_DELAY`].
+    /// Drive background work, tip changes, and periodic queue maintenance.
     ///
     /// Runs until the mempool returns an error,
     /// which happens when Zebra is shutting down.
@@ -74,14 +79,21 @@ where
         info!("initializing mempool queue checker task");
 
         loop {
-            // A notification that arrives while the mempool is being checked is stored, so the
-            // next wait returns immediately and the transaction isn't left until the backstop.
-            tokio::select! {
-                () = self.transaction_verified.notified() => {}
-                () = sleep(RATE_LIMIT_DELAY) => {}
-            }
-
+            // Mark before polling: a tip change during the request must wake the next check.
+            self.latest_chain_tip.mark_best_tip_seen();
             self.check_queue().await?;
+
+            tokio::select! {
+                // Notifications arriving during a check retain a permit for this next wait.
+                _ = self.transaction_verified.notified() => {}
+                _ = self.background_work.notify.notified() => {}
+                changed = self.latest_chain_tip.best_tip_changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                }
+                _ = sleep(RATE_LIMIT_DELAY) => {}
+            }
         }
     }
 
