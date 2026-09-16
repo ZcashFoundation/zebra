@@ -85,7 +85,7 @@ use zebra_consensus::{
     funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
+use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService, MempoolTxSubscriber};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -1008,8 +1008,14 @@ where
     /// `getblocktemplate` calls don't have to read the state and the mempool, select transactions,
     /// and build a coinbase transaction.
     ///
+    /// The task rebuilds when the chain tip changes and when `mempool_change` reports a change
+    /// that affects the template, so a new transaction reaches miners without waiting for a timer.
+    ///
     /// Returns `None` if mining isn't configured.
-    pub fn spawn_block_template_updater(&self) -> Option<JoinHandle<()>> {
+    pub fn spawn_block_template_updater(
+        &self,
+        mempool_change: MempoolTxSubscriber,
+    ) -> Option<JoinHandle<()>> {
         let miner_params = self.gbt.miner_params()?.clone();
         let template_cache = self.gbt.template_cache()?.clone();
 
@@ -1020,6 +1026,7 @@ where
                 self.gbt.coinbase_cache(),
                 template_cache,
                 self.mempool.clone(),
+                mempool_change.subscribe(),
                 self.read_state.clone(),
                 self.latest_chain_tip.clone(),
                 self.gbt.sync_status(),
