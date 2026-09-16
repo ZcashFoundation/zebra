@@ -497,6 +497,11 @@ impl Storage {
             }
         }
 
+        // Evicting an ancestor also evicts this transaction. Do not report or gossip it as admitted.
+        if result.is_ok() && !self.verified.contains(&tx_id) {
+            result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+        }
+
         result
     }
 

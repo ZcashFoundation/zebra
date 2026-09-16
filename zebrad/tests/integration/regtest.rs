@@ -559,7 +559,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         work::difficulty::U256,
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
-    use zebra_node_services::mempool;
     use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
 
@@ -570,7 +569,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         },
         fetch_chain_info,
         methods::{RpcImpl, RpcServer},
-        proposal_block_from_template, MinerParams, SubmitBlockChannel,
+        proposal_block_from_template, CoinbaseCache, LongPollInput, MinerParams,
+        SubmitBlockChannel,
     };
 
     let _init_guard = zebra_test::init();
@@ -627,13 +627,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
-    let genesis_hash = block_verifier_router
+    block_verifier_router
         .clone()
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
         .await
         .expect("should validate Regtest genesis block");
 
-    let mut mempool = MockService::build()
+    let mempool = MockService::build()
         .with_max_request_delay(Duration::from_secs(5))
         .for_unit_tests();
     let mut mock_sync_status = MockSyncStatus::default();
@@ -660,23 +660,30 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Some(submitblock_channel.sender()),
     );
 
-    let make_mock_mempool_request_handler = || async move {
-        mempool
-            .expect_request(mempool::Request::FullTransactions)
-            .await
-            .respond(mempool::Response::FullTransactions {
-                transactions: vec![],
-                transaction_dependencies: Default::default(),
-                // tip hash needs to match chain info for long poll requests
-                last_seen_tip_hash: genesis_hash,
-            });
+    let chain_info = fetch_chain_info(read_state.clone()).await?;
+    let make_template = |chain_info: &zebra_state::GetBlockTemplateChainInfo| {
+        BlockTemplateResponse::from_transactions(
+            &network,
+            &CoinbaseCache::default(),
+            &miner_params,
+            chain_info,
+            LongPollInput::new(
+                chain_info.tip_height,
+                chain_info.tip_hash,
+                chain_info.max_time,
+                [],
+            )
+            .generate_id(),
+            vec![],
+            None,
+        )
     };
-
-    let block_template_fut = rpc.get_block_template(None);
-    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
-    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let (templates, receiver) =
+        tokio::sync::watch::channel(Some(Arc::new(make_template(&chain_info))));
+    let (requests, _overrides) = tokio::sync::mpsc::channel(1);
+    let rpc = rpc.with_block_templates(receiver, requests);
     let GetBlockTemplateResponse::TemplateMode(block_template) =
-        block_template.expect("unexpected error in getblocktemplate RPC call")
+        rpc.get_block_template(None).await?
     else {
         panic!(
             "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
@@ -744,11 +751,11 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
 
     // Gets the next block template
-    let block_template_fut = rpc.get_block_template(None);
-    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
-    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    templates.send_replace(Some(Arc::new(make_template(
+        &fetch_chain_info(read_state.clone()).await?,
+    ))));
     let GetBlockTemplateResponse::TemplateMode(block_template) =
-        block_template.expect("unexpected error in getblocktemplate RPC call")
+        rpc.get_block_template(None).await?
     else {
         panic!(
             "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
@@ -918,16 +925,18 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         work::difficulty::U256,
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
-    use zebra_node_services::mempool;
     use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
 
     use zebra_rpc::{
         client::{
-            GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+            BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+            GetBlockTemplateResponse,
         },
+        fetch_chain_info,
         methods::{RpcImpl, RpcServer},
-        proposal_block_from_template, SubmitBlockChannel,
+        proposal_block_from_template, CoinbaseCache, LongPollInput, MinerParams,
+        SubmitBlockChannel,
     };
 
     let _init_guard = zebra_test::init();
@@ -966,6 +975,7 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
 
     let default_test_config = default_test_config(&network);
     let mining_config = default_test_config.mining;
+    let miner_params = MinerParams::new(&network, mining_config.clone())?;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network).await;
@@ -984,13 +994,13 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
-    let genesis_hash = block_verifier_router
+    block_verifier_router
         .clone()
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
         .await
         .expect("should validate Regtest genesis block");
 
-    let mut mempool = MockService::build()
+    let mempool = MockService::build()
         .with_max_request_delay(Duration::from_secs(5))
         .for_unit_tests();
     let mut mock_sync_status = MockSyncStatus::default();
@@ -1017,23 +1027,27 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         Some(submitblock_channel.sender()),
     );
 
-    let make_mock_mempool_request_handler = || async move {
-        mempool
-            .expect_request(mempool::Request::FullTransactions)
-            .await
-            .respond(mempool::Response::FullTransactions {
-                transactions: vec![],
-                transaction_dependencies: Default::default(),
-                // tip hash needs to match chain info for long poll requests
-                last_seen_tip_hash: genesis_hash,
-            });
-    };
-
-    let block_template_fut = rpc.get_block_template(None);
-    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
-    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let chain_info = fetch_chain_info(read_state.clone()).await?;
+    let template = BlockTemplateResponse::from_transactions(
+        &network,
+        &CoinbaseCache::default(),
+        &miner_params,
+        &chain_info,
+        LongPollInput::new(
+            chain_info.tip_height,
+            chain_info.tip_hash,
+            chain_info.max_time,
+            [],
+        )
+        .generate_id(),
+        vec![],
+        None,
+    );
+    let (_templates, receiver) = tokio::sync::watch::channel(Some(Arc::new(template)));
+    let (requests, _overrides) = tokio::sync::mpsc::channel(1);
+    let rpc = rpc.with_block_templates(receiver, requests);
     let GetBlockTemplateResponse::TemplateMode(block_template) =
-        block_template.expect("unexpected error in getblocktemplate RPC call")
+        rpc.get_block_template(None).await?
     else {
         panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };

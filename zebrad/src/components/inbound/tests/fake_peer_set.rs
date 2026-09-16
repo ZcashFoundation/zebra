@@ -186,8 +186,14 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Make sure there is an additional request broadcasting the
+    // inserted transaction to peers.
+    let mut hs = HashSet::new();
+    hs.insert(tx.unmined_id());
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
+        .await
+        .respond(Response::Nil);
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
@@ -200,15 +206,6 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         Response::TransactionIds(vec![test_transaction_id]),
         "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
-
-    // Make sure there is an additional request broadcasting the
-    // inserted transaction to peers.
-    let mut hs = HashSet::new();
-    hs.insert(tx.unmined_id());
-    peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs, None))
-        .await
-        .respond(Response::Nil);
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
@@ -404,8 +401,14 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         "`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Make sure there is an additional request broadcasting the
+    // inserted transaction to peers.
+    let mut hs = HashSet::new();
+    hs.insert(test_transaction.unmined_id());
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
+        .await
+        .respond(Response::Nil);
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
@@ -418,15 +421,6 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         Response::TransactionIds(vec![test_transaction_id]),
         "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
-
-    // Make sure there is an additional request broadcasting the
-    // inserted transaction to peers.
-    let mut hs = HashSet::new();
-    hs.insert(test_transaction.unmined_id());
-    peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs, None))
-        .await
-        .respond(Response::Nil);
 
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
@@ -505,8 +499,14 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Gossip is emitted only after proposal validation and verified-set insertion.
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(
+            HashSet::from([tx1_id]),
+            None,
+        ))
+        .await
+        .respond(Response::Nil);
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
@@ -532,45 +532,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Test transaction 1 is gossiped
-    let mut hs = HashSet::new();
-    hs.insert(tx1_id);
-
-    // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
     tokio::time::sleep(PEER_GOSSIP_DELAY).await;
-    let possible_requests = &mut [
-        Request::AdvertiseTransactionIds(hs, None),
-        Request::AdvertiseBlock(block_two.hash(), None),
-    ]
-    .to_vec();
-
     peer_set
-        .expect_request_that(|request| {
-            let is_possible = possible_requests.contains(request);
-
-            *possible_requests = possible_requests
-                .clone()
-                .into_iter()
-                .filter(|possible| possible != request)
-                .collect();
-
-            is_possible
-        })
-        .await
-        .respond(Response::Nil);
-
-    peer_set
-        .expect_request_that(|request| {
-            let is_possible = possible_requests.contains(request);
-
-            *possible_requests = possible_requests
-                .clone()
-                .into_iter()
-                .filter(|possible| possible != request)
-                .collect();
-
-            is_possible
-        })
+        .expect_request(Request::AdvertiseBlock(block_two.hash(), None))
         .await
         .respond(Response::Nil);
 
@@ -643,8 +607,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut hs = HashSet::new();
+    hs.insert(tx2_id);
+    peer_set
+        .expect_request(Request::AdvertiseTransactionIds(hs, None))
+        .await
+        .respond(Response::Nil);
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
@@ -680,16 +648,6 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .unbox_mempool_error(),
         MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::Expired)
     );
-
-    // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
-
-    let mut hs = HashSet::new();
-    hs.insert(tx2_id);
-    peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs, None))
-        .await
-        .respond(Response::Nil);
 
     // Add all the rest of the continuous blocks we have to test tx2 will never expire.
     let more_blocks: Vec<Arc<Block>> = vec![
@@ -1084,17 +1042,29 @@ async fn setup(
     // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mut mempool_service, transaction_subscriber) = Mempool::new(
-        &network,
-        &MempoolConfig::default(),
-        buffered_peer_set.clone(),
-        state_service.clone(),
-        buffered_tx_verifier.clone(),
-        sync_status.clone(),
-        latest_chain_tip.clone(),
-        chain_tip_change.clone(),
-        misbehavior_tx,
-    );
+    let (mut mempool_service, transaction_subscriber, _templates, _template_requests) =
+        Mempool::new(
+            &network,
+            &MempoolConfig::default(),
+            buffered_peer_set.clone(),
+            state_service.clone(),
+            buffered_tx_verifier.clone(),
+            sync_status.clone(),
+            latest_chain_tip.clone(),
+            chain_tip_change.clone(),
+            misbehavior_tx,
+            crate::components::mempool::admission_read_state(state_service.clone(), &network),
+            Buffer::new(
+                BoxService::new(tower::service_fn(|request: zebra_consensus::Request| {
+                    let zebra_consensus::Request::CheckProposal(block) = request else {
+                        panic!("mempool admission must not commit blocks");
+                    };
+                    std::future::ready(Ok::<_, BoxError>(block.hash()))
+                })),
+                1,
+            ),
+            None,
+        );
 
     // Pretend we're close to tip
     SyncStatus::sync_close_to_tip(&mut recent_syncs);
@@ -1141,8 +1111,14 @@ async fn setup(
         added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
     }
 
+    let background_work = mempool_service.background_work();
     let mempool_service = BoxService::new(mempool_service);
     let mempool_service = ServiceBuilder::new().buffer(1).service(mempool_service);
+    let _queue_checker = crate::components::mempool::QueueChecker::spawn(
+        mempool_service.clone(),
+        background_work,
+        latest_chain_tip.clone(),
+    );
 
     let (setup_tx, setup_rx) = oneshot::channel();
 

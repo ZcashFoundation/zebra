@@ -1467,11 +1467,9 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         mut mempool_transaction_receiver,
     ) = setup(&network, u64::MAX, true).await;
     mempool.enable(&mut recent_syncs).await;
+    let mut proposals = super::admission::mock_proposals(&mut mempool);
 
-    let verified_unmined_tx = network
-        .unmined_transactions_in_blocks(1..=10)
-        .find(|tx| !tx.transaction.transaction.outputs().is_empty())
-        .expect("should have at least 1 tx with transparent outputs");
+    let verified_unmined_tx = super::admission::candidate();
 
     let unmined_tx = verified_unmined_tx.transaction.clone();
     let unmined_tx_id = unmined_tx.id;
@@ -1487,7 +1485,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     // Call mempool with an AwaitOutput request
 
     let request = Request::AwaitOutput(outpoint);
-    let await_output_response_fut = mempool.ready().await.unwrap().call(request);
+    let mut await_output_response_fut = mempool.ready().await.unwrap().call(request);
 
     // Queue the transaction with the pending output to be added to the mempool
 
@@ -1505,24 +1503,58 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         panic!("wrong response from mempool to Queued request");
     };
 
-    let result_rx = results.remove(0).expect("should pass initial checks");
+    let mut result_rx = results.remove(0).expect("should pass initial checks");
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
-    // Wait for post-verification steps in mempool's Downloads
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    // Note: Buffered services shouldn't be polled without being called.
-    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
-    mempool
+    let proposal = super::admission::drive(
+        &mut mempool,
+        proposals.expect_request_that(|request| {
+            matches!(request, zebra_consensus::Request::CheckProposal(block)
+                if block.transactions.iter().any(|tx| tx.unmined_id() == unmined_tx_id))
+        }),
+    )
+    .await;
+    assert!(matches!(
+        result_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(await_output_response_fut.as_mut().now_or_never().is_none());
+    assert!(mempool.storage().created_output(&outpoint).is_none());
+    assert!(mempool_transaction_receiver.try_recv().is_err());
+    let Response::TransactionIds(ids) = mempool
         .ready()
         .await
-        .expect("polling mempool should succeed");
-
-    tokio::time::timeout(Duration::from_secs(10), result_rx)
+        .unwrap()
+        .call(Request::TransactionIds)
         .await
-        .expect("should not time out")
-        .expect("mempool tx verification result channel should not be closed")
-        .expect("mocked verification should be successful");
+        .unwrap()
+    else {
+        panic!("transaction ids response expected");
+    };
+    assert!(!ids.contains(&unmined_tx_id));
+    let Response::Queued(mut duplicates) = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![Gossip::Id(unmined_tx_id)]))
+        .await
+        .unwrap()
+    else {
+        panic!("queue response expected");
+    };
+    assert_eq!(
+        duplicates.remove(0).unbox_mempool_error(),
+        MempoolError::AlreadyQueued
+    );
+    let zebra_consensus::Request::CheckProposal(block) = proposal.request() else {
+        panic!("proposal request expected");
+    };
+    let hash = block.hash();
+    proposal.respond(hash);
+    super::admission::drive(&mut mempool, result_rx)
+        .await
+        .expect("admission response channel remains open")
+        .expect("successful proposal is admitted");
 
     assert_eq!(
         mempool.storage().transaction_count(),
@@ -2196,7 +2228,7 @@ fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
 }
 
 /// Create a new [`Mempool`] instance using mocked services.
-async fn setup(
+pub(super) async fn setup(
     network: &Network,
     tx_cost_limit: u64,
     should_commit_genesis_block: bool,
@@ -2235,7 +2267,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, _, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2243,7 +2275,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _templates, _template_requests) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2253,6 +2285,17 @@ async fn setup_with_mempool_config(
         latest_chain_tip,
         chain_tip_change.clone(),
         misbehavior_tx,
+        super::admission::admission_read_state(state_service.clone(), network),
+        Buffer::new(
+            BoxService::new(tower::service_fn(|request| async move {
+                let zebra_consensus::Request::CheckProposal(block) = request else {
+                    panic!("the mempool only verifies block proposals");
+                };
+                Ok::<_, BoxError>(block.hash())
+            })),
+            1,
+        ),
+        None,
     );
 
     // Keep the change feed drained in the background so tests that ignore it
