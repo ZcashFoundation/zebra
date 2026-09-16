@@ -81,4 +81,61 @@ proptest! {
         )));
         prop_assert!(!tracker.record_stall(addr));
     }
+
+    /// Releases a queued stall only after every preceding neutral response settles.
+    ///
+    /// Neutral outcomes preserve the existing stall count, even when their
+    /// arrival order differs from the request order.
+    #[test]
+    fn neutral_feedback_releases_completed_outcome(
+        mut neutral_requests in (1u64..10).prop_flat_map(|count| {
+            Just((0..count).collect::<Vec<_>>()).prop_shuffle()
+        }),
+    ) {
+        let _test_guard = zebra_test::init();
+
+        let mut tracker = FindResponseStallTracker::new();
+        let addr = test_addr(1);
+        prop_assert!(!tracker.record_stall(addr));
+        prop_assert_eq!(tracker.counts.get(&addr), Some(&1));
+
+        let mut request_order = neutral_requests.clone();
+        request_order.sort_unstable();
+
+        for request_id in request_order {
+            tracker.begin_request(addr, FindRequestId::from(request_id));
+        }
+
+        let stalled_request = FindRequestId::from(10);
+        tracker.begin_request(addr, stalled_request);
+
+        prop_assert!(!tracker.record_response(FindResponseEvent::new(
+            addr,
+            stalled_request,
+            FindResponseOutcome::Stalled,
+        )));
+        prop_assert_eq!(tracker.counts.get(&addr), Some(&1));
+
+        let last_neutral_request = neutral_requests
+            .pop()
+            .expect("the strategy generates at least one neutral request");
+
+        for request_id in neutral_requests {
+            prop_assert!(!tracker.record_response(FindResponseEvent::new(
+                addr,
+                FindRequestId::from(request_id),
+                FindResponseOutcome::Unclassified,
+            )));
+            prop_assert_eq!(tracker.counts.get(&addr), Some(&1));
+        }
+
+        prop_assert!(!tracker.record_response(FindResponseEvent::new(
+            addr,
+            FindRequestId::from(last_neutral_request),
+            FindResponseOutcome::Unclassified,
+        )));
+        prop_assert_eq!(tracker.counts.get(&addr), Some(&2));
+
+        prop_assert!(tracker.record_stall(addr));
+    }
 }
