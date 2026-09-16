@@ -286,6 +286,41 @@ async fn exhausted_utxo_retries_release_neutral_feedback() {
     assert!(!test.sync.find_response_progress.contains_key(&hash));
 }
 
+/// Exhausted post-checkpoint verifier retries release neutral feedback and retry state.
+#[tokio::test(start_paused = true)]
+async fn exhausted_verifier_retries_release_neutral_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.track_find_response(&[hash], Some(feedback));
+    test.sync
+        .block_reobtain_retries
+        .insert(hash, MAX_BLOCK_REOBTAIN_RETRIES);
+
+    let elapsed = timeout(Duration::ZERO, pending::<()>())
+        .await
+        .expect_err("a pending future cannot complete before the timeout");
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::ValidationRequestError {
+                error: elapsed.into(),
+                height: Height(1),
+                hash,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    assert!(!test.sync.reobtain_hashes.contains(&hash));
+    assert!(!test.sync.block_reobtain_retries.contains_key(&hash));
+    assert!(!test.sync.find_response_progress.contains_key(&hash));
+}
+
 /// A syncer whose block network fails before a request can be queued.
 type UnavailableNetworkSync = ChainSync<
     UnavailableNetwork,
