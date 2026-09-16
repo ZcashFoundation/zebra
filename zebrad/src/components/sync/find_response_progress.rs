@@ -13,6 +13,7 @@ pub(super) struct FindResponseProgress {
 /// Remaining work and the one-shot feedback owned by a response.
 struct Inner {
     remaining: usize,
+    abandoned: bool,
     feedback: Option<FindResponseFeedback>,
 }
 
@@ -27,6 +28,7 @@ impl FindResponseProgress {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 remaining: hash_count,
+                abandoned: false,
                 feedback: Some(feedback),
             })),
         }
@@ -34,28 +36,7 @@ impl FindResponseProgress {
 
     /// Records a verified hash, crediting the response only after all hashes verify.
     pub(super) fn record_verified_hash(&self) {
-        let feedback = {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("progress updates do not panic while locked");
-
-            if inner.feedback.is_none() {
-                return;
-            }
-
-            inner.remaining -= 1;
-
-            if inner.remaining == 0 {
-                inner.feedback.take()
-            } else {
-                None
-            }
-        };
-
-        if let Some(feedback) = feedback {
-            feedback.mark_useful();
-        }
+        self.finish_hash(false);
     }
 
     /// Records exhausted missing-block retries as a stall for the whole response.
@@ -68,8 +49,41 @@ impl FindResponseProgress {
         self.report_stalled();
     }
 
-    /// Leaves abandonment feedback pending until neutral reporting is implemented.
-    pub(super) fn record_abandoned_hash(&self) {}
+    /// Records an inconclusive local outcome without penalizing the response.
+    pub(super) fn record_abandoned_hash(&self) {
+        self.finish_hash(true);
+    }
+
+    /// Completes one hash and releases feedback when no unresolved hashes remain.
+    fn finish_hash(&self, abandoned: bool) {
+        let (feedback, useful) = {
+            let mut inner = self
+                .inner
+                .lock()
+                .expect("progress updates do not panic while locked");
+
+            if inner.feedback.is_none() {
+                return;
+            }
+
+            inner.remaining -= 1;
+            inner.abandoned |= abandoned;
+
+            let feedback = if inner.remaining == 0 {
+                inner.feedback.take()
+            } else {
+                None
+            };
+
+            (feedback, !inner.abandoned)
+        };
+
+        if let Some(feedback) = feedback {
+            if useful {
+                feedback.mark_useful();
+            }
+        }
+    }
 
     /// Consumes feedback once when any accepted hash proves unusable.
     fn report_stalled(&self) {
