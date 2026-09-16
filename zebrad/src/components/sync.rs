@@ -1299,11 +1299,10 @@ where
 
         let result = self.handle_block_response(Err(error));
 
-        if missing && self.block_reobtain_retries.contains_key(&hash) {
+        // Any scheduled retry can still resolve this hash's pending feedback.
+        if self.reobtain_hashes.contains(&hash) {
             return result;
         }
-
-        self.reobtain_hashes.shift_remove(&hash);
 
         if let Some(responses) = self.find_response_progress.remove(&hash) {
             for response in responses {
