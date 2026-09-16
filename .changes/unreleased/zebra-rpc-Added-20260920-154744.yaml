@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: Added
+body: 'Public `BlockTemplateResponse::is_valid_for_tip`, for checking the parent hash and
+  time-dependent Testnet difficulty freshness without verifying proposal validity
+  ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
+time: 2026-09-20T15:47:44.591707266+02:00

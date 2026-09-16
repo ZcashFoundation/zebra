@@ -187,7 +187,7 @@ async fn completed_batch_keeps_queue_checker_awake() {
     .expect("queued results must not wait for the five-second backstop");
 }
 
-/// Consuming a result frees admission even if its task has not exited.
+/// Finishing admission frees its slot even if the download task has not exited.
 #[tokio::test(start_paused = true)]
 async fn full_queue_can_retry_before_completed_task_exits() {
     let mut downloads = Downloads::new(
@@ -219,7 +219,12 @@ async fn full_queue_can_retry_before_completed_task_exits() {
     let (response, mut receiver) = oneshot::channel();
     downloads
         .results_sender
-        .send(Ok(Ok((tx, Vec::new(), Some(Height(0)), Some(response)))))
+        .send(Ok(Ok((
+            tx,
+            Vec::new(),
+            Some((Height(0), block::Hash([0; 32]))),
+            Some(response),
+        ))))
         .unwrap();
     let (tx, _, _, response) = tokio::time::timeout(Duration::from_secs(1), downloads.next())
         .await
@@ -231,9 +236,10 @@ async fn full_queue_can_retry_before_completed_task_exits() {
     assert!(downloads.pending.iter().all(|task| !task.is_finished()));
 
     // The mempool retries this transaction when its verified tip height is stale.
+    let source = downloads.finish_admission(tx.transaction.id);
     downloads
-        .download_if_needed_and_verify(tx.transaction.into(), None, response)
-        .expect("consuming a result must free its slot before a stale-tip retry");
+        .download_if_needed_and_verify(tx.transaction.into(), source, response)
+        .expect("finishing admission must free its slot before a stale-tip retry");
     assert!(matches!(
         receiver.try_recv(),
         Err(oneshot::error::TryRecvError::Empty)

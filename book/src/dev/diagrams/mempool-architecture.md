@@ -33,7 +33,8 @@ graph TD
     Downloads -->|6a- Check UTXO| State
     State -->|6b- UTXO data| Downloads
 
-    Downloads -->|7- Store verified tx| Storage
+    Downloads -->|7a- Ready for proposal admission| Mempool
+    Mempool -->|7b- Store admitted tx| Storage
 
     QueueChecker -->|8a- Check for verified| Mempool
     Mempool -->|8b- Process verified| QueueChecker
@@ -48,6 +49,8 @@ graph TD
     %% Mempool responds to service requests
     RPC -->|Query mempool| Mempool
     Mempool -->|Mempool data| RPC
+    Mempool -->|Published mining templates| RPC
+    RPC -->|Private template requests| Mempool
 
     %% Styling
     classDef external fill:#444,stroke:#888,stroke-width:1px,color:white;
@@ -71,6 +74,10 @@ graph TD
 
 6. **Gossip Task** (not shown): A separate async task that broadcasts new transaction IDs to peers via `MempoolChange` events. Located at `zebrad/src/components/mempool/gossip.rs`.
 
+7. **Admission** (not shown): Verifies a candidate and its required ancestors in a block proposal before storage. Located at `zebrad/src/components/mempool/admission.rs`.
+
+8. **Block Templates** (not shown): Publishes validated default mining work and serves caller-specific requests privately. Located at `zebrad/src/components/mempool/block_template.rs`.
+
 ## Transaction Flow
 
 1. Transactions arrive via network gossiping, direct RPC submission, or crawler polling. Both RPC and Crawler use the same `Request::Queue` mechanism to submit transaction IDs to the mempool.
@@ -79,9 +86,9 @@ graph TD
 
 3. The download service retrieves transaction data from peers.
 
-4. Transactions are verified against consensus rules using the transaction verifier.
+4. Transactions are individually verified against consensus rules using the transaction verifier.
 
-5. Verified transactions are stored in memory and gossiped to peers via the Gossip task.
+5. The mempool verifies a block proposal containing the candidate and its required ancestors. Only after successful admission and storage is the candidate available to queries, dependent transactions and gossip.
 
 6. The queue checker triggers the mempool to process newly verified transactions from the Downloads stream.
 

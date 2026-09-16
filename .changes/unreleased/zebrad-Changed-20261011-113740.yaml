@@ -1,9 +1,9 @@
 project: zebrad
 kind: Changed
 body: >-
-  Mining templates rebuild immediately after isolated verified mempool changes,
-  waking long polls on publication. Rebuilds pause for at least one second or the previous
-  build's duration, whichever is longer; the five-second backstop respects that pause,
+  Mining templates debounce verified mempool changes for 500 ms, waking long polls on
+  publication. Rebuilds pause for at least 500 ms or the previous build's duration,
+  whichever is longer; the five-second backstop respects that pause,
   while chain-tip changes rebuild immediately. Cached build failures no longer
   interrupt mining after the chain tip changes
   ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374)).
