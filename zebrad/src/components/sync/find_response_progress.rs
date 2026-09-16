@@ -57,6 +57,9 @@ impl FindResponseProgress {
             feedback.mark_useful();
         }
     }
+
+    /// Leaves missing-hash feedback pending until stall reporting is implemented.
+    pub(super) fn record_missing_hash(&self) {}
 }
 
 #[cfg(test)]
