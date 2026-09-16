@@ -130,6 +130,18 @@ async fn extend_response_with_continuation_reports_useful_feedback() {
     assert_eq!(observer.try_outcome(), Ok(Some(true)));
 }
 
+/// An empty extend-tips response receives stall feedback.
+#[tokio::test]
+async fn empty_extend_response_reports_stall() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+
+    let observer = test.raw_hashes_for_extend_tips(vec![]).await;
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+}
+
 /// An extend-tips response whose only hash differs from the expected overlap reports a stall.
 #[tokio::test]
 async fn extend_response_with_one_unexpected_hash_reports_stall() {
