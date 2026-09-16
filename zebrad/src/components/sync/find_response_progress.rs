@@ -58,8 +58,24 @@ impl FindResponseProgress {
         }
     }
 
-    /// Leaves missing-hash feedback pending until stall reporting is implemented.
-    pub(super) fn record_missing_hash(&self) {}
+    /// Records exhausted missing-block retries as a stall for the whole response.
+    pub(super) fn record_missing_hash(&self) {
+        self.report_stalled();
+    }
+
+    /// Consumes feedback once when any accepted hash proves unusable.
+    fn report_stalled(&self) {
+        let feedback = self
+            .inner
+            .lock()
+            .expect("progress updates do not panic while locked")
+            .feedback
+            .take();
+
+        if let Some(feedback) = feedback {
+            feedback.mark_stalled();
+        }
+    }
 }
 
 #[cfg(test)]
