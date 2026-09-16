@@ -43,6 +43,39 @@ proptest! {
             prop_assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
         }
     }
+
+    /// Only the final unclassified owner releases feedback and closes the channel.
+    #[test]
+    fn only_final_drop_releases_feedback(clone_count in 0usize..10) {
+        let _test_guard = zebra_test::init();
+
+        let addr = test_addr(1);
+        let request_id = FindRequestId::from(1);
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+
+        let feedback = FindResponseFeedback::new(addr, request_id, sender);
+        let clones = vec![feedback.clone(); clone_count];
+
+        prop_assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
+
+        for feedback in clones {
+            FeedbackAction::Drop.apply_to(feedback);
+
+            prop_assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
+        }
+
+        FeedbackAction::Drop.apply_to(feedback);
+
+        prop_assert_eq!(
+            receiver.try_recv(),
+            Ok(FindResponseEvent::new(
+                addr,
+                request_id,
+                FeedbackAction::Drop.expected_outcome(),
+            )),
+        );
+        prop_assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
+    }
 }
 
 /// An action taken by one owner of a feedback capability.
