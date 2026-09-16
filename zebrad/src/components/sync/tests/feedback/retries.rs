@@ -1,7 +1,9 @@
 //! Feedback ownership when missing-block retries are queued.
 
+use std::future::pending;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures::{future::Ready, StreamExt};
 use tokio::{
@@ -204,6 +206,38 @@ async fn utxo_timeout_retry_keeps_feedback_pending() {
                 height: Height(1),
                 hash,
                 advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert!(
+        test.sync.reobtain_hashes.contains(&hash),
+        "the retry must remain queued after feedback processing",
+    );
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+}
+
+/// A post-checkpoint verifier timeout retains its retry and pending feedback.
+#[tokio::test(start_paused = true)]
+async fn verifier_timeout_retry_keeps_feedback_pending() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.track_find_response(&[hash], Some(feedback));
+
+    let elapsed = timeout(Duration::ZERO, pending::<()>())
+        .await
+        .expect_err("a pending future cannot complete before the timeout");
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::ValidationRequestError {
+                error: elapsed.into(),
+                height: Height(1),
+                hash,
             },
             hash,
         )))
