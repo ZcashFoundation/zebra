@@ -14,21 +14,21 @@
 use std::{sync::Arc, time::Duration};
 
 use jsonrpsee::core::RpcResult;
-use tokio::{
-    sync::watch,
-    task::JoinHandle,
-    time::{sleep, timeout},
-};
+use tokio::{sync::watch, task::JoinHandle, time::sleep};
+
+use tower::ServiceExt;
 
 use zebra_chain::{
     amount::{Amount, NegativeOrZero},
     block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
+    serialization::{DateTime32, Duration32},
+    work::difficulty::ParameterDifficulty,
 };
 use zebra_node_services::mempool::MempoolService;
-use zebra_state::ReadState;
+use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
 use crate::{
     methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
@@ -44,12 +44,12 @@ use super::{
 #[cfg(test)]
 mod tests;
 
-/// How long `getblocktemplate` waits for [`run()`] to publish a template for a new chain tip,
-/// before building a template itself.
+/// How long `getblocktemplate` waits for [`run()`] to publish a template for the current chain
+/// tip, before building a template itself.
 ///
 /// [`run()`] publishes a coinbase-only template as soon as it sees a tip change, so this timeout
 /// only expires if that task is busy building a template, or isn't running at all.
-const NEW_TIP_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const NEW_TIP_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
@@ -109,39 +109,47 @@ impl TemplateCache {
     }
 
     /// Publishes `template` as the precomputed template.
-    fn publish(&self, template: BlockTemplateResponse) {
+    pub(crate) fn publish(&self, template: BlockTemplateResponse) {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns the precomputed template if it extends `tip_hash`, waiting up to
-    /// [`NEW_TIP_TIMEOUT`] for [`run()`] to catch up with a recent tip change.
-    ///
-    /// Returns `None` if no [`run()`] task has published a template yet, or if it didn't catch up
-    /// in time. Never returns a template for a different tip: mining on it would extend a chain
-    /// that Zebra has already seen a block for.
-    pub(crate) async fn wait_for_tip(
+    /// Returns a template for `tip_hash`, unless Testnet's time-dependent difficulty may have
+    /// become easier since it was built.
+    pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
+        network: &Network,
+        now: DateTime32,
     ) -> Option<Arc<BlockTemplateResponse>> {
-        let mut receiver = self.0.subscribe();
+        let cached = self.0.borrow();
+        let template = cached.as_ref()?;
 
-        // An empty cache means no `run()` task has published a template, so there's nothing to wait
-        // for.
-        let mut template = receiver.borrow_and_update().clone()?;
+        // Mining on a template for another tip extends a chain Zebra has already seen a block for.
+        if template.previous_block_hash != tip_hash {
+            return None;
+        }
 
-        timeout(NEW_TIP_TIMEOUT, async move {
-            loop {
-                if template.previous_block_hash == tip_hash {
-                    return Some(template);
-                }
+        // Only an abbreviated standard-difficulty Testnet time range can become unprofitable.
+        // At the full 90-minute median-time cap, even a fresh build clamps to the same max_time.
+        // Regtest deliberately uses historical chain time rather than the wall clock.
+        if now > template.max_time
+            && !network.is_regtest()
+            && NetworkUpgrade::minimum_difficulty_spacing_for_height(
+                network,
+                Height(template.height.saturating_sub(1)),
+            )
+            .is_some()
+            && template.bits != network.target_difficulty_limit().to_compact()
+            && template
+                .max_time
+                .saturating_duration_since(template.min_time)
+                .seconds()
+                < Duration32::from_minutes(90).seconds() - 1
+        {
+            return None;
+        }
 
-                receiver.changed().await.ok()?;
-                template = receiver.borrow_and_update().clone()?;
-            }
-        })
-        .await
-        .ok()
-        .flatten()
+        Some(Arc::clone(template))
     }
 }
 
@@ -223,29 +231,30 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
         }
 
-        // Build a template with mempool transactions, and give up if the tip changes while we're
-        // building it: that template is already stale, and the next iteration replaces it.
-        let mut tip_change = latest_chain_tip.clone();
-        let build_with_mempool = build(
+        // Await the full build even if the tip changes: dropping it would detach its
+        // `spawn_blocking` proof, letting repeated tip changes accumulate CPU-heavy work.
+        let built = match build(
             &network,
             &miner_params,
             &coinbase_cache,
             read_state.clone(),
             Some(mempool.clone()),
-        );
-
-        let built = tokio::select! {
-            biased;
-            tip_changed = tip_change.best_tip_changed() => {
-                // A closed channel means the state service has shut down, so there are no more
-                // templates to build.
-                if tip_changed.is_err() {
-                    return;
+        )
+        .await
+        {
+            Ok(Some(template)) => match state_tip_hash(read_state.clone()).await {
+                Ok(tip_hash) if tip_hash == Some(template.previous_block_hash) => {
+                    Ok(Some(template))
                 }
-
-                continue;
-            }
-            built = build_with_mempool => built,
+                Ok(_) => {
+                    // The state advanced while the template was being built. Retry immediately
+                    // rather than waiting for the chain tip notification to catch up.
+                    tracing::debug!("discarding a template for a superseded chain tip");
+                    continue;
+                }
+                Err(error) => Err(error),
+            },
+            result => result,
         };
 
         match built {
@@ -307,6 +316,24 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
         }
     }
+}
+
+/// Returns the hash of the chain tip the state has committed, if any.
+async fn state_tip_hash<ReadStateService>(
+    read_state: ReadStateService,
+) -> RpcResult<Option<block::Hash>>
+where
+    ReadStateService: ReadState,
+{
+    let ReadResponse::Tip(tip) = read_state
+        .oneshot(ReadRequest::Tip)
+        .await
+        .map_misc_error()?
+    else {
+        unreachable!("state service returned the wrong response to a Tip request");
+    };
+
+    Ok(tip.map(|(_, tip_hash)| tip_hash))
 }
 
 /// Builds a block template for the block after the current chain tip.
@@ -379,7 +406,7 @@ where
 }
 
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
-/// already built or being built.
+/// already built or another coinbase is still being built.
 fn start_precomputing_coinbase(
     next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     network: &Network,
@@ -388,7 +415,9 @@ fn start_precomputing_coinbase(
 ) {
     if next_coinbase
         .as_ref()
-        .is_some_and(|(precomputed_height, _)| *precomputed_height == height)
+        .is_some_and(|(precomputed_height, task)| {
+            *precomputed_height == height || !task.is_finished()
+        })
     {
         return;
     }
@@ -406,19 +435,23 @@ fn start_precomputing_coinbase(
 
 /// Moves the precomputed coinbase transaction into `coinbase_cache`, if it was built for `height`.
 ///
-/// A coinbase built for another height has the wrong BIP-34 height and subsidy, so it is discarded:
-/// the chain advanced by more than one block, or there was a reorg.
+/// A coinbase built for another height has the wrong BIP-34 height and subsidy. Keep tracking it
+/// until it finishes, so a later precomputation cannot detach an unfinished proof.
 async fn store_precomputed_coinbase(
     next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     height: Height,
     coinbase_cache: &CoinbaseCache,
 ) {
-    let Some((_, coinbase)) = next_coinbase
-        .take()
-        .filter(|(precomputed_height, _)| *precomputed_height == height)
-    else {
+    if next_coinbase
+        .as_ref()
+        .is_none_or(|(precomputed_height, _)| *precomputed_height != height)
+    {
         return;
-    };
+    }
+
+    let (_, coinbase) = next_coinbase
+        .take()
+        .expect("the precomputed height was checked above");
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that

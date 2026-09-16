@@ -71,7 +71,9 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
-    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+    },
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
@@ -1005,8 +1007,8 @@ where
     }
 
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
-    /// `getblocktemplate` calls don't have to read the state and the mempool, select transactions,
-    /// and build a coinbase transaction.
+    /// `getblocktemplate` calls only validate the tip against the state instead of reading the
+    /// mempool, selecting transactions, and building a coinbase transaction.
     ///
     /// Returns `None` if mining isn't configured.
     pub fn spawn_block_template_updater(&self) -> Option<JoinHandle<()>> {
@@ -1091,13 +1093,15 @@ where
             // The client is long polling on exactly this template, so wait for a reason to send
             // another one.
             let max_time = template.max_time;
-            let cur_time = template.cur_time;
 
-            // On Testnet the max time changes the block difficulty, so old shares become invalid.
-            // On Mainnet this means 90 minutes without a block or a mempool transaction.
-            let duration_until_max_time = max_time.saturating_duration_since(cur_time);
-            let wait_for_max_time: OptionFuture<_> = if duration_until_max_time.seconds() > 0 {
-                Some(tokio::time::sleep(duration_until_max_time.to_std()))
+            // `max_time` is inclusive. Wait until the clock passes it, not for the template's
+            // original time range again: cached `cur_time` may already be several seconds old.
+            let now = DateTime32::now();
+            let duration_until_max_time = max_time.saturating_duration_since(now);
+            let wait_for_max_time: OptionFuture<_> = if max_time >= now {
+                Some(tokio::time::sleep(
+                    duration_until_max_time.to_std() + Duration::from_secs(1),
+                ))
             } else {
                 None
             }
@@ -1126,32 +1130,43 @@ where
 
     /// Returns the precomputed template, if it extends the tip the state has committed.
     ///
-    /// Waits up to `NEW_TIP_TIMEOUT` for the updater task to catch up with a recent tip change.
+    /// Waits up to [`precompute::NEW_TIP_TIMEOUT`] for the updater task to catch up with a recent
+    /// tip change, re-reading the tip every time it publishes.
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
     ) -> Option<Arc<BlockTemplateResponse>> {
-        // # Correctness
-        //
-        // The tip has to come from the state, not from `latest_chain_tip`. The state's write task
-        // publishes a committed block to the read state before it updates the chain tip channel
-        // (`update_latest_chain_channels()`), so between those two sends the channel still names
-        // the parent of a block the state has already committed. Trusting the channel there would
-        // serve a template for a chain this node has itself extended.
-        //
-        // `ReadRequest::Tip` reads the same non-finalized state channel that
-        // `ReadRequest::ChainInfo` builds templates from, so the two can't disagree about the tip.
-        let ReadResponse::Tip(Some((_, tip_hash))) = self
-            .read_state
-            .clone()
-            .oneshot(ReadRequest::Tip)
-            .await
-            .ok()?
-        else {
-            return None;
-        };
+        // Subscribe before the first read below, so a template published while this call is
+        // deciding what to do with the previous one still wakes it.
+        let mut template_changes = cache.subscribe();
 
-        cache.wait_for_tip(tip_hash).await
+        tokio::time::timeout(precompute::NEW_TIP_TIMEOUT, async move {
+            loop {
+                // The state publishes committed blocks before updating `latest_chain_tip`.
+                // Read its tip on every cache publication, including after a wait, so neither
+                // a lagging tip channel nor a tip snapshot from before the wait admits stale work.
+                let ReadResponse::Tip(Some((_, tip_hash))) = self
+                    .read_state
+                    .clone()
+                    .oneshot(ReadRequest::Tip)
+                    .await
+                    .ok()?
+                else {
+                    return None;
+                };
+
+                if let Some(template) =
+                    cache.template_for_tip(tip_hash, &self.network, DateTime32::now())
+                {
+                    return Some(template);
+                }
+
+                template_changes.changed().await;
+            }
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     /// Returns a reference to the configured network.
