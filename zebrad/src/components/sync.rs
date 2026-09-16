@@ -957,13 +957,25 @@ where
 
         debug!(?self.prospective_tips);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
+        // Known hashes can follow unknown ones or become known while responses arrive.
+        // Settle their feedback without aborting downloads from this or other peers.
+        let mut unknown_downloads = IndexSet::new();
+        for hash in download_set {
             debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+            if self.state_contains(hash).await? {
+                if let Some(responses) = self.find_response_progress.remove(&hash) {
+                    for response in responses {
+                        // Known blocks can still be queued for validation, so this is
+                        // not proof of committed progress. Other missing or invalid
+                        // hashes in the response can still produce a stall.
+                        response.record_abandoned_hash();
+                    }
+                }
+            } else {
+                unknown_downloads.insert(hash);
             }
         }
+        let download_set = unknown_downloads;
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
