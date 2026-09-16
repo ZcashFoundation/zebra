@@ -63,6 +63,9 @@ impl FindResponseProgress {
         self.report_stalled();
     }
 
+    /// Leaves invalid-hash feedback pending until stall reporting is implemented.
+    pub(super) fn record_invalid_hash(&self) {}
+
     /// Consumes feedback once when any accepted hash proves unusable.
     fn report_stalled(&self) {
         let feedback = self
