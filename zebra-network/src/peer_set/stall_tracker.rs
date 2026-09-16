@@ -9,7 +9,12 @@
 //! `BlocksByHash`/`TransactionsById` is a legitimate "I don't have this
 //! inventory" answer, so those don't feed the tracker.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use tokio::sync::mpsc;
 
 use crate::PeerSocketAddr;
 
@@ -45,6 +50,90 @@ impl FindResponseStallTracker {
     /// Clears tracking for a peer that sent a useful response or disconnected.
     pub(super) fn clear(&mut self, addr: PeerSocketAddr) {
         self.counts.remove(&addr);
+    }
+}
+
+/// A shared feedback capability whose reporting is not implemented yet.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct FindResponseFeedback {
+    inner: Arc<FindResponseFeedbackInner>,
+}
+
+/// Shared one-shot reporting state for cloned [`FindResponseFeedback`] handles.
+#[allow(dead_code)]
+struct FindResponseFeedbackInner {
+    peer: PeerSocketAddr,
+    request_id: FindRequestId,
+    sender: Mutex<Option<mpsc::UnboundedSender<FindResponseEvent>>>,
+}
+
+#[allow(dead_code)]
+impl FindResponseFeedback {
+    /// Creates a [`FindResponseFeedback`] attributed to `peer` and `request_id`.
+    #[allow(dead_code)]
+    pub(super) fn new(
+        peer: PeerSocketAddr,
+        request_id: FindRequestId,
+        sender: mpsc::UnboundedSender<FindResponseEvent>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(FindResponseFeedbackInner {
+                peer,
+                request_id,
+                sender: Mutex::new(Some(sender)),
+            }),
+        }
+    }
+
+    /// Consumes this handle without reporting usefulness yet.
+    pub fn mark_useful(self) {}
+
+    /// Consumes this handle without reporting a stall yet.
+    pub fn mark_stalled(self) {}
+}
+
+/// A peer-set identity that preserves routed find-request order.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub(super) struct FindRequestId(u64);
+
+impl From<u64> for FindRequestId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+/// A response consumer's classification of a routed find request.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(super) enum FindResponseOutcome {
+    Useful,
+    Stalled,
+    /// The consumer did not judge the response before abandoning it.
+    Unclassified,
+}
+
+/// An attributed [`FindResponseOutcome`] sent to the peer set.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(super) struct FindResponseEvent {
+    pub(super) peer: PeerSocketAddr,
+    pub(super) request_id: FindRequestId,
+    pub(super) outcome: FindResponseOutcome,
+}
+
+#[allow(dead_code)]
+impl FindResponseEvent {
+    /// Creates a [`FindResponseEvent`] for `peer` and `request_id`.
+    pub(super) fn new(
+        peer: PeerSocketAddr,
+        request_id: FindRequestId,
+        outcome: FindResponseOutcome,
+    ) -> Self {
+        Self {
+            peer,
+            request_id,
+            outcome,
+        }
     }
 }
 
