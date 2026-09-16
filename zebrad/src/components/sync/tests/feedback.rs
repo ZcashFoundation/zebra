@@ -303,6 +303,69 @@ async fn extend_response_without_continuation_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// An already-known extend continuation reports a stall without downloading it again.
+#[tokio::test]
+async fn known_extend_continuation_reports_stall() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let tip = Hash([0; 32]);
+    let expected_next = Hash([1; 32]);
+    let known_hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.prospective_tips = HashSet::from([CheckedTip { tip, expected_next }]);
+
+    let peer_responses = async {
+        test.peers
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![tip],
+                stop: None,
+            })
+            .await
+            .respond(zn::Response::BlockHashes {
+                hashes: vec![expected_next, known_hash],
+                feedback: Some(feedback),
+            });
+
+        for _ in 1..FANOUT {
+            test.peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![tip],
+                    stop: None,
+                })
+                .await
+                .respond(Err(zn::BoxError::from("unused fanout response")));
+        }
+    };
+    let state_response = async {
+        test.state
+            .expect_request(zs::Request::KnownBlock(known_hash))
+            .await
+            .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+    };
+
+    let (result, ()) = {
+        let extend = async { tokio::join!(test.sync.extend_tips(), peer_responses) };
+        tokio::pin!(extend);
+
+        // Let the old implementation finish without querying state, then fail on feedback.
+        tokio::select! {
+            result = &mut extend => result,
+            () = state_response => extend.await,
+        }
+    };
+
+    assert!(result.unwrap().is_empty());
+    assert_eq!(
+        observer.try_outcome(),
+        Ok(Some(false)),
+        "an already-known continuation must report a stall",
+    );
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    assert_eq!(test.sync.downloads.in_flight(), 0);
+    assert!(test.sync.find_response_progress.is_empty());
+}
+
 /// A downloader error preserves the requested hash for response attribution.
 #[tokio::test]
 async fn failed_download_preserves_hash() {
