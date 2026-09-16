@@ -91,8 +91,10 @@ impl FindResponseFeedback {
         self.inner.report(FindResponseOutcome::Useful);
     }
 
-    /// Consumes this handle without reporting a stall yet.
-    pub fn mark_stalled(self) {}
+    /// Marks this response as stalled because it was unusable to the consumer.
+    pub fn mark_stalled(self) {
+        self.inner.report(FindResponseOutcome::Stalled);
+    }
 }
 
 impl FindResponseFeedbackInner {
