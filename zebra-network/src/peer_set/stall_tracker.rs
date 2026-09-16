@@ -55,7 +55,8 @@ impl FindResponseStallTracker {
 
 /// An opaque capability for classifying one peer's `FindBlocks` response.
 ///
-/// Cloned handles share a one-shot outcome.
+/// Cloned handles share a one-shot outcome. Dropping the final unclassified
+/// handle reports no judgment about the peer.
 #[derive(Clone)]
 pub struct FindResponseFeedback {
     inner: Arc<FindResponseFeedbackInner>,
@@ -112,6 +113,12 @@ impl FindResponseFeedbackInner {
     }
 }
 
+impl Drop for FindResponseFeedbackInner {
+    fn drop(&mut self) {
+        self.report(FindResponseOutcome::Unclassified);
+    }
+}
+
 /// A peer-set identity that preserves routed find-request order.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub(super) struct FindRequestId(u64);
@@ -124,7 +131,6 @@ impl From<u64> for FindRequestId {
 
 /// A response consumer's classification of a routed find request.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[allow(dead_code)]
 pub(super) enum FindResponseOutcome {
     Useful,
     Stalled,
