@@ -49,3 +49,25 @@ fn stalled_feedback_closes_channel() {
     );
     assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
 }
+
+/// Tests that a neutral outcome is reported on the final drop and the channel is closed.
+#[test]
+fn dropped_feedback_closes_channel() {
+    let _test_guard = zebra_test::init();
+    let addr = test_addr(1);
+    let request_id = FindRequestId::from(1);
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let feedback = FindResponseFeedback::new(addr, request_id, sender);
+
+    drop(feedback);
+
+    assert_eq!(
+        receiver.try_recv(),
+        Ok(FindResponseEvent::new(
+            addr,
+            request_id,
+            FindResponseOutcome::Unclassified
+        )),
+    );
+    assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
+}
