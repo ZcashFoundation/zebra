@@ -25,7 +25,9 @@ fn default_testnet() -> &'static Network {
 const FUZZ_HEADER_LEN: usize = 24;
 
 /// Body cap a codec starts at, before a handshake raises it. Tracks
-/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private.
+/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private. Used by Layer 0
+/// below to model the pre-handshake codec state; Layer 0b models the
+/// post-handshake state and is not bounded by this constant.
 const FUZZ_MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 
 /// The wire commands `Codec::read_body` dispatches on, in the order they appear
@@ -98,6 +100,45 @@ fuzz_target!(|data: &[u8]| {
         let body = &body[..body.len().min(FUZZ_MAX_HANDSHAKE_BODY_LEN)];
         let mut framed = assemble_frame(&Network::Mainnet, command, body);
         let mut framed_codec = Codec::builder().finish();
+        if let Ok(Some(msg)) = framed_codec.decode(&mut framed) {
+            messages.push(msg);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Layer 0b: Framed body, post-handshake — reach the deep-fuzzed
+    // accessors (including `ironwood_*`) on bodies larger than the
+    // pre-handshake cap.
+    //
+    // A production `Connection` calls `reconfigure_full_body_len()` on its
+    // codec once the version/verack handshake completes, raising the body
+    // cap to `MAX_PROTOCOL_MESSAGE_LEN`; every message after that — `tx`,
+    // `block`, and the rest — is decoded under the raised cap, not the 1 KiB
+    // pre-handshake one Layer 0 models above. Real Orchard/Ironwood shielded
+    // action data is larger than 1 KiB, so Layer 0's truncated body can never
+    // carry a `tx`/`block` into `deep_fuzz_transaction` with non-empty
+    // shielded pools — the `ironwood_*`/`orchard_value_balance()` calls
+    // there would only ever see empty bundles. This layer reuses Layer 0's
+    // framing (so the mutator still controls the body directly, without
+    // needing to guess a checksum) but against a codec already configured
+    // for the post-handshake cap, and without truncating the body, so a v6
+    // transaction with real shielded pool data can reach the accessors.
+    //
+    // The body is still capped at `MAX_PROTOCOL_MESSAGE_LEN`, the same bound
+    // `reconfigure_full_body_len()` gives the codec: `assemble_frame` below
+    // unconditionally copies and `sha256d`-hashes the body it's given before
+    // `decode` gets a chance to reject an oversize one, so bounding first
+    // avoids doing that work on bytes no post-handshake codec would ever
+    // accept.
+    // ═══════════════════════════════════════════════════════════════════
+    if let Some((&selector, body)) = data.split_last() {
+        let command = WIRE_COMMANDS[selector as usize % WIRE_COMMANDS.len()];
+        let body = &body[..body
+            .len()
+            .min(zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN)];
+        let mut framed = assemble_frame(&Network::Mainnet, command, body);
+        let mut framed_codec = Codec::builder().finish();
+        framed_codec.reconfigure_full_body_len();
         if let Ok(Some(msg)) = framed_codec.decode(&mut framed) {
             messages.push(msg);
         }
