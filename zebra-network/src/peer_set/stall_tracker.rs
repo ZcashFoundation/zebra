@@ -53,15 +53,15 @@ impl FindResponseStallTracker {
     }
 }
 
-/// A shared feedback capability whose reporting is not implemented yet.
-#[allow(dead_code)]
+/// An opaque capability for classifying one peer's `FindBlocks` response.
+///
+/// Cloned handles share a one-shot outcome.
 #[derive(Clone)]
 pub struct FindResponseFeedback {
     inner: Arc<FindResponseFeedbackInner>,
 }
 
 /// Shared one-shot reporting state for cloned [`FindResponseFeedback`] handles.
-#[allow(dead_code)]
 struct FindResponseFeedbackInner {
     peer: PeerSocketAddr,
     request_id: FindRequestId,
@@ -86,11 +86,28 @@ impl FindResponseFeedback {
         }
     }
 
-    /// Consumes this handle without reporting usefulness yet.
-    pub fn mark_useful(self) {}
+    /// Marks this response as useful to the consumer.
+    pub fn mark_useful(self) {
+        self.inner.report(FindResponseOutcome::Useful);
+    }
 
     /// Consumes this handle without reporting a stall yet.
     pub fn mark_stalled(self) {}
+}
+
+impl FindResponseFeedbackInner {
+    /// Reports `outcome` if no other handle has classified this response.
+    fn report(&self, outcome: FindResponseOutcome) {
+        let sender = self
+            .sender
+            .lock()
+            .expect("the feedback sender mutex is not held across panicking operations")
+            .take();
+
+        if let Some(sender) = sender {
+            let _ = sender.send(FindResponseEvent::new(self.peer, self.request_id, outcome));
+        }
+    }
 }
 
 /// A peer-set identity that preserves routed find-request order.
@@ -121,7 +138,6 @@ pub(super) struct FindResponseEvent {
     pub(super) outcome: FindResponseOutcome,
 }
 
-#[allow(dead_code)]
 impl FindResponseEvent {
     /// Creates a [`FindResponseEvent`] for `peer` and `request_id`.
     pub(super) fn new(
