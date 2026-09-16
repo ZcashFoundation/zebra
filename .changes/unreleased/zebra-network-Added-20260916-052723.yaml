@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: '`FindResponseFeedback` lets consumers classify a `FindBlocks` response without exposing the responding peer’s identity. Dropping unclassified feedback reports a neutral outcome ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).'
+time: 2026-09-16T05:27:23.180869683Z
