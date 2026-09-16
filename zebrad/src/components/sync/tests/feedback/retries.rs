@@ -15,7 +15,7 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     serialization::ZcashDeserializeInto,
 };
-use zebra_network as zn;
+use zebra_network::{self as zn, FindResponseFeedback};
 use zebra_state as zs;
 use zebra_test::mock_service::MockService;
 
@@ -155,6 +155,34 @@ async fn failed_retry_cleanup_releases_remaining_feedback() {
     assert!(sync.reobtain_hashes.is_empty());
     assert!(sync.block_reobtain_retries.is_empty());
     assert_eq!(sync.downloads.in_flight(), 0);
+}
+
+/// A behind-tip retry keeps its hash queued and its response feedback pending.
+#[tokio::test]
+async fn behind_tip_retry_keeps_feedback_pending() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.track_find_response(&[hash], Some(feedback));
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::BehindTipHeightLimit {
+                height: Height(1),
+                hash,
+                advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert!(
+        test.sync.reobtain_hashes.contains(&hash),
+        "the retry must remain queued after feedback processing",
+    );
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
 }
 
 /// A syncer whose block network fails before a request can be queued.
