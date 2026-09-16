@@ -579,7 +579,7 @@ fuzz_target!(|data: &[u8]| {
                 let mut mixed: Vec<InventoryHash> = Vec::new();
                 for (i, h) in hashes.iter().enumerate().take(64) {
                     match i % 4 {
-                        0 => mixed.push(h.clone()),
+                        0 => mixed.push(*h),
                         1 => {
                             if let Some(hash32) = inv_hash_to_32(h) {
                                 mixed.push(InventoryHash::Block(zebra_chain::block::Hash(hash32)));
