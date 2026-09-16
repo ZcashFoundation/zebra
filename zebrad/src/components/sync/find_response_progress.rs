@@ -68,6 +68,9 @@ impl FindResponseProgress {
         self.report_stalled();
     }
 
+    /// Leaves abandonment feedback pending until neutral reporting is implemented.
+    pub(super) fn record_abandoned_hash(&self) {}
+
     /// Consumes feedback once when any accepted hash proves unusable.
     fn report_stalled(&self) {
         let feedback = self
