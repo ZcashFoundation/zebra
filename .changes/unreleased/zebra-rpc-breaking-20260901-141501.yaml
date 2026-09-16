@@ -1,0 +1,16 @@
+project: zebra-rpc
+kind: breaking
+body: 'Import `BlockTemplateResponse` and `TransactionTemplate` from the crate root instead of
+  `client`. Replace `methods::RpcImpl::spawn_block_template_updater` with a validated template
+  producer attached through `methods::RpcImpl::with_block_templates` for `getblocktemplate`
+  template mode and Regtest generation. Default
+  requests only read published templates from the watch channel; missing, stopped, or unready
+  providers return errors instead of building work in the RPC handler. Long polling waits for a
+  different long poll ID, a chain tip change, or for `max_time` to pass. Published work is checked
+  against the committed tip after waiting, and Testnet work is refreshed when minimum-difficulty
+  rules make easier work available. Templates can be a few seconds behind the mempool. Regtest
+  generation uses a separate bounded request channel whose payout, coinbase data, and memo do
+  not change the default publication or share its coinbase cache
+  ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370),
+  [#11452](https://github.com/ZcashFoundation/zebra/issues/11452)).'
+time: 2026-09-01T14:15:01.000000000Z

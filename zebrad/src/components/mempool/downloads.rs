@@ -46,7 +46,7 @@ use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::Height,
+    block::{self, Height},
     parameters::NetworkUpgrade,
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
     transparent,
@@ -183,7 +183,7 @@ where
                     (
                         VerifiedUnminedTx,
                         Vec<transparent::OutPoint>,
-                        Option<Height>,
+                        Option<(Height, block::Hash)>,
                         Option<oneshot::Sender<Result<(), BoxError>>>,
                     ),
                     Box<(TransactionDownloadVerifyError, UnminedTxId)>,
@@ -212,6 +212,9 @@ where
     /// has it as the third tuple element. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<SocketAddr, usize>,
+
+    /// The completed transaction whose proposal admission still occupies its queue/peer slot.
+    admission: Option<UnminedTxId>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -231,7 +234,7 @@ where
             (
                 VerifiedUnminedTx,
                 Vec<transparent::OutPoint>,
-                Option<Height>,
+                Option<(Height, block::Hash)>,
                 Option<oneshot::Sender<Result<(), BoxError>>>,
             ),
             Box<(UnminedTxId, TransactionDownloadVerifyError)>,
@@ -253,12 +256,9 @@ where
         let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             let result = join_result.expect("transaction download and verify tasks must not panic");
             let (result, completed_txid) = match result {
-                Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
-                    let hash = tx.transaction.id;
-                    (
-                        Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))),
-                        Some(hash),
-                    )
+                Ok(Ok((tx, spent_mempool_outpoints, tip, rsp_tx))) => {
+                    assert!(this.admission.replace(tx.transaction.id).is_none());
+                    (Ok(Ok((tx, spent_mempool_outpoints, tip, rsp_tx))), None)
                 }
                 Ok(Err(boxed_err)) => {
                     let (e, hash) = *boxed_err;
@@ -325,6 +325,7 @@ where
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
+            admission: None,
         }
     }
 
@@ -358,7 +359,7 @@ where
             return Err(MempoolError::AlreadyQueued);
         }
 
-        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+        if self.cancel_handles.len().max(self.pending.len()) >= MAX_INBOUND_CONCURRENCY {
             debug!(
                 ?txid,
                 queue_len = self.pending.len(),
@@ -403,12 +404,12 @@ where
 
             trace!(?txid, "transaction is not in best chain");
 
-            let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
+            let (tip, next_height) = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Ok((None, Height(0))),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+                Ok(zs::Response::Tip(Some((height, hash)))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
-                    Ok((Some(height), next_height))
+                    Ok((Some((height, hash)), next_height))
                 }
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
@@ -464,7 +465,7 @@ where
                 .map_ok(|rsp| {
                     let tx::MempoolResponse { transaction, spent_mempool_outpoints } = rsp;
 
-                    (transaction, spent_mempool_outpoints, tip_height)
+                    (transaction, spent_mempool_outpoints, tip)
                 })
                 .await;
 
@@ -478,12 +479,12 @@ where
                 verification_height: next_height,
             })
         }
-        .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
+        .map_ok(|(tx, spent_mempool_outpoints, tip)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 "version" => format!("{}", tx.transaction.transaction.version()),
             ).increment(1);
-            (tx, spent_mempool_outpoints, tip_height)
+            (tx, spent_mempool_outpoints, tip)
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
@@ -520,7 +521,7 @@ where
                         .map_err(|elapsed| (txid, elapsed))
                         .map(|inner_result| {
                             match inner_result {
-                                Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
+                                Ok((transaction, spent_mempool_outpoints, tip)) => Ok((transaction, spent_mempool_outpoints, tip, rsp_tx)),
                                 Err(boxed_err) => {
                                     let (tx_verifier_error, tx_id) = *boxed_err;
                                     if let Some(rsp_tx) = rsp_tx.take() {
@@ -573,7 +574,7 @@ where
         let removed_txids: Vec<UnminedTxId> = self
             .cancel_handles
             .keys()
-            .filter(|txid| mined_ids.contains(&txid.mined_id()))
+            .filter(|txid| mined_ids.contains(&txid.mined_id()) && Some(**txid) != self.admission)
             .cloned()
             .collect();
 
@@ -584,6 +585,34 @@ where
                     Self::release_peer_slot(&mut self.pending_per_peer, source);
                 }
             }
+        }
+    }
+
+    /// Release a completed admission's deduplication, global and per-peer queue slot.
+    pub fn finish_admission(&mut self, txid: UnminedTxId) -> Option<SocketAddr> {
+        assert_eq!(self.admission.take(), Some(txid));
+        let Some((_, _, source)) = self.cancel_handles.remove(&txid) else {
+            unreachable!("admission retains its download accounting");
+        };
+        if let Some(source) = source {
+            Self::release_peer_slot(&mut self.pending_per_peer, source);
+        }
+        source
+    }
+
+    /// Move the retained admission accounting across a chain reset without cancelling its work.
+    pub fn transfer_admission(&mut self, replacement: &mut Self) {
+        if let Some(txid) = self.admission.take() {
+            let entry = self
+                .cancel_handles
+                .remove(&txid)
+                .expect("admission retains its download accounting");
+            if let Some(source) = entry.2 {
+                Self::release_peer_slot(&mut self.pending_per_peer, source);
+                *replacement.pending_per_peer.entry(source).or_default() += 1;
+            }
+            assert!(replacement.cancel_handles.insert(txid, entry).is_none());
+            assert!(replacement.admission.replace(txid).is_none());
         }
     }
 
@@ -599,6 +628,7 @@ where
             let _ = cancel_tx.send(CancelDownloadAndVerify);
         }
         self.pending_per_peer.clear();
+        self.admission = None;
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
         metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
@@ -615,16 +645,17 @@ where
         }
     }
 
-    /// Get the number of currently in-flight download tasks.
+    /// Get the number of transactions awaiting download, verification or proposal admission.
     #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
-        self.pending.len()
+        self.cancel_handles.len().max(self.pending.len())
     }
 
     /// Get a list of the currently pending transaction requests.
     pub fn transaction_requests(&self) -> impl Iterator<Item = &Gossip> {
         self.cancel_handles
             .iter()
+            .filter(|(tx_id, _)| Some(**tx_id) != self.admission)
             .map(|(_tx_id, (_handle, tx, _source))| tx)
     }
 

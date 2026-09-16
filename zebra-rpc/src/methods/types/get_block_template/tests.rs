@@ -390,3 +390,79 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
     zebra_consensus::transaction::check::coinbase_outputs_are_decryptable(&coinbase, &net, height)
         .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
 }
+
+/// Testnet's standard difficulty expires strictly after an abbreviated timestamp range.
+#[test]
+fn only_current_work_is_served() {
+    use super::{BlockTemplateResponse, CoinbaseCache};
+    use crate::methods::{tests::utils::fake_history_tree, types::long_poll::LongPollInput};
+    use zebra_chain::{
+        block,
+        serialization::{DateTime32, Duration32},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
+    };
+    use zebra_state::GetBlockTemplateChainInfo;
+
+    let _init_guard = zebra_test::init();
+    let max_time = DateTime32::from(1654008719);
+    let after_max_time = max_time.saturating_add(Duration32::from_seconds(1));
+    let tip_hash = block::Hash([0xab; 32]);
+    let make_template = |network: &Network| {
+        let tip_height = NetworkUpgrade::Nu5.activation_height(network).unwrap();
+        let params = MinerParams::from(
+            Address::decode(
+                network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            tip_height,
+            tip_hash,
+            cur_time: DateTime32::from(1654008617),
+            min_time: DateTime32::from(1654008606),
+            max_time,
+            chain_history_root: fake_history_tree(network).hash(),
+        };
+        BlockTemplateResponse::from_transactions(
+            network,
+            &CoinbaseCache::default(),
+            &params,
+            &chain_info,
+            LongPollInput::new(tip_height, tip_hash, max_time, []).generate_id(),
+            vec![],
+            None,
+        )
+    };
+    let network = Network::new_default_testnet();
+    let current = make_template(&network);
+    assert!(
+        current.is_valid_for_tip(tip_hash, &network, max_time),
+        "max_time is inclusive"
+    );
+    assert!(!current.is_valid_for_tip(block::Hash([0xff; 32]), &network, max_time));
+    assert!(!current.is_valid_for_tip(tip_hash, &network, after_max_time));
+
+    let mut median_capped = current.clone();
+    median_capped.min_time = max_time
+        .saturating_sub(Duration32::from_minutes(90))
+        .saturating_add(Duration32::from_seconds(1));
+    assert!(median_capped.is_valid_for_tip(tip_hash, &network, after_max_time));
+
+    let mut minimum_difficulty = current;
+    minimum_difficulty.bits = network.target_difficulty_limit().to_compact();
+    minimum_difficulty.target = network.target_difficulty_limit();
+    assert!(minimum_difficulty.is_valid_for_tip(tip_hash, &network, after_max_time));
+
+    let regtest = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for network in [Network::Mainnet, regtest] {
+        assert!(make_template(&network).is_valid_for_tip(tip_hash, &network, after_max_time));
+    }
+}

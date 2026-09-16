@@ -15,7 +15,7 @@ use zebra_chain::{
 
 use zebra_chain::transparent;
 
-use crate::components::mempool::{storage::*, Mempool};
+use crate::components::mempool::storage::*;
 
 /// Eviction memory time used for tests. Most tests won't care about this
 /// so we use a large enough value that will never be reached in the tests.
@@ -297,10 +297,6 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     assert!(expired.contains(&tx_id));
     let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
     assert_eq!(everything_in_mempool.len(), 0);
-
-    // No transaction will be sent to peers
-    let send_to_peers = Mempool::remove_expired_from_peer_list(&everything_in_mempool, &expired);
-    assert_eq!(send_to_peers.len(), 0);
 
     Ok(())
 }

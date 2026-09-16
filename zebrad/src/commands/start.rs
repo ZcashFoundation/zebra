@@ -57,7 +57,8 @@
 //!  * Mempool Service
 //!    * activates when the syncer is near the chain tip
 //!    * spawns download and verify tasks for each crawled or gossiped transaction
-//!    * handles in-memory storage of unmined transactions
+//!    * validates candidate blocks before admitting transactions to verified storage
+//!    * publishes block templates and handles per-request mining payout overrides
 //!  * Queue Checker Task
 //!    * runs in the background, polling the mempool to store newly verified transactions
 //!  * Transaction Gossip Task
@@ -419,18 +420,39 @@ impl StartCmd {
             misbehavior_sender.clone(),
         );
 
+        // Only prepare default mining work when a consumer can use it. Admission validation
+        // has its own unpublished transparent coinbase and does not require a mining address.
+        #[cfg(feature = "internal-miner")]
+        let is_internal_miner_enabled = config.mining.is_internal_miner_enabled();
+        #[cfg(not(feature = "internal-miner"))]
+        let is_internal_miner_enabled = false;
+        let miner_params = (config.rpc.listen_addr.is_some() || is_internal_miner_enabled)
+            .then(|| {
+                zebra_rpc::MinerParams::new(&config.network.network, config.mining.clone()).ok()
+            })
+            .flatten();
+
         info!("initializing mempool");
-        let (mempool, mempool_transaction_subscriber) = Mempool::new(
-            &config.network.network,
-            &config.mempool,
-            peer_set.clone(),
-            state.clone(),
-            tx_verifier,
-            sync_status.clone(),
-            latest_chain_tip.clone(),
-            chain_tip_change.clone(),
-            misbehavior_sender.clone(),
-        );
+        let (mempool, mempool_transaction_subscriber, block_templates, template_requests) =
+            Mempool::new(
+                &config.network.network,
+                &config.mempool,
+                peer_set.clone(),
+                state.clone(),
+                tx_verifier,
+                sync_status.clone(),
+                latest_chain_tip.clone(),
+                chain_tip_change.clone(),
+                misbehavior_sender.clone(),
+                ServiceBuilder::new()
+                    .buffer(1)
+                    .service(BoxService::new(read_only_state_service.clone())),
+                ServiceBuilder::new()
+                    .buffer(1)
+                    .service(BoxService::new(block_verifier_router.clone())),
+                miner_params,
+            );
+        let mempool_background_work = mempool.background_work();
 
         // Subscribe as soon as possible to not miss any events
         let mempool_change_receiver = mempool_transaction_subscriber.subscribe();
@@ -481,33 +503,11 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
-        let rpc_impl = rpc_impl.with_end_of_support_height(
-            sync::end_of_support::end_of_support_height(&config.network.network),
-        );
-
-        // Keep a block template ready for the `getblocktemplate` RPC, if this node is configured
-        // for mining, and something can actually ask for a template. Without the RPC server and
-        // without the internal miner, nothing can call `getblocktemplate`, so precomputing
-        // templates would build coinbase transactions that no one reads.
-        #[cfg(feature = "internal-miner")]
-        let is_internal_miner_enabled = config.mining.is_internal_miner_enabled();
-        #[cfg(not(feature = "internal-miner"))]
-        let is_internal_miner_enabled = false;
-
-        let block_template_task_handle =
-            if config.rpc.listen_addr.is_some() || is_internal_miner_enabled {
-                rpc_impl
-                    .spawn_block_template_updater()
-                    .inspect(|_| info!("spawned block template updater task"))
-            } else {
-                None
-            };
-
-        // Supervise the updater like every other ongoing task: if it exits or panics, the RPC
-        // keeps serving the last template it published, and pays the new-tip timeout on every call
-        // after the next tip change, so a silent exit has to be visible.
-        let block_template_task_handle: tokio::task::JoinHandle<()> = block_template_task_handle
-            .unwrap_or_else(|| tokio::spawn(std::future::pending().in_current_span()));
+        let rpc_impl = rpc_impl
+            .with_end_of_support_height(sync::end_of_support::end_of_support_height(
+                &config.network.network,
+            ))
+            .with_block_templates(block_templates, template_requests);
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
             RpcServer::start(rpc_impl.clone(), config.rpc.clone())
@@ -623,7 +623,11 @@ impl StartCmd {
             };
 
         info!("spawning mempool queue checker task");
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
+        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(
+            mempool.clone(),
+            mempool_background_work,
+            latest_chain_tip.clone(),
+        );
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
@@ -741,7 +745,6 @@ impl StartCmd {
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
         pin!(miner_task_handle);
-        pin!(block_template_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -854,14 +857,6 @@ impl StartCmd {
                     Ok(())
                 }
 
-                block_template_result = &mut block_template_task_handle => {
-                    block_template_result
-                        .expect("unexpected panic in the block template updater task");
-                    info!("block template updater task exited");
-
-                    Ok(())
-                }
-
                 miner_result = &mut miner_task_handle => miner_result
                     .expect("unexpected panic in the miner task")
                     .map(|_| info!("miner task exited")),
@@ -890,7 +885,6 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
-        block_template_task_handle.abort();
         health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();

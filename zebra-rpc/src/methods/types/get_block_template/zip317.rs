@@ -31,18 +31,7 @@ use crate::methods::types::transaction::TransactionTemplate;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
-
 use super::MinerParams;
-
-/// Used in the return type of [`select_mempool_transactions()`] for test compilations.
-#[cfg(test)]
-type SelectedMempoolTx = (InBlockTxDependenciesDepth, VerifiedUnminedTx);
-
-/// Used in the return type of [`select_mempool_transactions()`] for non-test compilations.
-#[cfg(not(test))]
-type SelectedMempoolTx = VerifiedUnminedTx;
 
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.
@@ -62,7 +51,7 @@ pub fn select_mempool_transactions(
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     coinbase_cache: Option<&CoinbaseCache>,
-) -> Vec<SelectedMempoolTx> {
+) -> Vec<VerifiedUnminedTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     //
@@ -144,6 +133,16 @@ pub fn select_mempool_transactions(
         );
     }
 
+    // Keep snapshot ordering deterministic without changing the public transaction type.
+    #[cfg(test)]
+    selected_txs.sort_by_cached_key(|tx| {
+        use zebra_chain::serialization::BytesInDisplayOrder;
+        (
+            dependencies_depth(&tx.transaction.id.mined_id(), &mempool_tx_deps),
+            tx.transaction.id.mined_id().bytes_in_display_order(),
+        )
+    });
+
     selected_txs
 }
 
@@ -185,7 +184,7 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
 /// Requires items in `selected_txs` to be unique to work correctly.
 fn has_direct_dependencies(
     candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
-    selected_txs: &Vec<SelectedMempoolTx>,
+    selected_txs: &[VerifiedUnminedTx],
 ) -> bool {
     let Some(deps) = candidate_tx_deps else {
         return true;
@@ -197,8 +196,6 @@ fn has_direct_dependencies(
 
     let mut num_available_deps = 0;
     for tx in selected_txs {
-        #[cfg(test)]
-        let (_, tx) = tx;
         if deps.contains(&tx.transaction.id.mined_id()) {
             num_available_deps += 1;
         } else {
@@ -219,7 +216,7 @@ fn has_direct_dependencies(
 fn dependencies_depth(
     dependent_tx_id: &transaction::Hash,
     mempool_tx_deps: &TransactionDependencies,
-) -> InBlockTxDependenciesDepth {
+) -> usize {
     let mut current_level = 0;
     let mut current_level_deps = mempool_tx_deps.direct_dependencies(dependent_tx_id);
     while !current_level_deps.is_empty() {
@@ -249,7 +246,7 @@ fn checked_add_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
     dependent_txs: &mut HashMap<transaction::Hash, VerifiedUnminedTx>,
     tx_weights: WeightedIndex<f32>,
-    selected_txs: &mut Vec<SelectedMempoolTx>,
+    selected_txs: &mut Vec<VerifiedUnminedTx>,
     mempool_tx_deps: &TransactionDependencies,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u32,
@@ -275,11 +272,7 @@ fn checked_add_transaction_weighted_random(
         "all candidate transactions should be independent"
     );
 
-    #[cfg(not(test))]
     selected_txs.push(candidate_tx);
-
-    #[cfg(test)]
-    selected_txs.push((0, candidate_tx));
 
     // Try adding any dependent transactions if all of their dependencies have been selected.
 
@@ -313,14 +306,7 @@ fn checked_add_transaction_weighted_random(
                     continue;
                 }
 
-                #[cfg(not(test))]
                 selected_txs.push(candidate_tx);
-
-                #[cfg(test)]
-                selected_txs.push((
-                    dependencies_depth(dependent_tx_id, mempool_tx_deps),
-                    candidate_tx,
-                ));
 
                 next_level_dependents.extend(mempool_tx_deps.direct_dependents(dependent_tx_id));
             }
