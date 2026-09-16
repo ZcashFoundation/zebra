@@ -14,6 +14,7 @@ use super::super::{ChainSync, FANOUT};
 use crate::config::ZebradConfig;
 
 mod prop;
+mod vectors;
 
 /// A mock service with strict request assertions.
 type Mock<Req, Resp> = MockService<Req, Resp, PanicAssertion>;
