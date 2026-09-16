@@ -147,6 +147,92 @@ async fn obtain_response_with_only_known_hashes_reports_stall() {
     assert_eq!(observer.try_outcome(), Ok(Some(false)));
 }
 
+/// A known suffix must not hide an unknown hash whose missing-block retries are exhausted.
+///
+/// A mixed response must keep its unknown hash pending rather than aborting
+/// tip discovery and releasing the whole response as unclassified.
+#[tokio::test]
+async fn known_suffix_does_not_hide_missing_obtain_hash() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let known_hash = Hash([0; 32]);
+    let missing_hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+
+    let mock_responses = async {
+        test.state
+            .expect_request(zs::Request::BlockLocator)
+            .await
+            .respond(zs::Response::BlockLocator(vec![known_hash]));
+
+        test.peers
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![known_hash],
+                stop: None,
+            })
+            .await
+            .respond(zn::Response::BlockHashes {
+                hashes: vec![missing_hash, known_hash],
+                feedback: Some(feedback),
+            });
+
+        // Locate the first unknown hash in this response.
+        test.state
+            .expect_request(zs::Request::KnownBlock(missing_hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+
+        for _ in 1..FANOUT {
+            test.peers
+                .expect_request(zn::Request::FindBlocks {
+                    known_blocks: vec![known_hash],
+                    stop: None,
+                })
+                .await
+                .respond(Err(zn::BoxError::from("unused fanout response")));
+        }
+
+        // Recheck the combined download set before queuing downloads.
+        test.state
+            .expect_request(zs::Request::KnownBlock(missing_hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        test.state
+            .expect_request(zs::Request::KnownBlock(known_hash))
+            .await
+            .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+    };
+
+    let (result, ()) = tokio::join!(test.sync.obtain_tips(), mock_responses);
+
+    assert!(
+        result.is_ok(),
+        "a known suffix must not abort processing the missing hash: {result:?}",
+    );
+    assert_eq!(test.sync.downloads.in_flight(), 1);
+    assert!(!test.sync.find_response_progress.contains_key(&known_hash));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+
+    // Report the initial failure and each permitted retry's failure.
+    for _ in 0..=MAX_BLOCK_REOBTAIN_RETRIES {
+        test.sync.reobtain_hashes.shift_remove(&missing_hash);
+        test.sync
+            .handle_download_response(Err((
+                BlockDownloadVerifyError::DownloadFailed {
+                    error: "NotFound".into(),
+                    hash: missing_hash,
+                },
+                missing_hash,
+            )))
+            .unwrap();
+    }
+
+    assert_eq!(observer.try_outcome(), Ok(Some(false)));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    test.sync.cancel_downloads();
+}
+
 /// Queuing an extend continuation must not credit an unverified block hash.
 #[tokio::test]
 async fn extend_feedback_waits_for_verification() {
