@@ -6,6 +6,8 @@ use super::{
     test_addr, FindRequestId, FindResponseEvent, FindResponseFeedback, FindResponseOutcome,
 };
 
+mod prop;
+
 /// Tests that once usefulness is reported the feedback channel is immediately closed.
 #[test]
 fn useful_feedback_closes_channel() {
