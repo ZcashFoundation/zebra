@@ -7,17 +7,11 @@ use zebra_chain::{
     parameters::subsidy::FundingStreamReceiver::{self, *},
 };
 
-/// When long polling, the amount of time we wait between mempool queries.
-/// (And sync status queries, which we do right before mempool queries.)
-///
-/// State tip changes make long polling return immediately. But miners can re-use old work
-/// with an old set of transactions, so they don't need to know about mempool changes immediately.
-///
-/// Sync status changes are rare, and the blocks they download cause a chain tip change anyway.
-///
-/// `zcashd` waits 10 seconds between checking the state
-/// <https://github.com/zcash/zcash/blob/420f8dfe38fd6b2465a665324366c2ae14aa98f4/src/rpc/mining.cpp#L626>
+/// The backstop interval for template refreshes and RPC sync/committed-tip checks, in seconds.
 pub const MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
+
+/// How long an RPC waits for the mempool to publish work for the committed tip.
+pub(crate) const NEW_TIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A range of valid block template nonces, that goes from `u32::MIN` to `u32::MAX` as a string.
 pub const NONCE_RANGE_FIELD: &str = "00000000ffffffff";

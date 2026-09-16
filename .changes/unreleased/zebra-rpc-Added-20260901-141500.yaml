@@ -1,6 +1,8 @@
 project: zebra-rpc
 kind: Added
-body: 'Method `methods::RpcImpl::spawn_block_template_updater()`, which spawns a task that keeps a
-  template precomputed for the current chain tip, and returns `None` when mining isn''t configured
-  ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).'
+body: 'Root re-exports `BlockTemplateResponse`, `TransactionTemplate`, `LongPollInput`,
+  `MEMPOOL_LONG_POLL_INTERVAL`, and `select_mempool_transactions`; public
+  `BlockTemplateRequest::{miner_params, response}`, `CoinbaseCache::{get, store}`,
+  `BlockTemplateResponse::from_transactions`, and `methods::RpcImpl::with_block_templates`
+  ([#11452](https://github.com/ZcashFoundation/zebra/issues/11452)).'
 time: 2026-09-01T14:15:00.000000000Z
