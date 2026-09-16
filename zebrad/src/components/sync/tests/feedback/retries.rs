@@ -24,7 +24,10 @@ use zebra_test::mock_service::MockService;
 
 use super::{Mock, TestScenario};
 use crate::{
-    components::sync::{downloads::BlockDownloadVerifyError, ChainSync, BLOCK_VERIFY_TIMEOUT},
+    components::sync::{
+        downloads::BlockDownloadVerifyError, ChainSync, BLOCK_VERIFY_TIMEOUT,
+        MAX_BLOCK_REOBTAIN_RETRIES,
+    },
     config::ZebradConfig,
 };
 
@@ -248,6 +251,39 @@ async fn verifier_timeout_retry_keeps_feedback_pending() {
         "the retry must remain queued after feedback processing",
     );
     assert_eq!(observer.try_outcome(), Err(TryRecvError::Empty));
+}
+
+/// Exhausted UTXO lookup retries release neutral feedback without retaining retry state.
+#[tokio::test]
+async fn exhausted_utxo_retries_release_neutral_feedback() {
+    let _test_guard = zebra_test::init();
+
+    let mut test = TestScenario::new();
+    let hash = Hash([2; 32]);
+    let (feedback, observer) = FindResponseFeedback::new_for_test();
+    test.sync.track_find_response(&[hash], Some(feedback));
+    test.sync
+        .block_reobtain_retries
+        .insert(hash, MAX_BLOCK_REOBTAIN_RETRIES);
+
+    test.sync
+        .handle_download_response(Err((
+            BlockDownloadVerifyError::Invalid {
+                error: VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+                    .into(),
+                height: Height(1),
+                hash,
+                advertiser_addr: None,
+            },
+            hash,
+        )))
+        .unwrap();
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(observer.try_outcome(), Err(TryRecvError::Disconnected));
+    assert!(!test.sync.reobtain_hashes.contains(&hash));
+    assert!(!test.sync.block_reobtain_retries.contains_key(&hash));
+    assert!(!test.sync.find_response_progress.contains_key(&hash));
 }
 
 /// A syncer whose block network fails before a request can be queued.
