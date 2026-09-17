@@ -276,6 +276,8 @@ jobs:
           find . -type f -name '*.sh' \
             -not -path './target/*' \
             -print0 | xargs -0 -r shellcheck --color=always
+      - name: Test cache image ref segment
+        run: .github/workflows/scripts/test-gcp-cache-image-ref-segment.sh
       - name: Test release changelog validator
         run: .github/scripts/test-validate-release-changelogs.sh
       # Builds a throwaway cargo workspace, so it needs the runner image's cargo.
