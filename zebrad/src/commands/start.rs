@@ -414,6 +414,7 @@ impl StartCmd {
             peer_set.clone(),
             block_verifier_router.clone(),
             state.clone(),
+            read_only_state_service.clone(),
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );
@@ -430,6 +431,10 @@ impl StartCmd {
             chain_tip_change.clone(),
             misbehavior_sender.clone(),
         );
+
+        // Subscribe as soon as possible to not miss any events
+        let mempool_change_receiver = mempool_transaction_subscriber.subscribe();
+
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
@@ -544,6 +549,28 @@ impl StartCmd {
             }
         };
 
+        let lightwalletd_rpc_task_handle = {
+            if let Some(lightwalletd_listen_addr) = config.rpc.lightwalletd_listen_addr {
+                info!("spawning lightwalletd gRPC server");
+                let (lightwalletd_rpc_task_handle, _listen_addr) =
+                    zebra_rpc::lightwalletd::server::init(
+                        lightwalletd_listen_addr,
+                        rpc_impl.clone(),
+                        read_only_state_service.clone(),
+                        mempool.clone(),
+                        latest_chain_tip.clone(),
+                        mempool_transaction_subscriber.clone(),
+                        config.network.network.clone(),
+                    )
+                    .await
+                    .map_err(|err| eyre!(err))?;
+
+                lightwalletd_rpc_task_handle
+            } else {
+                tokio::spawn(std::future::pending().in_current_span())
+            }
+        };
+
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
         let block_gossip_task_handle = tokio::spawn(
@@ -576,11 +603,8 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(
-                mempool_transaction_subscriber.subscribe(),
-                peer_set.clone(),
-            )
-            .in_current_span(),
+            mempool::gossip_mempool_transaction_id(mempool_change_receiver, peer_set.clone())
+                .in_current_span(),
         );
 
         info!("spawning delete old databases task");
@@ -683,6 +707,7 @@ impl StartCmd {
         // ongoing tasks
         pin!(rpc_task_handle);
         pin!(indexer_rpc_task_handle);
+        pin!(lightwalletd_rpc_task_handle);
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
         pin!(block_notify_task_handle);
@@ -733,6 +758,13 @@ impl StartCmd {
                     let indexer_rpc_server_result = indexer_rpc_join_result
                         .expect("unexpected panic in the indexer task");
                     info!(?indexer_rpc_server_result, "indexer rpc task exited");
+                    Ok(())
+                }
+
+                lightwalletd_rpc_join_result = &mut lightwalletd_rpc_task_handle => {
+                    let lightwalletd_rpc_server_result = lightwalletd_rpc_join_result
+                        .expect("unexpected panic in the lightwalletd gRPC task");
+                    info!(?lightwalletd_rpc_server_result, "lightwalletd gRPC task exited");
                     Ok(())
                 }
 

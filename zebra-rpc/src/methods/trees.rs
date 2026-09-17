@@ -47,8 +47,9 @@ impl Default for GetSubtreesByIndexResponse {
 
 /// Response to a `z_gettreestate` RPC request.
 ///
-/// Contains hex-encoded Sapling & Orchard note commitment trees and their corresponding
-/// [`struct@Hash`], [`Height`], and block time.
+/// Contains the Sapling & Orchard note commitment trees and their corresponding
+/// [`struct@Hash`], [`Height`], and block time. The tree and hash bytes are
+/// stored raw and hex-encoded only when serialized to JSON.
 ///
 /// The format of the serialized trees represents `CommitmentTree`s from the crate
 /// `incrementalmerkletree` and not `Frontier`s from the same crate, even though `zebrad`'s
@@ -62,7 +63,9 @@ impl Default for GetSubtreesByIndexResponse {
 /// The dense format might be used in future RPCs.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct GetTreestateResponse {
-    /// The block hash corresponding to the treestate, hex-encoded.
+    /// The block hash corresponding to the treestate.
+    ///
+    /// Stored as a raw [`struct@Hash`]; serialized to JSON as a hex-encoded string.
     #[serde(with = "hex")]
     #[getter(copy)]
     hash: Hash,
@@ -77,20 +80,24 @@ pub struct GetTreestateResponse {
     /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
 
-    /// A treestate containing a Sprout note commitment tree, hex-encoded. Zebra
-    /// does not support returning it; but the field is here to enable parsing
-    /// responses from other implementations.
+    /// A treestate containing a Sprout note commitment tree; its bytes are
+    /// serialized to JSON as hex-encoded strings. Zebra does not support
+    /// returning it, but the field is here to enable parsing responses from
+    /// other implementations.
     #[serde(skip_serializing_if = "Option::is_none")]
     sprout: Option<Treestate>,
 
-    /// A treestate containing a Sapling note commitment tree, hex-encoded.
+    /// A treestate containing a Sapling note commitment tree; its bytes are
+    /// serialized to JSON as hex-encoded strings.
     sapling: Treestate,
 
-    /// A treestate containing an Orchard note commitment tree, hex-encoded.
+    /// A treestate containing an Orchard note commitment tree; its bytes are
+    /// serialized to JSON as hex-encoded strings.
     orchard: Treestate,
 
-    /// A treestate containing an Ironwood note commitment tree, hex-encoded. Only present from
-    /// NU6.3, so that pre-NU6.3 responses are unchanged.
+    /// A treestate containing an Ironwood note commitment tree; its bytes are
+    /// serialized to JSON as hex-encoded strings. Only present from NU6.3, so
+    /// that pre-NU6.3 responses are unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     ironwood: Option<Treestate>,
 }
@@ -161,8 +168,8 @@ impl Default for GetTreestateResponse {
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Treestate {
-    /// Contains an Orchard or Sapling serialized note commitment tree,
-    /// hex-encoded.
+    /// The Orchard or Sapling note commitment tree, stored as raw bytes and
+    /// serialized to JSON as hex-encoded strings (see [`Commitments`]).
     commitments: Commitments,
 }
 
@@ -187,6 +194,13 @@ impl Default for Treestate {
 
 /// A wrapper that contains either an Orchard or Sapling note commitment tree.
 ///
+/// # Data representation
+///
+/// The fields hold **raw bytes** (`Vec<u8>`). They are hex-encoded only when the
+/// struct is serialized to JSON (via `serde_as` / `serde_with::hex`), so callers
+/// that read the Rust fields directly — through the generated getters or `new` —
+/// receive unencoded bytes, not hex strings.
+///
 /// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
 /// contains the field `finalRoot`. Zebra does *not* use this field.
 ///
@@ -194,12 +208,16 @@ impl Default for Treestate {
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Commitments {
-    /// Orchard or Sapling serialized note commitment tree root, hex-encoded.
+    /// The raw bytes of the Orchard or Sapling note commitment tree root.
+    ///
+    /// Serialized to JSON as a hex-encoded string in the `finalRoot` field.
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "finalRoot")]
     final_root: Option<Vec<u8>>,
-    /// Orchard or Sapling serialized note commitment tree, hex-encoded.
+    /// The raw bytes of the Orchard or Sapling serialized note commitment tree.
+    ///
+    /// Serialized to JSON as a hex-encoded string in the `finalState` field.
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "finalState")]

@@ -1,17 +1,17 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [16.0.0] - 2026-08-10
 
 ### Breaking Changes
 
-- The `Rpc` trait has a new required `get_deprecation_info` method. Downstream implementers of
-  the trait must add it; callers of `RpcImpl` are unaffected
-  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+- Requires `zebra-chain` 12.0.0, whose `Height` type is used by this crate's public API,
+  including `RpcImpl::with_end_of_support_height`. The `Rpc` trait also has a new required
+  `get_deprecation_info` method ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
 
 ### Added
 

@@ -8,7 +8,6 @@ use color_eyre::Report;
 use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
-use rand::{seq::SliceRandom, thread_rng};
 use zebra_chain::{
     amount::Amount,
     block::Block,
@@ -1100,6 +1099,95 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     Ok(())
 }
 
+/// Regression test for #10689: `poll_ready()` must stay ready when the
+/// `MempoolChange` broadcast channel has no subscribers.
+///
+/// The gossip and indexer tasks that consume the mempool change feed are
+/// optional consumers, not preconditions for mempool operation. With zero
+/// receivers, `broadcast::Sender::send` returns an error; propagating it out of
+/// `poll_ready()` with `?` made Tower treat the mempool service as permanently
+/// failed. This test builds a mempool with no change subscribers, drives a
+/// `MempoolChange::invalidated` through `poll_ready()`, and asserts the service
+/// does not fail.
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mempool_config = mempool::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    };
+
+    // `spawn_change_drain: false` leaves the returned receiver as the only
+    // subscriber; dropping it below gives the channel zero receivers.
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mempool_transaction_receiver,
+    ) = setup_with_mempool_config(&network, mempool_config, true, false).await;
+
+    drop(mempool_transaction_receiver);
+
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=2);
+    let rejected_tx = unmined_transactions.next().unwrap().clone();
+
+    mempool.enable(&mut recent_syncs).await;
+
+    // Queue a transaction and make the verifier reject it, so a subsequent
+    // `poll_ready()` emits a `MempoolChange::invalidated` on the empty channel.
+    let request = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.transaction.clone().into()]));
+    let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        responder.respond(Err(TransactionError::BadBalance));
+    });
+    let (response, _) = futures::join!(request, verification);
+    assert!(matches!(response.unwrap(), Response::Queued(_)));
+
+    // Poll the mempool so the invalidated change is sent with no subscribers.
+    // Before the fix, the `?` on the zero-receiver send made `poll_ready()`
+    // return an error at this point.
+    for _ in 0..3 {
+        assert!(
+            mempool.ready().await.is_ok(),
+            "poll_ready() must stay ready with no MempoolChange subscribers",
+        );
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
+
+    // Confirm the invalidated path actually ran (so the test is not vacuous):
+    // re-queueing the rejected transaction by ID now returns a
+    // failed-verification rejection.
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![rejected_tx.transaction.id.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("queue request returns a Queued response"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(matches!(
+        queued_responses
+            .into_iter()
+            .next()
+            .unwrap()
+            .unbox_mempool_error(),
+        MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
+    ));
+
+    Ok(())
+}
+
 /// Check if a transaction that fails download is _not_ rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
@@ -1502,14 +1590,10 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
 async fn mempool_reject_non_standard() -> Result<(), Report> {
     let network = Network::Mainnet;
 
-    // pick a random transaction from the dummy Zcash blockchain
-    let unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
-    let transactions = unmined_transactions.collect::<Vec<_>>();
-    let mut rng = thread_rng();
-    let mut last_transaction = transactions
-        .choose(&mut rng)
-        .expect("Missing transaction")
-        .clone();
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
 
     last_transaction.height = Some(Height(100_000));
 
@@ -1517,10 +1601,10 @@ async fn mempool_reject_non_standard() -> Result<(), Report> {
     // This is done by replacing its outputs with a dust output.
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(10), // this is below the dust threshold
         lock_script: p2pkh_script([0u8; 20]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     // Set cost limit to the cost of the transaction we will try to insert.
@@ -1568,10 +1652,10 @@ async fn mempool_accept_standard_op_return() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(0),
         lock_script: op_return_script(&[0x01]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1609,10 +1693,10 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(0),
         lock_script: op_return_script(&[0x03]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1631,7 +1715,7 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
         _tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
-    ) = setup_with_mempool_config(&network, mempool_config, true).await;
+    ) = setup_with_mempool_config(&network, mempool_config, true, true).await;
 
     service.enable(&mut recent_syncs).await;
 
@@ -1664,7 +1748,7 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![
+    tx_mut.set_outputs(vec![
         transparent::Output {
             value: Amount::new(0),
             lock_script: op_return_script(&[0x04]),
@@ -1673,7 +1757,7 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
             value: Amount::new(0),
             lock_script: op_return_script(&[0x05]),
         },
-    ];
+    ]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1717,10 +1801,10 @@ async fn mempool_reject_non_standard_scriptpubkey() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: transparent::Script::new(&[0x00]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1766,10 +1850,10 @@ async fn mempool_reject_bare_multisig() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: multisig_script(1, 1),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1813,10 +1897,10 @@ async fn mempool_reject_large_multisig() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: multisig_script(1, 4),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -2081,14 +2165,20 @@ fn op_n(n: u8) -> u8 {
 }
 
 fn set_first_prevout_unlock_script(tx: &mut Transaction, script: transparent::Script) {
-    for input in tx.inputs_mut() {
+    // Rebuild the transaction with modified inputs.
+    let mut inputs = tx.inputs();
+    let mut modified = false;
+    for input in &mut inputs {
         if let transparent::Input::PrevOut { unlock_script, .. } = input {
-            *unlock_script = script;
-            return;
+            *unlock_script = script.clone();
+            modified = true;
+            break;
         }
     }
-
-    panic!("missing prevout input");
+    if !modified {
+        panic!("missing prevout input");
+    }
+    *tx = tx.clone().with_transparent_inputs(inputs);
 }
 
 fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
@@ -2124,13 +2214,14 @@ async fn setup(
         ..Default::default()
     };
 
-    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block).await
+    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block, true).await
 }
 
 async fn setup_with_mempool_config(
     network: &Network,
     mempool_config: mempool::Config,
     should_commit_genesis_block: bool,
+    spawn_change_drain: bool,
 ) -> (
     Mempool,
     MockPeerSet,
@@ -2164,8 +2255,14 @@ async fn setup_with_mempool_config(
         misbehavior_tx,
     );
 
-    let mut mempool_transaction_receiver = mempool_transaction_subscriber.subscribe();
-    tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
+    // Keep the change feed drained in the background so tests that ignore it
+    // don't leave the broadcast channel without receivers (which would make
+    // `broadcast::Sender::send` fail). Tests that specifically need a channel
+    // with no subscribers pass `spawn_change_drain: false`.
+    if spawn_change_drain {
+        let mut mempool_transaction_receiver = mempool_transaction_subscriber.subscribe();
+        tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
+    }
 
     if should_commit_genesis_block {
         let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
@@ -2283,4 +2380,86 @@ async fn cancel_handles_drained_after_verification_timeout() {
         leaked, 0,
         "regression GHSA-65jj-fmw8-468q: cancel_handles must be drained after timeout"
     );
+}
+
+/// Regression test for #10684: the mempool verification-timeout path must
+/// release the per-peer queue slot, not just remove the cancel handle.
+///
+/// Before the fix, a peer whose `MAX_INBOUND_CONCURRENCY_PER_PEER` transactions
+/// all hit the verification timeout kept its per-peer count pinned at the cap
+/// even though no tasks remained, so any further transaction from that source
+/// was rejected with `FullQueue`.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verification_timeout_releases_peer_slot() {
+    use std::net::SocketAddr;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::{
+        crawler::RATE_LIMIT_DELAY,
+        downloads::{
+            Downloads, MAX_INBOUND_CONCURRENCY_PER_PEER, TRANSACTION_DOWNLOAD_TIMEOUT,
+            TRANSACTION_VERIFY_TIMEOUT,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+
+    let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
+
+    let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
+
+    // Fill the per-peer slot with `MAX_INBOUND_CONCURRENCY_PER_PEER` peer-sourced
+    // transactions from a single source.
+    for i in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        let tx = iter.next().expect("enough vector txs").transaction;
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
+            .unwrap_or_else(|e| panic!("queue tx {i} failed: {e:?}"));
+    }
+
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY_PER_PEER);
+
+    // Advance past `RATE_LIMIT_DELAY` so every spawned task hits the verification
+    // timeout (the mocked services never make progress).
+    time::advance(RATE_LIMIT_DELAY + Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+
+    for _ in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+        match downloads.as_mut().next().await {
+            Some(Err(_)) => {}
+            Some(Ok(_)) => panic!("expected a verification timeout error"),
+            None => panic!("Downloads stream ended before all tasks resolved"),
+        }
+    }
+
+    assert_eq!(downloads.in_flight(), 0, "pending should be drained");
+    assert_eq!(
+        downloads.transaction_requests().count(),
+        0,
+        "cancel_handles must be drained after timeout (GHSA-65jj)"
+    );
+
+    // The per-peer slots must have been released: a further transaction from the
+    // same source must queue successfully. Before the fix this returned
+    // `FullQueue` because the timeout path never released the slots.
+    let tx = iter.next().expect("enough vector txs").transaction;
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
+        .expect("a further transaction from the same source should queue after slots are freed");
 }

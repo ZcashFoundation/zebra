@@ -129,7 +129,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 /// - the amount of time between connection events and address book updates,
 ///   even under heavy load (in tests, we have observed delays up to 500ms),
 /// - the delay between an outbound connection failing,
-///   and the [CandidateSet](crate::peer_set::CandidateSet) registering the failure, and
+///   and [candidate selection](crate::peer_set::candidate_set) registering the failure, and
 /// - the delay between the application closing a connection,
 ///   and any remaining positive changes from the peer.
 pub const CONCURRENT_ADDRESS_CHANGE_PERIOD: Duration = Duration::from_secs(5);
@@ -210,7 +210,7 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
 /// The minimum time between outbound peer connections, implemented by
-/// [`CandidateSet::next`][crate::peer_set::CandidateSet::next].
+/// [`next_reconnect_peer`][crate::peer_set::candidate_set::next_reconnect_peer].
 ///
 /// ## Security
 ///
@@ -253,7 +253,7 @@ pub const MIN_INBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_secs(1
 pub const MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The minimum time between successive calls to
-/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
+/// [`crawl_once`][crate::peer_set::candidate_set::crawl_once].
 ///
 /// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
 ///
@@ -264,7 +264,7 @@ pub const MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL: Duration = Duration::from
 pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
 /// The combined timeout for all the requests in
-/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
+/// [`crawl_once`][crate::peer_set::candidate_set::crawl_once].
 ///
 /// `zcashd` doesn't respond to most `getaddr` requests,
 /// so this timeout needs to be short.

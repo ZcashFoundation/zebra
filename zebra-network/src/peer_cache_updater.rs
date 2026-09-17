@@ -1,24 +1,23 @@
 //! An async task that regularly updates the peer cache on disk from the current address book.
 
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::io;
 
-use chrono::Utc;
+use futures::FutureExt;
 use tokio::time::sleep;
+use tower::ServiceExt;
 
 use crate::{
+    address_book_updater::{AddressBookRequest, AddressBookResponse, AddressBookService},
     constants::{DNS_LOOKUP_TIMEOUT, PEER_DISK_CACHE_UPDATE_INTERVAL},
     meta_addr::MetaAddr,
-    AddressBook, BoxError, Config,
+    BoxError, Config,
 };
 
-/// An ongoing task that regularly caches the current `address_book` to disk, based on `config`.
-#[instrument(skip(config, address_book))]
+/// An ongoing task that regularly caches the current peers to disk, based on `config`.
+#[instrument(skip(config, address_book_service))]
 pub async fn peer_cache_updater(
     config: Config,
-    address_book: Arc<Mutex<AddressBook>>,
+    mut address_book_service: AddressBookService,
 ) -> Result<(), BoxError> {
     // Wait until we've queried DNS and (hopefully) sent peers to the address book.
     // Ideally we'd wait for at least one peer crawl, but that makes tests very slow.
@@ -32,7 +31,7 @@ pub async fn peer_cache_updater(
     loop {
         // Ignore errors because updating the cache is optional.
         // Errors are already logged by the functions we're calling.
-        wrote_cache |= update_peer_cache_once(&config, &address_book)
+        wrote_cache |= update_peer_cache_once(&config, &mut address_book_service)
             .await
             .unwrap_or(false);
 
@@ -49,15 +48,16 @@ pub async fn peer_cache_updater(
     }
 }
 
-/// Caches peers from the current `address_book` to disk, based on `config`.
+/// Caches the current cacheable peers to disk, based on `config`.
 ///
 /// Returns `true` if the cache was written, and `false` if the cacheable peer list was empty,
 /// keeping any previous cache.
 pub async fn update_peer_cache_once(
     config: &Config,
-    address_book: &Arc<Mutex<AddressBook>>,
+    address_book_service: &mut AddressBookService,
 ) -> io::Result<bool> {
-    let peer_list: std::collections::HashSet<_> = cacheable_peers(address_book)
+    let peer_list: std::collections::HashSet<_> = cacheable_peers(address_book_service)
+        .await?
         .iter()
         .map(|meta_addr| meta_addr.addr)
         .collect();
@@ -68,16 +68,22 @@ pub async fn update_peer_cache_once(
     Ok(has_peers)
 }
 
-/// Returns a list of cacheable peers, blocking for as short a time as possible.
-fn cacheable_peers(address_book: &Arc<Mutex<AddressBook>>) -> Vec<MetaAddr> {
-    // TODO: use spawn_blocking() here, if needed to handle address book mutex load
-    let now = Utc::now();
-
-    // # Concurrency
-    //
-    // We return from this function immediately to make sure the address book is unlocked.
-    address_book
-        .lock()
-        .expect("unexpected panic in previous thread while accessing the address book")
-        .cacheable(now)
+/// Returns a list of cacheable peers from the address book updater task.
+async fn cacheable_peers(
+    address_book_service: &mut AddressBookService,
+) -> io::Result<Vec<MetaAddr>> {
+    // Correctness: box the request future, so its captured types don't leak
+    // into generic callers (rustc's async Send inference struggles with
+    // boxed trait objects inside generic spawned tasks).
+    match address_book_service
+        .oneshot(AddressBookRequest::CacheablePeers)
+        .boxed()
+        .await
+    {
+        Ok(AddressBookResponse::Peers(peers)) => Ok(peers),
+        Ok(_) => unreachable!("CacheablePeers requests always return Peers"),
+        Err(error) => Err(io::Error::other(format!(
+            "error requesting cacheable peers, is Zebra shutting down? {error}"
+        ))),
+    }
 }

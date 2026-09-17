@@ -12,9 +12,9 @@ release_always = false
 # `zebrad` GitHub Release in .github/workflows/release.yml.
 git_release_enable = false
 
-# Source PRs author curated `[Unreleased]` entries. Release PRs finalize those
-# entries under versioned headings and add dependency-only release notes.
-changelog_update = true
+# Changie owns every changelog. The release workflow batches source-authored
+# fragments after release-plz has selected the versions.
+changelog_update = false
 
 # Breaking-change detection runs per PR via ziff, not in the release-pr job.
 semver_check = false
@@ -25,7 +25,7 @@ release_commits = "^(feat|fix|perf|refactor|build)"
 
 # Release PR metadata. Keep the generated long-lived PR out of the urgent queue
 # until maintainers are ready to publish.
-pr_labels = ["A-release"]
+pr_labels = ["release"]
 pr_name = "chore: release{% if package and version %} v{{ version }}{% endif %}"
 
 pr_body = """

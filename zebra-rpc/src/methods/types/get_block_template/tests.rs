@@ -382,11 +382,11 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
     // ZIP-229: from NU6.3, coinbase MUST have an empty Orchard component.
     assert_eq!(coinbase.version(), 6, "coinbase is v6 at NU6.3");
     assert!(
-        coinbase.ironwood_shielded_data().is_some(),
+        coinbase.has_ironwood_shielded_data(),
         "coinbase creates an Ironwood output"
     );
     assert!(
-        coinbase.orchard_shielded_data().is_none(),
+        !coinbase.has_orchard_shielded_data(),
         "coinbase must not create Orchard components on NU6.3"
     );
     zebra_consensus::transaction::check::coinbase_outputs_are_decryptable(&coinbase, &net, height)

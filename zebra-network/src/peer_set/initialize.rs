@@ -35,19 +35,24 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
+    address_book_updater::{
+        AddressBookChangeSender, AddressBookService, AddressBookUpdater, MIN_CHANNEL_SIZE,
+    },
     connection_metrics::{
         network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
         record_inbound_connection_rejected, ConnectionDirection,
     },
     constants,
-    meta_addr::{MetaAddr, MetaAddrChange},
+    meta_addr::MetaAddr,
     peer::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
         OutboundConnectorRequest, PeerPreference,
     },
     peer_cache_updater::peer_cache_updater,
-    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{
+        crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
+        ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
+    },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
@@ -153,6 +158,7 @@ where
         address_book,
         bans_receiver,
         address_book_updater,
+        address_book_service,
         address_metrics,
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, listen_addr);
@@ -292,7 +298,8 @@ where
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
     // 3. Outgoing peers we connect to in response to load.
-    let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
+    let (next_peer_service, mut crawl_service) =
+        crawler_services(address_book_service.clone(), peer_set.clone());
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
@@ -301,7 +308,7 @@ where
         .expect("unexpected error connecting to initial peers");
     let active_initial_peer_count = active_outbound_connections.update_count();
 
-    // We need to await candidates.update() here,
+    // We need to await the initial crawl here,
     // because zcashd rate-limits `addr`/`addrv2` messages per connection,
     // and if we only have one initial peer,
     // we need to ensure that its `Response::Addr` is used by the crawler.
@@ -312,7 +319,7 @@ where
         ?active_initial_peer_count,
         "sending initial request for peers"
     );
-    let _ = candidates.update_initial(active_initial_peer_count).await;
+    let _ = crawl_once(&mut crawl_service, Some(active_initial_peer_count)).await;
 
     // Compute remaining connections to open.
     let demand_count = config
@@ -328,7 +335,9 @@ where
         config.clone(),
         demand_tx,
         demand_rx,
-        candidates,
+        next_peer_service,
+        crawl_service,
+        address_book_service.clone(),
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -337,7 +346,7 @@ where
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
     // Start the peer disk cache updater
-    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_fut = peer_cache_updater(config, address_book_service);
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
 
     handle_tx
@@ -361,7 +370,7 @@ async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -525,7 +534,7 @@ where
 /// Also sends every initial peer to the `address_book_updater`.
 async fn limit_initial_peers(
     config: &Config,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> HashSet<PeerSocketAddr> {
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
@@ -911,7 +920,7 @@ enum CrawlerAction {
 /// `peerset_tx` channel.
 ///
 /// Crawl for new peers every `config.crawl_new_peer_interval`.
-/// Also crawl whenever there is demand, but no new peers in `candidates`.
+/// Also crawl whenever there is demand, but no new candidate peers.
 /// After crawling, try to connect to one new peer using `outbound_connector`.
 ///
 /// On every crawl timer tick, also queue a dial attempt for each spare outbound
@@ -922,7 +931,7 @@ enum CrawlerAction {
 /// If a handshake fails, restore the unused demand signal by sending it to
 /// `demand_tx`.
 ///
-/// The crawler terminates when `candidates.update()` or `peerset_tx` returns a
+/// The crawler terminates when a crawl or `peerset_tx` returns a
 /// permanent internal error. Transient errors and individual peer errors should
 /// be handled within the crawler.
 ///
@@ -934,7 +943,9 @@ enum CrawlerAction {
         config,
         demand_tx,
         demand_rx,
-        candidates,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
         outbound_connector,
         peerset_tx,
         active_outbound_connections,
@@ -948,11 +959,13 @@ async fn crawl_and_dial<C, S>(
     config: Config,
     demand_tx: futures::channel::mpsc::Sender<MorePeers>,
     mut demand_rx: futures::channel::mpsc::Receiver<MorePeers>,
-    candidates: CandidateSet<S>,
+    next_peer_service: NextPeerService,
+    crawl_service: CrawlService<S>,
+    address_book_service: AddressBookService,
     outbound_connector: C,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
 ) -> Result<(), BoxError>
 where
     C: Service<
@@ -963,7 +976,7 @@ where
         + Send
         + 'static,
     C::Future: Send + 'static,
-    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     use CrawlerAction::*;
@@ -976,10 +989,11 @@ where
 
     // # Concurrency
     //
-    // Allow tasks using the candidate set to be spawned, so they can run concurrently.
-    // Previously, Zebra has had deadlocks and long hangs caused by running dependent
-    // candidate set futures in the same async task.
-    let candidates = Arc::new(futures::lock::Mutex::new(candidates));
+    // The candidate selection and crawl services are cheap cloneable handles,
+    // sharing their rate limits across clones. So tasks using them can be
+    // spawned and run concurrently, without any locking. Previously, Zebra
+    // has had deadlocks and long hangs caused by running dependent candidate
+    // set futures in the same async task.
 
     // This contains both crawl and handshake tasks.
     let mut handshakes: FuturesUnordered<
@@ -1046,7 +1060,8 @@ where
 
             // Spawned tasks
             Ok(DemandHandshakeOrCrawl) => {
-                let candidates = candidates.clone();
+                let mut next_peer_service = next_peer_service.clone();
+                let crawl_service = crawl_service.clone();
                 let outbound_connector = outbound_connector.clone();
                 let peerset_tx = peerset_tx.clone();
                 let address_book_updater = address_book_updater.clone();
@@ -1064,17 +1079,14 @@ where
                 // # Concurrency
                 //
                 // The peer crawler must be able to make progress even if some handshakes are
-                // rate-limited. So the async mutex and next peer timeout are awaited inside the
-                // spawned task.
+                // rate-limited. So the next peer pacing is awaited inside the spawned task.
                 let handshake_or_crawl_handle = tokio::spawn(
                     async move {
                         // Try to get the next available peer for a handshake.
                         //
-                        // candidates.next() has a short timeout, and briefly holds the address
-                        // book lock, so it shouldn't hang.
-                        //
-                        // Hold the lock for as short a time as possible.
-                        let candidate = { candidates.lock().await.next().await };
+                        // The next peer request is served by the address book updater
+                        // task, so it shouldn't hang.
+                        let candidate = next_reconnect_peer(&mut next_peer_service).await;
 
                         if let Some(candidate) = candidate {
                             // we don't need to spawn here, because there's nothing running concurrently
@@ -1095,7 +1107,7 @@ where
                             // There weren't any peers, so try to get more peers.
                             debug!("demand for peers but no available candidates");
 
-                            crawl(candidates, demand_tx).await?;
+                            crawl(crawl_service, demand_tx).await?;
 
                             Ok(DemandCrawlFinished)
                         }
@@ -1107,7 +1119,8 @@ where
                 handshakes.push(handshake_or_crawl_handle);
             }
             Ok(TimerCrawl { tick }) => {
-                let candidates = candidates.clone();
+                let crawl_service = crawl_service.clone();
+                let address_book_service = address_book_service.clone();
                 let crawl_demand_tx = demand_tx.clone();
                 let spare_capacity = config
                     .peerset_outbound_connection_limit()
@@ -1130,7 +1143,7 @@ where
                         // demand handler re-checks the connection limit before each
                         // handshake, so excess signals are dropped, and failed handshakes
                         // restore their demand signal.
-                        let ready_candidates = { candidates.lock().await.ready_peer_count().await };
+                        let ready_candidates = ready_peer_count(&address_book_service).await;
                         let mut fill_demand_tx = crawl_demand_tx.clone();
                         for _ in 0..spare_capacity.min(ready_candidates) {
                             if fill_demand_tx.try_send(MorePeers).is_err() {
@@ -1138,7 +1151,7 @@ where
                             }
                         }
 
-                        crawl(candidates, crawl_demand_tx).await?;
+                        crawl(crawl_service, crawl_demand_tx).await?;
 
                         Ok(TimerCrawlFinished)
                     }
@@ -1176,31 +1189,25 @@ where
     }
 }
 
-/// Try to get more peers using `candidates`, then queue a connection attempt using `demand_tx`.
+/// Try to get more peers using `crawl_service`, then queue a connection attempt using `demand_tx`.
 /// If there were no new peers, the connection attempt is skipped.
-#[instrument(skip(candidates, demand_tx))]
+#[instrument(skip(crawl_service, demand_tx))]
 async fn crawl<S>(
-    candidates: Arc<futures::lock::Mutex<CandidateSet<S>>>,
+    mut crawl_service: CrawlService<S>,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
-    // update() has timeouts, and briefly holds the address book
-    // lock, so it shouldn't hang.
-    // Try to get new peers, holding the lock for as short a time as possible.
-    let result = {
-        let result = candidates.lock().await.update().await;
-        std::mem::drop(candidates);
-        result
-    };
-    let more_peers = match result {
+    // Crawls have timeouts, and are served without locks,
+    // so this call shouldn't hang.
+    let more_peers = match crawl_once(&mut crawl_service, None).await {
         Ok(more_peers) => more_peers,
         Err(e) => {
             info!(
                 ?e,
-                "candidate set returned an error, is Zebra shutting down?"
+                "crawl service returned an error, is Zebra shutting down?"
             );
             return Err(e);
         }
@@ -1210,11 +1217,11 @@ where
     //
     // # Security
     //
-    // Update attempts are rate-limited by the candidate set,
-    // and we only try peers if there was actually an update.
+    // Crawls are rate-limited by the crawl service,
+    // and we only try peers if a crawl actually ran.
     //
-    // So if all peers have had a recent attempt, and there was recent update
-    // with no peers, the channel will drain. This prevents useless update attempt
+    // So if all peers have had a recent attempt, and there was recent crawl
+    // with no peers, the channel will drain. This prevents useless crawl attempt
     // loops.
     if let Some(more_peers) = more_peers {
         if let Err(send_error) = demand_tx.try_send(more_peers) {
@@ -1250,7 +1257,7 @@ async fn dial<C>(
     outbound_connection_tracker: ConnectionTracker,
     outbound_connections: usize,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
 ) -> Result<(), BoxError>
 where
@@ -1332,10 +1339,7 @@ where
 
 /// Mark `addr` as a failed peer to `address_book_updater`.
 #[instrument(skip(address_book_updater))]
-async fn report_failed(
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-    addr: MetaAddr,
-) {
+async fn report_failed(address_book_updater: AddressBookChangeSender, addr: MetaAddr) {
     // The connection info is the same as what's already in the address book.
     let addr = MetaAddr::new_errored(addr.addr, None);
 

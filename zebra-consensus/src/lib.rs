@@ -34,7 +34,12 @@
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_consensus")]
 
+// Fuzzing switch: expose `block::check::equihash_solution_is_valid` to the
+// equihash fuzz harness. Private in normal builds; public only under `fuzzing`.
+#[cfg(not(feature = "fuzzing"))]
 mod block;
+#[cfg(feature = "fuzzing")]
+pub mod block;
 mod checkpoint;
 mod primitives;
 mod script;
@@ -51,7 +56,9 @@ pub use block::{subsidy::funding_stream_address, Request, VerifyBlockError, MAX_
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;
-pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
+pub use primitives::{
+    ed25519, groth16, halo2, redjubjub, redpallas, sapling::prover as sapling_prover,
+};
 pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].

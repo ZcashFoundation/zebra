@@ -88,11 +88,10 @@ impl NoteCommitmentTrees {
             ..
         } = self.clone();
 
-        let sprout_note_commitments: Vec<_> = block.sprout_note_commitments().cloned().collect();
-        let sapling_note_commitments: Vec<_> = block.sapling_note_commitments().cloned().collect();
-        let orchard_note_commitments: Vec<_> = block.orchard_note_commitments().cloned().collect();
-        let ironwood_note_commitments: Vec<_> =
-            block.ironwood_note_commitments().cloned().collect();
+        let sprout_note_commitments: Vec<_> = block.sprout_note_commitments().collect();
+        let sapling_note_commitments: Vec<_> = block.sapling_note_commitments().collect();
+        let orchard_note_commitments: Vec<_> = block.orchard_note_commitments().collect();
+        let ironwood_note_commitments: Vec<_> = block.ironwood_note_commitments().collect();
 
         let mut sprout_result = None;
         let mut sapling_result = None;

@@ -13,7 +13,7 @@ use zebra_chain::{
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_425_000;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_444_000;
 
 /// The estimated number of blocks per day, with the post-Blossom 75-second target spacing.
 ///

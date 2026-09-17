@@ -35,9 +35,9 @@ use zebra_chain::{
 };
 
 use crate::{
+    address_book_updater::{self, AddressBookChangeSender},
     connection_metrics::RemoteVersionOutcomeGuard,
     constants,
-    meta_addr::MetaAddrChange,
     peer::{
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
         MinimumPeerVersion, PeerError,
@@ -74,7 +74,7 @@ where
     relay: bool,
 
     inbound_service: S,
-    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: AddressBookChangeSender,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
@@ -406,7 +406,7 @@ where
     relay: Option<bool>,
 
     inbound_service: Option<S>,
-    address_book_updater: Option<tokio::sync::mpsc::Sender<MetaAddrChange>>,
+    address_book_updater: Option<AddressBookChangeSender>,
     inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
 }
@@ -447,7 +447,7 @@ where
     /// make outbound connections to peers.
     pub fn with_address_book_updater(
         mut self,
-        address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
+        address_book_updater: AddressBookChangeSender,
     ) -> Self {
         self.address_book_updater = Some(address_book_updater);
         self
@@ -516,7 +516,7 @@ where
         let address_book_updater = self.address_book_updater.unwrap_or_else(|| {
             // No `AddressBookUpdater` for timestamp collection was passed, so create a stub
             // channel. Dropping the receiver means sends will fail, but we don't care.
-            let (tx, _rx) = tokio::sync::mpsc::channel(1);
+            let (tx, _rx) = address_book_updater::change_channel(1);
             tx
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
@@ -1365,7 +1365,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     connected_addr: ConnectedAddr,
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: AddressBookChangeSender,
 ) -> Result<(), BoxError> {
     use futures::future::Either;
 
@@ -1422,7 +1422,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
-    heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    heartbeat_ts_collector: AddressBookChangeSender,
 ) -> Result<(), BoxError> {
     // Don't send the first heartbeat immediately - we've just completed the handshake!
     let mut interval = tokio::time::interval_at(
@@ -1521,7 +1521,7 @@ async fn send_one_heartbeat(
 /// `handle_heartbeat_error`.
 async fn heartbeat_timeout(
     fut: impl Future<Output = Result<Response, BoxError>>,
-    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &AddressBookChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<Option<Duration>, BoxError> {
     let response = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
@@ -1544,7 +1544,7 @@ async fn heartbeat_timeout(
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
 async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
-    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &AddressBookChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<T, E>
 where
@@ -1574,7 +1574,7 @@ where
 /// Mark `connected_addr` as shut down using `address_book_updater`.
 async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
-    address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
+    address_book_updater: &AddressBookChangeSender,
     connected_addr: &ConnectedAddr,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");

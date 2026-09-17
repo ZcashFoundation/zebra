@@ -335,13 +335,29 @@ impl Service<zn::Request> for Inbound {
                         continue;
                     };
 
-                    let Ok(err) = err.downcast::<VerifyBlockError>() else {
+                    // # Security
+                    //
+                    // The gossiped block verifier is a `BlockVerifierRouter`, so a failed
+                    // verification is boxed as a `RouterError`. `Box<dyn Error>::downcast`
+                    // is an exact type match, so downcasting to `VerifyBlockError` alone
+                    // never matched, and misbehaving peers were never scored.
+                    // (`VerifyBlockError` only appears nested inside `RouterError::Block`.)
+                    //
+                    // `VerifyBlockError` is still handled, so scoring keeps working if the
+                    // verifier stack is ever rewired to skip the router.
+                    //
+                    // Any other error (a tower `Elapsed` timeout, a transport failure) is a
+                    // local problem rather than peer misbehavior, so it stays unscored.
+                    let score = if let Some(err) = err.downcast_ref::<RouterError>() {
+                        err.misbehavior_score()
+                    } else if let Some(err) = err.downcast_ref::<VerifyBlockError>() {
+                        err.misbehavior_score()
+                    } else {
                         continue;
                     };
 
-                    if err.misbehavior_score() != 0 {
-                        let _ =
-                            misbehavior_sender.try_send((advertiser_addr, err.misbehavior_score()));
+                    if score != 0 {
+                        let _ = misbehavior_sender.try_send((advertiser_addr, score));
                     }
                 }
 

@@ -1,17 +1,26 @@
 //! Arbitrary data generation for transaction proptests
 
+pub mod shielded;
+
+pub use shielded::{
+    fake_bundle_for_branch, fake_orchard_bundle, fake_orchard_bundle_duplicate_nullifiers,
+    fake_orchard_bundle_with_note, fake_v6_transaction, insert_fake_orchard_shielded_data,
+    outputs_enabled_flags, v6_ironwood_flags_offset, v6_orchard_flags_offset,
+    with_garbage_orchard_authorization, with_orchard_flags, with_orchard_value_balance,
+};
+
 use std::{cmp::max, collections::HashMap, ops::Neg, sync::Arc};
 
 use chrono::{TimeZone, Utc};
-use proptest::{array, collection::vec, option, prelude::*, test_runner::TestRunner};
+use proptest::{array, collection::vec, option, prelude::*};
 use reddsa::{orchard::Binding, Signature};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
-    ironwood, orchard,
+    orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
+    primitives::{Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::{self, ZcashDeserializeInto},
     sprout, transparent,
@@ -19,11 +28,31 @@ use crate::{
     LedgerState,
 };
 
-use itertools::Itertools;
+use zcash_primitives::transaction::TxVersion;
+use zcash_transparent;
 
 use super::{
     FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx, VerifiedUnminedTx,
 };
+
+/// Returns the librustzcash consensus branch ID for `network_upgrade`, falling back to
+/// `fallback` when the upgrade has no branch ID that librustzcash recognises.
+///
+/// Shielded bundles must be built for the branch of the transaction that will carry them, since
+/// the branch selects the bundle version and therefore which flags are representable. The
+/// fallback must match the one the corresponding `Transaction::test_v*` constructor uses, or the
+/// bundle would be built for a different branch than the transaction it ends up in. In
+/// particular NU7's branch ID is behind an unstable feature, so a v6 transaction at NU7 falls
+/// back to NU6.3 — the branch where v6 and the Ironwood pool were introduced.
+fn branch_id_of(
+    network_upgrade: NetworkUpgrade,
+    fallback: zcash_protocol::consensus::BranchId,
+) -> zcash_protocol::consensus::BranchId {
+    network_upgrade
+        .branch_id()
+        .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+        .unwrap_or(fallback)
+}
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
 ///
@@ -41,97 +70,66 @@ impl Transaction {
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
         )
-            .prop_map(|(inputs, outputs, lock_time)| Transaction::V1 {
-                inputs,
-                outputs,
-                lock_time,
+            .prop_map(|(inputs, outputs, lock_time)| {
+                Transaction::test_v1(inputs, outputs, lock_time)
             })
             .boxed()
     }
 
     /// Generate a proptest strategy for V2 Transactions
+    ///
+    /// Note: the new Transaction type doesn't support arbitrary Sprout JoinSplit data
+    /// in proptest strategies, so this generates transparent-only V2 transactions.
     pub fn v2_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
-            option::of(any::<JoinSplitData<Bctv14Proof>>()),
         )
-            .prop_map(
-                |(inputs, outputs, lock_time, joinsplit_data)| Transaction::V2 {
-                    inputs,
-                    outputs,
-                    lock_time,
-                    joinsplit_data,
-                },
-            )
+            .prop_map(|(inputs, outputs, lock_time)| {
+                Transaction::test_v2(inputs, outputs, lock_time)
+            })
             .boxed()
     }
 
     /// Generate a proptest strategy for V3 Transactions
+    ///
+    /// Note: the new Transaction type doesn't support arbitrary Sprout JoinSplit data
+    /// in proptest strategies, so this generates transparent-only V3 transactions.
     pub fn v3_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
-            option::of(any::<JoinSplitData<Bctv14Proof>>()),
         )
-            .prop_map(
-                |(inputs, outputs, lock_time, expiry_height, joinsplit_data)| Transaction::V3 {
-                    inputs,
-                    outputs,
-                    lock_time,
-                    expiry_height,
-                    joinsplit_data,
-                },
-            )
+            .prop_map(|(inputs, outputs, lock_time, expiry_height)| {
+                Transaction::test_v3(inputs, outputs, lock_time, expiry_height)
+            })
             .boxed()
     }
 
     /// Generate a proptest strategy for V4 Transactions
+    ///
+    /// Note: the new Transaction type doesn't support arbitrary Sapling/Sprout shielded
+    /// data in proptest strategies, so this generates transparent-only V4 transactions.
     pub fn v4_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             any::<LockTime>(),
             any::<block::Height>(),
-            option::of(any::<JoinSplitData<Groth16Proof>>()),
-            option::of(any::<sapling::ShieldedData<sapling::PerSpendAnchor>>()),
         )
-            .prop_map(
-                move |(
-                    inputs,
-                    outputs,
-                    lock_time,
-                    expiry_height,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                )| {
-                    Transaction::V4 {
-                        inputs,
-                        outputs,
-                        lock_time,
-                        expiry_height,
-                        joinsplit_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any joinsplits.
-                            None
-                        } else {
-                            joinsplit_data
-                        },
-                        sapling_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            sapling_shielded_data
-                        },
-                    }
-                },
-            )
+            .prop_map(|(inputs, outputs, lock_time, expiry_height)| {
+                Transaction::test_v4(inputs, outputs, lock_time, expiry_height)
+            })
             .boxed()
     }
 
     /// Generate a proptest strategy for V5 Transactions
+    ///
+    /// Note: the new Transaction type doesn't support arbitrary Sapling/Orchard shielded
+    /// data in proptest strategies, so this generates transparent-only V5 transactions.
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             NetworkUpgrade::nu5_branch_id_strategy(),
@@ -139,48 +137,53 @@ impl Transaction {
             any::<block::Height>(),
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
-            option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData>()),
+            option::of((1usize..=2usize, any::<u64>())),
         )
             .prop_map(
-                move |(
-                    network_upgrade,
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                )| {
-                    Transaction::V5 {
-                        network_upgrade: if ledger_state.transaction_has_valid_network_upgrade() {
-                            ledger_state.network_upgrade()
+                move |(network_upgrade, lock_time, expiry_height, inputs, outputs, orchard)| {
+                    let nu = if ledger_state.transaction_has_valid_network_upgrade() {
+                        // Use the ledger's network upgrade if it has a consensus branch ID
+                        // (V5 transactions can only embed known branch IDs).
+                        let ledger_nu = ledger_state.network_upgrade();
+                        if ledger_nu.branch_id().is_some() {
+                            ledger_nu
                         } else {
                             network_upgrade
-                        },
-                        lock_time,
-                        expiry_height,
+                        }
+                    } else {
+                        network_upgrade
+                    };
+
+                    // The genesis block must not contain any shielded data.
+                    let orchard_bundle = (!ledger_state.height.is_min())
+                        .then_some(orchard)
+                        .flatten()
+                        .and_then(|(n_actions, seed)| {
+                            shielded::fake_bundle_for_branch(
+                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu5),
+                                ::orchard::ValuePool::Orchard,
+                                n_actions,
+                                seed,
+                            )
+                        });
+
+                    Transaction::test_v5_with_orchard(
+                        nu,
                         inputs,
                         outputs,
-                        sapling_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            sapling_shielded_data
-                        },
-                        orchard_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            orchard_shielded_data
-                        },
-                    }
+                        lock_time,
+                        expiry_height,
+                        orchard_bundle,
+                    )
                 },
             )
             .boxed()
     }
 
     /// Generate a proptest strategy for V6 Transactions
+    ///
+    /// Note: like [`Self::v5_strategy`], the new Transaction type doesn't support arbitrary
+    /// shielded data in proptest strategies, so this generates transparent-only V6 transactions.
     pub fn v6_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
             NetworkUpgrade::nu6_3_branch_id_strategy(),
@@ -188,9 +191,8 @@ impl Transaction {
             any::<block::Height>(),
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
-            option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedDataV6>()),
-            option::of(any::<ironwood::ShieldedData>()),
+            option::of((1usize..=2usize, any::<u64>())),
+            option::of((1usize..=2usize, any::<u64>())),
         )
             .prop_map(
                 move |(
@@ -199,39 +201,59 @@ impl Transaction {
                     expiry_height,
                     inputs,
                     outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ironwood_shielded_data,
+                    orchard,
+                    ironwood,
                 )| {
-                    Transaction::V6 {
-                        network_upgrade: if ledger_state.transaction_has_valid_network_upgrade() {
-                            ledger_state.network_upgrade()
+                    let nu = if ledger_state.transaction_has_valid_network_upgrade() {
+                        let ledger_nu = ledger_state.network_upgrade();
+                        if ledger_nu.branch_id().is_some() {
+                            ledger_nu
                         } else {
                             network_upgrade
+                        }
+                    } else {
+                        network_upgrade
+                    };
+
+                    // The genesis block must not contain any shielded data.
+                    let is_genesis = ledger_state.height.is_min();
+
+                    let orchard_bundle =
+                        (!is_genesis)
+                            .then_some(orchard)
+                            .flatten()
+                            .and_then(|(n_actions, seed)| {
+                                shielded::fake_bundle_for_branch(
+                                    branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                    ::orchard::ValuePool::Orchard,
+                                    n_actions,
+                                    seed,
+                                )
+                            });
+
+                    // Offset the Ironwood seeds so the two pools in one transaction never share
+                    // nullifiers (they are disjoint sets, but the tests read more clearly when
+                    // the generated values differ too).
+                    let ironwood_bundle = (!is_genesis).then_some(ironwood).flatten().and_then(
+                        |(n_actions, seed)| {
+                            shielded::fake_bundle_for_branch(
+                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                ::orchard::ValuePool::Ironwood,
+                                n_actions,
+                                seed ^ 0xEEEE_0000_u64,
+                            )
                         },
-                        lock_time,
-                        expiry_height,
+                    );
+
+                    Transaction::test_v6_with_bundles(
+                        nu,
                         inputs,
                         outputs,
-                        sapling_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            sapling_shielded_data
-                        },
-                        orchard_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            orchard_shielded_data
-                        },
-                        ironwood_shielded_data: if ledger_state.height.is_min() {
-                            // The genesis block should not contain any shielded data.
-                            None
-                        } else {
-                            ironwood_shielded_data
-                        },
-                    }
+                        lock_time,
+                        expiry_height,
+                        orchard_bundle,
+                        ironwood_bundle,
+                    )
                 },
             )
             .boxed()
@@ -259,41 +281,41 @@ impl Transaction {
             .boxed()
     }
 
-    /// Apply `f` to the transparent output, `v_sprout_new`, and `v_sprout_old` values
-    /// in this transaction, regardless of version.
+    /// Apply `f` to the transparent output values in this transaction.
+    ///
+    /// Note: Sprout/sapling/orchard value mutations are not supported with
+    /// the new Transaction type (proptest strategies generate transparent-only txs).
     pub fn for_each_value_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut Amount<NonNegative>),
     {
-        for output_value in self.output_values_mut() {
-            f(output_value);
+        let mut outputs = self.outputs();
+        let mut changed = false;
+        for output in &mut outputs {
+            let old = output.value;
+            f(&mut output.value);
+            if output.value != old {
+                changed = true;
+            }
         }
-
-        for sprout_added_value in self.output_values_to_sprout_mut() {
-            f(sprout_added_value);
-        }
-        for sprout_removed_value in self.input_values_from_sprout_mut() {
-            f(sprout_removed_value);
+        if changed {
+            *self = self.clone().with_transparent_outputs(outputs);
         }
     }
 
-    /// Apply `f` to the sapling, orchard, and ironwood value balances
-    /// in this transaction, regardless of version.
-    pub fn for_each_value_balance_mut<F>(&mut self, mut f: F)
+    /// Apply `f` to the sapling value balance and orchard value balance.
+    ///
+    /// Note: Not implemented for the new Transaction type since proptest strategies
+    /// generate transparent-only transactions. This is a no-op.
+    pub fn for_each_value_balance_mut<F>(&mut self, _f: F)
     where
         F: FnMut(&mut Amount<NegativeAllowed>),
     {
-        if let Some(sapling_value_balance) = self.sapling_value_balance_mut() {
-            f(sapling_value_balance);
-        }
-
-        if let Some(orchard_value_balance) = self.orchard_value_balance_mut() {
-            f(orchard_value_balance);
-        }
-
-        if let Some(ironwood_value_balance) = self.ironwood_value_balance_mut() {
-            f(ironwood_value_balance);
-        }
+        // The shielded bundles our strategies build always have a zero value balance
+        // (see `shielded::fake_bundle_for_branch`), so there is nothing to scale.
+        // If a strategy ever generates a non-zero one, this must rebuild the bundle:
+        // `zcash_primitives` bundles are immutable, so there is no value balance to take
+        // a `&mut` to.
     }
 
     /// Fixup transparent values and shielded value balances,
@@ -325,7 +347,7 @@ impl Transaction {
         }
 
         self.for_each_value_mut(scale_to_avoid_overflow);
-        self.for_each_value_balance_mut(scale_to_avoid_overflow);
+        // Shielded value balances are zero in proptest transactions, no fixup needed.
     }
 
     /// Fixup transparent values and shielded value balances,
@@ -377,51 +399,17 @@ impl Transaction {
 
         // update the input chain value pools,
         // zeroing any inputs that would exceed the input value
-
-        // TODO: consensus rule: normalise sprout JoinSplit values
-        //       so at least one of the values in each JoinSplit is zero
-        for input in self.input_values_from_sprout_mut() {
-            match input_chain_value_pools
-                .add_chain_value_pool_change(ValueBalance::from_sprout_amount(input.neg()))
-            {
-                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                // set the invalid input value to zero
-                Err(_) => *input = Amount::zero(),
-            }
-        }
-
-        // positive value balances subtract from the chain value pool
-
-        let sapling_input = self.sapling_value_balance().constrain::<NonNegative>();
-        if let Ok(sapling_input) = sapling_input {
-            match input_chain_value_pools.add_chain_value_pool_change(-sapling_input) {
-                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                Err(_) => *self.sapling_value_balance_mut().unwrap() = Amount::zero(),
-            }
-        }
-
-        let orchard_input = self.orchard_value_balance().constrain::<NonNegative>();
-        if let Ok(orchard_input) = orchard_input {
-            match input_chain_value_pools.add_chain_value_pool_change(-orchard_input) {
-                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                Err(_) => *self.orchard_value_balance_mut().unwrap() = Amount::zero(),
-            }
-        }
-
-        let ironwood_input = self.ironwood_value_balance().constrain::<NonNegative>();
-        if let Ok(ironwood_input) = ironwood_input {
-            match input_chain_value_pools.add_chain_value_pool_change(-ironwood_input) {
-                Ok(new_chain_pools) => input_chain_value_pools = new_chain_pools,
-                Err(_) => *self.ironwood_value_balance_mut().unwrap() = Amount::zero(),
-            }
-        }
+        //
+        // Note: Sprout, Sapling, Orchard, and Ironwood pool mutations are skipped here
+        // because proptest strategies generate transparent-only transactions.
+        // Those value balances are always zero and never exceed the chain pool.
 
         let remaining_transaction_value = self.fix_remaining_value(outputs)?;
 
         // check our calculations are correct
         let transaction_chain_value_pool_change =
             self
-            .value_balance_from_outputs(outputs)
+            .transparent_value_balance_from_outputs(outputs)
             .expect("chain value pool and remaining transaction value fixes produce valid transaction value balances")
             .neg();
 
@@ -461,10 +449,8 @@ impl Transaction {
         //       values much larger than MAX_MONEY
         //.expect("chain is limited to MAX_MONEY");
 
-        let sprout_inputs = self
-            .input_values_from_sprout()
-            .sum::<Result<Amount<NonNegative>, amount::Error>>()
-            .expect("chain is limited to MAX_MONEY");
+        // Proptest transactions don't have Sprout joinsplits, so sprout_inputs is always zero.
+        let sprout_inputs = Amount::<NonNegative>::zero();
 
         // positive value balances add to the transaction value pool
         let sapling_input = self
@@ -531,61 +517,27 @@ impl Transaction {
 
         // assign remaining input value to outputs,
         // zeroing any outputs that would exceed the input value
-
-        for output_value in self.output_values_mut() {
-            if remaining_input_value >= *output_value {
-                remaining_input_value = (remaining_input_value - *output_value)
+        let mut tx_outputs = self.outputs();
+        let mut outputs_changed = false;
+        for output in &mut tx_outputs {
+            if remaining_input_value >= output.value {
+                remaining_input_value = (remaining_input_value - output.value)
                     .expect("input >= output so result is always non-negative");
             } else {
-                *output_value = Amount::zero();
+                output.value = Amount::zero();
+                outputs_changed = true;
             }
+        }
+        if outputs_changed {
+            *self = self.clone().with_transparent_outputs(tx_outputs);
         }
 
-        for output_value in self.output_values_to_sprout_mut() {
-            if remaining_input_value >= *output_value {
-                remaining_input_value = (remaining_input_value - *output_value)
-                    .expect("input >= output so result is always non-negative");
-            } else {
-                *output_value = Amount::zero();
-            }
-        }
-
-        if let Some(value_balance) = self.sapling_value_balance_mut() {
-            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
-                if remaining_input_value >= output_value {
-                    remaining_input_value = (remaining_input_value - output_value)
-                        .expect("input >= output so result is always non-negative");
-                } else {
-                    *value_balance = Amount::zero();
-                }
-            }
-        }
-
-        if let Some(value_balance) = self.orchard_value_balance_mut() {
-            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
-                if remaining_input_value >= output_value {
-                    remaining_input_value = (remaining_input_value - output_value)
-                        .expect("input >= output so result is always non-negative");
-                } else {
-                    *value_balance = Amount::zero();
-                }
-            }
-        }
-
-        if let Some(value_balance) = self.ironwood_value_balance_mut() {
-            if let Ok(output_value) = value_balance.neg().constrain::<NonNegative>() {
-                if remaining_input_value >= output_value {
-                    remaining_input_value = (remaining_input_value - output_value)
-                        .expect("input >= output so result is always non-negative");
-                } else {
-                    *value_balance = Amount::zero();
-                }
-            }
-        }
+        // Sprout, Sapling, Orchard, and Ironwood output values are zero in proptest
+        // transactions, so there is nothing to fix up for the shielded pools.
 
         // check our calculations are correct
         let remaining_transaction_value = self
-            .value_balance_from_outputs(outputs)
+            .transparent_value_balance_from_outputs(outputs)
             .expect("chain is limited to MAX_MONEY")
             .remaining_transaction_value()
             .unwrap_or_else(|err| {
@@ -931,7 +883,9 @@ impl Arbitrary for UnminedTx {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<Transaction>().prop_map_into().boxed()
+        any::<Transaction>()
+            .prop_map(|tx| UnminedTx::from(Arc::new(tx)))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
@@ -995,144 +949,69 @@ impl Arbitrary for VerifiedUnminedTx {
 
 // Utility functions
 
-/// Convert `trans` into a fake v5 transaction,
-/// converting sapling shielded data from v4 to v5 if possible.
+/// Convert `trans` into a fake v5 transaction.
+///
+/// Takes the transparent inputs/outputs from `trans` and builds a new V5
+/// transaction at the given height. Used to test V5 sighash/serialization
+/// with real transparent data from the test vector blocks.
 pub fn transaction_to_fake_v5(
     trans: &Transaction,
     network: &Network,
     height: block::Height,
 ) -> Transaction {
-    use Transaction::*;
-
     let block_nu = NetworkUpgrade::current(network, height);
 
-    match trans {
-        V1 {
-            inputs,
-            outputs,
-            lock_time,
-        } => V5 {
-            network_upgrade: block_nu,
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: height,
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-        },
-        V2 {
-            inputs,
-            outputs,
-            lock_time,
-            ..
-        } => V5 {
-            network_upgrade: block_nu,
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: height,
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-        },
-        V3 {
-            inputs,
-            outputs,
-            lock_time,
-            ..
-        } => V5 {
-            network_upgrade: block_nu,
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: height,
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-        },
-        V4 {
-            inputs,
-            outputs,
-            lock_time,
-            sapling_shielded_data,
-            ..
-        } => V5 {
-            network_upgrade: block_nu,
-            inputs: inputs.to_vec(),
-            outputs: outputs.to_vec(),
-            lock_time: *lock_time,
-            expiry_height: height,
-            sapling_shielded_data: sapling_shielded_data
-                .clone()
-                .and_then(sapling_shielded_v4_to_fake_v5),
-            orchard_shielded_data: None,
-        },
-        v5 @ V5 { .. } => v5.clone(),
-        v6 @ V6 { .. } => v6.clone(),
-    }
-}
+    match trans.tx_version() {
+        // V5+ already in the right format; just clone
+        TxVersion::V5 | TxVersion::V6 => trans.clone(),
+        // For V1-V4: build a V5 with the same transparent data
+        _ => {
+            use crate::transaction::compat;
+            use zcash_primitives::transaction::{self as zp_tx, TxVersion};
+            use zcash_protocol::consensus::BranchId;
 
-/// Convert a v4 sapling shielded data into a fake v5 sapling shielded data,
-/// if possible.
-fn sapling_shielded_v4_to_fake_v5(
-    v4_shielded: sapling::ShieldedData<PerSpendAnchor>,
-) -> Option<sapling::ShieldedData<SharedAnchor>> {
-    use sapling::ShieldedData;
-    use sapling::TransferData::*;
+            let branch_id = block_nu
+                .branch_id()
+                .and_then(|cbid| BranchId::try_from(cbid).ok())
+                .unwrap_or(BranchId::Nu5);
 
-    let unique_anchors: Vec<_> = v4_shielded
-        .spends()
-        .map(|spend| spend.per_spend_anchor)
-        .unique()
-        .collect();
+            let inputs = trans.inputs();
+            let outputs = trans.outputs();
+            let vin = inputs.iter().map(compat::input_to_txin).collect();
+            let vout = outputs.iter().map(compat::output_to_txout).collect();
 
-    let fake_spends: Vec<_> = v4_shielded
-        .spends()
-        .cloned()
-        .map(sapling_spend_v4_to_fake_v5)
-        .collect();
+            let lock_time_u32 =
+                compat::lock_time_to_u32(&trans.lock_time().unwrap_or(LockTime::unlocked()));
 
-    let transfers = match v4_shielded.transfers {
-        SpendsAndMaybeOutputs { maybe_outputs, .. } => {
-            let shared_anchor = match unique_anchors.as_slice() {
-                [unique_anchor] => *unique_anchor,
-                // Multiple different anchors, can't convert to v5
-                _ => return None,
-            };
+            let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            });
 
-            SpendsAndMaybeOutputs {
-                shared_anchor,
-                spends: fake_spends.try_into().unwrap(),
-                maybe_outputs,
-            }
+            // For V4, carry over the sapling bundle (already in zcash_primitives format)
+            let sapling_bundle = trans.0.sapling_bundle().cloned();
+
+            let tx_data = zp_tx::TransactionData::from_parts(
+                TxVersion::V5,
+                branch_id,
+                lock_time_u32,
+                zcash_protocol::consensus::BlockHeight::from_u32(height.0),
+                transparent_bundle,
+                None,
+                sapling_bundle,
+                None,
+            );
+
+            Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
         }
-        JustOutputs { outputs } => JustOutputs { outputs },
-    };
-
-    let fake_shielded_v5 = ShieldedData::<SharedAnchor> {
-        value_balance: v4_shielded.value_balance,
-        transfers,
-        binding_sig: v4_shielded.binding_sig,
-    };
-
-    Some(fake_shielded_v5)
-}
-
-/// Convert a v4 sapling spend into a fake v5 sapling spend.
-fn sapling_spend_v4_to_fake_v5(
-    v4_spend: sapling::Spend<PerSpendAnchor>,
-) -> sapling::Spend<SharedAnchor> {
-    use sapling::Spend;
-
-    Spend::<SharedAnchor> {
-        cv: v4_spend.cv,
-        per_spend_anchor: FieldNotPresent,
-        nullifier: v4_spend.nullifier,
-        rk: v4_spend.rk,
-        zkproof: v4_spend.zkproof,
-        spend_auth_sig: v4_spend.spend_auth_sig,
+        // unreachable but suppress warning for non-nu7 builds
+        #[allow(unreachable_patterns)]
+        _ => trans.clone(),
     }
 }
 
-/// Iterate over V4 transactions in the block test vectors for the specified `network`.
+/// Iterate over transactions in the block test vectors for the specified `network`.
 pub fn test_transactions(
     network: &Network,
 ) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> {
@@ -1145,13 +1024,9 @@ pub fn test_transactions(
 pub fn v5_transactions<'b>(
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
-    transactions_from_blocks(blocks).filter_map(|(_, tx)| match *tx {
-        Transaction::V1 { .. }
-        | Transaction::V2 { .. }
-        | Transaction::V3 { .. }
-        | Transaction::V4 { .. } => None,
-        ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
-        ref tx @ Transaction::V6 { .. } => Some(tx.clone()),
+    transactions_from_blocks(blocks).filter_map(|(_, tx)| match tx.tx_version() {
+        TxVersion::V5 | TxVersion::V6 => Some((*tx).clone()),
+        _ => None,
     })
 }
 
@@ -1169,107 +1044,4 @@ pub fn transactions_from_blocks<'a>(
             .into_iter()
             .map(move |transaction| (block::Height(block_height), transaction))
     })
-}
-
-/// Modify a V5 transaction to insert fake Orchard shielded data.
-///
-/// Creates a fake instance of [`orchard::ShieldedData`] with one fake action. Note that both the
-/// action and the shielded data are invalid and shouldn't be used in tests that require them to be
-/// valid.
-///
-/// A mutable reference to the inserted shielded data is returned, so that the caller can further
-/// customize it if required.
-///
-/// # Panics
-///
-/// Panics if the transaction to be modified is not V5.
-pub fn insert_fake_orchard_shielded_data(
-    transaction: &mut Transaction,
-) -> &mut orchard::ShieldedData {
-    // A single-action dummy bundle with no flags and a zero value balance.
-    let dummy_shielded_data = fake_v6_orchard_shielded_data(
-        orchard::Flags::empty(),
-        Amount::try_from(0).expect("invalid transaction amount"),
-        1,
-    );
-
-    // Replace the shielded data in the transaction
-    match transaction {
-        Transaction::V5 {
-            orchard_shielded_data,
-            ..
-        } => {
-            *orchard_shielded_data = Some(dummy_shielded_data);
-
-            orchard_shielded_data
-                .as_mut()
-                .expect("shielded data was just inserted")
-        }
-        _ => panic!("Fake V5 transaction is not V5"),
-    }
-}
-
-/// Builds a cryptographically-INVALID v6 Orchard-protocol [`orchard::ShieldedData`] for structural
-/// NU6.3 consensus-rule tests.
-///
-/// The bundle has the given `flags` and `value_balance`, and `action_count` copies of a single
-/// dummy action — so all actions share one nullifier, which is convenient for duplicate-nullifier
-/// tests. The proof is empty (not canonically sized) and the signatures are not valid, so this MUST
-/// NOT be used where proof verification or a canonical proof size is required.
-pub fn fake_v6_orchard_shielded_data(
-    flags: orchard::Flags,
-    value_balance: Amount<NegativeAllowed>,
-    action_count: usize,
-) -> orchard::ShieldedData {
-    let mut runner = TestRunner::default();
-    let dummy_action = orchard::Action::arbitrary()
-        .new_tree(&mut runner)
-        .unwrap()
-        .current();
-
-    let dummy_authorized_action = orchard::AuthorizedAction {
-        action: dummy_action,
-        spend_auth_sig: Signature::from([0u8; 64]),
-    };
-
-    let actions = vec![dummy_authorized_action; action_count.max(1)];
-
-    orchard::ShieldedData {
-        flags,
-        value_balance,
-        shared_anchor: orchard::tree::Root::default(),
-        // A canonically-sized (zero-filled) proof, so librustzcash's parser — which enforces the
-        // canonical proof size — accepts the bundle when the wire deserializer round-trips through
-        // it. The proof is not cryptographically valid.
-        proof: Halo2Proof(vec![
-            0u8;
-            orchard::shielded_data::expected_proof_size(
-                action_count.max(1)
-            )
-        ]),
-        actions: actions.try_into().expect("action_count is at least one"),
-        binding_sig: Signature::from([0u8; 64]),
-    }
-}
-
-/// Builds a minimal NU6.3 v6 [`Transaction`] carrying the given optional Orchard-v6 and Ironwood
-/// bundles, for structural consensus-rule tests.
-///
-/// The transaction is non-coinbase (no inputs) and otherwise empty. The bundles are not
-/// cryptographically valid (see [`fake_v6_orchard_shielded_data`]).
-pub fn fake_v6_transaction(
-    network_upgrade: NetworkUpgrade,
-    orchard_shielded_data: Option<orchard::ShieldedDataV6>,
-    ironwood_shielded_data: Option<crate::ironwood::ShieldedData>,
-) -> Transaction {
-    Transaction::V6 {
-        network_upgrade,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data,
-        ironwood_shielded_data,
-    }
 }

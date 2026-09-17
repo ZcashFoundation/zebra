@@ -162,7 +162,12 @@ mod peer;
 mod peer_cache_updater;
 mod peer_set;
 mod policies;
+// Fuzzing switch: expose `protocol::external` (Codec/Message) to the p2p fuzz
+// harnesses. Private in normal builds; public only under `fuzzing`.
+#[cfg(not(feature = "fuzzing"))]
 mod protocol;
+#[cfg(feature = "fuzzing")]
+pub mod protocol;
 
 #[allow(unused)]
 pub(crate) use peer_set::PeerSet;

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: "Removed `transaction::txid::TxIdBuilder` and the `transaction::builder` module. Transaction IDs and coinbase construction now come from `zcash_primitives` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

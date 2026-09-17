@@ -1,9 +1,8 @@
-//! Fixed test vectors for CandidateSet.
+//! Fixed test vectors for candidate peer selection.
 
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::Arc,
     time::Duration as StdDuration,
 };
 
@@ -15,12 +14,13 @@ use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
 };
 
-use super::super::{validate_addrs, CandidateSet};
+use super::super::{crawl::validate_addrs, crawl_once, crawler_services};
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
 #[test]
@@ -127,7 +127,7 @@ fn rejects_all_addresses_if_applying_offset_causes_an_underflow() {
     assert!(validated_peers.next().is_none());
 }
 
-/// Test that calls to [`CandidateSet::update`] are rate limited.
+/// Test that crawls are rate limited.
 #[test]
 fn candidate_set_updates_are_rate_limited() {
     // Run the test for enough time for `update` to actually run three times
@@ -145,10 +145,16 @@ fn candidate_set_updates_are_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
-        peer_service.clone(),
-    );
+    let (
+        _address_book,
+        _bans_receiver,
+        _change_sender,
+        address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let (_next_peer_service, mut crawl_service) =
+        crawler_services(address_book_service, peer_service.clone());
 
     runtime.block_on(async move {
         time::pause();
@@ -159,10 +165,9 @@ fn candidate_set_updates_are_rate_limited() {
         let mut next_allowed_request_time = Instant::now();
 
         while Instant::now() <= time_limit {
-            candidate_set
-                .update()
+            crawl_once(&mut crawl_service, None)
                 .await
-                .expect("Call to CandidateSet::update should not fail");
+                .expect("crawls should not fail");
 
             if Instant::now() >= next_allowed_request_time {
                 verify_fanned_out_requests(&mut peer_service).await;
@@ -177,8 +182,7 @@ fn candidate_set_updates_are_rate_limited() {
     });
 }
 
-/// Test that a call to [`CandidateSet::update`] after a call to [`CandidateSet::update_initial`] is
-/// rate limited.
+/// Test that a crawl after an initial crawl is rate limited.
 #[test]
 fn candidate_set_update_after_update_initial_is_rate_limited() {
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -191,41 +195,43 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
-    let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
-        peer_service.clone(),
-    );
+    let (
+        _address_book,
+        _bans_receiver,
+        _change_sender,
+        address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+    let (_next_peer_service, mut crawl_service) =
+        crawler_services(address_book_service, peer_service.clone());
 
     runtime.block_on(async move {
         time::pause();
 
-        // Call `update_initial` first
-        candidate_set
-            .update_initial(GET_ADDR_FANOUT)
+        // Crawl with an initial fanout limit first
+        crawl_once(&mut crawl_service, Some(GET_ADDR_FANOUT))
             .await
-            .expect("Call to CandidateSet::update should not fail");
+            .expect("crawls should not fail");
 
         verify_fanned_out_requests(&mut peer_service).await;
 
-        // The following two calls to `update` should be skipped
-        candidate_set
-            .update()
+        // The following two crawls should be skipped
+        crawl_once(&mut crawl_service, None)
             .await
-            .expect("Call to CandidateSet::update should not fail");
+            .expect("crawls should not fail");
         time::advance(MIN_PEER_GET_ADDR_INTERVAL / 2).await;
-        candidate_set
-            .update()
+        crawl_once(&mut crawl_service, None)
             .await
-            .expect("Call to CandidateSet::update should not fail");
+            .expect("crawls should not fail");
 
         peer_service.expect_no_requests().await;
 
-        // After waiting for at least the minimum interval the call to `update` should succeed
+        // After waiting for at least the minimum interval the crawl should run
         time::advance(MIN_PEER_GET_ADDR_INTERVAL).await;
-        candidate_set
-            .update()
+        crawl_once(&mut crawl_service, None)
             .await
-            .expect("Call to CandidateSet::update should not fail");
+            .expect("crawls should not fail");
 
         verify_fanned_out_requests(&mut peer_service).await;
     });

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "11.0.0"
+version = "12.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
@@ -40,6 +40,9 @@ progress-bar = [
 # Testing features that activate extra dependencies
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
+# Exposes `protocol` to fuzz harnesses; private in normal builds.
+fuzzing = []
+
 [dependencies]
 bitflags = { workspace = true }
 byteorder = { workspace = true }
@@ -52,7 +55,6 @@ indexmap = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
 num-integer = { workspace = true }
-ordered-map = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
@@ -85,7 +87,7 @@ howudoin = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "11.3.0", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "12.0.0", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

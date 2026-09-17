@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use derive_new::new;
 use thiserror::Error;
 
+use tokio::sync::broadcast::error::RecvError;
 use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
@@ -237,6 +238,33 @@ pub enum ReconsiderError {
     /// validation.
     #[error("replaying a previously invalidated block failed contextual validation: {0}")]
     ReplayFailed(#[source] ValidateContextError),
+}
+
+/// An error describing why an `AwaitUtxo` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum AwaitUtxoError {
+    /// The state stopped responding, for example because it was dropped
+    /// during shutdown, before the UTXO could be found.
+    #[error("the state stopped responding before the UTXO arrived")]
+    Cancelled,
+
+    /// An internal channel error occurred while waiting for the UTXO.
+    #[error("internal channel error while waiting for the UTXO: receiver lagged by {0}")]
+    Lagged(u64),
+
+    /// The `ReadStateService` returned an error while looking up the UTXO.
+    #[error("the read state service returned an error: {0}")]
+    ReadStateFailed(#[source] BoxError),
+}
+
+impl From<RecvError> for AwaitUtxoError {
+    fn from(err: RecvError) -> Self {
+        match err {
+            RecvError::Closed => AwaitUtxoError::Cancelled,
+            RecvError::Lagged(skipped) => AwaitUtxoError::Lagged(skipped),
+        }
+    }
 }
 
 /// An error describing why a block failed contextual validation.

@@ -812,8 +812,16 @@ impl Service<Request> for Mempool {
                     "sending new transactions to peers and RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::added(send_to_peers_ids))?;
+                // A send fails only when the broadcast channel has no
+                // subscribers, which is a normal state the mempool must
+                // tolerate: the gossip and indexer tasks are downstream
+                // consumers of this feed, and mempool liveness must not depend
+                // on them staying subscribed. Discard the result so a momentary
+                // absence of subscribers does not make `poll_ready()` return a
+                // service-fatal error. See #10689.
+                let _ = self
+                    .transaction_sender
+                    .send(MempoolChange::added(send_to_peers_ids));
             }
 
             // Send transactions that were rejected to RPC listeners.
@@ -823,8 +831,11 @@ impl Service<Request> for Mempool {
                     "sending invalidated transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::invalidated(invalidated_ids))?;
+                // See the `MempoolChange::added` send above: a missing
+                // subscriber is not a fatal condition. See #10689.
+                let _ = self
+                    .transaction_sender
+                    .send(MempoolChange::invalidated(invalidated_ids));
             }
 
             // Send transactions that were mined onto the best chain to RPC listeners.
@@ -834,8 +845,11 @@ impl Service<Request> for Mempool {
                     "sending mined transactions to RPC listeners"
                 );
 
-                self.transaction_sender
-                    .send(MempoolChange::mined(mined_mempool_ids))?;
+                // See the `MempoolChange::added` send above: a missing
+                // subscriber is not a fatal condition. See #10689.
+                let _ = self
+                    .transaction_sender
+                    .send(MempoolChange::mined(mined_mempool_ids));
             }
         }
 

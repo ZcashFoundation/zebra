@@ -150,6 +150,12 @@ fn request_genesis_is_rate_limited() {
         }
     });
 
+    // create a read-only state service that is never called: the genesis download fails before any
+    // block body is available to check
+    let read_state_service = tower::service_fn(move |_request| async move {
+        unreachable!("no request to this service is allowed")
+    });
+
     // create an empty latest chain tip
     let (_sender, latest_chain_tip, _change) = ChainTipSender::new(None, &Network::Mainnet);
 
@@ -167,6 +173,7 @@ fn request_genesis_is_rate_limited() {
         peer_service,
         verifier_service,
         state_service,
+        read_state_service,
         latest_chain_tip,
         misbehavior_tx,
     );

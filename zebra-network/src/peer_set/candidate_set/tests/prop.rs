@@ -4,7 +4,6 @@ use std::{
     env,
     net::SocketAddr,
     str::FromStr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -18,13 +17,14 @@ use tracing::Span;
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::{
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
-    AddressBook, BoxError, Request, Response,
+    AddressBook,
 };
 
-use super::super::{validate_addrs, CandidateSet};
+use super::super::{crawl::validate_addrs, crawler_services, next_reconnect_peer, NextPeerService};
 
 /// The maximum number of candidates for a "next peer" test.
 const MAX_TEST_CANDIDATES: u32 = 4;
@@ -73,7 +73,10 @@ proptest! {
         // Since the address book is empty, there won't be any available peers
         let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
+            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+        let (mut next_peer_service, _crawl_service) =
+            crawler_services(address_book_service, peer_service);
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
@@ -82,7 +85,7 @@ proptest! {
             // Check that it takes less than the peer set candidate delay,
             // and hope that is enough time for test machines with high CPU load.
             let less_than_min_interval = MIN_OUTBOUND_PEER_CONNECTION_INTERVAL - Duration::from_millis(1);
-            assert_eq!(runtime.block_on(timeout(less_than_min_interval, candidate_set.next())), Ok(None));
+            assert_eq!(runtime.block_on(timeout(less_than_min_interval, next_reconnect_peer(&mut next_peer_service))), Ok(None));
         }
     }
 }
@@ -116,16 +119,19 @@ proptest! {
         let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
+            AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+        let (mut next_peer_service, _crawl_service) =
+            crawler_services(address_book_service, peer_service);
 
         let checks = async move {
             // Check rate limiting for initial peers
-            check_candidates_rate_limiting(&mut candidate_set, initial_candidates).await;
+            check_candidates_rate_limiting(&mut next_peer_service, initial_candidates).await;
             // Sleep more than the rate limiting delay
             sleep(MAX_TEST_CANDIDATES * MIN_OUTBOUND_PEER_CONNECTION_INTERVAL).await;
             // Check that the next peers are still respecting the rate limiting, without causing a
             // burst of reconnections
-            check_candidates_rate_limiting(&mut candidate_set, extra_candidates).await;
+            check_candidates_rate_limiting(&mut next_peer_service, extra_candidates).await;
         };
 
         // Allow enough time for the maximum number of candidates,
@@ -145,11 +151,7 @@ proptest! {
 /// - a connection peer is returned too quickly,
 /// - a connection peer is returned too slowly, or
 /// - if no reconnection peer is returned at all.
-async fn check_candidates_rate_limiting<S>(candidate_set: &mut CandidateSet<S>, candidates: u32)
-where
-    S: tower::Service<Request, Response = Response, Error = BoxError> + Send,
-    S::Future: Send + 'static,
-{
+async fn check_candidates_rate_limiting(next_peer_service: &mut NextPeerService, candidates: u32) {
     let mut now = Instant::now();
     let mut minimum_reconnect_instant = now;
     // Allow extra time for test machines with high CPU load
@@ -157,7 +159,7 @@ where
 
     for _ in 0..candidates {
         assert!(
-            candidate_set.next().await.is_some(),
+            next_reconnect_peer(next_peer_service).await.is_some(),
             "there are enough available candidates"
         );
 

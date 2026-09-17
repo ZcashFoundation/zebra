@@ -29,6 +29,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
+use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
@@ -77,6 +78,10 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 /// through the tower-level `BLOCK_DOWNLOAD_RETRY_LIMIT` (and hedging), so this
 /// is a coarse, hash-scoped retry on top of an exhausted per-request retry.
 const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
+
+/// The fewest `TransparentInputNotFound` drops without a verified block before the sync
+/// restarts, so a low `full_verify_concurrency_limit` can't disable the #11168 exemption.
+const MIN_UTXO_RACE_DROPS_BEFORE_RESTART: usize = 4;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -329,7 +334,7 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
-pub struct ChainSync<ZN, ZS, ZV, ZSTip>
+pub struct ChainSync<ZN, ZS, ZSR, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -343,6 +348,12 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
+    ZSR: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZSR::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
@@ -383,6 +394,7 @@ where
             Downloads<
                 Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
                 Timeout<ZV>,
+                ZSR,
                 ZSTip,
             >,
         >,
@@ -416,6 +428,10 @@ where
     /// Per-hash count of how many times a `NotFound` block has been re-requested,
     /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     block_reobtain_retries: HashMap<block::Hash, u8>,
+
+    /// `TransparentInputNotFound` drops since the last verified block, bounded by the
+    /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
+    utxo_race_drops: usize,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -424,7 +440,7 @@ where
 /// This component is used for initial block sync, but the `Inbound` service is
 /// responsible for participating in the gossip protocols used for block
 /// diffusion.
-impl<ZN, ZS, ZV, ZSTip> ChainSync<ZN, ZS, ZV, ZSTip>
+impl<ZN, ZS, ZSR, ZV, ZSTip> ChainSync<ZN, ZS, ZSR, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -438,6 +454,12 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
+    ZSR: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZSR::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
@@ -451,15 +473,18 @@ where
     ///  - peers: the zebra-network peers to contact for downloads
     ///  - verifier: the zebra-consensus verifier that checks the chain
     ///  - state: the zebra-state that stores the chain
+    ///  - read_state: a read-only handle to the zebra-state, used to check downloaded block heights
     ///  - latest_chain_tip: the latest chain tip from `state`
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &ZebradConfig,
         max_checkpoint_height: Height,
         peers: ZN,
         verifier: ZV,
         state: ZS,
+        read_state: ZSR,
         latest_chain_tip: ZSTip,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
     ) -> (Self, SyncStatus) {
@@ -529,6 +554,7 @@ where
         let downloads = Box::pin(Downloads::new(
             block_network,
             verifier,
+            read_state,
             latest_chain_tip.clone(),
             past_lookahead_limit_sender,
             max(
@@ -554,6 +580,7 @@ where
             misbehavior_sender,
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
+            utxo_race_drops: 0,
         };
 
         (new_syncer, sync_status)
@@ -605,6 +632,7 @@ where
 
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
+        self.utxo_race_drops = 0;
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -1183,6 +1211,7 @@ where
 
                 // The block arrived, so forget any re-request bookkeeping for it.
                 self.block_reobtain_retries.remove(&hash);
+                self.utxo_race_drops = 0;
 
                 return Ok(());
             }
@@ -1197,13 +1226,6 @@ where
                     .try_send((advertiser_addr, error.misbehavior_score()));
             }
 
-            Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
-            }
-
             Err(BlockDownloadVerifyError::InvalidHeight {
                 advertiser_addr: Some(advertiser_addr),
                 ..
@@ -1211,37 +1233,125 @@ where
                 let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
             }
 
+            // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
+            // header and it proves the body's claimed height wrong. A peer can answer with a
+            // canonical header and a rewritten coinbase height because the initial hash check does
+            // not recompute the header's commitment to the body's authorizing data
+            // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
+            // fall through unscored. Score only a parent-proven rewrite.
+            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) => {
+                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            }
+
+            // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
+            // stay that way (GHSA-qhr3-cvch-5fh2): `FindBlocks` responses carry no
+            // address, so the follow-up request goes to an independently chosen, honest
+            // peer that served the block but did not choose its height. Scoring it let a
+            // malicious `FindBlocks` responder evict honest peers throughout IBD. Unlike
+            // the behind-tip sibling advisory, the block here is genuine, so there is no
+            // local proof of forgery to re-attribute with. Do not add scoring back.
             Err(_) => {}
         };
 
-        // A block whose download failed because no peer delivered it (`NotFound`)
-        // is otherwise dropped here and never re-requested, which wedges the
-        // checkpoint frontier until the verify timeout (#5709). Re-queue it for
-        // the next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Consensus
-        // failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
-        // re-downloading a block the network already rejected is pointless.
-        if let Err(BlockDownloadVerifyError::DownloadFailed { error, hash }) = &response {
-            if format!("{error:?}").contains("NotFound") {
-                let attempts = self.block_reobtain_retries.entry(*hash).or_insert(0);
-                if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
-                    *attempts += 1;
-                    self.reobtain_hashes.insert(*hash);
-                    debug!(
-                        ?hash,
-                        attempts = *attempts,
-                        "re-queueing missing block for re-download"
+        // A hash the syncer still needs, whose download did not produce a usable block, is
+        // otherwise dropped here and only rediscovered by a later sync round. Re-queue it for the
+        // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
+        // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
+        //   frontier until the verify timeout (#5709).
+        // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
+        //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
+        //   be attributed, and covers the window before a score reaches the address book, which
+        //   only applies misbehavior reports in batches.
+        // - UTXO races (#11168): the block was never rejected, and the state parks its
+        //   children until it arrives, so re-request it instead of waiting for a tip walk.
+        // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
+        // excluded — re-downloading a block the network already rejected is pointless.
+        let reobtain_hash = match &response {
+            Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
+                if format!("{error:?}").contains("NotFound") =>
+            {
+                Some(*hash)
+            }
+            Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
+            Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
+                if Self::is_utxo_lookup_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            Err(e @ BlockDownloadVerifyError::ValidationRequestError { hash, .. })
+                if Self::is_post_checkpoint_verify_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            _ => None,
+        };
+
+        if let Some(hash) = reobtain_hash {
+            let attempts = self.block_reobtain_retries.entry(hash).or_insert(0);
+            if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
+                *attempts += 1;
+                self.reobtain_hashes.insert(hash);
+                debug!(
+                    ?hash,
+                    attempts = *attempts,
+                    "re-queueing missing block for re-download"
+                );
+            } else {
+                debug!(
+                    ?hash,
+                    "missing block exceeded re-download retries, dropping"
+                );
+                self.block_reobtain_retries.remove(&hash);
+            }
+        }
+
+        // A UTXO race resolves as soon as the parent commits. A whole lookahead wave of
+        // timeouts with no commit isn't the race, so restart instead of draining the batch.
+        if let Err(error) = &response {
+            if Self::is_utxo_lookup_timeout(error) {
+                self.utxo_race_drops += 1;
+                if self.utxo_race_drops
+                    >= self
+                        .full_verify_concurrency_limit
+                        .max(MIN_UTXO_RACE_DROPS_BEFORE_RESTART)
+                {
+                    warn!(
+                        drops = self.utxo_race_drops,
+                        "no block verified across a full wave of UTXO lookup timeouts, restarting sync"
                     );
-                } else {
-                    debug!(
-                        ?hash,
-                        "missing block exceeded re-download retries, dropping"
-                    );
-                    self.block_reobtain_retries.remove(hash);
+                    return response.map(|_| ());
                 }
             }
         }
 
         Self::handle_response(response)
+    }
+
+    /// Returns `true` for the `AwaitUtxo` timeout that `should_restart_sync` exempts (#11168).
+    fn is_utxo_lookup_timeout(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } if matches!(
+                **source,
+                VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
+            )
+        )
+    }
+
+    /// Returns `true` for the short post-final-checkpoint verify timeout (#5125) that
+    /// `should_restart_sync` exempts; the 8-minute tower timeout is a different type.
+    fn is_post_checkpoint_verify_timeout(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::ValidationRequestError { error, .. }
+                if error.is::<tokio::time::error::Elapsed>()
+        )
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.
@@ -1311,6 +1421,12 @@ where
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
+            // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
+            // commit a restart would cancel, looping near the tip (#11168, #11132).
+            e if Self::is_utxo_lookup_timeout(e) => {
+                debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting, continuing");
+                false
+            }
 
             // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload { .. }
@@ -1321,8 +1437,8 @@ where
             BlockDownloadVerifyError::BehindTipHeightLimit { .. } => {
                 debug!(
                     error = ?e,
-                    "block height is behind the current state tip, \
-                     assuming the syncer will eventually catch up to the state, continuing"
+                    "block height is behind the current state tip: re-requesting the hash, \
+                     and scoring the peer if the body contradicts the parent we hold, continuing"
                 );
                 false
             }
@@ -1361,6 +1477,13 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+
+            // The short post-final-checkpoint verify timeout is a UTXO race (#5125), not an
+            // invalid block; the 8-minute tower timeout stays in the catch-all (#5709).
+            e if Self::is_post_checkpoint_verify_timeout(e) => {
+                debug!(error = ?e, "initial fully verified block timed out waiting for its parent's outputs, re-requesting, continuing");
                 false
             }
 
