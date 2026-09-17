@@ -2043,7 +2043,8 @@ where
         // # Concurrency
         //
         // For consistency, this lookup must be performed first, then all the other lookups must
-        // be based on the hash.
+        // be based on the hash. The tree lookups check every chain, so a reorg that moves the
+        // block onto a side chain after this lookup can't make its treestate disappear.
         //
         // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
         let block = match read_state
@@ -2077,7 +2078,7 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
+                    service.call(zebra_state::ReadRequest::AnyChainSaplingTree(hash))
                 })
                 .await
                 .map_misc_error()?
@@ -2097,7 +2098,7 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
+                    service.call(zebra_state::ReadRequest::AnyChainOrchardTree(hash))
                 })
                 .await
                 .map_misc_error()?
@@ -2117,7 +2118,7 @@ where
             match read_state
                 .ready()
                 .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::IronwoodTree(hash.into()))
+                    service.call(zebra_state::ReadRequest::AnyChainIronwoodTree(hash))
                 })
                 .await
                 .map_misc_error()?
