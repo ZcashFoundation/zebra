@@ -11,6 +11,7 @@
 
 use std::{
     collections::HashMap,
+    fmt::{self, Debug, Formatter},
     sync::{Arc, Mutex},
 };
 
@@ -69,7 +70,6 @@ struct FindResponseFeedbackInner {
     sender: Mutex<Option<mpsc::UnboundedSender<FindResponseEvent>>>,
 }
 
-#[allow(dead_code)]
 impl FindResponseFeedback {
     /// Creates a [`FindResponseFeedback`] attributed to `peer` and `request_id`.
     #[allow(dead_code)]
@@ -112,6 +112,23 @@ impl FindResponseFeedbackInner {
         }
     }
 }
+
+impl Debug for FindResponseFeedback {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FindResponseFeedback")
+            .field("request_id", &self.inner.request_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for FindResponseFeedback {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.peer == other.inner.peer && self.inner.request_id == other.inner.request_id
+    }
+}
+
+// Deriving `Eq` would require the ignored feedback channel state to implement `Eq`.
+impl Eq for FindResponseFeedback {}
 
 impl Drop for FindResponseFeedbackInner {
     fn drop(&mut self) {
