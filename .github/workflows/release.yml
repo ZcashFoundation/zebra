@@ -68,16 +68,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       # release-plz matches open Release PRs by head-branch prefix across every
       # base branch and closes all but the first, so each base branch needs a
-      # prefix of its own.
+      # prefix of its own. release-plz requires a clean working tree, so the
+      # scoped configuration is written outside the checkout.
       - name: Scope the Release PR branch to this base branch
+        id: release-plz-config
         env:
           CONFIG_PATH: release-plz.toml
         run: |
           set -euo pipefail
 
           PREFIX="release-plz-${GITHUB_REF_NAME#release/}-"
+          SCOPED_CONFIG_PATH="${RUNNER_TEMP}/release-plz.toml"
 
-          SCOPED_CONFIG="$(awk -v prefix="${PREFIX}" '
+          awk -v prefix="${PREFIX}" '
             $0 == "[workspace]" && !found {
               print
               printf "pr_branch_prefix = \"%s\"\n", prefix
@@ -86,12 +89,12 @@ jobs:
             }
             { print }
             END { exit found ? 0 : 1 }
-          ' "${CONFIG_PATH}")" || {
+          ' "${CONFIG_PATH}" > "${SCOPED_CONFIG_PATH}" || {
             echo "::error::${CONFIG_PATH} has no [workspace] section to scope."
             exit 1
           }
 
-          printf '%s\n' "${SCOPED_CONFIG}" > "${CONFIG_PATH}"
+          echo "path=${SCOPED_CONFIG_PATH}" >> "${GITHUB_OUTPUT}"
           echo "Release PR branches for ${GITHUB_REF_NAME} use the prefix ${PREFIX}."
 
       - name: Create or update Release PR
@@ -99,6 +102,7 @@ jobs:
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
         with:
           command: release-pr
+          config: ${{ steps.release-plz-config.outputs.path }}
           version: "0.3.160"
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
