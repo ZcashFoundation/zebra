@@ -207,26 +207,27 @@ impl FindResponseFeedbackObserver {
     /// Returns `Some(true)` for [`FindResponseOutcome::Useful`], `Some(false)`
     /// for [`FindResponseOutcome::Stalled`], and `None` while unclassified.
     pub fn outcome(&mut self) -> Option<bool> {
-        match self.receiver.try_recv() {
-            Ok(FindResponseEvent {
-                outcome: FindResponseOutcome::Useful,
-                ..
-            }) => Some(true),
-            Ok(FindResponseEvent {
-                outcome: FindResponseOutcome::Stalled,
-                ..
-            }) => Some(false),
-            Ok(FindResponseEvent {
-                outcome: FindResponseOutcome::Unclassified,
-                ..
-            }) => None,
-            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => None,
-        }
+        self.try_outcome().ok().flatten()
     }
 
-    /// Reports pending feedback until classification observation is implemented.
+    /// Receives one classification, preserving pending and disconnected states.
+    ///
+    /// `Ok(None)` means an explicit unclassified event was received.
     pub fn try_outcome(&mut self) -> Result<Option<bool>, mpsc::error::TryRecvError> {
-        Err(mpsc::error::TryRecvError::Empty)
+        Ok(match self.receiver.try_recv()? {
+            FindResponseEvent {
+                outcome: FindResponseOutcome::Useful,
+                ..
+            } => Some(true),
+            FindResponseEvent {
+                outcome: FindResponseOutcome::Stalled,
+                ..
+            } => Some(false),
+            FindResponseEvent {
+                outcome: FindResponseOutcome::Unclassified,
+                ..
+            } => None,
+        })
     }
 }
 
