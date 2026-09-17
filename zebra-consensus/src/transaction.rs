@@ -1379,11 +1379,13 @@ fn verify_sapling_bundle(
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     if let Some(bundle) = bundle {
-        async_checks.push(
-            primitives::sapling::VERIFIER
-                .clone()
-                .oneshot(primitives::sapling::Item::new(bundle, *sighash, tx_id)),
-        );
+        let verifier = primitives::sapling::VERIFIER.clone();
+        #[cfg(test)]
+        let verifier = tests::SAPLING_CACHE_VERIFIER
+            .try_with(Clone::clone)
+            .unwrap_or(verifier);
+        async_checks
+            .push(verifier.oneshot(primitives::sapling::Item::new(bundle, *sighash, tx_id)));
     }
 
     async_checks
@@ -1405,7 +1407,7 @@ fn verify_orchard_bundle(
     wtx_id: Option<transaction::WtxId>,
 ) -> AsyncChecks {
     queue_orchard_bundle(
-        || primitives::halo2::orchard_v5_verifier_for(network_upgrade),
+        || primitives::halo2::cached_orchard_v5_verifier_for(network_upgrade),
         bundle,
         sighash,
         wtx_id,
@@ -1424,7 +1426,7 @@ fn verify_orchard_v6_bundle(
     wtx_id: Option<transaction::WtxId>,
 ) -> AsyncChecks {
     queue_orchard_bundle(
-        primitives::halo2::orchard_v6_verifier,
+        primitives::halo2::cached_orchard_v6_verifier,
         bundle,
         sighash,
         wtx_id,
@@ -1453,7 +1455,7 @@ fn verify_orchard_v6_bundle(
 /// mempool is not verified again in the block that mines it. Without one the item is verified
 /// every time.
 fn queue_orchard_bundle(
-    select_verifier: impl FnOnce() -> &'static primitives::halo2::VerifierService,
+    select_verifier: impl FnOnce() -> &'static primitives::halo2::CachedVerifierService,
     bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     sighash: &SigHash,
     wtx_id: Option<transaction::WtxId>,
@@ -1466,7 +1468,12 @@ fn queue_orchard_bundle(
             None => primitives::halo2::Item::new(bundle, *sighash),
         };
 
-        async_checks.push(select_verifier().clone().oneshot(item));
+        let verifier = select_verifier().clone();
+        #[cfg(test)]
+        let verifier = tests::HALO2_CACHE_VERIFIER
+            .try_with(Clone::clone)
+            .unwrap_or(verifier);
+        async_checks.push(verifier.oneshot(item));
     }
 
     async_checks

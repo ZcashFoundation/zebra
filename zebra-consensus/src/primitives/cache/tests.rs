@@ -138,3 +138,65 @@ fn the_lookup_set_and_the_eviction_queue_hold_the_same_keys() {
     verified.clear();
     assert!(verified.keys.is_empty() && verified.insertion_order.is_empty());
 }
+
+/// A poisoned cache must neither accept a cached item nor reject an unchecked item.
+#[tokio::test]
+async fn poisoned_cache_bypasses_lookups_and_inserts() {
+    use super::{Cached, CachedItem};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tower::ServiceExt;
+
+    #[derive(Clone)]
+    struct Item(CacheKey);
+
+    impl CachedItem for Item {
+        fn cache_key(&self) -> Option<CacheKey> {
+            Some(self.0)
+        }
+    }
+
+    let valid = Item(CacheKey::new(
+        legacy_tx_id(1),
+        [0; 32],
+        ShieldedPool::Sapling,
+    ));
+    let invalid = Item(CacheKey::new(
+        legacy_tx_id(2),
+        [0; 32],
+        ShieldedPool::Sapling,
+    ));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let inner = tower::service_fn({
+        let calls = calls.clone();
+        let valid = valid.clone();
+        move |item: Item| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(if item.0 == valid.0 {
+                Ok(())
+            } else {
+                Err(crate::BoxError::from("invalid bundle"))
+            })
+        }
+    });
+    let verifier = Cached::new(inner, 2, "poison_test");
+    verifier.clone().oneshot(valid.clone()).await.unwrap();
+
+    let verified = verifier.verified.clone();
+    assert!(std::panic::catch_unwind(move || {
+        let mut verified = verified.lock().unwrap();
+        // Model a panic between updates to the set and eviction queue.
+        verified.insertion_order.clear();
+        panic!("poison the cache");
+    })
+    .is_err());
+    assert!(verifier.verified.is_poisoned());
+
+    for _ in 0..2 {
+        verifier.clone().oneshot(valid.clone()).await.unwrap();
+    }
+    assert!(verifier.clone().oneshot(invalid).await.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}

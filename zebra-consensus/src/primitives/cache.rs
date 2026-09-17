@@ -175,8 +175,8 @@ pub(super) trait CachedItem {
 /// What one [`VerifiedBundles::insert`] did, so the caller can report it after releasing the
 /// lock.
 ///
-/// Metrics are emitted outside the critical section: a labelled `metrics` macro allocates its
-/// label set on every call, and this lock is taken by every shielded verification the node runs.
+/// Metrics are emitted outside the critical section so recorder code never runs under the cache
+/// lock.
 #[derive(Clone, Copy, Debug)]
 struct InsertOutcome {
     /// Whether this key was new, rather than a concurrent duplicate.
@@ -275,24 +275,45 @@ impl VerifiedBundles {
 }
 
 impl InsertOutcome {
-    /// Reports this insert under `verifier_name`.
+    /// Reports this insert using the cache's metric handles.
     ///
     /// [`Cached::call`] calls this after it releases the cache lock.
-    fn report(self, verifier_name: &'static str) {
+    fn report(self, metrics: &CacheMetrics) {
         if !self.inserted {
             return;
         }
 
-        metrics::counter!(CACHE_INSERT, VERIFIER_LABEL => verifier_name).increment(1);
+        metrics.insert.increment(1);
 
         if self.evicted > 0 {
             // Cast is safe: at most `capacity` keys are evicted by one insert.
-            metrics::counter!(CACHE_EVICT, VERIFIER_LABEL => verifier_name)
-                .increment(self.evicted as u64);
+            metrics.evict.increment(self.evicted as u64);
         }
 
         // Cast is safe: the length is bounded by `capacity`, far below f64's exact integer range.
-        metrics::gauge!(CACHE_SIZE, VERIFIER_LABEL => verifier_name).set(self.size as f64);
+        metrics.size.set(self.size as f64);
+    }
+}
+
+/// Metric handles registered once when a cache is created.
+#[derive(Clone)]
+struct CacheMetrics {
+    hit: metrics::Counter,
+    miss: metrics::Counter,
+    insert: metrics::Counter,
+    evict: metrics::Counter,
+    size: metrics::Gauge,
+}
+
+impl CacheMetrics {
+    fn new(verifier_name: &'static str) -> Self {
+        Self {
+            hit: metrics::counter!(CACHE_HIT, VERIFIER_LABEL => verifier_name),
+            miss: metrics::counter!(CACHE_MISS, VERIFIER_LABEL => verifier_name),
+            insert: metrics::counter!(CACHE_INSERT, VERIFIER_LABEL => verifier_name),
+            evict: metrics::counter!(CACHE_EVICT, VERIFIER_LABEL => verifier_name),
+            size: metrics::gauge!(CACHE_SIZE, VERIFIER_LABEL => verifier_name),
+        }
     }
 }
 
@@ -301,17 +322,16 @@ impl InsertOutcome {
 /// This wraps one verifier's batch-and-fallback stack. The cache is shared between clones, so
 /// every handle to a global verifier sees the same set of verified bundles.
 ///
-/// This type is public only because it appears in existing public verifier signatures. The
-/// private `cache` module is not re-exported, and its constructor and accessors are private.
-pub struct Cached<S> {
+/// The public Halo2 services retain their uncached types.
+pub(crate) struct Cached<S> {
     /// The verification service to consult on a miss.
     inner: S,
 
     /// The keys of items that have already verified under this cache's verifying key.
     verified: Arc<Mutex<VerifiedBundles>>,
 
-    /// The value this cache reports in the `verifier` label of its metrics.
-    verifier_name: &'static str,
+    /// The metric handles shared by clones of this cache.
+    metrics: CacheMetrics,
 
     /// The keys of the items that reached the inner service, in call order.
     ///
@@ -325,7 +345,7 @@ impl<S: Clone> Clone for Cached<S> {
         Self {
             inner: self.inner.clone(),
             verified: self.verified.clone(),
-            verifier_name: self.verifier_name,
+            metrics: self.metrics.clone(),
             #[cfg(test)]
             inner_calls: self.inner_calls.clone(),
         }
@@ -339,8 +359,22 @@ impl<S> Cached<S> {
         Self {
             inner,
             verified: Arc::new(Mutex::new(VerifiedBundles::new(capacity))),
-            verifier_name,
+            metrics: CacheMetrics::new(verifier_name),
             #[cfg(test)]
+            inner_calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Returns a cold cache with independent call records and the same inner verifier.
+    #[cfg(test)]
+    pub(crate) fn isolated(&self) -> Self
+    where
+        S: Clone,
+    {
+        Self {
+            inner: self.inner.clone(),
+            verified: Arc::new(Mutex::new(VerifiedBundles::new(CACHE_CAPACITY))),
+            metrics: self.metrics.clone(),
             inner_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -356,9 +390,9 @@ impl<S> Cached<S> {
 
     /// Returns how many times an item equivalent to `item` has reached the inner service.
     ///
-    /// Test-only. It counts one item rather than all calls because the global verifiers are shared
-    /// by every test in the process, so a plain call counter would also see verifications a test
-    /// did not make. Counting one transaction's own item isolates a test from the rest.
+    /// Test-only. It counts calls for one key so tests can distinguish the original transaction
+    /// from a transaction with different authorizing data. Use [`Self::isolated`] to avoid
+    /// sharing the cache and call records with other tests.
     ///
     /// Readiness failures are not counted: an item that never reached the inner service was never
     /// verified by it.
@@ -386,7 +420,7 @@ impl<S> Cached<S> {
         Cached {
             inner,
             verified: self.verified.clone(),
-            verifier_name: self.verifier_name,
+            metrics: self.metrics.clone(),
             inner_calls: self.inner_calls.clone(),
         }
     }
@@ -427,22 +461,23 @@ where
         // Copied once here, outside `Fallback`, which clones every request eagerly.
         let key = item.cache_key();
 
+        // A poisoned cache is bypassed: its set and eviction queue may disagree.
+        // Verification remains authoritative even when caching is unavailable.
         if let Some(key) = key {
             if self
                 .verified
                 .lock()
-                .expect("verified bundle cache mutex should not be poisoned")
-                .contains(&key)
+                .is_ok_and(|verified| verified.contains(&key))
             {
-                metrics::counter!(CACHE_HIT, VERIFIER_LABEL => self.verifier_name).increment(1);
+                self.metrics.hit.increment(1);
                 return future::ready(Ok(())).boxed();
             }
         }
 
-        metrics::counter!(CACHE_MISS, VERIFIER_LABEL => self.verifier_name).increment(1);
+        self.metrics.miss.increment(1);
 
         let verified = self.verified.clone();
-        let verifier_name = self.verifier_name;
+        let metrics = self.metrics.clone();
         let mut inner = self.inner.clone();
 
         #[cfg(test)]
@@ -470,10 +505,11 @@ where
             if let (Ok(()), Some(key)) = (&result, key) {
                 let outcome = verified
                     .lock()
-                    .expect("verified bundle cache mutex should not be poisoned")
-                    .insert(key);
-
-                outcome.report(verifier_name);
+                    .ok()
+                    .map(|mut verified| verified.insert(key));
+                if let Some(outcome) = outcome {
+                    outcome.report(&metrics);
+                }
             }
 
             result

@@ -266,7 +266,7 @@ type BatchFallbackService = Fallback<
 >;
 
 /// The concrete type of the global Sapling verification service.
-pub type VerifierService = Cached<BatchFallbackService>;
+pub(crate) type VerifierService = Cached<BatchFallbackService>;
 
 /// Global batch verification context for Sapling shielded data.
 ///
@@ -274,15 +274,13 @@ pub type VerifierService = Cached<BatchFallbackService>;
 /// gossiped into the mempool does not have to be verified again when the block that mines it
 /// arrives. One cache covers all of Sapling: its spend and output verifying keys have never
 /// changed, so unlike Orchard there are no circuit eras to keep apart.
-pub static VERIFIER: Lazy<VerifierService> =
+pub(crate) static VERIFIER: Lazy<VerifierService> =
     Lazy::new(|| Cached::new(batch_fallback_verifier(), CACHE_CAPACITY, "groth16_sapling"));
 
-/// Returns how many times `item` has reached the inner Sapling verifier.
-///
-/// Test-only. See [`Cached::inner_calls_for`].
+/// Returns how many times `item` reached this verifier's inner service.
 #[cfg(test)]
-pub(crate) fn inner_calls_for(item: &Item) -> usize {
-    VERIFIER.inner_calls_for(item)
+pub(crate) fn inner_calls_for(verifier: &VerifierService, item: &Item) -> usize {
+    verifier.inner_calls_for(item)
 }
 
 /// Builds the uncached batching-and-fallback stack.

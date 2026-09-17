@@ -131,49 +131,66 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
 /// restriction applies to every Orchard Action from NU6.3 onward regardless of transaction version
 /// (ZIP 229), so it cannot be bypassed with a v5 transaction. Only NU6.2 uses the fixed key.
 ///
-/// This is an async test because forcing the global `Lazy` verifiers builds their `Batch` layer,
-/// which spawns a worker task and therefore needs a Tokio runtime.
-#[tokio::test(flavor = "multi_thread")]
-async fn orchard_verifier_routing_selects_the_correct_key() {
-    let pre: &'static super::VerifierService = &VERIFIER_PRE_NU6_2;
-    let post: &'static super::VerifierService = &VERIFIER_NU6_2;
-    let post_nu6_3: &'static super::VerifierService = &VERIFIER_NU6_3_ONWARD;
+/// The shared runtime keeps the global batch workers alive for subsequent tests.
+#[test]
+fn orchard_verifier_routing_selects_the_correct_key() {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let pre: &'static super::VerifierService = &VERIFIER_PRE_NU6_2;
+        let post: &'static super::VerifierService = &VERIFIER_NU6_2;
+        let post_nu6_3: &'static super::VerifierService = &VERIFIER_NU6_3_ONWARD;
 
-    // v5 Orchard bundles before NU6.2 (incl. upgrades from before Orchard existed) route to the
-    // insecure key, the only key pre-NU6.2 Orchard history verifies under.
-    for nu in [
-        NetworkUpgrade::Nu5,
-        NetworkUpgrade::Nu6,
-        NetworkUpgrade::Nu6_1,
-    ] {
+        // v5 Orchard bundles before NU6.2 (incl. upgrades from before Orchard existed) route to the
+        // insecure key, the only key pre-NU6.2 Orchard history verifies under.
+        for nu in [
+            NetworkUpgrade::Nu5,
+            NetworkUpgrade::Nu6,
+            NetworkUpgrade::Nu6_1,
+        ] {
+            assert!(
+                std::ptr::eq(orchard_v5_verifier_for(nu), pre),
+                "v5 Orchard at {nu:?} must route to the pre-NU6.2 (insecure) verifier"
+            );
+            assert!(std::ptr::eq(
+                super::cached_orchard_v5_verifier_for(nu),
+                &*super::CACHED_VERIFIER_PRE_NU6_2
+            ));
+        }
+
+        // NU6.2 — and only NU6.2 — uses the fixed key: it is active from the NU6.2 activation height
+        // until NU6.3.
         assert!(
-            std::ptr::eq(orchard_v5_verifier_for(nu), pre),
-            "v5 Orchard at {nu:?} must route to the pre-NU6.2 (insecure) verifier"
+            std::ptr::eq(orchard_v5_verifier_for(NetworkUpgrade::Nu6_2), post),
+            "v5 Orchard at NU6.2 must route to the post-NU6.2 (fixed) verifier"
         );
-    }
+        assert!(std::ptr::eq(
+            super::cached_orchard_v5_verifier_for(NetworkUpgrade::Nu6_2),
+            &*super::CACHED_VERIFIER_NU6_2
+        ));
 
-    // NU6.2 — and only NU6.2 — uses the fixed key: it is active from the NU6.2 activation height
-    // until NU6.3.
-    assert!(
-        std::ptr::eq(orchard_v5_verifier_for(NetworkUpgrade::Nu6_2), post),
-        "v5 Orchard at NU6.2 must route to the post-NU6.2 (fixed) verifier"
-    );
+        // v5 Orchard bundles from NU6.3 onward route to the NU6.3 (cross-address) key, NOT the fixed
+        // key — the cross-address restriction cannot be bypassed with a v5 transaction. This is the
+        // regression guard for the routing bug.
+        for nu in [NetworkUpgrade::Nu6_3, NetworkUpgrade::Nu7] {
+            assert!(
+                std::ptr::eq(orchard_v5_verifier_for(nu), post_nu6_3),
+                "v5 Orchard at {nu:?} must use the NU6.3 verifier"
+            );
+            assert!(std::ptr::eq(
+                super::cached_orchard_v5_verifier_for(nu),
+                &*super::CACHED_VERIFIER_NU6_3_ONWARD
+            ));
+        }
 
-    // v5 Orchard bundles from NU6.3 onward route to the NU6.3 (cross-address) key, NOT the fixed
-    // key — the cross-address restriction cannot be bypassed with a v5 transaction. This is the
-    // regression guard for the routing bug.
-    for nu in [NetworkUpgrade::Nu6_3, NetworkUpgrade::Nu7] {
+        // v6 Orchard + Ironwood bundles route to the same NU6.3 (cross-address) key.
         assert!(
-            std::ptr::eq(orchard_v5_verifier_for(nu), post_nu6_3),
-            "v5 Orchard at {nu:?} must route to the NU6.3 verifier, not the post-NU6.2 fixed key"
+            std::ptr::eq(orchard_v6_verifier(), post_nu6_3),
+            "v6 Orchard/Ironwood must route to the NU6.3 verifier"
         );
-    }
-
-    // v6 Orchard + Ironwood bundles route to the same NU6.3 (cross-address) key.
-    assert!(
-        std::ptr::eq(orchard_v6_verifier(), post_nu6_3),
-        "v6 Orchard/Ironwood must route to the NU6.3 verifier"
-    );
+        assert!(std::ptr::eq(
+            super::cached_orchard_v6_verifier(),
+            &*super::CACHED_VERIFIER_NU6_3_ONWARD
+        ));
+    });
 }
 
 // Cache key completeness.
@@ -539,9 +556,8 @@ async fn cache_evicts_in_insertion_order_and_stays_correct_when_full() {
 /// A remembered result is never visible to another circuit version's cache.
 ///
 /// The cache key deliberately does not name the verifying key. What binds an entry to the key it
-/// was produced under is which cache holds it — [`batch_verifier`](super::batch_verifier) builds
-/// one per circuit version, and [`orchard_verifier_routing_selects_the_correct_key`] pins the
-/// routing. This pins the other half: two cache instances share no state, so an item verified
+/// was produced under is which cache holds it. Each circuit version has its own cache, and
+/// [`orchard_verifier_routing_selects_the_correct_key`] pins the routing. This pins the other half: two cache instances share no state, so an item verified
 /// under the pre-NU6.2 insecure key can never be answered from that entry when it is later routed
 /// to a different era's verifier.
 #[tokio::test]

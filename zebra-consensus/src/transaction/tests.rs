@@ -11,7 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
 use futures::{FutureExt, TryFutureExt};
 use tokio::time::timeout;
-use tower::{buffer::Buffer, service_fn, ServiceExt};
+use tower::{buffer::Buffer, service_fn, Service, ServiceExt};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -5586,11 +5586,11 @@ fn respond_to_nullifier_and_anchor_check(state: &CacheTestState) {
     });
 }
 
-/// Returns the [`TransactionError`] behind a buffered block verifier's boxed error.
-fn transaction_error(error: crate::BoxError) -> TransactionError {
-    *error
-        .downcast::<TransactionError>()
-        .expect("the block verifier reports a typed transaction error")
+tokio::task_local! {
+    /// Private Halo2 cache for the current transaction-verification test.
+    pub(super) static HALO2_CACHE_VERIFIER: crate::primitives::halo2::CachedVerifierService;
+    /// Private Sapling cache for the current transaction-verification test.
+    pub(super) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
 }
 
 /// Returns a block request that mines `tx` at `height`.
@@ -5606,9 +5606,8 @@ fn cache_test_block_request(tx: &Transaction, height: Height) -> BlockRequest {
 
 /// The Halo2 proof cache, exercised end to end through the transaction verifiers.
 ///
-/// This is one test rather than three because all three claims need the same transaction and a
-/// cold cache for it. The Halo2 verifiers are process-wide `Lazy` statics, so only one test can
-/// ever see that transaction's cache entry cold.
+/// Each run uses a private cache and call records, so other tests can verify the same transaction.
+/// The block verifier runs in this task so it shares the mempool verifier's scoped cache.
 ///
 /// It runs on [`zebra_test::MULTI_THREADED_RUNTIME`] because it reaches a global verifier.
 /// `tower-batch-control` spawns that verifier's batch worker on whichever runtime first touches
@@ -5630,103 +5629,122 @@ fn the_halo2_cache_is_reused_only_for_the_transaction_that_earned_it() {
     let _init_guard = zebra_test::init();
 
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let state: CacheTestState = MockService::build().for_prop_tests();
-        let mempool_verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
-        let block_verifier = Buffer::new(BlockTxVerifier::new(&Network::Mainnet, state.clone()), 1);
-
         let tx = cacheable_mainnet_orchard_transaction();
         let expiry_height = tx
             .expiry_height()
             .expect("a V5 transaction has an expiry height");
         let network_upgrade = NetworkUpgrade::current(&Network::Mainnet, expiry_height);
         let item = orchard_item(&tx, network_upgrade);
-        assert_eq!(
-            crate::primitives::halo2::inner_calls_for(network_upgrade, &item),
-            0,
-            "this transaction's bundle must not have been verified before this test"
-        );
-
-        // 1. The mempool verification is the only one that reaches the Halo2 verifier.
-        respond_to_nullifier_and_anchor_check(&state);
-        mempool_verifier
-            .oneshot(MempoolRequest {
-                transaction: Arc::new(tx.clone()).into(),
-                height: expiry_height,
-            })
-            .await
-            .expect("a real mainnet Orchard transaction must verify at its expiry height");
-
-        assert_eq!(
-            crate::primitives::halo2::inner_calls_for(network_upgrade, &item),
-            1,
-            "the mempool verification must reach the inner Halo2 verifier"
-        );
-
-        block_verifier
+        let global_verifier =
+            crate::primitives::halo2::cached_orchard_v5_verifier_for(network_upgrade);
+        global_verifier
             .clone()
-            .oneshot(cache_test_block_request(&tx, expiry_height))
+            .oneshot(item.clone())
             .await
-            .expect("the same transaction must verify in a block");
+            .expect("the global cache can already contain this transaction");
+        let verifier = global_verifier.isolated();
+        HALO2_CACHE_VERIFIER
+            .scope(verifier.clone(), async {
+                let state: CacheTestState = MockService::build().for_prop_tests();
+                let mempool_verifier =
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
+                let mut block_verifier = BlockTxVerifier::new(&Network::Mainnet, state.clone());
 
-        assert_eq!(
-            crate::primitives::halo2::inner_calls_for(network_upgrade, &item),
-            1,
-            "the block verification must be answered from the cache"
-        );
+                assert_eq!(
+                    crate::primitives::halo2::inner_calls_for(&verifier, &item),
+                    0,
+                    "the private cache starts with no inner calls"
+                );
 
-        // 2. The cached proof does not carry the transaction past the expiry check.
-        let too_late =
-            (expiry_height + 1).expect("a mainnet expiry height is far below the maximum");
-        let error = block_verifier
-            .clone()
-            .oneshot(cache_test_block_request(&tx, too_late))
-            .await
-            .expect_err("a transaction mined past its expiry height must be rejected");
+                // 1. The mempool verification is the only one that reaches the Halo2 verifier.
+                respond_to_nullifier_and_anchor_check(&state);
+                mempool_verifier
+                    .oneshot(MempoolRequest {
+                        transaction: Arc::new(tx.clone()).into(),
+                        height: expiry_height,
+                    })
+                    .await
+                    .expect("a real mainnet Orchard transaction must verify at its expiry height");
 
-        assert_eq!(
-            transaction_error(error),
-            TransactionError::ExpiredTransaction {
-                expiry_height,
-                block_height: too_late,
-                transaction_hash: tx.hash(),
-            },
-            "the rejection must be the expiry rule, not some other failure"
-        );
+                assert_eq!(
+                    crate::primitives::halo2::inner_calls_for(&verifier, &item),
+                    1,
+                    "the mempool verification must reach the inner Halo2 verifier"
+                );
 
-        // 3. The authorizing-data twin does not inherit the cached result.
-        let twin = with_garbage_orchard_authorization(tx.clone());
-        assert_eq!(
+                block_verifier
+                    .ready()
+                    .await
+                    .expect("the block verifier must become ready")
+                    .call(cache_test_block_request(&tx, expiry_height))
+                    .await
+                    .expect("the same transaction must verify in a block");
+
+                assert_eq!(
+                    crate::primitives::halo2::inner_calls_for(&verifier, &item),
+                    1,
+                    "the block verification must be answered from the cache"
+                );
+
+                // 2. The cached proof does not carry the transaction past the expiry check.
+                let too_late =
+                    (expiry_height + 1).expect("a mainnet expiry height is far below the maximum");
+                let error = block_verifier
+                    .ready()
+                    .await
+                    .expect("the block verifier must become ready")
+                    .call(cache_test_block_request(&tx, too_late))
+                    .await
+                    .expect_err("a transaction mined past its expiry height must be rejected");
+
+                assert_eq!(
+                    error,
+                    TransactionError::ExpiredTransaction {
+                        expiry_height,
+                        block_height: too_late,
+                        transaction_hash: tx.hash(),
+                    },
+                    "the rejection must be the expiry rule, not some other failure"
+                );
+
+                // 3. The authorizing-data twin does not inherit the cached result.
+                let twin = with_garbage_orchard_authorization(tx.clone());
+                assert_eq!(
             tx.hash(),
             twin.hash(),
             "replacing authorizing data must leave the txid unchanged, or this test proves nothing"
         );
 
-        let twin_item = orchard_item(&twin, network_upgrade);
-        // A collision here would already be the failure: the twin would inherit the valid
-        // transaction's result instead of being verified.
-        assert_eq!(
-            crate::primitives::halo2::inner_calls_for(network_upgrade, &twin_item),
-            0,
-            "the authorizing-data twin must get a different cache key"
-        );
+                let twin_item = orchard_item(&twin, network_upgrade);
+                // A collision here would already be the failure: the twin would inherit the valid
+                // transaction's result instead of being verified.
+                assert_eq!(
+                    crate::primitives::halo2::inner_calls_for(&verifier, &twin_item),
+                    0,
+                    "the authorizing-data twin must get a different cache key"
+                );
 
-        let error = block_verifier
-            .clone()
-            .oneshot(cache_test_block_request(&twin, expiry_height))
-            .await
-            .expect_err("a transaction with replaced authorizing data must be rejected");
+                let error = block_verifier
+                    .ready()
+                    .await
+                    .expect("the block verifier must become ready")
+                    .call(cache_test_block_request(&twin, expiry_height))
+                    .await
+                    .expect_err("a transaction with replaced authorizing data must be rejected");
 
-        assert_eq!(
-            transaction_error(error),
-            TransactionError::Halo2VerificationFailed,
-            "the twin must fail Orchard verification"
-        );
+                assert_eq!(
+                    error,
+                    TransactionError::Halo2VerificationFailed,
+                    "the twin must fail Orchard verification"
+                );
 
-        assert_eq!(
-            crate::primitives::halo2::inner_calls_for(network_upgrade, &twin_item),
-            1,
-            "the twin must reach the inner Halo2 verifier"
-        );
+                assert_eq!(
+                    crate::primitives::halo2::inner_calls_for(&verifier, &twin_item),
+                    1,
+                    "the twin must reach the inner Halo2 verifier"
+                );
+            })
+            .await;
     });
 }
 
@@ -5791,7 +5809,7 @@ fn sapling_item(
 ///
 /// The Sapling counterpart of
 /// [`the_halo2_cache_is_reused_only_for_the_transaction_that_earned_it`], and the same reasons
-/// apply for it being one test on the shared runtime. Sapling bundles also appear in v4
+/// apply for its private cache and shared runtime. Sapling bundles also appear in v4
 /// transactions, whose legacy transaction ID is the hash of the whole serialization, so this also
 /// covers the key form Orchard never sees.
 ///
@@ -5806,67 +5824,82 @@ fn the_sapling_cache_is_reused_only_for_the_transaction_that_earned_it() {
     let _init_guard = zebra_test::init();
 
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let state: CacheTestState = MockService::build().for_prop_tests();
-        let mempool_verifier = MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
-        let block_verifier = Buffer::new(BlockTxVerifier::new(&Network::Mainnet, state.clone()), 1);
-
         let (network_upgrade, tx) = cacheable_mainnet_sapling_transaction();
         let expiry_height = tx
             .expiry_height()
             .expect("a V4 or V5 transaction has an expiry height");
         let item = sapling_item(&tx, network_upgrade);
-        assert_eq!(
-            crate::primitives::sapling::inner_calls_for(&item),
-            0,
-            "this transaction's bundle must not have been verified before this test"
-        );
+        crate::primitives::sapling::VERIFIER
+            .clone()
+            .oneshot(item.clone())
+            .await
+            .expect("the global cache can already contain this transaction");
+        let verifier = crate::primitives::sapling::VERIFIER.isolated();
+        SAPLING_CACHE_VERIFIER
+            .scope(verifier.clone(), async {
+                let state: CacheTestState = MockService::build().for_prop_tests();
+                let mempool_verifier =
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state.clone());
+                let mut block_verifier = BlockTxVerifier::new(&Network::Mainnet, state.clone());
 
-        // 1. The mempool verification is the only one that reaches the Sapling verifier.
-        respond_to_nullifier_and_anchor_check(&state);
-        mempool_verifier
-            .oneshot(MempoolRequest {
-                transaction: Arc::new(tx.clone()).into(),
-                height: expiry_height,
+                assert_eq!(
+                    crate::primitives::sapling::inner_calls_for(&verifier, &item),
+                    0,
+                    "the private cache starts with no inner calls"
+                );
+
+                // 1. The mempool verification is the only one that reaches the Sapling verifier.
+                respond_to_nullifier_and_anchor_check(&state);
+                mempool_verifier
+                    .oneshot(MempoolRequest {
+                        transaction: Arc::new(tx.clone()).into(),
+                        height: expiry_height,
+                    })
+                    .await
+                    .expect("a real mainnet Sapling transaction must verify at its expiry height");
+
+                assert_eq!(
+                    crate::primitives::sapling::inner_calls_for(&verifier, &item),
+                    1,
+                    "the mempool verification must reach the inner Sapling verifier"
+                );
+
+                block_verifier
+                    .ready()
+                    .await
+                    .expect("the block verifier must become ready")
+                    .call(cache_test_block_request(&tx, expiry_height))
+                    .await
+                    .expect("the same transaction must verify in a block");
+
+                assert_eq!(
+                    crate::primitives::sapling::inner_calls_for(&verifier, &item),
+                    1,
+                    "the block verification must be answered from the cache"
+                );
+
+                // 2. The cached verification does not carry the transaction past the expiry check.
+                let too_late =
+                    (expiry_height + 1).expect("a mainnet expiry height is far below the maximum");
+                let error = block_verifier
+                    .ready()
+                    .await
+                    .expect("the block verifier must become ready")
+                    .call(cache_test_block_request(&tx, too_late))
+                    .await
+                    .expect_err("a transaction mined past its expiry height must be rejected");
+
+                assert_eq!(
+                    error,
+                    TransactionError::ExpiredTransaction {
+                        expiry_height,
+                        block_height: too_late,
+                        transaction_hash: tx.hash(),
+                    },
+                    "the rejection must be the expiry rule, not some other failure"
+                );
             })
-            .await
-            .expect("a real mainnet Sapling transaction must verify at its expiry height");
-
-        assert_eq!(
-            crate::primitives::sapling::inner_calls_for(&item),
-            1,
-            "the mempool verification must reach the inner Sapling verifier"
-        );
-
-        block_verifier
-            .clone()
-            .oneshot(cache_test_block_request(&tx, expiry_height))
-            .await
-            .expect("the same transaction must verify in a block");
-
-        assert_eq!(
-            crate::primitives::sapling::inner_calls_for(&item),
-            1,
-            "the block verification must be answered from the cache"
-        );
-
-        // 2. The cached verification does not carry the transaction past the expiry check.
-        let too_late =
-            (expiry_height + 1).expect("a mainnet expiry height is far below the maximum");
-        let error = block_verifier
-            .clone()
-            .oneshot(cache_test_block_request(&tx, too_late))
-            .await
-            .expect_err("a transaction mined past its expiry height must be rejected");
-
-        assert_eq!(
-            transaction_error(error),
-            TransactionError::ExpiredTransaction {
-                expiry_height,
-                block_height: too_late,
-                transaction_hash: tx.hash(),
-            },
-            "the rejection must be the expiry rule, not some other failure"
-        );
+            .await;
     });
 }
 

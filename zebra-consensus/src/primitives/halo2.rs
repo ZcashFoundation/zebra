@@ -280,38 +280,16 @@ impl Service<Item> for OrchardFallback {
     }
 }
 
-/// The batching-and-fallback stack for one Orchard circuit version, before caching.
-type BatchFallbackService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
-
 /// The concrete type of a global Halo2 verification service.
 ///
-/// Each Orchard circuit version gets its own instance — see [`VERIFIER_PRE_NU6_2`],
-/// [`VERIFIER_NU6_2`], and [`VERIFIER_NU6_3_ONWARD`] — so that batches, fallbacks, verifying
-/// keys, and caches are fully separated per circuit version. The Orchard verifier routing
-/// functions ([`orchard_v5_verifier_for`] / [`orchard_v6_verifier`]) return a borrow of the
-/// matching one.
-pub type VerifierService = Cached<BatchFallbackService>;
+/// Each Orchard circuit version has its own batch worker and fallback verifier.
+pub type VerifierService = Fallback<Batch<Verifier, Item>, OrchardFallback>;
 
-/// Builds a global Halo2 verifier that validates every item against `vk`.
-///
-/// The returned service batches contemporaneous proof verifications and, if a batch fails, falls
-/// back to verifying each item individually. The batch and its fallback share the single `vk`
-/// passed here, so an item built by this verifier is always checked against exactly one era's key.
-/// Callers select the correct era's key by which `VERIFYING_KEY_*` they pass (see the two statics
-/// below); there is no runtime key resolution.
-///
-/// The stack is wrapped in a [`Cached`] so that a proof verified when its transaction was
-/// gossiped into the mempool does not have to be verified again when the block that mines it
-/// arrives. Because each circuit version builds its own verifier here, each also gets its own
-/// cache, which is what binds a remembered result to the `vk` it was produced under.
-/// `verifier_name` is the era's `verifier` metrics label, so each era's cache reports its own hit
-/// rate.
-fn batch_verifier(vk: &'static ItemVerifyingKey, verifier_name: &'static str) -> VerifierService {
-    Cached::new(batch_fallback_verifier(vk), CACHE_CAPACITY, verifier_name)
-}
+/// A private cache around one public Halo2 verifier.
+pub(crate) type CachedVerifierService = Cached<VerifierService>;
 
-/// Builds the uncached batching-and-fallback stack for `vk`.
-fn batch_fallback_verifier(vk: &'static ItemVerifyingKey) -> BatchFallbackService {
+/// Builds the batching-and-fallback stack for `vk`.
+fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
     Fallback::new(
         Batch::new(
             Verifier::new(vk),
@@ -332,7 +310,7 @@ fn batch_fallback_verifier(vk: &'static ItemVerifyingKey) -> BatchFallbackServic
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2, "halo2_pre_nu6_2"));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_PRE_NU6_2));
 
 /// Global batch verification context for **NU6.2-until-NU6.3** Halo2 Action proofs.
 ///
@@ -343,7 +321,7 @@ pub static VERIFIER_PRE_NU6_2: Lazy<VerifierService> =
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_NU6_2: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2, "halo2_nu6_2"));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_2));
 
 /// Global batch verification context for **NU6.3-onward** Halo2 Action proofs.
 ///
@@ -356,7 +334,29 @@ pub static VERIFIER_NU6_2: Lazy<VerifierService> =
 /// Note that making a `Service` call requires mutable access to the service, so you should call
 /// `.clone()` on the global handle to create a local, mutable handle.
 pub static VERIFIER_NU6_3_ONWARD: Lazy<VerifierService> =
-    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD, "halo2_nu6_3_onward"));
+    Lazy::new(|| batch_verifier(&VERIFYING_KEY_NU6_3_ONWARD));
+
+/// Cached verification before NU6.2 using the public verifier's batch worker.
+static CACHED_VERIFIER_PRE_NU6_2: Lazy<CachedVerifierService> = Lazy::new(|| {
+    Cached::new(
+        VERIFIER_PRE_NU6_2.clone(),
+        CACHE_CAPACITY,
+        "halo2_pre_nu6_2",
+    )
+});
+
+/// Cached verification at NU6.2 using the public verifier's batch worker.
+static CACHED_VERIFIER_NU6_2: Lazy<CachedVerifierService> =
+    Lazy::new(|| Cached::new(VERIFIER_NU6_2.clone(), CACHE_CAPACITY, "halo2_nu6_2"));
+
+/// Cached verification from NU6.3 onward using the public verifier's batch worker.
+static CACHED_VERIFIER_NU6_3_ONWARD: Lazy<CachedVerifierService> = Lazy::new(|| {
+    Cached::new(
+        VERIFIER_NU6_3_ONWARD.clone(),
+        CACHE_CAPACITY,
+        "halo2_nu6_3_onward",
+    )
+});
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
 /// block at `network_upgrade`.
@@ -382,6 +382,23 @@ pub static VERIFIER_NU6_3_ONWARD: Lazy<VerifierService> =
 /// version-comparison fallthrough and no default arm, so adding a future upgrade is a compile error
 /// here until it is bound to a key on purpose.
 pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService {
+    orchard_v5_verifiers_for(network_upgrade).0
+}
+
+/// Returns the cache for the same circuit selected by [`orchard_v5_verifier_for`].
+pub(crate) fn cached_orchard_v5_verifier_for(
+    network_upgrade: NetworkUpgrade,
+) -> &'static CachedVerifierService {
+    orchard_v5_verifiers_for(network_upgrade).1
+}
+
+/// Routes both services together without initializing unused circuit eras.
+fn orchard_v5_verifiers_for(
+    network_upgrade: NetworkUpgrade,
+) -> (
+    &'static Lazy<VerifierService>,
+    &'static Lazy<CachedVerifierService>,
+) {
     use NetworkUpgrade::*;
 
     match network_upgrade {
@@ -389,11 +406,11 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         // are bound to the pre-NU6.2 (insecure) verifier because that is the only key under which
         // any Orchard history before NU6.2 verifies; routing them anywhere else cannot be correct.
         Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy | Nu5
-        | Nu6 | Nu6_1 => &VERIFIER_PRE_NU6_2,
+        | Nu6 | Nu6_1 => (&VERIFIER_PRE_NU6_2, &CACHED_VERIFIER_PRE_NU6_2),
 
         // NU6.2 ships the fixed circuit and is the only upgrade that uses it: it is active from the
         // NU6.2 activation height until NU6.3.
-        Nu6_2 => &VERIFIER_NU6_2,
+        Nu6_2 => (&VERIFIER_NU6_2, &CACHED_VERIFIER_NU6_2),
 
         // NU6.3 adds the `disableCrossAddress` constraint to the Orchard Action circuit. Every
         // Orchard Action from NU6.3 onward — including those in v5 transactions — commits to this
@@ -401,24 +418,21 @@ pub fn orchard_v5_verifier_for(network_upgrade: NetworkUpgrade) -> &'static Veri
         // restriction applies "regardless of transaction version ... so that it cannot be bypassed
         // by using a version 5 transaction". Verifying these under the NU6.2 fixed key would both
         // reject honest proofs (different key) and fail to enforce the restriction.
-        Nu6_3 | Nu7 => &VERIFIER_NU6_3_ONWARD,
+        Nu6_3 | Nu7 => (&VERIFIER_NU6_3_ONWARD, &CACHED_VERIFIER_NU6_3_ONWARD),
 
         // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.3
         // upgrade, so it inherits the NU6.3 circuit and is bound to the NU6.3-onward key here on
         // purpose (rather than via a wildcard) to keep this match exhaustive and fail-closed under
         // every build configuration.
         #[cfg(zcash_unstable = "zfuture")]
-        ZFuture => &VERIFIER_NU6_3_ONWARD,
+        ZFuture => (&VERIFIER_NU6_3_ONWARD, &CACHED_VERIFIER_NU6_3_ONWARD),
     }
 }
 
-/// Returns how many times `item` has reached the inner Halo2 verifier of the circuit version
-/// `network_upgrade` routes v5 Orchard bundles to.
-///
-/// Test-only. See [`Cached::inner_calls_for`].
+/// Returns how many times `item` reached this verifier's inner service.
 #[cfg(test)]
-pub(crate) fn inner_calls_for(network_upgrade: NetworkUpgrade, item: &Item) -> usize {
-    orchard_v5_verifier_for(network_upgrade).inner_calls_for(item)
+pub(crate) fn inner_calls_for(verifier: &CachedVerifierService, item: &Item) -> usize {
+    verifier.inner_calls_for(item)
 }
 
 /// Returns the global Halo2 verifier for **v6** Orchard-pool and Ironwood-pool bundles.
@@ -427,6 +441,11 @@ pub(crate) fn inner_calls_for(network_upgrade: NetworkUpgrade, item: &Item) -> u
 /// circuit — the same [`VERIFIER_NU6_3_ONWARD`] key that v5 Orchard bundles at NU6.3 route to.
 pub fn orchard_v6_verifier() -> &'static VerifierService {
     &VERIFIER_NU6_3_ONWARD
+}
+
+/// Returns the shared Orchard and Ironwood cache for v6 transactions.
+pub(crate) fn cached_orchard_v6_verifier() -> &'static CachedVerifierService {
+    &CACHED_VERIFIER_NU6_3_ONWARD
 }
 
 /// Halo2 proof verifier implementation
