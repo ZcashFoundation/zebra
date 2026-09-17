@@ -498,17 +498,23 @@ async fn any_chain_block_test() -> Result<()> {
     Ok(())
 }
 
-/// Test that AnyChainBlock finds blocks in side chains, while Block does not.
-#[tokio::test(flavor = "multi_thread")]
-async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
+/// A non-finalized state with two chains forked from the same genesis block.
+struct SideChainFixture {
+    non_finalized_state: crate::service::non_finalized_state::NonFinalizedState,
+    finalized_state: crate::service::finalized_state::FinalizedState,
+    best_hash: Hash,
+    side_hash: Hash,
+}
+
+/// Returns a [`SideChainFixture`] whose genesis block is extended by a best chain block
+/// and by a lower-work side chain block.
+fn side_chain_fixture() -> Result<SideChainFixture> {
     use crate::{
         arbitrary::Prepare,
         service::{finalized_state::FinalizedState, non_finalized_state::NonFinalizedState},
         tests::FakeChainHelper,
     };
     use zebra_chain::{amount::NonNegative, value_balance::ValueBalance};
-
-    let _init_guard = zebra_test::init();
 
     let network = Mainnet;
 
@@ -524,13 +530,10 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
     // because difficulty_threshold is part of the header
     let best_hash = best_chain_block.hash();
     let side_hash = side_chain_block.hash();
-
-    // If hashes are the same, we can't test side chains properly
-    // This would mean our fake block generation isn't working as expected
-    if best_hash == side_hash {
-        tracing::warn!("unable to create different block hashes, skipping side chain test");
-        return Ok(());
-    }
+    assert_ne!(
+        best_hash, side_hash,
+        "unable to create different block hashes"
+    );
 
     // Create state with a finalized and non-finalized component
     let mut non_finalized_state = NonFinalizedState::new(&network);
@@ -549,10 +552,10 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
     non_finalized_state.commit_new_chain(genesis.prepare(), &finalized_state)?;
 
     // Commit best chain block (higher work) - extends the genesis chain
-    non_finalized_state.commit_block(best_chain_block.clone().prepare(), &finalized_state)?;
+    non_finalized_state.commit_block(best_chain_block.prepare(), &finalized_state)?;
 
     // Commit side chain block (lower work) - also tries to extend genesis, creating a fork
-    non_finalized_state.commit_block(side_chain_block.clone().prepare(), &finalized_state)?;
+    non_finalized_state.commit_block(side_chain_block.prepare(), &finalized_state)?;
 
     // Verify we have 2 chains (genesis extended by best_chain_block, and genesis extended by side_chain_block)
     assert_eq!(
@@ -561,9 +564,27 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         "Should have 2 competing chains"
     );
 
-    // Now test with the read interface
-    // We'll use the low-level block lookup functions directly
+    Ok(SideChainFixture {
+        non_finalized_state,
+        finalized_state,
+        best_hash,
+        side_hash,
+    })
+}
+
+/// Test that AnyChainBlock finds blocks in side chains, while Block does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
     use crate::service::read::block::{any_block, block};
+
+    let _init_guard = zebra_test::init();
+
+    let SideChainFixture {
+        non_finalized_state,
+        finalized_state,
+        best_hash,
+        side_hash,
+    } = side_chain_fixture()?;
 
     // Test 1: any_block with all chains should find the side chain block by hash
     let found = any_block(
@@ -615,163 +636,213 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
     Ok(())
 }
 
-/// Test that the any-chain treestate lookups find trees in side chains by hash,
-/// while the best-chain-only lookups do not.
+/// Test that the any-chain treestate lookups return the tree of the chain containing the
+/// requested block, including side chains, while the best-chain-only lookups do not find
+/// side chain trees.
 #[tokio::test(flavor = "multi_thread")]
 async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
-    use crate::{
-        arbitrary::Prepare,
-        service::{
-            finalized_state::FinalizedState,
-            non_finalized_state::NonFinalizedState,
-            read::tree::{
-                any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_tree, orchard_tree,
-                sapling_tree,
-            },
-        },
-        tests::FakeChainHelper,
+    use hex::FromHex;
+    use zebra_chain::sapling;
+
+    use crate::service::read::tree::{
+        any_ironwood_tree, any_orchard_tree, any_sapling_tree, ironwood_tree, orchard_tree,
+        sapling_tree,
     };
-    use zebra_chain::{amount::NonNegative, value_balance::ValueBalance};
 
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
+    let SideChainFixture {
+        non_finalized_state,
+        finalized_state,
+        best_hash,
+        side_hash,
+    } = side_chain_fixture()?;
+    let db = &finalized_state.db;
 
-    // Use pre-Heartwood blocks to avoid history tree complications
-    let genesis: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    // The fake blocks have no shielded data, so both chains have the same empty trees.
+    // Give each chain distinct trees at its tip, so a lookup that returns the wrong
+    // chain's tree fails the root comparisons below.
+    let chain_with_distinct_trees = |hash: Hash, seed: u64| -> Arc<Chain> {
+        let mut chain = non_finalized_state
+            .find_chain(|chain| chain.contains_block_hash(hash))
+            .expect("fixture chains contain their tip blocks")
+            .as_ref()
+            .clone();
+        let height = chain
+            .height_by_hash(hash)
+            .expect("the chain was found by this hash");
 
-    // Create two competing children of genesis with different work, so they fork.
-    let best_chain_block = genesis.make_fake_child().set_work(100);
-    let side_chain_block = genesis.make_fake_child().set_work(50);
+        let mut sapling_tree = sapling::tree::NoteCommitmentTree::default();
+        let cm_u = <[u8; 32]>::from_hex(
+            "225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b11458",
+        )
+        .expect("the test vector is valid hex");
+        let cm_u = sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&cm_u)
+            .expect("the test vector is a valid Sapling note commitment");
+        for _ in 0..seed {
+            sapling_tree.append(cm_u).expect("the tree is not full");
+        }
 
-    let best_hash = best_chain_block.hash();
-    let side_hash = side_chain_block.hash();
+        let mut orchard_tree = orchard::tree::NoteCommitmentTree::default();
+        orchard_tree
+            .append(seed.into())
+            .expect("the tree is not full");
 
-    // If hashes are the same, we can't test side chains properly.
-    if best_hash == side_hash {
-        tracing::warn!("unable to create different block hashes, skipping side chain test");
-        return Ok(());
+        let mut ironwood_tree = orchard::tree::NoteCommitmentTree::default();
+        ironwood_tree
+            .append((seed + 100).into())
+            .expect("the tree is not full");
+
+        chain
+            .sapling_trees_by_height
+            .insert(height, Arc::new(sapling_tree));
+        chain
+            .orchard_trees_by_height
+            .insert(height, Arc::new(orchard_tree));
+        chain
+            .ironwood_trees_by_height
+            .insert(height, Arc::new(ironwood_tree));
+
+        Arc::new(chain)
+    };
+
+    // Best chain first, like `NonFinalizedState::chain_iter()`.
+    let best_chain = chain_with_distinct_trees(best_hash, 1);
+    let side_chain = chain_with_distinct_trees(side_hash, 2);
+    let chains = [best_chain.clone(), side_chain.clone()];
+
+    let sapling_root = |chain: &Chain| chain.sapling_note_commitment_tree_for_tip().root();
+    let orchard_root = |chain: &Chain| chain.orchard_note_commitment_tree_for_tip().root();
+    let ironwood_root = |chain: &Chain| chain.ironwood_note_commitment_tree_for_tip().root();
+
+    assert_ne!(sapling_root(&best_chain), sapling_root(&side_chain));
+    assert_ne!(orchard_root(&best_chain), orchard_root(&side_chain));
+    assert_ne!(ironwood_root(&best_chain), ironwood_root(&side_chain));
+
+    for (hash, chain) in [(best_hash, &best_chain), (side_hash, &side_chain)] {
+        assert_eq!(
+            any_sapling_tree(chains.iter(), db, hash).map(|tree| tree.root()),
+            Some(sapling_root(chain)),
+            "any_sapling_tree should find the treestate of the chain containing the block",
+        );
+        assert_eq!(
+            any_orchard_tree(chains.iter(), db, hash).map(|tree| tree.root()),
+            Some(orchard_root(chain)),
+            "any_orchard_tree should find the treestate of the chain containing the block",
+        );
+        assert_eq!(
+            any_ironwood_tree(chains.iter(), db, hash).map(|tree| tree.root()),
+            Some(ironwood_root(chain)),
+            "any_ironwood_tree should find the treestate of the chain containing the block",
+        );
     }
 
-    let mut non_finalized_state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
-
-    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
-    finalized_state.set_finalized_value_pool(fake_value_pool);
-
-    non_finalized_state.commit_new_chain(genesis.prepare(), &finalized_state)?;
-    non_finalized_state.commit_block(best_chain_block.clone().prepare(), &finalized_state)?;
-    non_finalized_state.commit_block(side_chain_block.clone().prepare(), &finalized_state)?;
-
+    // The best-chain lookups find the best chain trees, but not the side chain trees.
     assert_eq!(
-        non_finalized_state.chain_count(),
-        2,
-        "Should have 2 competing chains"
+        sapling_tree(Some(&best_chain), db, best_hash.into()).map(|tree| tree.root()),
+        Some(sapling_root(&best_chain)),
     );
-
-    // Sapling: any-chain lookup finds the side chain tree by hash, best-chain lookup does not.
-    assert!(
-        any_sapling_tree(
-            non_finalized_state.chain_iter(),
-            &finalized_state.db,
-            side_hash,
-        )
-        .is_some(),
-        "any_sapling_tree should find side chain treestate by hash"
+    assert_eq!(
+        orchard_tree(Some(&best_chain), db, best_hash.into()).map(|tree| tree.root()),
+        Some(orchard_root(&best_chain)),
+    );
+    assert_eq!(
+        ironwood_tree(Some(&best_chain), db, best_hash.into()).map(|tree| tree.root()),
+        Some(ironwood_root(&best_chain)),
     );
     assert!(
-        sapling_tree(
-            non_finalized_state.best_chain(),
-            &finalized_state.db,
-            side_hash.into(),
-        )
-        .is_none(),
+        sapling_tree(Some(&best_chain), db, side_hash.into()).is_none(),
         "sapling_tree should NOT find side chain treestate by hash"
     );
-
-    // Orchard: same expectations.
     assert!(
-        any_orchard_tree(
-            non_finalized_state.chain_iter(),
-            &finalized_state.db,
-            side_hash,
-        )
-        .is_some(),
-        "any_orchard_tree should find side chain treestate by hash"
-    );
-    assert!(
-        orchard_tree(
-            non_finalized_state.best_chain(),
-            &finalized_state.db,
-            side_hash.into(),
-        )
-        .is_none(),
+        orchard_tree(Some(&best_chain), db, side_hash.into()).is_none(),
         "orchard_tree should NOT find side chain treestate by hash"
     );
-
-    // Ironwood: same expectations.
     assert!(
-        any_ironwood_tree(
-            non_finalized_state.chain_iter(),
-            &finalized_state.db,
-            side_hash,
-        )
-        .is_some(),
-        "any_ironwood_tree should find side chain treestate by hash"
-    );
-    assert!(
-        ironwood_tree(
-            non_finalized_state.best_chain(),
-            &finalized_state.db,
-            side_hash.into(),
-        )
-        .is_none(),
+        ironwood_tree(Some(&best_chain), db, side_hash.into()).is_none(),
         "ironwood_tree should NOT find side chain treestate by hash"
     );
 
-    // Both lookups find the best chain treestate by hash.
-    assert!(
-        any_sapling_tree(
-            non_finalized_state.chain_iter(),
-            &finalized_state.db,
-            best_hash,
-        )
-        .is_some(),
-        "any_sapling_tree should find best chain treestate by hash"
-    );
-    assert!(
-        sapling_tree(
-            non_finalized_state.best_chain(),
-            &finalized_state.db,
-            best_hash.into(),
-        )
-        .is_some(),
-        "sapling_tree should find best chain treestate by hash"
-    );
-    assert!(
-        any_ironwood_tree(
-            non_finalized_state.chain_iter(),
-            &finalized_state.db,
-            best_hash,
-        )
-        .is_some(),
-        "any_ironwood_tree should find best chain treestate by hash"
-    );
-    assert!(
-        ironwood_tree(
-            non_finalized_state.best_chain(),
-            &finalized_state.db,
-            best_hash.into(),
-        )
-        .is_some(),
-        "ironwood_tree should find best chain treestate by hash"
-    );
+    // The unmodified non-finalized state resolves the same way.
+    assert!(any_sapling_tree(non_finalized_state.chain_iter(), db, side_hash).is_some());
+    assert!(any_orchard_tree(non_finalized_state.chain_iter(), db, side_hash).is_some());
+    assert!(any_ironwood_tree(non_finalized_state.chain_iter(), db, side_hash).is_some());
+
+    // A block in no chain has no treestate.
+    let unknown_hash = Hash([0xff; 32]);
+    assert!(any_sapling_tree(chains.iter(), db, unknown_hash).is_none());
+    assert!(any_orchard_tree(chains.iter(), db, unknown_hash).is_none());
+    assert!(any_ironwood_tree(chains.iter(), db, unknown_hash).is_none());
+
+    Ok(())
+}
+
+/// Test that the ReadStateService answers the any-chain treestate requests with the
+/// matching response variant and the same trees as the best-chain requests, for blocks
+/// in the finalized state.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_treestate_requests_find_finalized_trees() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        populated_state(blocks.clone(), &Mainnet).await;
+
+    let call = |request: ReadRequest| {
+        let read_state = read_state.clone();
+        async move {
+            read_state
+                .oneshot(request)
+                .await
+                .expect("read requests should succeed")
+        }
+    };
+
+    for block in &blocks {
+        let hash = block.hash();
+
+        let (ReadResponse::SaplingTree(Some(expected)), ReadResponse::SaplingTree(Some(found))) = (
+            call(ReadRequest::SaplingTree(hash.into())).await,
+            call(ReadRequest::AnyChainSaplingTree(hash)).await,
+        ) else {
+            panic!("AnyChainSaplingTree should return a Sapling tree for a committed block");
+        };
+        assert_eq!(expected.root(), found.root());
+
+        let (ReadResponse::OrchardTree(Some(expected)), ReadResponse::OrchardTree(Some(found))) = (
+            call(ReadRequest::OrchardTree(hash.into())).await,
+            call(ReadRequest::AnyChainOrchardTree(hash)).await,
+        ) else {
+            panic!("AnyChainOrchardTree should return an Orchard tree for a committed block");
+        };
+        assert_eq!(expected.root(), found.root());
+
+        let (ReadResponse::IronwoodTree(Some(expected)), ReadResponse::IronwoodTree(Some(found))) = (
+            call(ReadRequest::IronwoodTree(hash.into())).await,
+            call(ReadRequest::AnyChainIronwoodTree(hash)).await,
+        ) else {
+            panic!("AnyChainIronwoodTree should return an Ironwood tree for a committed block");
+        };
+        assert_eq!(expected.root(), found.root());
+    }
+
+    let unknown_hash = Hash([0xff; 32]);
+    assert!(matches!(
+        call(ReadRequest::AnyChainSaplingTree(unknown_hash)).await,
+        ReadResponse::SaplingTree(None)
+    ));
+    assert!(matches!(
+        call(ReadRequest::AnyChainOrchardTree(unknown_hash)).await,
+        ReadResponse::OrchardTree(None)
+    ));
+    assert!(matches!(
+        call(ReadRequest::AnyChainIronwoodTree(unknown_hash)).await,
+        ReadResponse::IronwoodTree(None)
+    ));
 
     Ok(())
 }
