@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`ReadRequest::AnyChainSaplingTree`, `ReadRequest::AnyChainOrchardTree` and `ReadRequest::AnyChainIronwoodTree`, which look up a note commitment treestate by block hash in every non-finalized chain before falling back to the finalized state, like `ReadRequest::AnyChainBlock`. They stay correct when a reorg moves the block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).'
+time: 2026-09-17T01:19:07.000000000Z
