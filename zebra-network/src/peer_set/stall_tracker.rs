@@ -179,5 +179,34 @@ impl FindResponseEvent {
     }
 }
 
+/// Observes classifications emitted by a [`FindResponseFeedback`] in tests.
+#[cfg(any(test, feature = "proptest-impl"))]
+pub struct FindResponseFeedbackObserver {
+    receiver: mpsc::UnboundedReceiver<FindResponseEvent>,
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl FindResponseFeedbackObserver {
+    /// Returns `Some(true)` for [`FindResponseOutcome::Useful`], `Some(false)`
+    /// for [`FindResponseOutcome::Stalled`], and `None` while unclassified.
+    pub fn outcome(&mut self) -> Option<bool> {
+        match self.receiver.try_recv() {
+            Ok(FindResponseEvent {
+                outcome: FindResponseOutcome::Useful,
+                ..
+            }) => Some(true),
+            Ok(FindResponseEvent {
+                outcome: FindResponseOutcome::Stalled,
+                ..
+            }) => Some(false),
+            Ok(FindResponseEvent {
+                outcome: FindResponseOutcome::Unclassified,
+                ..
+            }) => None,
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -201,6 +201,9 @@ pub use crate::{
     },
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use peer_set::FindResponseFeedbackObserver;
+
 /// Types used in the definition of [`Request`], [`Response`], and [`VersionMessage`].
 pub mod types {
     pub use crate::{
