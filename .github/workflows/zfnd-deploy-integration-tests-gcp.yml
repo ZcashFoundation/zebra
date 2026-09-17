@@ -240,6 +240,9 @@ jobs:
       instance_zone: ${{ steps.create-instance.outputs.instance_zone }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
+      # The `secrets` context is unavailable in a step `if:`, so the presence of the
+      # key is resolved here.
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -264,6 +267,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
         uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
@@ -272,6 +276,10 @@ jobs:
 
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
@@ -610,6 +618,7 @@ jobs:
       TEST_ID: ${{ inputs.test_id }}
       GCP_ZONE: ${{ needs.test-result.outputs.instance_zone }}
       INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -617,13 +626,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
+      - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
+        uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
       - name: Authenticate to Google Cloud
@@ -676,6 +691,7 @@ jobs:
     env:
       STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
       CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -710,6 +726,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
         uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
@@ -718,6 +735,10 @@ jobs:
 
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
