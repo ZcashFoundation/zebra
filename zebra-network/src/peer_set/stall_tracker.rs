@@ -20,6 +20,9 @@ use tokio::sync::mpsc;
 
 use crate::PeerSocketAddr;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 /// Consecutive stalled `FindBlocks`/`FindHeaders` responses tolerated before
 /// the peer set disconnects a peer.
 pub(super) const FIND_RESPONSE_STALL_THRESHOLD: usize = 3;
@@ -183,6 +186,20 @@ impl FindResponseEvent {
 #[cfg(any(test, feature = "proptest-impl"))]
 pub struct FindResponseFeedbackObserver {
     receiver: mpsc::UnboundedReceiver<FindResponseEvent>,
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl FindResponseFeedback {
+    /// Creates a [`FindResponseFeedback`] and observer for tests.
+    pub fn new_for_test() -> (Self, FindResponseFeedbackObserver) {
+        let peer = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8233)).into();
+        let (sender, receiver) = mpsc::unbounded_channel();
+
+        (
+            Self::new(peer, FindRequestId::from(0), sender),
+            FindResponseFeedbackObserver { receiver },
+        )
+    }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
