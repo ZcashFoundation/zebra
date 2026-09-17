@@ -12,7 +12,7 @@ use crate::{
     address_book_updater::{
         AddressBookRequest, AddressBookResponse, AddressBookUpdater, MIN_CHANNEL_SIZE,
     },
-    constants::DEFAULT_MAX_CONNS_PER_IP,
+    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_PEER_MISBEHAVIOR_SCORE},
     protocol::types::PeerServices,
     types::MetaAddr,
     AddressBook,
@@ -200,5 +200,50 @@ async fn concurrent_next_reconnect_peer_requests_return_distinct_peers() {
         unique_peers.len(),
         TEST_PEER_COUNT,
         "concurrent NextReconnectPeer requests must never return the same peer",
+    );
+}
+
+/// Banning an IPv6 peer must publish the ban on the bans watch channel, so the
+/// peer set and inbound listener drop its connections.
+#[tokio::test]
+async fn banning_an_ipv6_group_publishes_the_ban() {
+    let _init_guard = zebra_test::init();
+
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+
+    let (
+        _address_book,
+        bans_receiver,
+        _change_sender,
+        address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
+
+    let misbehaving: crate::PeerSocketAddr =
+        SocketAddr::from_str("[2001:db8::5]:8233").unwrap().into();
+
+    let response = address_book_service
+        .clone()
+        .oneshot(AddressBookRequest::Change(MetaAddr::new_misbehavior(
+            misbehaving,
+            MAX_PEER_MISBEHAVIOR_SCORE,
+        )))
+        .await
+        .expect("service should be running");
+    assert!(
+        matches!(response, AddressBookResponse::Updated(None)),
+        "a ban-threshold misbehavior change is not applied to the address book"
+    );
+
+    let bans = bans_receiver.borrow().clone();
+    assert!(
+        bans.is_banned("2001:db8::".parse::<std::net::IpAddr>().unwrap()),
+        "the ban must be published on the bans channel, keyed by peer group"
     );
 }

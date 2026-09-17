@@ -1,0 +1,7 @@
+project: zebrad
+kind: Security
+body: 'Misbehaving peers can no longer avoid being banned by reconnecting from a
+  different address in the same IPv6 `/64` allocation: bans now apply to the
+  whole peer group
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
+time: 2026-09-01T12:00:01.000000000Z
