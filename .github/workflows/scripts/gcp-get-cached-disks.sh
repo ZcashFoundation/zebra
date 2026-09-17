@@ -48,7 +48,7 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     CACHED_DISK_NAME=""
 
     # Try to find one from the current branch (or PR).
-    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
+    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${REF_SEGMENT}" "branch")
     # If no image was found, try to find an image based on the `main` branch.
     CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch")}
     # If we still have no image, try to find one from any branch.
