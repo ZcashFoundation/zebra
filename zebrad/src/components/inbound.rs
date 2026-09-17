@@ -48,7 +48,7 @@ use cached_peer_addr_response::CachedPeerAddrResponse;
 #[cfg(test)]
 mod tests;
 
-use downloads::Downloads as BlockDownloads;
+use downloads::{Downloads as BlockDownloads, HeightLimitError};
 
 /// The maximum amount of time an inbound service response can take.
 ///
@@ -83,8 +83,12 @@ type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
 >;
-type GossipedBlockDownloads =
-    BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<SemanticBlockVerifier>, State>;
+type GossipedBlockDownloads = BlockDownloads<
+    Timeout<BlockDownloadPeerSet>,
+    Timeout<SemanticBlockVerifier>,
+    State,
+    zs::LatestChainTip,
+>;
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
@@ -351,6 +355,14 @@ impl Service<zn::Request> for Inbound {
                     let score = if let Some(err) = err.downcast_ref::<RouterError>() {
                         err.misbehavior_score()
                     } else if let Some(err) = err.downcast_ref::<VerifyBlockError>() {
+                        err.misbehavior_score()
+                    } else if let Some(err) = err.downcast_ref::<HeightLimitError>() {
+                        // A gossiped block dropped before the verifier because its coinbase height
+                        // was outside the accepted range around the tip. The downloader only
+                        // attaches an advertiser address to these drops when the parent header
+                        // Zebra holds contradicts the claimed height, which proves the height was
+                        // rewritten (GHSA-4f6v-mj46-gxg3), so honest peers serving genuinely old or
+                        // far-ahead blocks are never scored.
                         err.misbehavior_score()
                     } else {
                         continue;
