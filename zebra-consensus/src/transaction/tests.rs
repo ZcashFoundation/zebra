@@ -4153,12 +4153,12 @@ async fn mempool_zip317_ok() {
         .expect("Nu5 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
 
-    // Will produce a big enough miner fee to pass the check.
+    // Pays exactly the ZIP-317 conventional fee for two logical actions.
     let (input, output, known_utxos) = mock_transparent_transfer(
         fund_height,
         true,
         0,
-        Amount::try_from(10_001).expect("valid amount"),
+        Amount::try_from(2_001).expect("valid amount"),
     );
 
     // Create a non-coinbase V5 tx.

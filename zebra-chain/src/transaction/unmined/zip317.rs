@@ -20,7 +20,7 @@ mod tests;
 /// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
 //
 // TODO: allow Amount<NonNegative> in constants
-pub const MARGINAL_FEE: u64 = 5_000;
+pub const MARGINAL_FEE: u64 = 1_000;
 
 /// The number of grace logical actions allowed by the ZIP-317 fee calculation.
 const GRACE_ACTIONS: u32 = 2;
@@ -33,9 +33,6 @@ const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
 /// The weight ratio cap for ZIP-317 block production.
 /// `weight_ratio_cap` in ZIP-317.
-///
-/// This is higher than the ZIP-317 recommended value of 4, widening the priority
-/// lane for transactions that pay more than their conventional fee.
 const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 10.0;
 
 /// The minimum fee for the block production weight ratio calculation, in zatoshis.
@@ -102,7 +99,7 @@ pub fn unpaid_actions(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -
 
     // max(0, conventional_actions - marginal_fee_weight_ratio)
     //
-    // Subtracting MAX_MONEY/5000 from a u32 can't go above i64::MAX.
+    // Subtracting MAX_MONEY/1000 from a u32 can't go above i64::MAX.
     let unpaid_actions = i64::from(conventional_actions) - marginal_fee_weight_ratio;
 
     unpaid_actions.try_into().unwrap_or_default()
