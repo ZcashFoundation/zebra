@@ -107,6 +107,10 @@ Canopy = 1_046_400
 NU5 = 1_687_104
 NU6 = 2_726_400
 "NU6.1" = 3_146_400
+"NU6.2" = 3_364_600
+"NU6.3" = 3_428_143
+# NU7 has no scheduled activation height yet; this is an example value.
+NU7 = 3_500_000
 
 # This section may be omitted if it's not necessary to
 # add transactions to Zebra's mempool

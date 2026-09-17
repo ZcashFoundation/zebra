@@ -21,15 +21,11 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::zcash_history::BlockCommitmentTreeRoots,
-    primitives::Groth16Proof,
     sapling,
     serialization::ZcashSerialize as _,
     sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::{
-        self,
-        Transaction::{self, *},
-    },
+    transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -1604,10 +1600,12 @@ impl Chain {
         addresses: &HashSet<transparent::Address>,
     ) -> (Amount<NegativeAllowed>, u64) {
         let (balance, received) = self.partial_transparent_indexes(addresses).fold(
-            (Ok(Amount::zero()), 0),
+            (Ok(Amount::zero()), 0u64),
             |(balance, received), transfers| {
                 let balance = balance + transfers.balance();
-                (balance, received + transfers.received())
+                // Saturate: each per-address `received()` can already reach `u64::MAX`, so
+                // summing several of them could overflow. Matches the finalized path (#10556).
+                (balance, received.saturating_add(transfers.received()))
             },
         );
 
@@ -1647,6 +1645,19 @@ impl Chain {
             .collect();
 
         (created_utxos, spent_utxos)
+    }
+
+    /// Returns the number of UTXOs that `addresses` spend in this partial non-finalized chain.
+    ///
+    /// A limited finalized UTXO query has to over-fetch by this many entries, because any of
+    /// the UTXOs it returns can turn out to be spent here.
+    pub fn partial_transparent_spent_utxo_count(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> usize {
+        self.partial_transparent_indexes(addresses)
+            .map(|transfers| transfers.spent_utxos().len())
+            .sum()
     }
 
     /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds,
@@ -1815,71 +1826,13 @@ impl Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-                ironwood_shielded_data,
-            ) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    &None,
-                    None,
-                    None,
-                ),
-                V5 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data.as_ref(),
-                    None,
-                ),
-                V6 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ironwood_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data.as_ref().map(|data| data.data()),
-                    ironwood_shielded_data.as_ref(),
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
-            };
+            let inputs = transaction.inputs();
+            let outputs = transaction.outputs();
 
             // Shielded-data updates run before the transparent updates and
             // the `tx_loc_by_hash` insert so that a duplicate transaction
             // (same hash → same nullifiers) is rejected with a clean
-            // `Duplicate{Sprout|Sapling|Orchard}Nullifier` error by
+            // `Duplicate{Sprout|Sapling|Orchard|Ironwood}Nullifier` error by
             // `add_to_non_finalized_chain_unique` before reaching the
             // defense-in-depth assertions on `tx_loc_by_hash`,
             // `created_utxos`, and `spent_utxos` below.
@@ -1887,22 +1840,37 @@ impl Chain {
                 #[cfg(not(feature = "indexer"))]
                 let transaction_hash = ();
 
-                self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
-                self.update_chain_tip_with(&(
-                    sapling_shielded_data_per_spend_anchor,
-                    &transaction_hash,
-                ))?;
-                self.update_chain_tip_with(&(
-                    sapling_shielded_data_shared_anchor,
-                    &transaction_hash,
-                ))?;
-                self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+                // Sprout nullifiers
+                let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
+                check::nullifier::add_to_non_finalized_chain_unique(
+                    &mut self.sprout_nullifiers,
+                    sprout_nfs,
+                    transaction_hash,
+                )?;
 
-                // The Ironwood pool reuses orchard::ShieldedData, so its nullifiers are applied
-                // through a distinct UpdateWith impl keyed on the ironwood::ShieldedData newtype
-                // (which doesn't collide with the Orchard impl). It flows through the version match
-                // above so a new tx version cannot silently skip it.
-                self.update_chain_tip_with(&(ironwood_shielded_data, &transaction_hash))?;
+                // Sapling nullifiers
+                let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
+                check::nullifier::add_to_non_finalized_chain_unique(
+                    &mut self.sapling_nullifiers,
+                    sapling_nfs,
+                    transaction_hash,
+                )?;
+
+                // Orchard nullifiers
+                let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
+                check::nullifier::add_to_non_finalized_chain_unique(
+                    &mut self.orchard_nullifiers,
+                    orchard_nfs,
+                    transaction_hash,
+                )?;
+
+                // Ironwood nullifiers
+                let ironwood_nfs: Vec<_> = transaction.ironwood_nullifiers().collect();
+                check::nullifier::add_to_non_finalized_chain_unique(
+                    &mut self.ironwood_nullifiers,
+                    ironwood_nfs,
+                    transaction_hash,
+                )?;
             }
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -1916,9 +1884,9 @@ impl Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
+            self.update_chain_tip_with(&(&outputs, &transaction_hash, new_outputs))?;
             // delete the utxos this consumed
-            self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
+            self.update_chain_tip_with(&(&inputs, &transaction_hash, spent_outputs))?;
         }
 
         // update the chain value pool balances
@@ -2027,71 +1995,13 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-                ironwood_shielded_data,
-            ) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    &None,
-                    None,
-                    None,
-                ),
-                V5 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data.as_ref(),
-                    None,
-                ),
-                V6 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ironwood_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data.as_ref().map(|data| data.data()),
-                    ironwood_shielded_data.as_ref(),
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
-            };
+            let inputs = transaction.inputs();
+            let outputs = transaction.outputs();
 
             // remove the utxos this produced
-            self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
+            self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
             // reset the utxos this consumed
-            self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
+            self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
 
             // TODO: move this to the history tree UpdateWith.revert...()?
             // remove `transaction.hash` from `tx_loc_by_hash`
@@ -2100,26 +2010,35 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 "transactions must be present if block was added to chain"
             );
 
-            // remove the shielded data
+            // remove the shielded nullifiers
 
-            #[cfg(not(feature = "indexer"))]
-            let transaction_hash = &();
-
-            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
-            self.revert_chain_with(
-                &(sapling_shielded_data_per_spend_anchor, transaction_hash),
-                position,
+            // Sprout nullifiers
+            let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                sprout_nfs,
             );
-            self.revert_chain_with(
-                &(sapling_shielded_data_shared_anchor, transaction_hash),
-                position,
-            );
-            self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
 
-            // Revert the Ironwood nullifiers through the matching UpdateWith impl (see
-            // `update_chain_tip_with_block_except_trees`). It flows through the version match above
-            // so the revert stays in lockstep with the update for every tx version.
-            self.revert_chain_with(&(ironwood_shielded_data, transaction_hash), position);
+            // Sapling nullifiers
+            let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sapling_nullifiers,
+                sapling_nfs,
+            );
+
+            // Orchard nullifiers
+            let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.orchard_nullifiers,
+                orchard_nfs,
+            );
+
+            // Ironwood nullifiers
+            let ironwood_nfs: Vec<_> = transaction.ironwood_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.ironwood_nullifiers,
+                ironwood_nfs,
+            );
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -2358,212 +2277,6 @@ impl
     }
 }
 
-impl
-    UpdateWith<(
-        &Option<transaction::JoinSplitData<Groth16Proof>>,
-        &SpendingTransactionId,
-    )> for Chain
-{
-    #[instrument(skip(self, joinsplit_data))]
-    fn update_chain_tip_with(
-        &mut self,
-        &(joinsplit_data, revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Groth16Proof>>,
-            &SpendingTransactionId,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        if let Some(joinsplit_data) = joinsplit_data {
-            // We do note commitment tree updates in parallel rayon threads.
-
-            check::nullifier::add_to_non_finalized_chain_unique(
-                &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers().copied(),
-                *revealing_tx_id,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// # Panics
-    ///
-    /// Panics if any nullifier is missing from the chain when we try to remove it.
-    ///
-    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
-    #[instrument(skip(self, joinsplit_data))]
-    fn revert_chain_with(
-        &mut self,
-        &(joinsplit_data, _revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Groth16Proof>>,
-            &SpendingTransactionId,
-        ),
-        _position: RevertPosition,
-    ) {
-        if let Some(joinsplit_data) = joinsplit_data {
-            // Note commitments are removed from the Chain during a fork,
-            // by removing trees above the fork height from the note commitment index.
-            // This happens when reverting the block itself.
-
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers().copied(),
-            );
-        }
-    }
-}
-
-impl<AnchorV>
-    UpdateWith<(
-        &Option<sapling::ShieldedData<AnchorV>>,
-        &SpendingTransactionId,
-    )> for Chain
-where
-    AnchorV: sapling::AnchorVariant + Clone,
-{
-    #[instrument(skip(self, sapling_shielded_data))]
-    fn update_chain_tip_with(
-        &mut self,
-        &(sapling_shielded_data, revealing_tx_id): &(
-            &Option<sapling::ShieldedData<AnchorV>>,
-            &SpendingTransactionId,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        if let Some(sapling_shielded_data) = sapling_shielded_data {
-            // We do note commitment tree updates in parallel rayon threads.
-
-            check::nullifier::add_to_non_finalized_chain_unique(
-                &mut self.sapling_nullifiers,
-                sapling_shielded_data.nullifiers().copied(),
-                *revealing_tx_id,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// # Panics
-    ///
-    /// Panics if any nullifier is missing from the chain when we try to remove it.
-    ///
-    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
-    #[instrument(skip(self, sapling_shielded_data))]
-    fn revert_chain_with(
-        &mut self,
-        &(sapling_shielded_data, _revealing_tx_id): &(
-            &Option<sapling::ShieldedData<AnchorV>>,
-            &SpendingTransactionId,
-        ),
-        _position: RevertPosition,
-    ) {
-        if let Some(sapling_shielded_data) = sapling_shielded_data {
-            // Note commitments are removed from the Chain during a fork,
-            // by removing trees above the fork height from the note commitment index.
-            // This happens when reverting the block itself.
-
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.sapling_nullifiers,
-                sapling_shielded_data.nullifiers().copied(),
-            );
-        }
-    }
-}
-
-impl UpdateWith<(Option<&orchard::ShieldedData>, &SpendingTransactionId)> for Chain {
-    #[instrument(skip(self, orchard_shielded_data))]
-    fn update_chain_tip_with(
-        &mut self,
-        &(orchard_shielded_data, revealing_tx_id): &(
-            Option<&orchard::ShieldedData>,
-            &SpendingTransactionId,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        if let Some(orchard_shielded_data) = orchard_shielded_data {
-            // We do note commitment tree updates in parallel rayon threads.
-
-            check::nullifier::add_to_non_finalized_chain_unique(
-                &mut self.orchard_nullifiers,
-                orchard_shielded_data.nullifiers().copied(),
-                *revealing_tx_id,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// # Panics
-    ///
-    /// Panics if any nullifier is missing from the chain when we try to remove it.
-    ///
-    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
-    #[instrument(skip(self, orchard_shielded_data))]
-    fn revert_chain_with(
-        &mut self,
-        (orchard_shielded_data, _revealing_tx_id): &(
-            Option<&orchard::ShieldedData>,
-            &SpendingTransactionId,
-        ),
-        _position: RevertPosition,
-    ) {
-        if let Some(orchard_shielded_data) = orchard_shielded_data {
-            // Note commitments are removed from the Chain during a fork,
-            // by removing trees above the fork height from the note commitment index.
-            // This happens when reverting the block itself.
-
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.orchard_nullifiers,
-                orchard_shielded_data.nullifiers().copied(),
-            );
-        }
-    }
-}
-
-impl UpdateWith<(Option<&ironwood::ShieldedData>, &SpendingTransactionId)> for Chain {
-    #[instrument(skip(self, ironwood_shielded_data))]
-    fn update_chain_tip_with(
-        &mut self,
-        &(ironwood_shielded_data, revealing_tx_id): &(
-            Option<&ironwood::ShieldedData>,
-            &SpendingTransactionId,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        if let Some(ironwood_shielded_data) = ironwood_shielded_data {
-            // The Ironwood pool reuses orchard::ShieldedData but commits to a disjoint nullifier
-            // set, so its nullifiers are wrapped in the ironwood::Nullifier newtype.
-            check::nullifier::add_to_non_finalized_chain_unique(
-                &mut self.ironwood_nullifiers,
-                ironwood_shielded_data
-                    .data()
-                    .nullifiers()
-                    .map(|nullifier| ironwood::Nullifier::from(*nullifier)),
-                *revealing_tx_id,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// # Panics
-    ///
-    /// Panics if any nullifier is missing from the chain when we try to remove it.
-    ///
-    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
-    #[instrument(skip(self, ironwood_shielded_data))]
-    fn revert_chain_with(
-        &mut self,
-        (ironwood_shielded_data, _revealing_tx_id): &(
-            Option<&ironwood::ShieldedData>,
-            &SpendingTransactionId,
-        ),
-        _position: RevertPosition,
-    ) {
-        if let Some(ironwood_shielded_data) = ironwood_shielded_data {
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.ironwood_nullifiers,
-                ironwood_shielded_data
-                    .data()
-                    .nullifiers()
-                    .map(|nullifier| ironwood::Nullifier::from(*nullifier)),
-            );
-        }
-    }
-}
-
 impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
@@ -2623,17 +2336,20 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
 impl Ord for Chain {
     /// Chain order for the [`NonFinalizedState`][1]'s `chain_set`.
     ///
-    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`],
-    /// breaking ties using the tip block hash.
+    /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`].
+    /// Ties are broken by preferring the chain whose tip block was received
+    /// first (the earlier [`received_time`][3] stamp set by the block verifier),
+    /// implementing the consensus rule
+    /// quoted below. Sibling blocks on Zcash always have equal work (`nBits`
+    /// is fully determined by their ancestors), so without first-received
+    /// preference, an already-adopted tip could be displaced by an equal-work
+    /// sibling arriving arbitrarily later.
     ///
-    /// Despite the consensus rules, Zebra uses the tip block hash as a
-    /// tie-breaker. Zebra blocks are downloaded in parallel, so download
-    /// timestamps may not be unique. (And Zebra currently doesn't track
-    /// download times, because [`Block`](block::Block)s are immutable.)
-    ///
-    /// This departure from the consensus rules may delay network convergence,
-    /// for as long as the greater hash belongs to the later mined block.
-    /// But Zebra nodes should converge as soon as the tied work is broken.
+    /// The tip block hash remains as a final tie-breaker when receipt times
+    /// are equal, so that the order is total. Chains whose tip has no receipt
+    /// stamp (checkpoint sync, backup restore) compare as if received before
+    /// any stamped block, like `zcashd`'s disk-loaded blocks, which all share
+    /// `nSequenceId` 0.
     ///
     /// "At a given point in time, each full validator is aware of a set of candidate blocks.
     /// These form a tree rooted at the genesis block, where each node in the tree
@@ -2658,40 +2374,41 @@ impl Ord for Chain {
     /// # Correctness
     ///
     /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
-    /// interior mutability.
+    /// interior mutability. The tip block's `received_time` is set by the block verifier
+    /// before the block is pushed onto a chain, and is never modified afterwards.
     ///
     /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
-    /// the tip hash match. The [`NonFinalizedState::chain_set`][2] is a
-    /// `BTreeSet<Arc<Chain>>`, so an attempt to insert a chain that compares
-    /// equal to an existing entry is a no-op rather than a process-fatal panic.
-    /// Callers that need to replace such a chain must remove the existing entry
-    /// first.
+    /// the tip hash match. Two chains with the same tip hash share the stored tip
+    /// block (and therefore its receipt time), so they always compare equal. The
+    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
+    /// attempt to insert a chain that compares equal to an existing entry is a
+    /// no-op rather than a process-fatal panic. Callers that need to replace
+    /// such a chain must remove the existing entry first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
+    /// [3]: ContextuallyVerifiedBlock::received_time
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.partial_cumulative_work != other.partial_cumulative_work {
-            self.partial_cumulative_work
-                .cmp(&other.partial_cumulative_work)
-        } else {
-            let self_hash = self
-                .blocks
-                .values()
-                .last()
-                .expect("always at least 1 element")
-                .hash;
+        self.partial_cumulative_work
+            .cmp(&other.partial_cumulative_work)
+            .then_with(|| {
+                let self_tip = self
+                    .tip_block()
+                    .expect("non-finalized chains always have at least one block");
+                let other_tip = other
+                    .tip_block()
+                    .expect("non-finalized chains always have at least one block");
 
-            let other_hash = other
-                .blocks
-                .values()
-                .last()
-                .expect("always at least 1 element")
-                .hash;
-
-            // This comparison is a tie-breaker within the local node, so it does not need to
-            // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
-            self_hash.0.cmp(&other_hash.0)
-        }
+                // Prefer the first-received tip: an EARLIER receipt time is a BETTER chain,
+                // so it must compare `Greater` (the best chain is the greatest in the set).
+                other_tip
+                    .received_time
+                    .cmp(&self_tip.received_time)
+                    // This comparison is a tie-breaker within the local node, so it does not
+                    // need to be consistent with the ordering on `ExpandedDifficulty` and
+                    // `block::Hash`.
+                    .then_with(|| self_tip.hash.0.cmp(&other_tip.hash.0))
+            })
     }
 }
 
@@ -2703,7 +2420,7 @@ impl PartialOrd for Chain {
 
 impl PartialEq for Chain {
     /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
-    /// work, then the tip block hash as a tie-breaker.
+    /// work, then the tip block's receipt time, then the tip block hash.
     ///
     /// Two chains with the same cumulative work and tip hash are equal; the
     /// `chain_set` uses this to keep tip hashes unique.

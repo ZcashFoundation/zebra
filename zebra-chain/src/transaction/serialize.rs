@@ -3,28 +3,34 @@
 
 use std::{borrow::Borrow, io, sync::Arc};
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::pasta::group::ff::PrimeField;
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::FromHex;
-use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
-    amount,
     block::MAX_BLOCK_BYTES,
-    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{Halo2Proof, ZkSnarkProof},
+    primitives::ZkSnarkProof,
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_empty_list,
-        zcash_serialize_external_count, AtLeastOne, CompactSizeMessage, ReadZcashExt,
-        SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
-use crate::parameters::TX_V6_VERSION_GROUP_ID;
-
 use super::*;
-use crate::sapling;
+use crate::sprout;
+
+// Only the test-gated shielded-data codecs below need these.
+#[cfg(any(test, feature = "proptest-impl"))]
+use crate::{
+    amount, ironwood, orchard,
+    primitives::Halo2Proof,
+    sapling,
+    serialization::{
+        zcash_deserialize_external_count, zcash_serialize_empty_list,
+        zcash_serialize_external_count, AtLeastOne, CompactSizeMessage,
+    },
+};
+#[cfg(any(test, feature = "proptest-impl"))]
+use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -109,10 +115,103 @@ where
     }
 }
 
+// Serialization for Zebra's own shielded-data types.
+//
+// Production transaction serialization goes through `zcash_primitives`, which owns the wire
+// format for every shielded pool (see the `ZcashSerialize`/`ZcashDeserialize` impls for
+// `Transaction`). The codecs below operate on Zebra's `sapling`/`orchard`/`ironwood`
+// shielded-data structs, which no production path serializes, so they are compiled only for
+// tests. Gating them keeps a second copy of the wire format out of release builds and makes it
+// unambiguous which encoder consensus depends on.
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl ZcashSerialize for Option<sapling::ShieldedData<sapling::PerSpendAnchor>> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => {
+                zcash_serialize_empty_list(&mut writer)?;
+                zcash_serialize_empty_list(&mut writer)?;
+            }
+            Some(sd) => {
+                sd.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl ZcashSerialize for sapling::ShieldedData<sapling::PerSpendAnchor> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let spends: Vec<_> = self.spends().cloned().collect();
+        let outputs: Vec<_> = self
+            .outputs()
+            .cloned()
+            .map(sapling::Output::into_v4)
+            .collect();
+
+        spends.zcash_serialize(&mut writer)?;
+        outputs.zcash_serialize(&mut writer)?;
+        self.value_balance.zcash_serialize(&mut writer)?;
+        writer.write_all(&<[u8; 64]>::from(self.binding_sig)[..])?;
+        Ok(())
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::PerSpendAnchor>> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let spends: Vec<sapling::Spend<sapling::PerSpendAnchor>> =
+            (&mut reader).zcash_deserialize_into()?;
+        let outputs: Vec<sapling::OutputInTransactionV4> =
+            (&mut reader).zcash_deserialize_into()?;
+
+        if spends.is_empty() && outputs.is_empty() {
+            return Ok(None);
+        }
+
+        let value_balance = (&mut reader).zcash_deserialize_into()?;
+        let binding_sig = reader.read_64_bytes()?.into();
+
+        let outputs: Vec<sapling::Output> = outputs
+            .into_iter()
+            .map(sapling::OutputInTransactionV4::into_output)
+            .collect();
+
+        let transfers = match spends.split_first() {
+            None => sapling::TransferData::JustOutputs {
+                outputs: outputs.try_into().map_err(|_| {
+                    SerializationError::Parse(
+                        "ShieldedData<PerSpendAnchor> with no spends or outputs",
+                    )
+                })?,
+            },
+            Some((first, rest)) => sapling::TransferData::SpendsAndMaybeOutputs {
+                shared_anchor: sapling::FieldNotPresent,
+                spends: std::iter::once(first.clone())
+                    .chain(rest.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .map_err(|_| {
+                        SerializationError::Parse("ShieldedData<PerSpendAnchor> spend list empty")
+                    })?,
+                maybe_outputs: outputs,
+            },
+        };
+
+        Ok(Some(sapling::ShieldedData {
+            value_balance,
+            transfers,
+            binding_sig,
+        }))
+    }
+}
+
 // Transaction::V5 serializes sapling ShieldedData in a single continuous byte
 // range, so we can implement its serialization and deserialization separately.
 // (Unlike V4, where it must be serialized as part of the transaction.)
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
@@ -130,6 +229,7 @@ impl ZcashSerialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for sapling::ShieldedData<sapling::SharedAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Collect arrays for Spends
@@ -181,6 +281,7 @@ impl ZcashSerialize for sapling::ShieldedData<sapling::SharedAnchor> {
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
@@ -195,6 +296,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
 /// **before** allocating the spend vector, closing the late-validation gap
 /// described in GHSA-rgwx-8r98-p34c.
 #[allow(clippy::unwrap_in_result)]
+#[cfg(any(test, feature = "proptest-impl"))]
 fn deserialize_v5_sapling_shielded_data<R: io::Read>(
     mut reader: R,
     is_coinbase: bool,
@@ -367,6 +469,7 @@ fn deserialize_v5_sapling_shielded_data<R: io::Read>(
 /// "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard, proofsOrchard,
 /// and bindingSigOrchard are present if and only if nActionsOrchard > 0." — `§` note of the second
 /// table of <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
+#[cfg(any(test, feature = "proptest-impl"))]
 fn zcash_serialize_optional_orchard_bundle<W: io::Write>(
     shielded_data: Option<&orchard::ShieldedData>,
     mut writer: W,
@@ -378,12 +481,14 @@ fn zcash_serialize_optional_orchard_bundle<W: io::Write>(
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for Option<orchard::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_optional_orchard_bundle(self.as_ref(), writer)
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for orchard::ShieldedData {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Split the AuthorizedAction
@@ -427,16 +532,19 @@ impl ZcashSerialize for orchard::ShieldedData {
 /// (MUST be 0) for the Orchard pool regardless of tx version — matching
 /// `orchard::bundle::Flags::from_byte`, which rejects bit 2 for `ValuePool::Orchard`. Tying the
 /// codec to the bundle type lets the (de)serializers below imply it instead of naming it explicitly.
+#[cfg(any(test, feature = "proptest-impl"))]
 trait V6FlagCodec {
     /// The flag codec: `orchard::Flags` reserves bit 2, `orchard::FlagsV6` permits it.
     type Codec: ZcashDeserialize + Into<orchard::Flags>;
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl V6FlagCodec for orchard::ShieldedDataV6 {
     // The v6 Orchard bundle parses with the pre-NU6.3 codec, exactly like v5.
     type Codec = orchard::Flags;
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl V6FlagCodec for ironwood::ShieldedData {
     // Only the Ironwood bundle permits `enableCrossAddress`.
     type Codec = orchard::FlagsV6;
@@ -444,6 +552,7 @@ impl V6FlagCodec for ironwood::ShieldedData {
 
 /// Deserializes the shared Orchard-protocol bundle body of a v6 bundle newtype `T`, using the flag
 /// codec [implied by `T`](V6FlagCodec) rather than one named at the call site.
+#[cfg(any(test, feature = "proptest-impl"))]
 fn deserialize_v6_orchard_shielded_data<R, T>(
     reader: R,
 ) -> Result<Option<orchard::ShieldedData>, SerializationError>
@@ -454,6 +563,7 @@ where
     deserialize_orchard_shielded_data::<R, T::Codec>(reader)
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
@@ -463,12 +573,14 @@ impl ZcashDeserialize for Option<orchard::ShieldedDataV6> {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for Option<orchard::ShieldedDataV6> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(
@@ -479,6 +591,7 @@ impl ZcashDeserialize for Option<ironwood::ShieldedData> {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashSerialize for Option<ironwood::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_optional_orchard_bundle(self.as_ref().map(|data| data.data()), writer)
@@ -487,6 +600,7 @@ impl ZcashSerialize for Option<ironwood::ShieldedData> {
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
+#[cfg(any(test, feature = "proptest-impl"))]
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         // The bare `Option<orchard::ShieldedData>` codec is the v5 Orchard bundle, which uses the
@@ -500,6 +614,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
 ///
 /// v5 Orchard bundles pass `F = orchard::Flags` (pre-NU6.3 format); v6 Orchard and Ironwood bundles
 /// pass `F = orchard::FlagsV6` (the NU6.3 format, which permits the `enableCrossAddress` flag).
+#[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) fn deserialize_orchard_shielded_data<R, F>(
     mut reader: R,
 ) -> Result<Option<orchard::ShieldedData>, SerializationError>
@@ -583,642 +698,6 @@ impl<T: reddsa::SigType> ZcashSerialize for reddsa::Signature<T> {
 impl<T: reddsa::SigType> ZcashDeserialize for reddsa::Signature<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Ok(reader.read_64_bytes()?.into())
-    }
-}
-
-impl ZcashSerialize for Transaction {
-    #[allow(clippy::unwrap_in_result)]
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
-        // (Strictly, the maximum transaction size is about 1.5 kB less,
-        // because blocks also include a block header.)
-        //
-        // Currently, all transaction structs are parsed as part of a
-        // block. So we don't need to check transaction size here, until
-        // we start parsing mempool transactions, or generating our own
-        // transactions (see #483).
-        //
-        // Since we checkpoint on Canopy activation, we won't ever need
-        // to check the smaller pre-Sapling transaction size limit.
-
-        // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
-        // Write `version` and set the `fOverwintered` bit if necessary
-        let overwintered_flag = if self.is_overwintered() { 1 << 31 } else { 0 };
-        let version = overwintered_flag | self.version();
-
-        writer.write_u32::<LittleEndian>(version)?;
-
-        match self {
-            Transaction::V1 {
-                inputs,
-                outputs,
-                lock_time,
-            } => {
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-            }
-            Transaction::V2 {
-                inputs,
-                outputs,
-                lock_time,
-                joinsplit_data,
-            } => {
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-
-                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                // `joinSplitPubKey` and `joinSplitSig`.
-                match joinsplit_data {
-                    // Write 0 for nJoinSplits to signal no JoinSplitData.
-                    None => zcash_serialize_empty_list(writer)?,
-                    Some(jsd) => jsd.zcash_serialize(&mut writer)?,
-                }
-            }
-            Transaction::V3 {
-                inputs,
-                outputs,
-                lock_time,
-                expiry_height,
-                joinsplit_data,
-            } => {
-                // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(OVERWINTER_VERSION_GROUP_ID)?;
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-
-                writer.write_u32::<LittleEndian>(expiry_height.0)?;
-
-                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                // `joinSplitPubKey` and `joinSplitSig`.
-                match joinsplit_data {
-                    // Write 0 for nJoinSplits to signal no JoinSplitData.
-                    None => zcash_serialize_empty_list(writer)?,
-                    Some(jsd) => jsd.zcash_serialize(&mut writer)?,
-                }
-            }
-            Transaction::V4 {
-                inputs,
-                outputs,
-                lock_time,
-                expiry_height,
-                sapling_shielded_data,
-                joinsplit_data,
-            } => {
-                // Transaction V4 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
-
-                // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                writer.write_u32::<LittleEndian>(expiry_height.0)?;
-
-                // The previous match arms serialize in one go, because the
-                // internal structure happens to nicely line up with the
-                // serialized structure. However, this is not possible for
-                // version 4 transactions, as the binding_sig for the
-                // ShieldedData is placed at the end of the transaction. So
-                // instead we have to interleave serialization of the
-                // ShieldedData and the JoinSplitData.
-
-                match sapling_shielded_data {
-                    None => {
-                        // Signal no value balance.
-                        writer.write_i64::<LittleEndian>(0)?;
-                        // Signal no shielded spends and no shielded outputs.
-                        zcash_serialize_empty_list(&mut writer)?;
-                        zcash_serialize_empty_list(&mut writer)?;
-                    }
-                    Some(sapling_shielded_data) => {
-                        // Denoted as `valueBalanceSapling` in the spec.
-                        sapling_shielded_data
-                            .value_balance
-                            .zcash_serialize(&mut writer)?;
-
-                        // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
-                        let spends: Vec<_> = sapling_shielded_data.spends().cloned().collect();
-                        spends.zcash_serialize(&mut writer)?;
-
-                        // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
-                        let outputs: Vec<_> = sapling_shielded_data
-                            .outputs()
-                            .cloned()
-                            .map(sapling::OutputInTransactionV4)
-                            .collect();
-                        outputs.zcash_serialize(&mut writer)?;
-                    }
-                }
-
-                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                // `joinSplitPubKey` and `joinSplitSig`.
-                match joinsplit_data {
-                    None => zcash_serialize_empty_list(&mut writer)?,
-                    Some(jsd) => jsd.zcash_serialize(&mut writer)?,
-                }
-
-                // Denoted as `bindingSigSapling` in the spec.
-                if let Some(shielded_data) = sapling_shielded_data {
-                    writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
-                }
-            }
-
-            Transaction::V5 {
-                network_upgrade,
-                lock_time,
-                expiry_height,
-                inputs,
-                outputs,
-                sapling_shielded_data,
-                orchard_shielded_data,
-            } => {
-                // Transaction V5 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
-
-                // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
-
-                // Denoted as `nConsensusBranchId` in the spec.
-                writer.write_u32::<LittleEndian>(u32::from(
-                    network_upgrade
-                        .branch_id()
-                        .expect("valid transactions must have a network upgrade with a branch id"),
-                ))?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                writer.write_u32::<LittleEndian>(expiry_height.0)?;
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
-                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
-                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
-                // `bindingSigSapling`.
-                sapling_shielded_data.zcash_serialize(&mut writer)?;
-
-                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
-                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
-                orchard_shielded_data.zcash_serialize(&mut writer)?;
-            }
-
-            Transaction::V6 {
-                network_upgrade,
-                lock_time,
-                expiry_height,
-                inputs,
-                outputs,
-                sapling_shielded_data,
-                orchard_shielded_data,
-                ironwood_shielded_data,
-            } => {
-                // Transaction V6 (Ironwood / NU6.3) spec:
-                // https://github.com/zcash/zips/pull/1301
-
-                // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
-
-                // Denoted as `nConsensusBranchId` in the spec.
-                writer.write_u32::<LittleEndian>(u32::from(
-                    network_upgrade
-                        .branch_id()
-                        .expect("valid transactions must have a network upgrade with a branch id"),
-                ))?;
-
-                // Denoted as `lock_time` in the spec.
-                lock_time.zcash_serialize(&mut writer)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                writer.write_u32::<LittleEndian>(expiry_height.0)?;
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs.zcash_serialize(&mut writer)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs.zcash_serialize(&mut writer)?;
-
-                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
-                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
-                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
-                // `bindingSigSapling`.
-                sapling_shielded_data.zcash_serialize(&mut writer)?;
-
-                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
-                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
-                orchard_shielded_data.zcash_serialize(&mut writer)?;
-
-                // The Ironwood bundle: the same field layout as the Orchard bundle above, denoted
-                // `nActionsIronwood`, `vActionsIronwood`, `flagsIronwood`, `valueBalanceIronwood`,
-                // `anchorIronwood`, `sizeProofsIronwood`, `proofsIronwood`, `vSpendAuthSigsIronwood`,
-                // and `bindingSigIronwood`.
-                ironwood_shielded_data.zcash_serialize(&mut writer)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Transaction {
-    #[allow(clippy::unwrap_in_result)]
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        // # Consensus
-        //
-        // > [Pre-Sapling] The encoded size of the transaction MUST be less than or
-        // > equal to 100000 bytes.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-        //
-        // Zebra does not verify this rule because we checkpoint up to Canopy blocks, but:
-        // Since transactions must get mined into a block to be useful,
-        // we reject transactions that are larger than blocks.
-        //
-        // If the limit is reached, we'll get an UnexpectedEof error.
-        let mut limited_reader = reader.take(MAX_BLOCK_BYTES);
-
-        let (version, overwintered) = {
-            const LOW_31_BITS: u32 = (1 << 31) - 1;
-            // Denoted as `header` in the spec, contains the `fOverwintered` flag and the `version` field.
-            let header = limited_reader.read_u32::<LittleEndian>()?;
-            (header & LOW_31_BITS, header >> 31 != 0)
-        };
-
-        // # Consensus
-        //
-        // The next rules apply for different transaction versions as follows:
-        //
-        // [Pre-Overwinter]: Transactions version 1 and 2.
-        // [Overwinter onward]: Transactions version 3 and above.
-        // [Overwinter only, pre-Sapling]: Transactions version 3.
-        // [Sapling to Canopy inclusive, pre-NU5]: Transactions version 4.
-        // [NU5 onward]: Transactions version 4 and above.
-        //
-        // > The transaction version number MUST be greater than or equal to 1.
-        //
-        // > [Pre-Overwinter] The fOverwintered fag MUST NOT be set.
-        //
-        // > [Overwinter onward] The version group ID MUST be recognized.
-        //
-        // > [Overwinter onward] The fOverwintered flag MUST be set.
-        //
-        // > [Overwinter only, pre-Sapling] The transaction version number MUST be 3,
-        // > and the version group ID MUST be 0x03C48270.
-        //
-        // > [Sapling to Canopy inclusive, pre-NU5] The transaction version number MUST be 4,
-        // > and the version group ID MUST be 0x892F2085.
-        //
-        // > [NU5 onward] The transaction version number MUST be 4 or 5.
-        // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
-        // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
-        //
-        // Note: Zebra checkpoints until Canopy blocks, this means only transactions versions
-        // 4 and 5 get fully verified. This satisfies "The transaction version number MUST be 4"
-        // and "The transaction version number MUST be 4 or 5" from the last two rules above.
-        // This is done in the zebra-consensus crate, in the transactions checks.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-        match (version, overwintered) {
-            (1, false) => Ok(Transaction::V1 {
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                inputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                outputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                // Denoted as `lock_time` in the spec.
-                lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
-            }),
-            (2, false) => {
-                // Version 2 transactions use Sprout-on-BCTV14.
-                type OptV2Jsd = Option<JoinSplitData<Bctv14Proof>>;
-                Ok(Transaction::V2 {
-                    // Denoted as `tx_in_count` and `tx_in` in the spec.
-                    inputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                    // Denoted as `tx_out_count` and `tx_out` in the spec.
-                    outputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                    // Denoted as `lock_time` in the spec.
-                    lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
-                    // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                    // `joinSplitPubKey` and `joinSplitSig`.
-                    joinsplit_data: OptV2Jsd::zcash_deserialize(&mut limited_reader)?,
-                })
-            }
-            (3, true) => {
-                // Denoted as `nVersionGroupId` in the spec.
-                let id = limited_reader.read_u32::<LittleEndian>()?;
-                if id != OVERWINTER_VERSION_GROUP_ID {
-                    return Err(SerializationError::Parse(
-                        "expected OVERWINTER_VERSION_GROUP_ID",
-                    ));
-                }
-                // Version 3 transactions use Sprout-on-BCTV14.
-                type OptV3Jsd = Option<JoinSplitData<Bctv14Proof>>;
-                Ok(Transaction::V3 {
-                    // Denoted as `tx_in_count` and `tx_in` in the spec.
-                    inputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                    // Denoted as `tx_out_count` and `tx_out` in the spec.
-                    outputs: Vec::zcash_deserialize(&mut limited_reader)?,
-                    // Denoted as `lock_time` in the spec.
-                    lock_time: LockTime::zcash_deserialize(&mut limited_reader)?,
-                    // Denoted as `nExpiryHeight` in the spec.
-                    expiry_height: block::Height(limited_reader.read_u32::<LittleEndian>()?),
-                    // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                    // `joinSplitPubKey` and `joinSplitSig`.
-                    joinsplit_data: OptV3Jsd::zcash_deserialize(&mut limited_reader)?,
-                })
-            }
-            (4, true) => {
-                // Transaction V4 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
-
-                // Denoted as `nVersionGroupId` in the spec.
-                let id = limited_reader.read_u32::<LittleEndian>()?;
-                if id != SAPLING_VERSION_GROUP_ID {
-                    return Err(SerializationError::Parse(
-                        "expected SAPLING_VERSION_GROUP_ID",
-                    ));
-                }
-                // Version 4 transactions use Sprout-on-Groth16.
-                type OptV4Jsd = Option<JoinSplitData<Groth16Proof>>;
-
-                // The previous match arms deserialize in one go, because the
-                // internal structure happens to nicely line up with the
-                // serialized structure. However, this is not possible for
-                // version 4 transactions, as the binding_sig for the
-                // ShieldedData is placed at the end of the transaction. So
-                // instead we have to pull the component parts out manually and
-                // then assemble them.
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                let is_coinbase = inputs.len() == 1
-                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
-
-                // Denoted as `lock_time` in the spec.
-                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
-
-                // Denoted as `valueBalanceSapling` in the spec.
-                let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
-
-                // Denoted as `nSpendsSapling` — read count before allocating.
-                let spend_count: CompactSizeMessage =
-                    (&mut limited_reader).zcash_deserialize_into()?;
-                let spend_count: usize = spend_count.into();
-
-                // # Consensus
-                //
-                // > A coinbase transaction MUST NOT have any Spend descriptions.
-                //
-                // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-                if is_coinbase && spend_count > 0 {
-                    return Err(SerializationError::Parse(
-                        "coinbase transaction must not have Sapling spends",
-                    ));
-                }
-
-                // Denoted as `vSpendsSapling` in the spec.
-                let shielded_spends: Vec<sapling::Spend<sapling::PerSpendAnchor>> =
-                    zcash_deserialize_external_count(spend_count, &mut limited_reader)?;
-
-                // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
-                let shielded_outputs =
-                    Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut limited_reader)?
-                        .into_iter()
-                        .map(sapling::Output::from_v4)
-                        .collect();
-
-                // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
-                // `joinSplitPubKey` and `joinSplitSig`.
-                let joinsplit_data = OptV4Jsd::zcash_deserialize(&mut limited_reader)?;
-
-                let sapling_transfers = if !shielded_spends.is_empty() {
-                    Some(sapling::TransferData::SpendsAndMaybeOutputs {
-                        shared_anchor: FieldNotPresent,
-                        spends: shielded_spends.try_into().expect("checked for spends"),
-                        maybe_outputs: shielded_outputs,
-                    })
-                } else if !shielded_outputs.is_empty() {
-                    Some(sapling::TransferData::JustOutputs {
-                        outputs: shielded_outputs.try_into().expect("checked for outputs"),
-                    })
-                } else {
-                    // # Consensus
-                    //
-                    // > [Sapling onward] If effectiveVersion = 4 and there are no Spend
-                    // > descriptions or Output descriptions, then valueBalanceSapling MUST be 0.
-                    //
-                    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-                    if value_balance != 0 {
-                        return Err(SerializationError::BadTransactionBalance);
-                    }
-                    None
-                };
-
-                let sapling_shielded_data = match sapling_transfers {
-                    Some(transfers) => Some(sapling::ShieldedData {
-                        value_balance,
-                        transfers,
-                        // Denoted as `bindingSigSapling` in the spec.
-                        binding_sig: limited_reader.read_64_bytes()?.into(),
-                    }),
-                    None => None,
-                };
-
-                Ok(Transaction::V4 {
-                    inputs,
-                    outputs,
-                    lock_time,
-                    expiry_height,
-                    sapling_shielded_data,
-                    joinsplit_data,
-                })
-            }
-            (5, true) => {
-                // Transaction V5 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
-
-                // Denoted as `nVersionGroupId` in the spec.
-                let id = limited_reader.read_u32::<LittleEndian>()?;
-                if id != TX_V5_VERSION_GROUP_ID {
-                    return Err(SerializationError::Parse("expected TX_V5_VERSION_GROUP_ID"));
-                }
-                // Denoted as `nConsensusBranchId` in the spec.
-                // Convert it to a NetworkUpgrade
-                let network_upgrade =
-                    NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
-
-                // # Consensus
-                //
-                // > [NU5 onward] The transaction version number MUST be 4 or 5.
-                //
-                // V5 transactions are only valid from NU5 onward, so reject
-                // transactions with pre-NU5 consensus branch IDs.
-                if network_upgrade < NetworkUpgrade::Nu5 {
-                    return Err(SerializationError::Parse(
-                        "v5 transaction must have NU5 or later consensus branch ID",
-                    ));
-                }
-
-                // Denoted as `lock_time` in the spec.
-                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                let is_coinbase = inputs.len() == 1
-                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
-
-                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
-                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
-                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
-                // `bindingSigSapling`.
-                let sapling_shielded_data =
-                    deserialize_v5_sapling_shielded_data(&mut limited_reader, is_coinbase)?;
-
-                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
-                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
-                let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
-
-                let tx = Transaction::V5 {
-                    network_upgrade,
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                };
-
-                tx.to_librustzcash(network_upgrade)?;
-
-                Ok(tx)
-            }
-            (6, true) => {
-                // Denoted as `nVersionGroupId` in the spec.
-                let id = limited_reader.read_u32::<LittleEndian>()?;
-                if id != TX_V6_VERSION_GROUP_ID {
-                    return Err(SerializationError::Parse("expected TX_V6_VERSION_GROUP_ID"));
-                }
-                // Denoted as `nConsensusBranchId` in the spec.
-                // Convert it to a NetworkUpgrade
-                let network_upgrade =
-                    NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
-                // v6 transactions are only valid from NU6.3 onward, so reject transactions with
-                // pre-NU6.3 consensus branch IDs at the wire layer. (The exact tx-vs-block network
-                // upgrade match is also re-checked during verification by `consensus_branch_id`.)
-                if network_upgrade < NetworkUpgrade::Nu6_3 {
-                    return Err(SerializationError::Parse(
-                        "v6 transaction must have a NU6.3 or later consensus branch ID",
-                    ));
-                }
-                // Denoted as `lock_time` in the spec.
-                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `nExpiryHeight` in the spec.
-                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
-
-                // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                // Denoted as `tx_out_count` and `tx_out` in the spec.
-                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
-
-                let is_coinbase = inputs.len() == 1
-                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
-
-                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
-                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
-                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
-                // `bindingSigSapling`.
-                //
-                // The v6 Sapling bundle has the same *wire* format as v5: the NU6.3 changes (moving
-                // `anchorSapling` from the txid digest to the auth digest, and the `..._v6`
-                // personalizations) only affect digest computation, which Zebra delegates to
-                // librustzcash via `to_librustzcash`. So the v5 Sapling codec is reused here.
-                let sapling_shielded_data =
-                    deserialize_v5_sapling_shielded_data(&mut limited_reader, is_coinbase)?;
-
-                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
-                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
-                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`. The v6 Orchard
-                // bundle reserves the `enableCrossAddress` bit (like v5); only the Ironwood bundle
-                // below permits it.
-                let orchard_shielded_data = (&mut limited_reader)
-                    .zcash_deserialize_into::<Option<orchard::ShieldedDataV6>>()?;
-
-                // The Ironwood bundle: the same field layout and NU6.3 flag format as the Orchard
-                // bundle above (`nActionsIronwood` .. `bindingSigIronwood`).
-                let ironwood_shielded_data = (&mut limited_reader)
-                    .zcash_deserialize_into::<Option<ironwood::ShieldedData>>()?;
-
-                let tx = Transaction::V6 {
-                    network_upgrade,
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ironwood_shielded_data,
-                };
-
-                // Validate that the whole transaction round-trips to the librustzcash format, as the
-                // v5 arm above does. Zebra's and librustzcash's parsers are not identical, so this
-                // fails closed at the wire layer for any divergence, ensuring an incompatibility can
-                // never reach the `expect(...)` in the txid/auth-digest path (`Hash::from`), which
-                // would otherwise abort the node on attacker-supplied input.
-                tx.to_librustzcash(network_upgrade)?;
-
-                Ok(tx)
-            }
-            (_, _) => Err(SerializationError::Parse("bad tx header")),
-        }
     }
 }
 

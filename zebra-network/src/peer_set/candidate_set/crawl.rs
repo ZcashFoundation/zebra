@@ -79,6 +79,7 @@ pub(crate) type CrawlService<S> = RateLimitBySkipping<CrawlFanout<S>>;
 /// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
 /// [`Failed`]: crate::PeerAddrState::Failed
 /// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
+/// [`next_reconnect_peer`]: super::next_reconnect_peer
 pub(crate) async fn crawl_once<S>(
     crawl_service: &mut CrawlService<S>,
     fanout_limit: Option<usize>,

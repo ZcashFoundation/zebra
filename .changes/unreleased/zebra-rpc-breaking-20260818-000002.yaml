@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`getaddressutxos` now accepts optional `startHeight` and `maxEntries` fields and bounds the state query by them. The JSON-RPC had no such fields before and silently dropped them, so a client that already sends them now receives fewer entries than before for the same request. The `GetAddressUtxos` gRPC method already accepted both, but applied them to the finished reply after the node had read every UTXO held by the named addresses; it now passes them through, so a request naming one address with a large UTXO set no longer costs the same whether it asks for one entry or all of them ([#11239](https://github.com/ZcashFoundation/zebra/issues/11239)).'
+time: 2026-08-18T00:00:02.000000000Z

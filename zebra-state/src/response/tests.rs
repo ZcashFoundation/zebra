@@ -32,6 +32,15 @@ fn fake_chain(network: &Network, len: usize) -> Vec<Arc<Block>> {
 
 /// Commits `blocks` (a single chain in ascending height order) into a fresh non-finalized state.
 fn state_from_chain(network: &Network, blocks: &[Arc<Block>]) -> NonFinalizedState {
+    state_from_chains(network, &[blocks])
+}
+
+/// Commits `chains` into a fresh non-finalized state.
+///
+/// The first block of the first chain becomes the new chain's root, and every other block is
+/// committed as a child, so a fork only needs to list the blocks above its fork point. Each chain
+/// must be in ascending height order.
+fn state_from_chains(network: &Network, chains: &[&[Arc<Block>]]) -> NonFinalizedState {
     let finalized_state = FinalizedState::new(
         &Config::ephemeral(),
         network,
@@ -41,12 +50,16 @@ fn state_from_chain(network: &Network, blocks: &[Arc<Block>]) -> NonFinalizedSta
     .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
 
+    let (best_chain, forks) = chains
+        .split_first()
+        .expect("there must be at least one chain");
+
     let mut state = NonFinalizedState::new(network);
-    let (root, rest) = blocks.split_first().expect("chain must not be empty");
+    let (root, rest) = best_chain.split_first().expect("chain must not be empty");
     state
         .commit_new_chain(root.clone().prepare(), &finalized_state)
         .expect("committing the root block should succeed");
-    for block in rest {
+    for block in rest.iter().chain(forks.iter().copied().flatten()) {
         state
             .commit_block(block.clone().prepare(), &finalized_state)
             .expect("committing a child block should succeed");
@@ -89,6 +102,38 @@ async fn sends_all_blocks_when_no_known_tips() {
     assert_eq!(recv_hash(&mut received).await, hashes[0]);
     assert_eq!(recv_hash(&mut received).await, hashes[1]);
     assert_eq!(recv_hash(&mut received).await, hashes[2]);
+    assert_idle(&mut received).await;
+}
+
+/// Chains that fork share every block below their fork point, so those blocks are only sent once.
+///
+/// Sending them once per chain would queue up to `MAX_NON_FINALIZED_CHAIN_FORKS` copies of a chain
+/// that can be `MAX_BLOCK_REORG_HEIGHT` blocks long, overflowing the channel buffer during an
+/// ordinary initial send.
+#[tokio::test]
+async fn sends_blocks_shared_between_chains_once() {
+    let network = Network::Mainnet;
+    let blocks = fake_chain(&network, 3);
+    let hashes: Vec<_> = blocks.iter().map(|b| b.hash()).collect();
+
+    // A second chain forking at block2: it shares block1 and block2 with the best chain, and its
+    // tip has less work than block3, so the best chain stays first in the chain order.
+    let fork_tip = blocks[1].make_fake_child().set_work(5);
+    let fork_tip_hash = fork_tip.hash();
+    assert_ne!(
+        fork_tip_hash, hashes[2],
+        "the fork must be a distinct block"
+    );
+
+    let (_tx, rx) = watch::channel(state_from_chains(&network, &[&blocks, &[fork_tip]]));
+    let listener = NonFinalizedBlocksListener::spawn(WatchReceiver::new(rx), HashSet::new());
+    let mut received = listener.unwrap();
+
+    // The best chain is sent in full, then the fork contributes only the block it doesn't share.
+    assert_eq!(recv_hash(&mut received).await, hashes[0]);
+    assert_eq!(recv_hash(&mut received).await, hashes[1]);
+    assert_eq!(recv_hash(&mut received).await, hashes[2]);
+    assert_eq!(recv_hash(&mut received).await, fork_tip_hash);
     assert_idle(&mut received).await;
 }
 

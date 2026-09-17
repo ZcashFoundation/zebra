@@ -26,6 +26,7 @@ comparison-interpreter = []
 libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
+zcash_transparent = { workspace = true }
 zebra-chain = { path = "../zebra-chain", version = "12.0.0" }
 
 rand = { workspace = true }
@@ -38,6 +39,9 @@ ripemd = { workspace = true }
 secp256k1 = { workspace = true }
 sha2 = { workspace = true }
 zebra-test = { path = "../zebra-test" }
+
+# The tests build transactions with `Transaction::test_v*`, which are gated behind this feature.
+zebra-chain = { path = "../zebra-chain", version = "12.0.0", features = ["proptest-impl"] }
 
 [lints]
 workspace = true

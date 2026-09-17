@@ -1691,11 +1691,17 @@ impl Service<ReadRequest> for ReadStateService {
             .map(ReadResponse::AddressesTransactionIds),
 
             // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => read::address_utxos(
+            ReadRequest::UtxosByAddresses {
+                addresses,
+                height_range,
+                max_entries,
+            } => read::address_utxos(
                 &state.network,
                 state.latest_best_chain(),
                 &state.db,
                 addresses,
+                height_range,
+                max_entries,
             )
             .map(ReadResponse::AddressUtxos),
 

@@ -99,7 +99,7 @@ fn roundtrip_transaction() {
         // (GHSA-rgwx-8r98-p34c), so they cannot round-trip through `IntoDisk`/`FromDisk`.
         // The arbitrary `Transaction` strategy still produces them so the
         // `transaction_roundtrip` proptest in `zebra-chain` can exercise the rejection path.
-        prop_assume!(!(val.is_coinbase() && val.sapling_spends_per_anchor().count() > 0));
+        prop_assume!(!(val.is_coinbase() && val.sapling_spends().count() > 0));
         assert_value_properties(val)
     });
 }

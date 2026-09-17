@@ -2,7 +2,7 @@
 name: "🚧 Change request"
 description: Suggest a feature or change for this project
 title: 'feature: '
-labels: [C-enhancement, S-needs-triage]
+type: Feature
 body:
   - type: markdown
     attributes:

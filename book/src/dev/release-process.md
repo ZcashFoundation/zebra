@@ -15,14 +15,6 @@ For example, version `3.1.11` indicates major version 3, minor version 1, and pa
 
 The version number is incremented based on the level of change included in the release.
 
-<div class="alert pre-release">
-
-**NOTE**: <br />
-As Zebra is in a `pre-release` state (is unstable and might not satisfy the intended compatibility requirements as denoted by its associated normal version).
-The pre-release version is denoted by appending a hyphen and a series of dot separated identifiers immediately following the patch version.
-
-</div>
-
 | Level of change | Details                                                                                                                                                                                                                                                              |
 | :-------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Major release   | Contains significant new features, and commonly correspond to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
@@ -33,7 +25,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **16 weeks** but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **15 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
@@ -49,8 +41,6 @@ You can update to any version of Zebra, provided that the following criteria are
 
 - The version you want to update _to_ is supported.
 - The version you want to update _from_ is within one major version of the version you want to upgrade to.
-
-See [Keeping Up-to-Date](guide/updating "Updating your projects") for more information about updating your Zebra projects to the most recent version.
 
 <a id="previews"></a>
 
@@ -133,7 +123,7 @@ The normal release path requires 2 maintainer actions:
 1. Review the latest Release PR after every required check passes.
 2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `A-release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 

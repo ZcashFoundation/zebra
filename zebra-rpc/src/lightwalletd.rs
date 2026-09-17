@@ -6,7 +6,7 @@
 //!
 //! [`zcash/lightwalletd`]: https://github.com/zcash/lightwalletd/tree/master/walletrpc
 
-use zebra_chain::{block, orchard, transaction, transaction::Transaction};
+use zebra_chain::{block, transaction, transaction::Transaction};
 
 #[cfg(test)]
 mod tests;
@@ -56,17 +56,22 @@ pub(crate) fn has_nullifiers(tx: &Transaction) -> bool {
 ///
 /// Ironwood reuses the Orchard action encoding, so the same conversion serves both pools.
 /// If `nullifiers_only` is true, only the nullifier is included.
-fn compact_action(action: &orchard::Action, nullifiers_only: bool) -> CompactOrchardAction {
+fn compact_action(
+    action: &::orchard::Action<
+        <::orchard::bundle::Authorized as ::orchard::bundle::Authorization>::SpendAuth,
+    >,
+    nullifiers_only: bool,
+) -> CompactOrchardAction {
     let mut compact_action = CompactOrchardAction {
-        nullifier: <[u8; 32]>::from(action.nullifier).to_vec(),
+        nullifier: action.nullifier().to_bytes().to_vec(),
         ..Default::default()
     };
 
     if !nullifiers_only {
-        compact_action.cmx = <[u8; 32]>::from(action.cm_x).to_vec();
-        compact_action.ephemeral_key = <[u8; 32]>::from(&action.ephemeral_key).to_vec();
+        compact_action.cmx = action.cmx().to_bytes().to_vec();
+        compact_action.ephemeral_key = action.encrypted_note().epk_bytes.to_vec();
         compact_action.ciphertext =
-            <[u8; 580]>::from(action.enc_ciphertext)[..COMPACT_CIPHERTEXT_SIZE].to_vec();
+            action.encrypted_note().enc_ciphertext[..COMPACT_CIPHERTEXT_SIZE].to_vec();
     }
 
     compact_action
@@ -139,7 +144,7 @@ impl CompactTx {
         let spends = tx
             .sapling_nullifiers()
             .map(|nullifier| CompactSaplingSpend {
-                nf: <[u8; 32]>::from(*nullifier).to_vec(),
+                nf: <[u8; 32]>::from(nullifier).to_vec(),
             })
             .collect();
 
@@ -148,10 +153,9 @@ impl CompactTx {
         } else {
             tx.sapling_outputs()
                 .map(|output| CompactSaplingOutput {
-                    cmu: output.cm_u.to_bytes().to_vec(),
-                    ephemeral_key: <[u8; 32]>::from(&output.ephemeral_key).to_vec(),
-                    ciphertext: <[u8; 580]>::from(output.enc_ciphertext)[..COMPACT_CIPHERTEXT_SIZE]
-                        .to_vec(),
+                    cmu: output.cmu().to_bytes().to_vec(),
+                    ephemeral_key: output.ephemeral_key().0.to_vec(),
+                    ciphertext: output.enc_ciphertext()[..COMPACT_CIPHERTEXT_SIZE].to_vec(),
                 })
                 .collect()
         };

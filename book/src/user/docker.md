@@ -17,7 +17,9 @@ docker run -d \
 
 The `-p 8233:8233` flag publishes Zebra's P2P port so other Zcash nodes can
 connect to yours (use `-p 18233:18233` for Testnet), and `-v` mounts a named
-volume so the chain state survives container restarts.
+volume so the chain state survives container restarts. To skip the multi-day
+initial sync, you can seed that volume from a
+[state snapshot](./snapshots.md#docker).
 
 You can also use `docker compose`, which we recommend. First get the repo:
 

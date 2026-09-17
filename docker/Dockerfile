@@ -124,8 +124,13 @@ RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
-# Copy the lightwalletd binary and source files to be able to run tests
-COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+# Copy the lightwalletd binary and source files to be able to run tests.
+#
+# This must be a lightwalletd release that can parse the transaction versions in
+# the blocks the tests sync: v6 transactions (version group ID 0xD884B698) were
+# introduced by NU6.3, so anything older than v0.5.0 stalls at the NU6.3
+# activation height and the lightwalletd tests time out.
+COPY --link --from=electriccoinco/lightwalletd:v0.5.3 /usr/local/bin/lightwalletd /usr/local/bin/
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
