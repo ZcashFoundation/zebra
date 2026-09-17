@@ -17,6 +17,14 @@ or the default `unknowntestnet` if no network name is explicitly configured.
 
 Double check that Zebra has bumped its protocol version.
 
+### Set a Distinct Subversion
+
+Change Zebra's subversion so that it is **different from the subversion used on the
+public network**. The subversion is the BIP 14 user-agent string (`/Zebra:<version>/`),
+produced by `user_agent()` in `zebrad/src/application.rs`; it is set in code, not in the
+config file. A distinct subversion keeps the private Testnet's nodes from being mistaken
+for public-network nodes and makes the participants easy to identify.
+
 ### Set Up Lightwalletd Server
 
 It's a good idea to set up a lightwalletd server connected to your node, and
@@ -42,6 +50,14 @@ also set in some librustzcash crates. For this reason, someone will need to
 **create a branch of librustzcash** with the chosen height set and you will need
 to **change Zebra to use that**. However, double check if that's still
 necessary.
+
+When you set the upcoming network upgrade in that librustzcash branch, also give it a
+**consensus branch id that is different from the branch id of any existing network
+upgrade, and from any consensus branch id used in a previous private Testnet test**. The
+consensus branch id identifies the upgrade in transaction sighashes and in version
+negotiation, so reusing an existing or previously-used id breaks the isolation of the
+private Testnet: transactions and blocks could be confused with another network or an
+earlier test.
 
 ### Configure Zebra to use a custom testnet
 
