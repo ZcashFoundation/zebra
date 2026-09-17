@@ -375,7 +375,9 @@ jobs:
   release:
     name: Publish crates and GitHub Release
     needs: release-target
-    if: needs.release-target.outputs.operation == 'resume'
+    if: >-
+      github.repository == 'ZcashFoundation/zebra' &&
+      needs.release-target.outputs.operation == 'resume'
     runs-on: ubuntu-latest-xl
     timeout-minutes: 120
     permissions:
