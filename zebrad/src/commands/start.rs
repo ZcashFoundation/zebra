@@ -504,7 +504,7 @@ impl StartCmd {
             };
 
         // Supervise the updater like every other ongoing task: if it exits or panics, the RPC
-        // keeps serving the last template it published, and pays `NEW_TIP_TIMEOUT` on every call
+        // keeps serving the last template it published, and pays the new-tip timeout on every call
         // after the next tip change, so a silent exit has to be visible.
         let block_template_task_handle: tokio::task::JoinHandle<()> = block_template_task_handle
             .unwrap_or_else(|| tokio::spawn(std::future::pending().in_current_span()));

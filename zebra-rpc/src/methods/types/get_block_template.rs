@@ -509,6 +509,19 @@ impl MinerParams {
         self.memo.as_ref()
     }
 
+    /// Returns `true` if the coinbase transaction that pays these parameters has a shielded
+    /// output, which needs a proof that takes seconds to build.
+    ///
+    /// This mirrors the receiver that `TransactionTemplate::new_coinbase()` pays: a unified
+    /// address falls back to its transparent receiver when it has no shielded receiver.
+    pub fn has_shielded_component(&self) -> bool {
+        match &self.addr {
+            Address::Unified(addr) => addr.orchard().is_some() || addr.sapling().is_some(),
+            Address::Sapling(_) => true,
+            _ => false,
+        }
+    }
+
     /// Randomizes the memo.
     pub fn randomize_memo(&mut self) {
         let mut random = [0u8; 512];

@@ -1130,7 +1130,7 @@ where
 
     /// Returns the precomputed template, if it extends the tip the state has committed.
     ///
-    /// Waits up to [`precompute::NEW_TIP_TIMEOUT`] for the updater task to catch up with a recent
+    /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
     /// tip change, re-reading the tip every time it publishes.
     async fn precomputed_template_for_state_tip(
         &self,
@@ -1140,7 +1140,11 @@ where
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
 
-        tokio::time::timeout(precompute::NEW_TIP_TIMEOUT, async move {
+        // Falling back to an on-demand build costs a shielded coinbase proof per request, so a
+        // shielded miner address waits longer for the updater than a transparent one.
+        let timeout = precompute::new_tip_timeout(self.gbt.miner_params()?);
+
+        tokio::time::timeout(timeout, async move {
             loop {
                 // The state publishes committed blocks before updating `latest_chain_tip`.
                 // Read its tip on every cache publication, including after a wait, so neither

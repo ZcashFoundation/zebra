@@ -51,6 +51,27 @@ mod tests;
 /// only expires if that task is busy building a template, or isn't running at all.
 pub(crate) const NEW_TIP_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// The same wait, for a miner address with a shielded component.
+///
+/// Building a template for a shielded address runs a coinbase proof, which takes seconds. So
+/// giving up on the updater is the expensive option, not the cheap one: every waiting request
+/// starts a proof of its own, alongside the one the updater is already running, which is the
+/// per-request proving this cache exists to avoid.
+///
+/// Wait long enough to cover a proof and the rest of the build, but not forever, so a wedged
+/// updater still can't stall `getblocktemplate` indefinitely.
+pub(crate) const SHIELDED_NEW_TIP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long `getblocktemplate` waits for [`run()`] to publish a template for the current chain
+/// tip, when it pays `miner_params`.
+pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
+    if miner_params.has_shielded_component() {
+        SHIELDED_NEW_TIP_TIMEOUT
+    } else {
+        NEW_TIP_TIMEOUT
+    }
+}
+
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
 const RETRY_DELAY: Duration = Duration::from_secs(1);

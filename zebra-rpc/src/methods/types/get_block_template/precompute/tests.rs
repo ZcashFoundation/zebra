@@ -298,3 +298,39 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
     .await
     .expect("the replacement proof should complete");
 }
+
+/// Checks that a shielded miner address waits longer for a precomputed template than a transparent
+/// one, because falling back to an on-demand build runs a coinbase proof per request.
+#[test]
+fn shielded_miner_addresses_wait_longer_for_a_template() {
+    let _init_guard = zebra_test::init();
+
+    let net = Network::new_default_testnet();
+
+    let miner_params = |addr_type| {
+        MinerParams::from(
+            Address::decode(&net, default_miner_address(net.kind(), &addr_type))
+                .expect("hard-coded miner address is valid"),
+        )
+    };
+
+    let transparent = miner_params(MinerAddressType::Transparent);
+    assert!(!transparent.has_shielded_component());
+    assert_eq!(new_tip_timeout(&transparent), NEW_TIP_TIMEOUT);
+
+    for (name, addr_type) in [
+        ("a Sapling address", MinerAddressType::Sapling),
+        ("a unified address", MinerAddressType::Unified),
+    ] {
+        let shielded = miner_params(addr_type);
+        assert!(
+            shielded.has_shielded_component(),
+            "{name} pays a shielded coinbase output"
+        );
+        assert_eq!(
+            new_tip_timeout(&shielded),
+            SHIELDED_NEW_TIP_TIMEOUT,
+            "{name} should wait for the updater instead of proving per request"
+        );
+    }
+}
