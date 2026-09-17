@@ -135,6 +135,25 @@ mod tests {
         assert_eq!(json["error"]["data"], serde_json::json!({ "detail": "x" }));
     }
 
+    /// A string request id is preserved through the rewrite. String ids were the case the old
+    /// code (which re-parsed the id from JSON) was most fragile on.
+    #[tokio::test]
+    async fn preserves_string_id() {
+        let inner = ErrorService {
+            code: ErrorCode::InvalidParams.code(),
+            message: "bad params",
+            data: None,
+        };
+
+        let request = Request::new("getinfo".into(), None, Id::Str("curltest".into()));
+        let response = FixRpcResponseMiddleware::new(inner).call(request).await;
+
+        assert_eq!(response.as_error_code(), Some(i32::from(LegacyCode::Misc)));
+        let json: serde_json::Value =
+            serde_json::from_str(response.as_result()).expect("response should be valid json");
+        assert_eq!(json["id"], serde_json::json!("curltest"));
+    }
+
     /// Errors with any other code pass through unchanged.
     #[tokio::test]
     async fn leaves_other_error_codes_unchanged() {
