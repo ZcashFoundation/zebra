@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-09-17
+## [Zebra 6.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.0) - 2026-09-17
 
 ### Added
 
