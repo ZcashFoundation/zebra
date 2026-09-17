@@ -1610,19 +1610,19 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
-            ReadRequest::AnyChainSaplingTree(hash_or_height) => {
+            ReadRequest::AnyChainSaplingTree(hash) => {
                 Ok(ReadResponse::SaplingTree(read::any_sapling_tree(
                     state.latest_non_finalized_state().chain_iter(),
                     &state.db,
-                    hash_or_height,
+                    hash,
                 )))
             }
 
-            ReadRequest::AnyChainOrchardTree(hash_or_height) => {
+            ReadRequest::AnyChainOrchardTree(hash) => {
                 Ok(ReadResponse::OrchardTree(read::any_orchard_tree(
                     state.latest_non_finalized_state().chain_iter(),
                     &state.db,
-                    hash_or_height,
+                    hash,
                 )))
             }
 
@@ -1630,11 +1630,11 @@ impl Service<ReadRequest> for ReadStateService {
                 read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
-            ReadRequest::AnyChainIronwoodTree(hash_or_height) => {
+            ReadRequest::AnyChainIronwoodTree(hash) => {
                 Ok(ReadResponse::IronwoodTree(read::any_ironwood_tree(
                     state.latest_non_finalized_state().chain_iter(),
                     &state.db,
-                    hash_or_height,
+                    hash,
                 )))
             }
 

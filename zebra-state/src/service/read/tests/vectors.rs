@@ -680,7 +680,7 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         any_sapling_tree(
             non_finalized_state.chain_iter(),
             &finalized_state.db,
-            side_hash.into(),
+            side_hash,
         )
         .is_some(),
         "any_sapling_tree should find side chain treestate by hash"
@@ -700,7 +700,7 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         any_orchard_tree(
             non_finalized_state.chain_iter(),
             &finalized_state.db,
-            side_hash.into(),
+            side_hash,
         )
         .is_some(),
         "any_orchard_tree should find side chain treestate by hash"
@@ -720,7 +720,7 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         any_ironwood_tree(
             non_finalized_state.chain_iter(),
             &finalized_state.db,
-            side_hash.into(),
+            side_hash,
         )
         .is_some(),
         "any_ironwood_tree should find side chain treestate by hash"
@@ -740,7 +740,7 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         any_sapling_tree(
             non_finalized_state.chain_iter(),
             &finalized_state.db,
-            best_hash.into(),
+            best_hash,
         )
         .is_some(),
         "any_sapling_tree should find best chain treestate by hash"
@@ -758,7 +758,7 @@ async fn any_chain_treestate_finds_side_chain_trees() -> Result<()> {
         any_ironwood_tree(
             non_finalized_state.chain_iter(),
             &finalized_state.db,
-            best_hash.into(),
+            best_hash,
         )
         .is_some(),
         "any_ironwood_tree should find best chain treestate by hash"

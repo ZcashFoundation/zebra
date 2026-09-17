@@ -14,7 +14,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
-    orchard, sapling,
+    block, orchard, sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
@@ -49,25 +49,27 @@ where
 }
 
 /// Returns the Sapling
-/// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
-/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+/// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) for the block with `hash`,
+/// if it exists in any of the non-finalized `chains` or finalized `db`.
 ///
 /// Unlike [`sapling_tree`], this checks every non-finalized chain (best chain first,
-/// then side chains), so a lookup by hash is immune to reorgs that move a block from
-/// the best chain onto a still-retained side chain.
+/// then side chains), so it is immune to reorgs that move a block from the best chain
+/// onto a still-retained side chain.
 pub fn any_sapling_tree<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
-    hash_or_height: HashOrHeight,
+    hash: block::Hash,
 ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
     // # Correctness
     //
-    // Since sapling treestates are the same in the finalized and non-finalized
-    // state, we check the most efficient alternative first. (`chains` are always
-    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    // Lookups are by hash, not height, because the same height can have different
+    // treestates in different chain forks. A block hash identifies a single treestate,
+    // which is the same in whichever chain or the finalized state contains the block,
+    // so we check the most efficient alternative first. (`chains` are always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
     chains
-        .find_map(|chain| chain.as_ref().sapling_tree(hash_or_height))
-        .or_else(|| db.sapling_tree_by_hash_or_height(hash_or_height))
+        .find_map(|chain| chain.as_ref().sapling_tree(hash.into()))
+        .or_else(|| db.sapling_tree_by_hash_or_height(hash.into()))
 }
 
 /// Returns a list of Sapling [`NoteCommitmentSubtree`]s with indexes in the provided range.
@@ -114,25 +116,27 @@ where
 }
 
 /// Returns the Orchard
-/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) for the block with `hash`,
+/// if it exists in any of the non-finalized `chains` or finalized `db`.
 ///
 /// Unlike [`orchard_tree`], this checks every non-finalized chain (best chain first,
-/// then side chains), so a lookup by hash is immune to reorgs that move a block from
-/// the best chain onto a still-retained side chain.
+/// then side chains), so it is immune to reorgs that move a block from the best chain
+/// onto a still-retained side chain.
 pub fn any_orchard_tree<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
-    hash_or_height: HashOrHeight,
+    hash: block::Hash,
 ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
     // # Correctness
     //
-    // Since orchard treestates are the same in the finalized and non-finalized
-    // state, we check the most efficient alternative first. (`chains` are always
-    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    // Lookups are by hash, not height, because the same height can have different
+    // treestates in different chain forks. A block hash identifies a single treestate,
+    // which is the same in whichever chain or the finalized state contains the block,
+    // so we check the most efficient alternative first. (`chains` are always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
     chains
-        .find_map(|chain| chain.as_ref().orchard_tree(hash_or_height))
-        .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
+        .find_map(|chain| chain.as_ref().orchard_tree(hash.into()))
+        .or_else(|| db.orchard_tree_by_hash_or_height(hash.into()))
 }
 
 /// Returns a list of Orchard [`NoteCommitmentSubtree`]s with indexes in the provided range.
@@ -181,27 +185,29 @@ where
 }
 
 /// Returns the Ironwood
-/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-/// hash or height, if it exists in any of the non-finalized `chains` or finalized `db`.
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) for the block with `hash`,
+/// if it exists in any of the non-finalized `chains` or finalized `db`.
 ///
 /// Unlike [`ironwood_tree`], this checks every non-finalized chain (best chain first,
-/// then side chains), so a lookup by hash is immune to reorgs that move a block from
-/// the best chain onto a still-retained side chain.
+/// then side chains), so it is immune to reorgs that move a block from the best chain
+/// onto a still-retained side chain.
 ///
 /// Ironwood reuses the Orchard note commitment tree type, in a separate tree.
 pub fn any_ironwood_tree<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
-    hash_or_height: HashOrHeight,
+    hash: block::Hash,
 ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
     // # Correctness
     //
-    // Since Ironwood treestates are the same in the finalized and non-finalized
-    // state, we check the most efficient alternative first. (`chains` are always
-    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    // Lookups are by hash, not height, because the same height can have different
+    // treestates in different chain forks. A block hash identifies a single treestate,
+    // which is the same in whichever chain or the finalized state contains the block,
+    // so we check the most efficient alternative first. (`chains` are always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
     chains
-        .find_map(|chain| chain.as_ref().ironwood_tree(hash_or_height))
-        .or_else(|| db.ironwood_tree_by_hash_or_height(hash_or_height))
+        .find_map(|chain| chain.as_ref().ironwood_tree(hash.into()))
+        .or_else(|| db.ironwood_tree_by_hash_or_height(hash.into()))
 }
 
 /// Returns a list of Ironwood [`NoteCommitmentSubtree`]s with indexes in the provided range.
