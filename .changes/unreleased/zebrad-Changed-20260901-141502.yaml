@@ -1,0 +1,11 @@
+project: zebrad
+kind: Changed
+body: 'The `getblocktemplate` RPC uses a precomputed block template for the current chain tip when
+  one is available, rather than assembling one while the miner waits. Zebra precomputes templates
+  when a miner address is configured and either the RPC server or the internal miner is enabled,
+  refreshing them on chain tip changes and every few seconds, so a template can be a few seconds
+  behind the mempool, but each template is checked against the committed tip. Cached work is also
+  refreshed when Testnet difficulty becomes easier. Tip changes do not accumulate unfinished
+  coinbase proofs
+  ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).'
+time: 2026-09-01T14:15:02.000000000Z
