@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: 'The `getblock` RPC now supports verbosity 3, which adds a `prevout` object (with `generated`, `height`, `value`, and `scriptPubKey`) to each transparent input and a `fee` field to each non-coinbase transaction, matching Bitcoin Core.'
+time: 2026-09-18T00:00:00.000000000Z

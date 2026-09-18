@@ -1,6 +1,6 @@
 //! Transaction-related types.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::methods::arrayhex;
 use chrono::{DateTime, Utc};
@@ -27,7 +27,7 @@ use zebra_chain::{
     sapling::ValueCommitment,
     serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
-    transparent::Script,
+    transparent::{OutPoint, Script, Utxo},
 };
 use zebra_consensus::{error::TransactionError, funding_stream_address};
 use zebra_script::Sigops;
@@ -289,6 +289,13 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub(crate) confirmations: Option<i64>,
 
+    /// The transaction fee in ZEC, only present at `getblock` verbosity 3.
+    ///
+    /// Omitted for the coinbase transaction and when a spent output cannot be found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    pub(crate) fee: Option<f64>,
+
     /// Transparent inputs of the transaction.
     #[serde(rename = "vin")]
     pub(crate) inputs: Vec<Input>,
@@ -459,7 +466,32 @@ pub enum Input {
         /// The address of the output being spent.
         #[serde(skip_serializing_if = "Option::is_none")]
         address: Option<String>,
+        /// The output being spent, only present at `getblock` verbosity 3.
+        ///
+        /// Boxed to keep the common (verbosity 1/2) input small.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prevout: Option<Box<Prevout>>,
     },
+}
+
+/// The previous output spent by a transparent input.
+///
+/// Only present at `getblock` verbosity 3. The fields match Bitcoin Core's `getblock`
+/// verbosity 3 `prevout` object.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct Prevout {
+    /// Whether the output being spent was created by a coinbase transaction.
+    #[getter(copy)]
+    generated: bool,
+    /// The height of the block that created the output being spent.
+    #[getter(copy)]
+    height: u32,
+    /// The value of the output being spent in ZEC.
+    #[getter(copy)]
+    value: f64,
+    /// The scriptPubKey of the output being spent.
+    #[serde(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
 }
 
 /// The transparent output of a transaction.
@@ -498,36 +530,11 @@ impl OutputObject {
         coinbase: bool,
         network: &Network,
     ) -> Self {
-        let lock_script = &output.lock_script;
-        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
-        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
-
-        let script_pub_key = ScriptPubKey::new(
-            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
-            lock_script.clone(),
-            req_sigs,
-            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
-                .to_component()
-                .ok()
-                .and_then(|c| c.refine().ok())
-                .and_then(|component| zcash_script::solver::standard(&component))
-                .map(|kind| match kind {
-                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
-                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
-                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
-                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
-                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
-                })
-                .unwrap_or("nonstandard")
-                .to_string(),
-            addresses,
-        );
-
         Self {
             best_block,
             confirmations,
             value: crate::methods::types::zec::Zec::from(output.value()).lossy_zec(),
-            script_pub_key,
+            script_pub_key: ScriptPubKey::from_output(output, network),
             version,
             coinbase,
         }
@@ -554,6 +561,38 @@ pub struct ScriptPubKey {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     addresses: Option<Vec<String>>,
+}
+
+impl ScriptPubKey {
+    /// Builds the `scriptPubKey` object for a transparent output's lock script.
+    pub fn from_output(output: &zebra_chain::transparent::Output, network: &Network) -> Self {
+        let lock_script = &output.lock_script;
+        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
+        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
+
+        Self {
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
+            asm: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            hex: lock_script.clone(),
+            req_sigs,
+            r#type: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
+            addresses,
+        }
+    }
 }
 
 /// The scriptSig of a transaction input.
@@ -812,6 +851,7 @@ impl Default for TransactionObject {
             ),
             height: Option::default(),
             confirmations: Option::default(),
+            fee: None,
             inputs: Vec::new(),
             outputs: Vec::new(),
             shielded_spends: Vec::new(),
@@ -875,6 +915,8 @@ impl TransactionObject {
                 // Mempool
                 None
             },
+            // Only populated at `getblock` verbosity 3.
+            fee: None,
             inputs: tx
                 .inputs()
                 .iter()
@@ -902,6 +944,7 @@ impl TransactionObject {
                         value: None,
                         value_zat: None,
                         address: None,
+                        prevout: None,
                     },
                 })
                 .collect(),
@@ -909,46 +952,11 @@ impl TransactionObject {
                 .outputs()
                 .iter()
                 .enumerate()
-                .map(|output| {
-                    // Parse the scriptPubKey to find destination addresses.
-                    let (addresses, req_sigs) = output
-                        .1
-                        .address(network)
-                        .map(|address| (vec![address.to_string()], 1))
-                        .unzip();
-
-                    Output {
-                        value: Zec::from(output.1.value).lossy_zec(),
-                        value_zat: output.1.value.zatoshis(),
-                        n: output.0 as u32,
-                        script_pub_key: ScriptPubKey {
-                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
-                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
-                            asm: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_asm(false),
-                            hex: output.1.lock_script.clone(),
-                            req_sigs,
-                            r#type: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_component()
-                            .ok()
-                            .and_then(|c| c.refine().ok())
-                            .and_then(|component| zcash_script::solver::standard(&component))
-                            .map(|kind| match kind {
-                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
-                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
-                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
-                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
-                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
-                            })
-                            .unwrap_or("nonstandard")
-                            .to_string(),
-                            addresses,
-                        },
-                    }
+                .map(|(n, output)| Output {
+                    value: Zec::from(output.value).lossy_zec(),
+                    value_zat: output.value.zatoshis(),
+                    n: n as u32,
+                    script_pub_key: ScriptPubKey::from_output(output, network),
                 })
                 .collect(),
             shielded_spends: tx
@@ -1072,13 +1080,213 @@ impl TransactionObject {
             block_time,
         }
     }
+
+    /// Fills in each transparent input's `prevout` and the transaction `fee` from the outputs
+    /// `tx` spends, for `getblock` verbosity 3.
+    ///
+    /// `spent_utxos` maps each spent outpoint to the output it spends. Coinbase transactions
+    /// spend no outputs and have no fee, so they are left unchanged. A `prevout` object is set
+    /// for every input whose spent output is present in `spent_utxos`; the `fee` is only set when
+    /// every spent output is present, because the value balance is otherwise incomplete.
+    pub fn add_prevouts(
+        &mut self,
+        tx: &Transaction,
+        spent_utxos: &HashMap<OutPoint, Utxo>,
+        network: &Network,
+    ) {
+        if tx.is_coinbase() {
+            return;
+        }
+
+        // `self.inputs` is built one-to-one from `tx.inputs()`, so pair each rendered input with
+        // its own source input and use that input's outpoint. This keeps the alignment correct
+        // even if an input carries no outpoint, rather than relying on the filtered
+        // `spent_outpoints()` iterator staying in step.
+        for (input, source_input) in self.inputs.iter_mut().zip(tx.inputs()) {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                continue;
+            };
+            let Some(utxo) = source_input.outpoint().and_then(|o| spent_utxos.get(&o)) else {
+                continue;
+            };
+            *prevout = Some(Box::new(Prevout::new(
+                utxo.from_coinbase,
+                utxo.height.0,
+                Zec::from(utxo.output.value).lossy_zec(),
+                ScriptPubKey::from_output(&utxo.output, network),
+            )));
+        }
+
+        // The fee needs every spent output to complete the value balance.
+        if tx
+            .spent_outpoints()
+            .all(|outpoint| spent_utxos.contains_key(&outpoint))
+        {
+            if let Ok(value_balance) = tx.value_balance(spent_utxos) {
+                if let Ok(fee) = value_balance.remaining_transaction_value() {
+                    self.fee = Some(Zec::from(fee).lossy_zec());
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transparent::Output};
+
+    /// Returns the first non-coinbase, transparent-only transaction in the mainnet block vectors.
+    ///
+    /// "Transparent-only" means it has transparent inputs and no shielded data, so its fee is just
+    /// the difference between the transparent input and output totals.
+    fn first_transparent_only_tx() -> Arc<Transaction> {
+        zebra_test::vectors::MAINNET_BLOCKS
+            .values()
+            .flat_map(|bytes| {
+                let block: Block = bytes
+                    .zcash_deserialize_into()
+                    .expect("hard-coded test vector must deserialize");
+                block.transactions.clone()
+            })
+            .find(|tx| {
+                !tx.is_coinbase()
+                    && !tx.inputs().is_empty()
+                    && tx.sapling_spends_count() == 0
+                    && tx.sapling_outputs().count() == 0
+                    && tx.orchard_actions().count() == 0
+                    && tx.ironwood_actions().count() == 0
+                    && tx.sprout_joinsplit_descriptions().next().is_none()
+            })
+            .expect("the mainnet block vectors contain a transparent-only transaction")
+    }
+
+    /// `add_prevouts` fills every input's `prevout` and computes the `fee` when all spent outputs
+    /// are present.
+    #[test]
+    fn add_prevouts_fills_prevouts_and_fee() {
+        let network = Network::Mainnet;
+        let tx = first_transparent_only_tx();
+
+        let output_total = tx
+            .outputs()
+            .iter()
+            .try_fold(Amount::<NonNegative>::zero(), |acc, output| {
+                acc + output.value
+            })
+            .expect("transparent outputs sum within range");
+
+        // Put the whole input value on the first input, so the fee is exactly `FEE`.
+        const FEE: i64 = 10_000;
+        let first_input_value = (output_total + Amount::<NonNegative>::try_from(FEE).unwrap())
+            .expect("input total within range");
+        let lock_script = Script::new(&[0x76, 0xa9]);
+
+        let mut spent_utxos = HashMap::new();
+        for (i, outpoint) in tx.spent_outpoints().enumerate() {
+            let value = if i == 0 {
+                first_input_value
+            } else {
+                Amount::zero()
+            };
+            spent_utxos.insert(
+                outpoint,
+                Utxo::new(Output::new(value, lock_script.clone()), Height(123), i == 0),
+            );
+        }
+
+        let mut object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+        object.add_prevouts(&tx, &spent_utxos, &network);
+
+        // Every transparent input has a prevout.
+        for input in &object.inputs {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                panic!("a transparent-only transaction has only non-coinbase inputs");
+            };
+            assert!(prevout.is_some(), "each input must carry a prevout");
+        }
+
+        // The first input's prevout carries the fabricated fields.
+        let Input::NonCoinbase { prevout, .. } = &object.inputs[0] else {
+            unreachable!("checked above");
+        };
+        let prevout = prevout.as_ref().expect("prevout is set");
+        assert!(prevout.generated());
+        assert_eq!(prevout.height(), 123);
+        assert_eq!(prevout.value(), Zec::from(first_input_value).lossy_zec());
+
+        // For a transparent-only transaction the fee is inputs minus outputs.
+        let expected_fee = Zec::from(Amount::<NonNegative>::try_from(FEE).unwrap()).lossy_zec();
+        assert_eq!(object.fee(), Some(expected_fee));
+    }
+
+    /// `add_prevouts` leaves a coinbase transaction unchanged: no `fee`, no `prevout`.
+    #[test]
+    fn add_prevouts_is_noop_for_coinbase() {
+        let network = Network::Mainnet;
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+        let coinbase = block.transactions[0].clone();
+        assert!(coinbase.is_coinbase());
+
+        let mut object = TransactionObject::from_transaction(
+            coinbase.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            coinbase.hash(),
+        );
+        object.add_prevouts(&coinbase, &HashMap::new(), &network);
+
+        assert_eq!(object.fee(), None);
+        assert!(matches!(object.inputs[0], Input::Coinbase { .. }));
+    }
+
+    /// When a spent output is missing, `add_prevouts` sets no `prevout` for it and omits the `fee`,
+    /// because the value balance would be incomplete.
+    #[test]
+    fn add_prevouts_omits_fee_when_a_spent_output_is_missing() {
+        let network = Network::Mainnet;
+        let tx = first_transparent_only_tx();
+
+        let mut object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+        // No spent outputs supplied.
+        object.add_prevouts(&tx, &HashMap::new(), &network);
+
+        assert_eq!(object.fee(), None);
+        for input in &object.inputs {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                panic!("a transparent-only transaction has only non-coinbase inputs");
+            };
+            assert!(
+                prevout.is_none(),
+                "a missing spent output must leave no prevout"
+            );
+        }
+    }
 
     /// `vjoinsplit` must be populated for transactions with Sprout JoinSplits.
     ///
