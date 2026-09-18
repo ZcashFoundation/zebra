@@ -154,6 +154,13 @@ test-group = 'serial-state'
 filter = 'test(=stateful::sync::sync_to_mandatory_checkpoint_mainnet) or test(=stateful::sync::sync_to_mandatory_checkpoint_testnet)'
 slow-timeout = { period = "1500m", terminate-after = 1 }
 
+# The tip update tests start from a cached state that is at most a few days
+# behind, so they normally finish in 3-30 minutes, but have been taking a bit
+# longer, so raise the timeout.
+[[profile.ci-stateful.overrides]]
+filter = 'test(=stateful::sync::sync_update_mainnet) or test(=stateful::lightwalletd::lwd_sync_update)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+
 [[profile.ci-stateful.overrides]]
 filter = 'test(=stateful::sync::sync_past_mandatory_checkpoint_mainnet) or test(=stateful::sync::sync_past_mandatory_checkpoint_testnet) or test(=stateful::rpc::rpc_get_block_from_cached_state) or test(=stateful::lightwalletd::lightwalletd_test_suite) or test(=stateful::lightwalletd::lwd_grpc_wallet)'
 slow-timeout = { period = "60m", terminate-after = 2 }

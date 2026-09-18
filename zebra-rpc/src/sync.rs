@@ -1,6 +1,10 @@
 //! Syncer task for maintaining a non-finalized state in Zebra's ReadStateService and updating `ChainTipSender` via RPCs
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
@@ -372,7 +376,10 @@ impl TrustedChainSync {
                 }
             }
 
-            let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            // Stamp the receipt time so equal-work ties resolve like the source node: the
+            // listener streams the best chain first, so arrival order mirrors its preference.
+            let mut block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            block.received_time = Some(Instant::now());
             match self.try_commit(block.clone()).await {
                 Ok(()) => {
                     last_failed_commit_hash = None;
@@ -492,7 +499,8 @@ impl TrustedChainSync {
                 }
             };
 
-            let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            let mut block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            block.received_time = Some(Instant::now());
             if let Err(error) = self.commit(block) {
                 tracing::warn!(
                     ?error,

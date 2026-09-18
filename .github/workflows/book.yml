@@ -56,7 +56,11 @@ jobs:
           use-mermaid: true
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: nightly
+          # This job needs nightly for the unstable rustdoc flags below.
+          # Pinned: nightly >= 2026-09-08 ICEs in rustdoc's auto-trait synthesis
+          # while documenting zebra-consensus, so `cargo doc` cannot complete.
+          # Regressed by https://github.com/rust-lang/rust/pull/162182.
+          toolchain: nightly-2026-09-04
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
 
@@ -75,10 +79,14 @@ jobs:
           mkdir -p target/docs/internal
           cp -r target/internal/doc/* target/docs/internal/
         env:
-          # Keep in sync with ./lint.yml:jobs.docs
-          # The -A and -W settings must be the same as the `rustdocflags` in:
+          # No `-D warnings` here: rustdoc lints must not block publishing the
+          # docs site. A broken intra-doc link kept the deploy skipped for days
+          # in September 2026. The blocking `-D warnings` policy lives in
+          # ./advisory.yml:jobs.docs ("Nightly documentation"), where #10968 put
+          # it. A real `cargo doc` failure still fails this step.
+          # The -A settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
-          RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
+          RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Include benchmark dashboard
         # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into

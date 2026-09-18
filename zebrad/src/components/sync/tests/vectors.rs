@@ -13,7 +13,9 @@ use zebra_chain::{
     parameters::subsidy::SubsidyError,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
+use zebra_consensus::{
+    error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+};
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -1396,6 +1398,142 @@ async fn invalid_height_does_not_restart_sync() {
     assert!(
         has_addr,
         "InvalidHeight should carry advertiser_addr for peer scoring"
+    );
+}
+
+/// A concrete `ChainSync` type for calling associated functions in tests.
+type TestChainSync = ChainSync<
+    MockService<zn::Request, zn::Response, PanicAssertion>,
+    MockService<zs::Request, zs::Response, PanicAssertion>,
+    MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    MockChainTip,
+>;
+
+/// Verifies fix for #11168 and #11132: a `TransparentInputNotFound` from an `AwaitUtxo`
+/// timeout does not trigger a sync restart, but other transaction errors still do.
+#[tokio::test]
+async fn transparent_input_not_found_does_not_restart_sync() {
+    let make_invalid = |tx_error| BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Transaction(tx_error)),
+        },
+        height: block::Height(3_427_629),
+        hash: block::Hash::from([0xCC; 32]),
+        advertiser_addr: None,
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_invalid(
+            TransactionError::TransparentInputNotFound
+        )),
+        "a transparent input UTXO lookup timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
+        "other transaction errors should still trigger sync restart"
+    );
+}
+
+/// A poisoned `FindBlocks` batch can make every block in a lookahead wave time out on its
+/// UTXO lookup with nothing committing in between. The #11168 exemption is bounded so that
+/// case still restarts the sync, while a single near-tip race followed by a commit does not.
+#[tokio::test]
+async fn utxo_lookup_timeouts_without_a_commit_restart_sync() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let limit = chain_sync
+        .full_verify_concurrency_limit
+        .max(sync::MIN_UTXO_RACE_DROPS_BEFORE_RESTART);
+
+    let utxo_timeout = |i: u8| {
+        Err(BlockDownloadVerifyError::Invalid {
+            error: RouterError::Block {
+                source: Box::new(VerifyBlockError::Transaction(
+                    TransactionError::TransparentInputNotFound,
+                )),
+            },
+            height: block::Height(3_427_629 + u32::from(i)),
+            hash: block::Hash::from([i; 32]),
+            advertiser_addr: None,
+        })
+    };
+
+    for i in 0..(limit - 1) {
+        assert!(
+            chain_sync
+                .handle_block_response(utxo_timeout(i as u8))
+                .is_ok(),
+            "UTXO lookup timeouts below the lookahead limit should not restart sync (#11168)"
+        );
+        assert!(
+            chain_sync
+                .reobtain_hashes
+                .contains(&block::Hash::from([i as u8; 32])),
+            "a dropped UTXO-race block must be re-requested, not left for a tip walk"
+        );
+    }
+
+    // A verified block means the race resolved, so the count starts over.
+    assert!(chain_sync
+        .handle_block_response(Ok((
+            block::Height(3_427_628),
+            block::Hash::from([0xAA; 32])
+        )))
+        .is_ok());
+    assert!(chain_sync.handle_block_response(utxo_timeout(0)).is_ok());
+
+    for i in 1..(limit - 1) {
+        assert!(chain_sync
+            .handle_block_response(utxo_timeout(i as u8))
+            .is_ok());
+    }
+    assert!(
+        chain_sync
+            .handle_block_response(utxo_timeout(0xFF))
+            .is_err(),
+        "a full lookahead wave of UTXO lookup timeouts with no verified block should restart sync"
+    );
+}
+
+/// Verifies fix for #11168: the short post-final-checkpoint verify timeout (#5125) does
+/// not trigger a sync restart, but the tower-level `BLOCK_VERIFY_TIMEOUT` still does (#5709).
+#[tokio::test]
+async fn verify_timeout_elapsed_does_not_restart_sync() {
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+
+    let make_error = |error: crate::BoxError| BlockDownloadVerifyError::ValidationRequestError {
+        error,
+        height: block::Height(3_428_007),
+        hash: block::Hash::from([0xCD; 32]),
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_error(tokio_elapsed.into())),
+        "the post-final-checkpoint verify timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_error(
+            tower::timeout::error::Elapsed::new().into()
+        )),
+        "the tower block verify timeout should still trigger sync restart (#5709)"
+    );
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+    assert!(chain_sync
+        .handle_block_response(Err(make_error(tokio_elapsed.into())))
+        .is_ok());
+    assert!(
+        chain_sync
+            .reobtain_hashes
+            .contains(&block::Hash::from([0xCD; 32])),
+        "a block dropped on the post-checkpoint verify timeout must be re-requested"
     );
 }
 
