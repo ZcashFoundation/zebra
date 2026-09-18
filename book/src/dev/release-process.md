@@ -211,7 +211,7 @@ git switch -c release/6.3 v6.3.1
 git push origin release/6.3
 ```
 
-The `Release branches` ruleset covers `refs/heads/release/**`. It applies the same requirements as `PR Requirements` on `main`, and also blocks deletion and force-pushes. Nothing else needs configuring.
+Before anything merges into `release/**`, create the `Release branches` ruleset on `refs/heads/release/**`. It must apply the same requirements as `PR Requirements` on `main`, and also block deletion and force-pushes.
 
 ### Bring the release pipeline up to date
 
@@ -274,7 +274,7 @@ gh workflow run release.yml --ref release/X.Y \
 
 ### What a patch publishes when it is not Latest
 
-`ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows read GitHub's latest-release marker to decide the Docker Hub `latest` tag and the production deploy.
+`ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows always publish the immutable `X.Y.Z` artifacts, then recheck GitHub's latest-release marker immediately before mutating Docker Hub `latest` or deploying production.
 
 A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag. Operators who pin `zfnd/zebra:6.3.1` get the patch.
 
