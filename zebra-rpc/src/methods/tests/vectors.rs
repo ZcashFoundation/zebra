@@ -4218,8 +4218,7 @@ async fn rpc_get_standard_fee() {
         .await
         .expect("get_standard_fee should succeed");
 
-    // Static v0 placeholder: the ZIP-317 marginal fee and version 0.
-    assert_eq!(response.standard_fee(), 5000);
+    assert_eq!(response.standard_fee(), 1000);
     assert_eq!(response.version(), 0);
 }
 

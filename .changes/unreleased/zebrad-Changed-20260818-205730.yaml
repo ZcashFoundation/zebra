@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Block template construction now caps the ZIP-317 fee weight ratio at 10 instead of 4, widening the priority lane for transactions that pay more than their conventional fee ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).'
+time: 2026-08-18T20:57:30.000000000Z
