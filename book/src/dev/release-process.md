@@ -211,7 +211,7 @@ git switch -c release/6.3 v6.3.1
 git push origin release/6.3
 ```
 
-Before anything merges into `release/**`, create the `Release branches` ruleset on `refs/heads/release/**`. It must apply the same requirements as `PR Requirements` on `main`, and also block deletion and force-pushes.
+The `Release branches` ruleset covers `refs/heads/release/**`. It applies the same requirements as `PR Requirements` on `main`, and also blocks deletion and force-pushes. It does not include a merge queue: GitHub rejects merge queues on wildcard refs. A per-line merge-queue ruleset is an optional later admin step once a concrete `release/X.Y` exists.
 
 ### Bring the release pipeline up to date
 
