@@ -136,19 +136,7 @@ jobs:
       log_file: ${{ steps.set-matrix.outputs.log_file }}
       verify: ${{ steps.set-matrix.outputs.verify }}
       use_reserved_ip: ${{ steps.set-matrix.outputs.use_reserved_ip }}
-      is_latest_release: ${{ steps.latest-release.outputs.is_latest_release }}
     steps:
-      # A patch release cut from a release branch can publish after a higher
-      # version, so production follows the release GitHub marks as latest.
-      - id: latest-release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
-          echo "is_latest_release=$([[ "${latest_tag}" == "${RELEASE_TAG}" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
-
       - id: set-matrix
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -231,13 +219,14 @@ jobs:
     # - Pull requests
     # - Manual workflow_dispatch
     # - Push to main branch
-    # - The highest stable release, which is the only one that deploys production
+    # - Every published release (immutable X.Y.Z). Production mutation is
+    #   decided later, after a fresh `releases/latest` recheck.
     if: >-
       ${{
         (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && github.ref_name == 'main') ||
-        (github.event_name == 'release' && needs.set-matrix.outputs.is_latest_release == 'true')
+        github.event_name == 'release'
       }}
     with:
       source_sha: ${{ github.sha }}
@@ -261,10 +250,16 @@ jobs:
         github.repository == 'ZcashFoundation/zebra' &&
         (
           (github.event_name == 'push' && github.ref_name == 'main') ||
-          (github.event_name == 'release' && needs.set-matrix.outputs.is_latest_release == 'true') ||
+          github.event_name == 'release' ||
           github.event_name == 'workflow_dispatch'
         )
       }}
+    # Serialize latest-channel mutations with Docker `latest` promotion. Do not
+    # cancel an in-progress fleet update. Non-release deploys use a unique
+    # group so they do not take that lock.
+    concurrency:
+      group: ${{ github.event_name == 'release' && 'zebra-latest-channel' || format('{0}-{1}', github.workflow, github.run_id) }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -282,6 +277,7 @@ jobs:
       log_file: ${{ needs.set-matrix.outputs.log_file }}
       verify: ${{ fromJSON(needs.set-matrix.outputs.verify) }}
       use_reserved_ip: ${{ fromJSON(needs.set-matrix.outputs.use_reserved_ip) }}
+      confirm_latest_release: ${{ github.event_name == 'release' }}
 
   build-failure-issue:
     name: Open or update issues for image build failures
