@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "`parameters::subsidy::{scheduled_block_subsidy, block_subsidy_with_parent_pools}`, and behind `--cfg zcash_unstable=\"zip234\"` the halving-preserving NU7 issuance rule from [zips#1354](https://github.com/zcash/zips/pull/1354): the `nsm` balance in `ValueBalance`, excluded from the issued supply, and the `initial_nsm_value_balance` and `zip234_deployment_height` parameters for configured Testnets and Regtest ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:00.000000000-06:00

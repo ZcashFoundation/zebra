@@ -128,6 +128,16 @@ impl CommitBlockError {
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
+        // Most contextual validation errors can depend on this node's view of the chain. A wrong
+        // block subsidy, funding stream, or miner fee payment is invalid given only the block and
+        // its parent, so the peer that sent it is misbehaving.
+        #[cfg(zcash_unstable = "zip234")]
+        if let CommitBlockError::ValidateContextError(err) = self {
+            if matches!(**err, ValidateContextError::InvalidSubsidy { .. }) {
+                return 100;
+            }
+        }
+
         0
     }
 }
@@ -452,6 +462,18 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
+    #[cfg(zcash_unstable = "zip234")]
+    #[error(
+        "invalid block subsidy, funding stream, or miner fee payment in block {block_hash:?} at \
+         {height:?}: {subsidy_error}"
+    )]
+    #[non_exhaustive]
+    InvalidSubsidy {
+        subsidy_error: zebra_chain::parameters::subsidy::CoinbaseTransactionError,
+        height: block::Height,
+        block_hash: block::Hash,
+    },
+
     #[error("error updating a note commitment tree: {0}")]
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
@@ -579,5 +601,20 @@ mod tests {
             location: KnownBlock::BestChain,
         };
         assert_eq!(dup_err.misbehavior_score(), 0);
+    }
+
+    #[cfg(zcash_unstable = "zip234")]
+    #[test]
+    fn invalid_subsidy_commit_error_misbehavior_score() {
+        use zebra_chain::parameters::subsidy::{CoinbaseTransactionError, SubsidyError};
+
+        let subsidy_err = CommitBlockError::ValidateContextError(Box::new(
+            ValidateContextError::InvalidSubsidy {
+                subsidy_error: CoinbaseTransactionError::Subsidy(SubsidyError::InvalidMinerFees),
+                height: Height(5),
+                block_hash: zebra_chain::block::Hash([0; 32]),
+            },
+        ));
+        assert_eq!(subsidy_err.misbehavior_score(), 100);
     }
 }
