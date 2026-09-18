@@ -31,10 +31,14 @@ ZEBRA_DOCKER_RUNTIME_GID=10001
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
-ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz"
-ZCASHD_RUNTIME_ARCHIVE_SHA256="92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
-ZCASHD_DEFAULT_DOCKER_IMAGE="zfnd/zcashd:zebra-compat-v1.1.0"
+# docker-split-containers runs zcashd from the Zebra image, with the hash-pinned
+# sidecar binary above bind-mounted in. The image's runtime user is zebra, so the
+# datadir goes under its home.
+ZCASHD_CONTAINER_BINARY_PATH="/usr/local/bin/zcashd"
+ZCASHD_CONTAINER_DATADIR="/home/zebra/.zcash"
 
 INSTALL_PROFILE=""
 MODE=""
@@ -186,7 +190,7 @@ Modes for --install-profile default:
 Modes for --install-profile zcashd-compat:
   split-binary               Download zebrad and zcashd, print separate commands
   supervised                 Download zebrad and zcashd, print Zebra-supervised command
-  docker-split-containers    Pull images, print separate docker run commands
+  docker-split-containers    Pull the Zebra image and download zcashd, print separate docker run commands
   docker-supervised          Pull compat image, print single supervised docker run command
   build-from-source          Validate source tree paths, print build/start commands
 
@@ -208,6 +212,8 @@ Options:
   --zebrad-path PATH
   --zcashd-path PATH
   --zcashd-docker-image IMAGE
+                             docker-split-containers: run zcashd from IMAGE instead of
+                             the Zebra image (IMAGE's entrypoint must be zcashd)
   --download-binaries yes|no
   --dry-run                  Do not download archives or pull Docker images
   --unsafe-low-specs         Report hardware/disk failures as warnings
@@ -1362,7 +1368,14 @@ compat_collect_tool_checks() {
     split-binary | supervised)
       tools="curl install tar sha256sum python3"
       ;;
-    docker-split-containers | docker-supervised)
+    docker-split-containers)
+      if [[ -n "$ZCASHD_DOCKER_IMAGE" ]]; then
+        tools="docker"
+      else
+        tools="docker curl install tar sha256sum python3"
+      fi
+      ;;
+    docker-supervised)
       tools="docker"
       ;;
     build-from-source)
@@ -2046,15 +2059,43 @@ Zebra's zcashd-compat images have not been published yet: build one locally with
       docker_image_available_or_pull "$ZEBRA_DOCKER_IMAGE" ||
         add_error "Docker image is missing or could not be pulled: $ZEBRA_DOCKER_IMAGE"
 
-      if [[ -z "$ZCASHD_DOCKER_IMAGE" ]]; then
-        ZCASHD_DOCKER_IMAGE="$ZCASHD_DEFAULT_DOCKER_IMAGE"
+      if [[ -n "$ZCASHD_DOCKER_IMAGE" ]]; then
+        docker_image_available_or_pull "$ZCASHD_DOCKER_IMAGE" ||
+          add_error "zcashd Docker image is missing or could not be pulled: $ZCASHD_DOCKER_IMAGE"
       fi
-
-      docker_image_available_or_pull "$ZCASHD_DOCKER_IMAGE" ||
-        add_error "docker-split-containers requires a zcashd Docker image; attempted $ZCASHD_DOCKER_IMAGE but it was not present or pullable. Pass --zcashd-docker-image IMAGE to choose a published image."
       ;;
   esac
 
+  finalize_checks
+}
+
+# docker-split-containers runs zcashd from the Zebra image rather than a separate
+# zcashd image: none is published, and bind-mounting the hash-pinned sidecar keeps
+# the container's zcashd in lockstep with the version this script pins, the same
+# way docker-supervised relies on Zebra's embedded download. The Zebra image's
+# entrypoint runs non-zebrad commands as its runtime user, which already owns the
+# mounted datadir. --zcashd-docker-image opts out of all of this.
+compat_prepare_docker_zcashd_binary() {
+  local zcashd_url zcashd_sha zcashd_member
+
+  if [[ "$MODE" != "docker-split-containers" || -n "$ZCASHD_DOCKER_IMAGE" ]]; then
+    return
+  fi
+
+  ZCASHD_PATH="$(abs_path "${ZCASHD_PATH:-$INSTALL_DIR/zcashd/bin/zcashd}")"
+  zcashd_url="$(compat_manifest_field runtime_archive_url)"
+
+  if ((DOWNLOAD_BINARIES == 0)); then
+    printf '\nSkipping the zcashd download. Provision the pinned zcashd at %s yourself:\n%s\n\n' "$ZCASHD_PATH" "$zcashd_url"
+  else
+    zcashd_sha="$(compat_manifest_field runtime_archive_sha256)"
+    zcashd_member="$(compat_manifest_field runtime_archive_member_binary_path)"
+    download_and_extract "zcashd" "$zcashd_url" "$zcashd_sha" "$zcashd_member" "$(basename "$zcashd_url")" "$ZCASHD_PATH"
+  fi
+
+  if ((!DRY_RUN)); then
+    [[ -x "$ZCASHD_PATH" ]] || add_error "zcashd binary $ZCASHD_PATH does not exist or is not executable by the current user"
+  fi
   finalize_checks
 }
 
@@ -2115,12 +2156,13 @@ compat_print_zcashd_flag_lines() {
 # flag per line so no command-substitution/heredoc line-join can splice two
 # flags together with an escaped space.
 compat_print_docker_zcashd_flag_lines() {
+  local datadir="$1"
   local arg
   while IFS= read -r arg; do
     [[ -n "$arg" ]] && printf '  %s \\\n' "$arg"
   done < <(compat_zcashd_network_args)
-  printf '  -datadir=/home/zcashd/.zcash \\\n'
-  printf '  -conf=/home/zcashd/.zcash/zcash.conf \\\n'
+  printf '  -datadir=%s \\\n' "$datadir"
+  printf '  -conf=%s/zcash.conf \\\n' "$datadir"
   while IFS= read -r arg; do
     [[ -n "$arg" ]] && printf '  %s \\\n' "$arg"
   done < <(compat_zcashd_p2p_pinning_args)
@@ -2197,10 +2239,25 @@ docker run --rm -it --name zebra-compat --network host \\
   zebrad $(compat_zebrad_start_args)
 
 $(style "$GREEN$BOLD" "Start zcashd container in terminal 2:")
+EOF
+
+  if [[ -n "$ZCASHD_DOCKER_IMAGE" ]]; then
+    cat <<EOF
 docker run --rm -it --name zebra-compat-zcashd --network host \\
   --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=/home/zcashd/.zcash \\
   $(shell_quote "$ZCASHD_DOCKER_IMAGE") \\
-$(compat_print_docker_zcashd_flag_lines)
+$(compat_print_docker_zcashd_flag_lines /home/zcashd/.zcash)
+EOF
+    return
+  fi
+
+  cat <<EOF
+docker run --rm -it --name zebra-compat-zcashd --network host \\
+  --mount type=bind,src=$(shell_quote "$ZCASHD_PATH"),dst=$ZCASHD_CONTAINER_BINARY_PATH,readonly \\
+  --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=$ZCASHD_CONTAINER_DATADIR \\
+  $(shell_quote "$ZEBRA_DOCKER_IMAGE") \\
+  zcashd \\
+$(compat_print_docker_zcashd_flag_lines "$ZCASHD_CONTAINER_DATADIR")
 EOF
 }
 
@@ -2752,6 +2809,7 @@ case "$INSTALL_PROFILE" in
         # Validate/pull images before touching on-disk ownership: a failed pull
         # then aborts (via finalize_checks) without having re-owned operator data.
         compat_prepare_docker_images
+        compat_prepare_docker_zcashd_binary
         # Bootstrap the standalone zcashd container's conf; it lives inside the
         # datadir, so create it before compat_prepare_docker_mounts sets up the
         # mount. zcashd only reads the conf, so its owner-agnostic default perms

@@ -80,17 +80,24 @@ input are expected and are not failures.
 
 ### Known limitation: P2P frame size
 
-`p2p_message_parse`, `p2p_deep_fuzz` and `addr_message_fuzz` build their codecs
-with `Codec::builder()`, which starts at `MAX_HANDSHAKE_BODY_LEN` (1 KiB) — the
+`p2p_message_parse` and `addr_message_fuzz` build their codecs with
+`Codec::builder()`, which starts at `MAX_HANDSHAKE_BODY_LEN` (1 KiB) — the
 pre-handshake limit. Zebra raises a codec to `MAX_PROTOCOL_MESSAGE_LEN` (2 MiB)
-only after a peer handshake completes. These targets therefore exercise the
-pre-handshake framing rules, and a frame declaring a longer body is rejected at
-the header before its body is ever parsed.
+only after a peer handshake completes. These two targets exercise only the
+pre-handshake framing rules; a frame declaring a longer body is rejected at the
+header before its body is ever parsed.
 
-Covering the post-handshake limit as well means fuzzing both codec states rather
-than swapping one for the other, since the 1 KiB check is itself a rule worth
-testing. That is a change to how these targets consume their input, so it is
-left as follow-up work rather than folded in here.
+`p2p_deep_fuzz` fuzzes both codec states rather than swapping one for the
+other, since the 1 KiB check is itself a rule worth testing: one framed-body
+path models the pre-handshake codec and truncates to `MAX_HANDSHAKE_BODY_LEN`,
+a second models the post-handshake codec (`reconfigure_full_body_len()`) and
+truncates only to `MAX_PROTOCOL_MESSAGE_LEN`. The multi-message decode loop
+that reads raw fuzzer bytes directly is still pre-handshake-capped, since it
+needs a correct checksum baked into the input to get past framing at all,
+corpus-seeded inputs aside.
+
+Extending `p2p_message_parse` and `addr_message_fuzz` the same way is left as
+follow-up work.
 
 ## Seed corpora
 
