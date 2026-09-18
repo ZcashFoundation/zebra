@@ -15,7 +15,7 @@ concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       github.event.action == 'labeled' &&
-      github.event.label.name != 'A-release' &&
+      github.event.label.name != 'release' &&
       'ignored-label' ||
       'required'
     }}
@@ -34,7 +34,7 @@ env:
 
 jobs:
   changes:
-    if: github.event.action != 'labeled' || github.event.label.name == 'A-release'
+    if: github.event.action != 'labeled' || github.event.label.name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -84,7 +84,7 @@ jobs:
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'A-release')
+    if: needs.changes.outputs.unit_tests == 'true' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release')
     permissions:
       contents: read
       statuses: write
@@ -110,7 +110,7 @@ jobs:
     name: >-
       ${{
         github.event.action == 'labeled' &&
-        github.event.label.name != 'A-release' &&
+        github.event.label.name != 'release' &&
         'Label does not require unit tests' ||
         'unit-tests'
       }}
@@ -118,7 +118,7 @@ jobs:
     if: >-
       always() &&
       (github.event.action != 'labeled' ||
-      github.event.label.name == 'A-release')
+      github.event.label.name == 'release')
     needs:
       - changes
       - run-unit-tests

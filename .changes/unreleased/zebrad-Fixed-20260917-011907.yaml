@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: '`z_gettreestate` no longer returns null commitments for a block it found when a concurrent reorg moves that block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).'
+time: 2026-09-17T01:19:07.000000000Z
