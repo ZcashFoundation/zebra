@@ -1,0 +1,3 @@
+project: zebrad
+kind: Added
+body: Add metrics `zcash.pool.value.zatoshis` (labeled by pool name) and `zcash.pool.notes.created` (labeled by pool name) reporting value pool balances in zatoshis and note commitment counts at the non-finalized chain tip ([#11391](https://github.com/ZcashFoundation/zebra/pull/11391))
