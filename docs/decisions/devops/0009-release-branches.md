@@ -80,7 +80,7 @@ Chosen option 3: a `release/X.Y` branch created when a line first needs a patch,
 
 **2. The current stable line receives the patch.** That is the line of the latest published stable release. It does not depend on the version an unmerged Release PR on `main` proposes. Supporting an older line takes a separate explicit decision.
 
-**3. The branch is created on demand, from the latest published stable release on its line.** `release/X.Y` is an ordinary public branch. A maintainer creates it when the line first needs a patch, starting from the newest tag on that line: `release/6.3` from `v6.3.1` when that is the newest 6.3 tag, and from `v6.3.0` otherwise. The `Release branches` ruleset covers `refs/heads/release/**` with the same requirements as `PR Requirements` on `main`, plus deletion and force-push protection.
+**3. The branch is created on demand, from the latest published stable release on its line.** `release/X.Y` is an ordinary public branch. A maintainer creates it when the line first needs a patch, starting from the newest tag on that line: `release/6.3` from `v6.3.1` when that is the newest 6.3 tag, and from `v6.3.0` otherwise. The `Release branches` ruleset must be created on `refs/heads/release/**` with the same requirements as `PR Requirements` on `main`, plus deletion and force-push protection, before anything merges there.
 
 **4. Three kinds of change land on a release branch, each one reviewed.** The fix; the release metadata, meaning versions, changelog entries, and `ESTIMATED_RELEASE_HEIGHT` in `zebrad/src/components/sync/end_of_support.rs`; and the build or workflow infrastructure the release needs. When the branch's starting tag predates changes to the release pipeline, the first pull request is a narrowly reviewed infrastructure update: copy the required scripts, workflow files, and configuration, and initialize changelog history only through that stable release. Never copy `main`'s whole `.changes/unreleased/` directory. Never replace all of `.github/` wholesale. Never merge `main` into the release branch. Each of these changes must be visible in review as part of the release.
 
@@ -96,7 +96,7 @@ gh workflow run release.yml --ref release/X.Y \
   -f release_pr_number=<PR>
 ```
 
-**8. Latest and production follow GitHub's latest-release marker.** `ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows read that marker to decide the Docker Hub `latest` tag and the production deploy. A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag.
+**8. Latest and production follow GitHub's latest-release marker.** `ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows always publish the immutable `X.Y.Z` artifacts, then recheck that marker immediately before mutating Docker Hub `latest` or deploying production. A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag.
 
 **9. No new automation.** There is no backport bot, no scheduled job that copies commits between branches, and no second release engine. Pull requests are opened by hand and run through the pipeline that already exists.
 
