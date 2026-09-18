@@ -52,7 +52,7 @@ on:
         type: boolean
         default: false
       publish_latest_tag:
-        description: "Also publish the `latest` tag. Set only for the highest stable release."
+        description: "After publishing the immutable version tag, attempt to move Docker `latest` if this release is still GitHub's latest-release marker. The long build never applies `latest`."
         required: false
         type: boolean
         default: false
@@ -189,11 +189,11 @@ jobs:
           # generate Docker tags based on the following events/attributes
           tags: |
             # These DockerHub release tags support the following use cases:
-            # - `latest`: Points to the highest stable Zebra release, so users who pull without a tag get that version.
             # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
+            # - `latest` is not applied here. A short serialized job rechecks
+            #   GitHub's latest-release marker and retags after this build.
             #
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ inputs.publish_latest_tag }}
             # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
             # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
             # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
@@ -347,7 +347,6 @@ jobs:
             latest=false
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ inputs.publish_latest_tag }}
             type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=edge,enable={{is_default_branch}}
@@ -488,3 +487,81 @@ jobs:
           environment: ${{ (github.event_name == 'release' && !github.event.release.prerelease && 'prod') || (github.event_name == 'push' && github.ref_name == 'main' && 'stage') || (github.event_name == 'pull_request' && 'dev') }}
           organization: zfnd
           github-token: ${{ secrets.GITHUB_TOKEN }} # to be able to write the comment
+
+  # Move Docker `latest` only after the immutable version tag exists, and only
+  # when this release is still GitHub's latest-release marker. Serialized with
+  # the production deploy so two promotions cannot interleave.
+  promote-latest:
+    name: Promote Docker latest tag
+    needs: [determine-environment, merge]
+    if: >-
+      ${{
+        inputs.publish_latest_tag &&
+        inputs.publish_to_dockerhub &&
+        github.event_name == 'release' &&
+        !github.event.release.prerelease &&
+        github.repository == 'ZcashFoundation/zebra' &&
+        startsWith(github.event.release.tag_name, 'v')
+      }}
+    concurrency:
+      group: zebra-latest-channel
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Recheck the latest-release marker
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [[ "${latest_tag}" == "${RELEASE_TAG}" ]]; then
+            echo "is_latest_release=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "is_latest_release=false" >> "${GITHUB_OUTPUT}"
+            echo "Skipping Docker latest: GitHub latest is ${latest_tag}, this release is ${RELEASE_TAG}"
+          fi
+
+      - name: Authenticate to Google Cloud
+        if: steps.latest.outputs.is_latest_release == 'true'
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
+          token_format: access_token
+          access_token_lifetime: 3600s
+
+      - name: Login to Google Artifact Registry
+        if: steps.latest.outputs.is_latest_release == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Login to DockerHub
+        if: steps.latest.outputs.is_latest_release == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Point latest at this release
+        if: steps.latest.outputs.is_latest_release == 'true'
+        env:
+          SOURCE_IMAGE: ${{ needs.merge.outputs.image }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+        run: |
+          gar="us-docker.pkg.dev/${GCP_PROJECT}/zebra/${IMAGE_NAME}"
+          hub="docker.io/zfnd/${IMAGE_NAME}"
+          docker buildx imagetools create \
+            -t "${gar}:latest" \
+            -t "${hub}:latest" \
+            "${SOURCE_IMAGE}"
