@@ -37,8 +37,8 @@ use crate::{
 
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, zip317::select_mempool_transactions, BlockTemplateResponse,
-    CoinbaseCache, MinerParams,
+    fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -398,10 +398,7 @@ where
     let network = network.clone();
     let miner_params = miner_params.clone();
     let coinbase_cache = coinbase_cache.clone();
-    #[cfg(zcash_unstable = "zip234")]
-    let parent_nsm_value_balance = Some(chain_info.chain_value_pools.nsm_amount());
-    #[cfg(not(zcash_unstable = "zip234"))]
-    let parent_nsm_value_balance = None;
+    let parent_nsm_value_balance = nsm_value_balance_for_next_block(&network, &chain_info);
 
     // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.

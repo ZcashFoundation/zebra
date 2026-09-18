@@ -2612,7 +2612,8 @@ where
     ) -> Result<GetBlockTemplateResponse> {
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
-            validate_block_proposal, zip317::select_mempool_transactions,
+            nsm_value_balance_for_next_block, validate_block_proposal,
+            zip317::select_mempool_transactions,
         };
 
         // Clone Services
@@ -2850,10 +2851,7 @@ where
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
-        #[cfg(zcash_unstable = "zip234")]
-        let parent_nsm_value_balance = Some(chain_info.chain_value_pools.nsm_amount());
-        #[cfg(not(zcash_unstable = "zip234"))]
-        let parent_nsm_value_balance = None;
+        let parent_nsm_value_balance = nsm_value_balance_for_next_block(&self.network, &chain_info);
 
         let mempool_txs = select_mempool_transactions(
             &self.network,

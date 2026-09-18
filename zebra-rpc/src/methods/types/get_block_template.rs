@@ -329,10 +329,7 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        #[cfg(zcash_unstable = "zip234")]
-        let parent_nsm_value_balance = Some(chain_info.chain_value_pools.nsm_amount());
-        #[cfg(not(zcash_unstable = "zip234"))]
-        let parent_nsm_value_balance = None;
+        let parent_nsm_value_balance = nsm_value_balance_for_next_block(net, chain_info);
 
         // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
         // shielded address) as a last resort — caching the result so subsequent requests for the
@@ -578,6 +575,31 @@ pub enum MinerParamsError {
 impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     fn from(err: zcash_address::ConversionError<&'static str>) -> Self {
         Self::InvalidAddr(err)
+    }
+}
+
+/// Returns the NSM value balance after the chain tip in `chain_info`, if the subsidy of the
+/// next block depends on it.
+///
+/// From the ZIP 234 deployment height, the coinbase can't be built or cached without the
+/// balance. Before it, the coinbase pays the scheduled subsidy, so a coinbase built ahead of time
+/// without the balance is cached under `None` and reused.
+pub(crate) fn nsm_value_balance_for_next_block(
+    network: &Network,
+    chain_info: &GetBlockTemplateChainInfo,
+) -> Option<Amount<NonNegative>> {
+    #[cfg(zcash_unstable = "zip234")]
+    {
+        let height = chain_info.tip_height.next().ok()?;
+
+        zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network)
+            .then(|| chain_info.chain_value_pools.nsm_amount())
+    }
+
+    #[cfg(not(zcash_unstable = "zip234"))]
+    {
+        let _ = (network, chain_info);
+        None
     }
 }
 
