@@ -47,15 +47,14 @@ fuzz_target!(|data: &[u8]| {
 
     // ── Ironwood + v6 accessors (must not panic; iterators fully consumed) ──
     let has_ironwood = tx.has_ironwood_shielded_data();
-    let ironwood_data = tx.ironwood_shielded_data();
+    let ironwood_present = tx.ironwood_flags().is_some();
     let _ = tx.ironwood_actions().count();
     let _ = tx.ironwood_nullifiers().count();
     let _ = tx.ironwood_note_commitments().count();
-    let _ = tx.ironwood_flags();
     let method_enough_flags = tx.has_enough_ironwood_flags();
     let _ = tx.ironwood_value_balance();
     let _ = tx.orchard_value_balance();
-    let _ = tx.orchard_shielded_data();
+    let _ = tx.orchard_flags();
     let _ = tx.has_shielded_inputs();
     let _ = tx.has_shielded_outputs();
     let _ = tx.version_group_id();
@@ -73,9 +72,8 @@ fuzz_target!(|data: &[u8]| {
     // ── Structural invariants that must hold by construction ──
     // The presence predicate must agree with the accessor.
     assert_eq!(
-        has_ironwood,
-        ironwood_data.is_some(),
-        "has_ironwood_shielded_data disagrees with ironwood_shielded_data()"
+        has_ironwood, ironwood_present,
+        "has_ironwood_shielded_data disagrees with ironwood_flags().is_some()"
     );
     // The consensus flag-check is a thin wrapper over the transaction method:
     // it returns Ok iff the tx has enough Ironwood flags. A divergence is a bug.
