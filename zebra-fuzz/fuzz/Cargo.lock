@@ -5126,6 +5126,7 @@ dependencies = [
  "jsonrpsee",
  "libfuzzer-sys",
  "libzcash_script",
+ "orchard",
  "proptest",
  "sapling-crypto",
  "serde_json",
@@ -5133,6 +5134,7 @@ dependencies = [
  "tokio-util",
  "tower 0.4.13",
  "zcash_address",
+ "zcash_protocol",
  "zcash_script",
  "zebra-chain",
  "zebra-consensus",
@@ -5239,7 +5241,6 @@ dependencies = [
  "zcash_address",
  "zcash_keys",
  "zcash_primitives",
- "zcash_proofs",
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
@@ -5260,6 +5261,7 @@ dependencies = [
  "thiserror 2.0.19",
  "zcash_primitives",
  "zcash_script",
+ "zcash_transparent",
  "zebra-chain",
 ]
 

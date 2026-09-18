@@ -1,3 +1,4 @@
 [toolchain]
 # Keep in sync with RUST_VERSION in docker/Dockerfile.
 channel = "1.91.0"
+components = ["rust-analyzer"]
