@@ -7,6 +7,7 @@
 pub mod client;
 pub mod config;
 pub mod indexer;
+pub mod lightwalletd;
 pub mod methods;
 pub mod queue;
 pub mod server;

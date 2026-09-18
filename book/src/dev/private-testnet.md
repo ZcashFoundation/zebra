@@ -152,6 +152,11 @@ Heartwood = 903_800
 Canopy = 1_028_500
 NU5 = 1_842_420
 NU6 = 2_969_920
+"NU6.1" = 3_536_500
+"NU6.2" = 4_052_000
+"NU6.3" = 4_134_000
+# NU7 has no scheduled activation height yet; this is an example value.
+NU7 = 4_200_000
 
 [rpc]
 debug_force_finished_sync = false

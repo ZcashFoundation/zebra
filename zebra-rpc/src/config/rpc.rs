@@ -46,6 +46,35 @@ pub struct Config {
     /// anyone on the internet can query your node's state.
     pub indexer_listen_addr: Option<SocketAddr>,
 
+    /// IP address and port for the lightwalletd-compatible gRPC server.
+    ///
+    /// Note: The lightwalletd gRPC server is disabled by default.
+    /// To enable it, set a listen address in the config:
+    /// ```toml
+    /// [rpc]
+    /// lightwalletd_listen_addr = '127.0.0.1:9067'
+    /// ```
+    ///
+    /// This server implements the lightwalletd `CompactTxStreamer` service, so
+    /// Zcash light clients can connect directly to Zebra.
+    ///
+    /// This server is experimental: its behaviour and configuration may change
+    /// in any release, including in ways that break clients.
+    ///
+    /// # Security
+    ///
+    /// The port serves plaintext HTTP/2, with no TLS and no authentication —
+    /// cookie authentication does not apply to it. Anyone who can reach the
+    /// port can query your node's state and send transactions through it, and
+    /// anyone on the network path can read and modify the traffic, including
+    /// the addresses a light client is querying. Terminate TLS in a reverse
+    /// proxy, and bind Zebra to a loopback or private address.
+    ///
+    /// Run this on infrastructure you operate, not on end users' machines: a
+    /// loopback port is reachable by any local process, and by web pages
+    /// loaded in a browser on that machine.
+    pub lightwalletd_listen_addr: Option<SocketAddr>,
+
     /// The number of threads used to process RPC requests and responses.
     ///
     /// This field is deprecated and could be removed in a future release.
@@ -80,6 +109,9 @@ impl Default for Config {
 
             // Disable indexer RPCs by default.
             indexer_listen_addr: None,
+
+            // Disable the lightwalletd gRPC server by default.
+            lightwalletd_listen_addr: None,
 
             // Use multiple threads, because we pause requests during getblocktemplate long polling
             parallel_cpu_threads: 0,

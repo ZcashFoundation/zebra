@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "With the `proptest-impl` feature: `transaction::arbitrary::shielded`, which builds Orchard and Ironwood bundles for tests, and `Transaction::test_v6`, `test_v5_with_orchard` and `test_v6_with_bundles` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
+time: 2026-08-13T12:00:00.000000000-03:00

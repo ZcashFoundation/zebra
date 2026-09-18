@@ -48,7 +48,7 @@ proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
     #[test]
     fn mempool_receives_raw_tx(transaction in any::<Transaction>(), network in any::<Network>()) {
-        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends().count() > 0));
 
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
@@ -66,7 +66,7 @@ proptest! {
 
             let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex, None).await });
 
-            let unmined_transaction = UnminedTx::from(transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction));
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Ok(()));
@@ -95,7 +95,7 @@ proptest! {
     /// Mempool service errors should become server errors.
     #[test]
     fn mempool_errors_are_forwarded(transaction in any::<Transaction>(), network in any::<Network>()) {
-        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends().count() > 0));
 
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
@@ -112,7 +112,7 @@ proptest! {
             let _transaction_hex = transaction_hex.clone();
             let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex, None).await });
 
-            let unmined_transaction = UnminedTx::from(transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction));
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
             mempool
@@ -151,7 +151,7 @@ proptest! {
     /// Test that when the mempool rejects a transaction the caller receives an error.
     #[test]
     fn rejected_txs_are_reported(transaction in any::<Transaction>(), network in any::<Network>()) {
-        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends().count() > 0));
 
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
@@ -162,7 +162,7 @@ proptest! {
 
         runtime.block_on(async move {
             let tx = hex::encode(&transaction.zcash_serialize_to_vec()?);
-            let req = mempool::Request::Queue(vec![UnminedTx::from(transaction).into()]);
+            let req = mempool::Request::Queue(vec![UnminedTx::from(std::sync::Arc::new(transaction)).into()]);
             let rsp = mempool::Response::Queued(vec![Err(DummyError.into())]);
             let mempool_query = mempool.expect_request(req).map_ok(|r| r.respond(rsp));
 
@@ -724,7 +724,7 @@ proptest! {
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
     fn rpc_queue_main_loop(tx in any::<Transaction>(), network in any::<Network>()) {
-        prop_assume!(!(tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0));
+        prop_assume!(!(tx.is_coinbase() && tx.sapling_spends().count() > 0));
 
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
@@ -741,7 +741,7 @@ proptest! {
                 let rpc = rpc.clone();
                 tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex, None).await })
             };
-            let tx_unmined = UnminedTx::from(tx);
+            let tx_unmined = UnminedTx::from(std::sync::Arc::new(tx));
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
             // fail the mempool insertion
@@ -804,7 +804,7 @@ proptest! {
     #[test]
     fn rpc_queue_receives_all_txs_from_channel(txs in any::<[Transaction; 2]>(),
                                                network in any::<Network>()) {
-        prop_assume!(txs.iter().all(|tx| !(tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0)));
+        prop_assume!(txs.iter().all(|tx| !(tx.is_coinbase() && tx.sapling_spends().count() > 0)));
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -821,7 +821,7 @@ proptest! {
                 let tx_hex = hex::encode(&tx_bytes);
                 let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex, None).await });
 
-                let tx_unmined = UnminedTx::from(tx.clone());
+                let tx_unmined = UnminedTx::from(std::sync::Arc::new(tx.clone()));
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
                 // insert to hs we will use later
@@ -867,7 +867,7 @@ proptest! {
             // each transaction will be retried
             for tx in txs.clone() {
                 let expected_request =
-                    mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(tx))]);
+                    mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(std::sync::Arc::new(tx)))]);
                 let (rsp_tx, rsp_rx) = oneshot::channel();
                 let _ = rsp_tx.send(Ok(()));
                 let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);

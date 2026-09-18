@@ -5,6 +5,7 @@ use std::{
     ops::{Add, Deref, DerefMut, RangeInclusive},
     pin::Pin,
     sync::Arc,
+    time::Instant,
 };
 
 use tower::{BoxError, Service, ServiceExt};
@@ -269,6 +270,22 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// The local time at which the block verifier received this block, if it passed
+    /// through the block verifier.
+    ///
+    /// Used by `Chain::cmp` to prefer the first-received chain when cumulative works
+    /// are equal, per the protocol specification:
+    ///
+    /// > To break ties between leaf blocks, a node will prefer the block that it received first.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
+    ///
+    /// This is node-local, in-memory metadata, not consensus data. It is `None` for
+    /// blocks constructed outside the block verifier (checkpoint sync, backup restore,
+    /// tests); `Chain::cmp` treats unstamped blocks as received before any stamped
+    /// block, like `zcashd`'s disk-loaded blocks, which all share `nSequenceId` 0.
+    pub received_time: Option<Instant>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -329,6 +346,11 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    /// The local time at which the block verifier received this block, if it passed
+    /// through the block verifier, copied from the [`SemanticallyVerifiedBlock`] it was
+    /// built from. See that type's `received_time` field for details.
+    pub(crate) received_time: Option<Instant>,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -507,6 +529,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -526,6 +549,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
             )?,
+            received_time,
         })
     }
 }
@@ -561,6 +585,7 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time: None,
         }
     }
 }
@@ -586,6 +611,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time: None,
         }
     }
 }
@@ -598,6 +624,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
+            received_time: valid.received_time,
         }
     }
 }
@@ -610,6 +637,8 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             height: finalized.height,
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
+            // The finalized state does not track receipt times, so there is no stamp.
+            received_time: None,
         }
     }
 }
@@ -1340,6 +1369,38 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
 
+    /// Looks up a Sapling note commitment tree by block hash in any current chain.
+    ///
+    /// Unlike [`SaplingTree`](Self::SaplingTree), this checks every non-finalized chain
+    /// (and the finalized state), so it is immune to reorgs that move a block from the
+    /// best chain onto a still-retained side chain.
+    ///
+    /// Only lookups by hash are supported, because the same height can have different
+    /// treestates in different chain forks.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SaplingTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
+    AnyChainSaplingTree(block::Hash),
+
+    /// Looks up an Orchard note commitment tree by block hash in any current chain.
+    ///
+    /// Unlike [`OrchardTree`](Self::OrchardTree), this checks every non-finalized chain
+    /// (and the finalized state), so it is immune to reorgs that move a block from the
+    /// best chain onto a still-retained side chain.
+    ///
+    /// Only lookups by hash are supported, because the same height can have different
+    /// treestates in different chain forks.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::OrchardTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::OrchardTree)
+    ///   if the corresponding block contains an Orchard note commitment tree.
+    /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
+    AnyChainOrchardTree(block::Hash),
+
     /// Looks up an Ironwood note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1348,6 +1409,22 @@ pub enum ReadRequest {
     ///   if the corresponding block contains an Ironwood note commitment tree.
     /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
     IronwoodTree(HashOrHeight),
+
+    /// Looks up an Ironwood note commitment tree by block hash in any current chain.
+    ///
+    /// Unlike [`IronwoodTree`](Self::IronwoodTree), this checks every non-finalized chain
+    /// (and the finalized state), so it is immune to reorgs that move a block from the
+    /// best chain onto a still-retained side chain.
+    ///
+    /// Only lookups by hash are supported, because the same height can have different
+    /// treestates in different chain forks.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::IronwoodTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::IronwoodTree)
+    ///   if the corresponding block contains an Ironwood note commitment tree.
+    /// * [`ReadResponse::IronwoodTree(None)`](crate::ReadResponse::IronwoodTree) otherwise.
+    AnyChainIronwoodTree(block::Hash),
 
     /// Returns a list of Sapling note commitment subtrees by their indexes, starting at
     /// `start_index`, and returning up to `limit` subtrees.
@@ -1423,10 +1500,22 @@ pub enum ReadRequest {
     #[cfg(feature = "indexer")]
     SpendingTransactionId(Spend),
 
-    /// Looks up utxos for the provided addresses.
+    /// Looks up utxos for the provided addresses, in the provided height range,
+    /// returning at most `max_entries` of them.
     ///
     /// Returns a type with found utxos and transaction information.
-    UtxosByAddresses(HashSet<transparent::Address>),
+    UtxosByAddresses {
+        /// The addresses to look up utxos for.
+        addresses: HashSet<transparent::Address>,
+
+        /// The blocks to be queried for utxos.
+        height_range: RangeInclusive<block::Height>,
+
+        /// The maximum number of utxos to return, or `None` for no limit.
+        ///
+        /// The limit bounds the index scan, not just the response.
+        max_entries: Option<usize>,
+    },
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
@@ -1519,13 +1608,16 @@ impl ReadRequest {
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
+            ReadRequest::AnyChainSaplingTree { .. } => "any_chain_sapling_tree",
+            ReadRequest::AnyChainOrchardTree { .. } => "any_chain_orchard_tree",
             ReadRequest::IronwoodTree { .. } => "ironwood_tree",
+            ReadRequest::AnyChainIronwoodTree { .. } => "any_chain_ironwood_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::IronwoodSubtrees { .. } => "ironwood_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
-            ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
+            ReadRequest::UtxosByAddresses { .. } => "utxos_by_addresses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }

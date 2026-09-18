@@ -1610,9 +1610,33 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::AnyChainSaplingTree(hash) => {
+                Ok(ReadResponse::SaplingTree(read::any_sapling_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
+
+            ReadRequest::AnyChainOrchardTree(hash) => {
+                Ok(ReadResponse::OrchardTree(read::any_orchard_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
+
             ReadRequest::IronwoodTree(hash_or_height) => Ok(ReadResponse::IronwoodTree(
                 read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
+
+            ReadRequest::AnyChainIronwoodTree(hash) => {
+                Ok(ReadResponse::IronwoodTree(read::any_ironwood_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
@@ -1691,11 +1715,17 @@ impl Service<ReadRequest> for ReadStateService {
             .map(ReadResponse::AddressesTransactionIds),
 
             // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => read::address_utxos(
+            ReadRequest::UtxosByAddresses {
+                addresses,
+                height_range,
+                max_entries,
+            } => read::address_utxos(
                 &state.network,
                 state.latest_best_chain(),
                 &state.db,
                 addresses,
+                height_range,
+                max_entries,
             )
             .map(ReadResponse::AddressUtxos),
 

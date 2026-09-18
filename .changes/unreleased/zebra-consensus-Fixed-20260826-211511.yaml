@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: 'Do not keep the entire input list in memory while verifying a transparent input. This caused quadratic memory consumption since all inputs are verified concurrently ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).'
+time: 2026-08-26T21:15:11.000000000Z

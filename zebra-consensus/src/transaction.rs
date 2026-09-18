@@ -29,10 +29,9 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block,
     parameters::{Network, NetworkUpgrade},
-    primitives::Groth16Proof,
     serialization::DateTime32,
     transaction::{
-        self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
+        self, HashType, SigHash, Transaction, TxVersion, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
     transparent,
 };
@@ -835,7 +834,7 @@ fn check_structure_and_network_rules(
     //
     // This will be treated as "Rules that apply generally before the next NU"
     // when we add the NU that re-enables Orchard actions.
-    if network.is_orchard_temporarily_disabled(height) && tx.orchard_shielded_data().is_some() {
+    if network.is_orchard_temporarily_disabled(height) && tx.has_orchard_shielded_data() {
         return Err(TransactionError::Other(
             "transaction has Orchard actions (temporarily disabled)".into(),
         ));
@@ -858,12 +857,10 @@ fn check_structure_and_network_rules(
     // The gate activates at the NU6.2 activation height committed in
     // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
     // `Network::orchard_canonical_proof_size_rule_active`.
-    if network.orchard_canonical_proof_size_rule_active(height) {
-        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-            if !orchard_shielded_data.proof_size_is_canonical() {
-                return Err(TransactionError::OrchardProofSize);
-            }
-        }
+    if network.orchard_canonical_proof_size_rule_active(height)
+        && !tx.orchard_proof_size_is_canonical()
+    {
+        return Err(TransactionError::OrchardProofSize);
     }
 
     // The Ironwood bundle's Halo2 proof must also have a canonical size. Ironwood only exists
@@ -871,10 +868,8 @@ fn check_structure_and_network_rules(
     // enforced unconditionally whenever an Ironwood bundle is present. Like the Orchard bundle,
     // Ironwood bundles are deserialized leniently, so the size is checked here rather than during
     // parsing.
-    if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
-        if !ironwood_shielded_data.proof_size_is_canonical() {
-            return Err(TransactionError::IronwoodProofSize);
-        }
+    if !tx.ironwood_proof_size_is_canonical() {
+        return Err(TransactionError::IronwoodProofSize);
     }
 
     Ok(())
@@ -922,7 +917,7 @@ fn check_maturity_height(
 ) -> Result<(), TransactionError> {
     check::tx_transparent_coinbase_spends_maturity(
         network,
-        tx,
+        &tx,
         height,
         Arc::new(HashMap::new()),
         spent_utxos,
@@ -942,23 +937,18 @@ fn dispatch_version_verification(
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
 ) -> Result<AsyncChecks, TransactionError> {
-    match tx {
-        Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+    match tx.tx_version() {
+        TxVersion::Sprout(_) | TxVersion::V3 => {
             tracing::debug!(?tx, "got transaction with wrong version");
             Err(TransactionError::WrongVersion)
         }
-        Transaction::V4 { joinsplit_data, .. } => verify_v4_transaction(
-            tx,
-            nu,
-            script_verifier,
-            cached_ffi_transaction,
-            joinsplit_data,
-        ),
-        Transaction::V5 { .. } => {
-            verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction)
-        }
-        Transaction::V6 { .. } => {
-            verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction)
+        TxVersion::V4 => verify_v4_transaction(tx, nu, script_verifier, cached_ffi_transaction),
+        TxVersion::V5 => verify_v5_transaction(tx, nu, script_verifier, cached_ffi_transaction),
+        TxVersion::V6 => verify_v6_transaction(tx, nu, script_verifier, cached_ffi_transaction),
+        #[allow(unreachable_patterns)]
+        _ => {
+            tracing::debug!(?tx, "got transaction with unsupported version");
+            Err(TransactionError::WrongVersion)
         }
     }
 }
@@ -978,14 +968,12 @@ fn dispatch_version_verification(
 /// - the `nu` network upgrade active at the transaction's verification height
 /// - the `script_verifier` to use for verifying the transparent transfers
 /// - the prepared `cached_ffi_transaction` used by the script verifier
-/// - the Sprout `joinsplit_data` shielded data in the transaction
 #[allow(clippy::unwrap_in_result)]
 fn verify_v4_transaction(
     tx: &Transaction,
     nu: NetworkUpgrade,
     script_verifier: script::Verifier,
     cached_ffi_transaction: Arc<CachedFfiTransaction>,
-    joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
 ) -> Result<AsyncChecks, TransactionError> {
     verify_v4_transaction_network_upgrade(tx, nu)?;
 
@@ -997,7 +985,7 @@ fn verify_v4_transaction(
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
-            .and(verify_sprout_shielded_data(joinsplit_data, &sighash)?)
+            .and(verify_sprout_shielded_data(tx, &sighash)?)
             .and(verify_sapling_bundle(sapling_bundle, &sighash)),
     )
 }
@@ -1225,13 +1213,13 @@ fn verify_transparent_inputs_and_outputs(
 
 /// Verifies a transaction's Sprout shielded join split data.
 fn verify_sprout_shielded_data(
-    joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+    tx: &Transaction,
     shielded_sighash: &SigHash,
 ) -> Result<AsyncChecks, TransactionError> {
     let mut checks = AsyncChecks::new();
 
-    if let Some(joinsplit_data) = joinsplit_data {
-        for joinsplit in joinsplit_data.joinsplits() {
+    if let Some(sprout_bundle) = tx.sprout_bundle() {
+        for joinsplit in &sprout_bundle.joinsplits {
             // # Consensus
             //
             // > The proof π_ZKJoinSplit MUST be valid given a
@@ -1245,7 +1233,7 @@ fn verify_sprout_shielded_data(
             // checks that (at a minimum) must pass for the
             // transaction to verify.
             checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                primitives::groth16::Item::from_joinsplit(joinsplit, &joinsplit_data.pub_key)?,
+                primitives::groth16::joinsplit_to_item(joinsplit, &sprout_bundle.joinsplit_pubkey)?,
             ));
         }
 
@@ -1280,7 +1268,11 @@ fn verify_sprout_shielded_data(
         // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
         let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
-        let ed25519_item = (joinsplit_data.pub_key, joinsplit_data.sig, shielded_sighash).into();
+        let pub_key = zebra_chain::primitives::ed25519::VerificationKeyBytes::from(
+            sprout_bundle.joinsplit_pubkey,
+        );
+        let sig = zebra_chain::primitives::ed25519::Signature::from(sprout_bundle.joinsplit_sig);
+        let ed25519_item = (pub_key, sig, shielded_sighash).into();
 
         checks.push(ed25519_verifier.oneshot(ed25519_item));
     }

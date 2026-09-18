@@ -31,6 +31,14 @@ use crate::{error::TransactionError, BoxError};
 /// - verify Sapling shielded data in the tx verifier.
 static SAPLING: Lazy<LocalTxProver> = Lazy::new(LocalTxProver::bundled);
 
+/// Returns the shared Sapling prover.
+///
+/// Parsing the bundled Sapling parameters takes time, so callers that build Sapling
+/// outputs share this prover instead of parsing the parameters again.
+pub fn prover() -> &'static LocalTxProver {
+    &SAPLING
+}
+
 #[derive(Clone)]
 pub struct Item {
     /// The bundle containing the Sapling shielded data to verify.

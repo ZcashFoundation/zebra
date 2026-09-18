@@ -8,6 +8,9 @@ You can run Zebra as a backend for [`lightwalletd`][lwd], or a [mining][mining] 
 For Kubernetes and load balancer integrations, Zebra provides simple [HTTP
 health endpoints](./health.md).
 
+A first sync from genesis takes days on Mainnet. To start from a recent
+height instead, see [Syncing from a State Snapshot](./snapshots.md).
+
 ## Optional Configs & Features
 
 Zebra supports a variety of optional features which you can enable and configure

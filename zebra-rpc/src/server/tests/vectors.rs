@@ -33,6 +33,7 @@ async fn rpc_server_spawn() {
     let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
         indexer_listen_addr: None,
+        lightwalletd_listen_addr: None,
         parallel_cpu_threads: 0,
         debug_force_finished_sync: false,
         cookie_dir: Default::default(),
@@ -102,6 +103,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         indexer_listen_addr: None,
+        lightwalletd_listen_addr: None,
         parallel_cpu_threads: 0,
         debug_force_finished_sync: false,
         cookie_dir: Default::default(),
@@ -161,6 +163,7 @@ async fn rpc_server_spawn_port_conflict() {
     let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         indexer_listen_addr: None,
+        lightwalletd_listen_addr: None,
         debug_force_finished_sync: false,
         parallel_cpu_threads: 0,
         cookie_dir: Default::default(),

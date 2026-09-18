@@ -1,8 +1,8 @@
 # Updating the ECC dependencies
 
-Zebra relies on numerous dependencies maintained by ZODL, and updating them can be a complex task. This guide will help you navigate the process.
+Zebra relies on numerous dependencies maintained by ZODL (formerly the Electric Coin Company), and updating them can be a complex task. This guide will help you navigate the process.
 
-The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because [zebra_script](https://github.com/ZcashFoundation/zcash_script) links to specific files from it (zcash_script.cpp and all on which it depends). Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
+The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because `zebra-script` depends on the [zcash_script](https://github.com/ZcashFoundation/zcash_script) project, which is now split into two crates (see `zebra-script/Cargo.toml`): `libzcash_script`, which links to specific files from zcash (zcash_script.cpp and all on which it depends), and the higher-level `zcash_script` crate. Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
 
 ## Steps for upgrading
 
@@ -32,7 +32,7 @@ Notes:
 
 - Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version.
 
-- You need to have [cargo upgrade](https://crates.io/crates/cargo-upgrades) and [cargo edit](https://crates.io/crates/cargo-edit) installed for this command to work.
+- You need to have [cargo-edit](https://crates.io/crates/cargo-edit) installed for this command to work — it is the crate that provides the `cargo upgrade` subcommand.
 
 ### Version consistency check
 
