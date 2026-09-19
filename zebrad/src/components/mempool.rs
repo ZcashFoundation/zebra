@@ -907,12 +907,21 @@ impl Service<Request> for Mempool {
                             .map(|_| ())
                             .map_err(BoxError::from)
                     });
+
+                    // An insertion changes the verified set even when it reports an error:
+                    // `Storage::insert()` evicts transactions to stay under the cost limit, and
+                    // returns `RandomlyEvicted` when the incoming transaction or one of its
+                    // ancestors was among them, having already removed the others. The result
+                    // doesn't say what was evicted, so assume the set moved.
+                    //
+                    // Unlike a failed verification, reaching this costs a peer a transaction that
+                    // passed verification and proposal admission, so being conservative here
+                    // isn't a rebuild a peer can cheaply provoke.
+                    verified_set_changed = true;
+
                     if result.is_ok() {
                         send_to_peers_ids.insert(tx_id);
-                        verified_set_changed = true;
                     } else {
-                        // A transaction that failed to enter the mempool doesn't change what the
-                        // next template should contain.
                         invalidated_ids.insert(tx_id);
                     }
                     if let Some(response) = pending.response {
