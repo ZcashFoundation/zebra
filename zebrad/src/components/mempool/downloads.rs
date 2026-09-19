@@ -243,7 +243,7 @@ where
     >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
@@ -253,10 +253,30 @@ where
         // task is scheduled for wakeup when the next task becomes ready.
         //
         // TODO: this would be cleaner with poll_map (#2693)
-        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
+        loop {
+            let Some(join_result) = ready!(this.pending.as_mut().poll_next(cx)) else {
+                return Poll::Ready(None);
+            };
+
             let result = join_result.expect("transaction download and verify tasks must not panic");
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip, rsp_tx))) => {
+                    // A task's success is queued here before this stream consumes it, and
+                    // `cancel()` can run in between: a block that mines this transaction removes
+                    // its accounting, but cancellation can't reach a task that already finished.
+                    //
+                    // Admitting it now would put a mined transaction in the mempool, and
+                    // `finish_admission()` would find no accounting left to release. Drop it
+                    // instead, which is what cancelling it would have done.
+                    if !this.cancel_handles.contains_key(&tx.transaction.id) {
+                        if let Some(rsp_tx) = rsp_tx {
+                            let _ = rsp_tx
+                                .send(Err("transaction was mined while it was verified".into()));
+                        }
+
+                        continue;
+                    }
+
                     assert!(this.admission.replace(tx.transaction.id).is_none());
                     (Ok(Ok((tx, spent_mempool_outpoints, tip, rsp_tx))), None)
                 }
@@ -283,12 +303,8 @@ where
                 }
             }
 
-            Some(result)
-        } else {
-            None
-        };
-
-        Poll::Ready(item)
+            return Poll::Ready(Some(result));
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

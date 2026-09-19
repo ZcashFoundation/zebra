@@ -42,6 +42,39 @@ pub(super) fn mock_proposals(mempool: &mut Mempool) -> ProposalVerifier {
     verifier
 }
 
+/// Gives the mempool a template scheduler with a miner address and a controlled block verifier.
+///
+/// The default `setup()` has no miner address, so its scheduler never builds a template.
+fn mock_templates(
+    mempool: &mut Mempool,
+) -> (
+    ProposalVerifier,
+    tokio::sync::watch::Receiver<Option<Arc<zebra_rpc::BlockTemplateResponse>>>,
+    tokio::sync::mpsc::Sender<zebra_rpc::BlockTemplateRequest>,
+) {
+    let verifier: ProposalVerifier = MockService::build().for_unit_tests();
+    let miner_params = zebra_rpc::MinerParams::from(
+        zcash_keys::address::Address::decode(
+            &mempool.network,
+            zebra_rpc::config::mining::default_miner_address(
+                mempool.network.kind(),
+                &zebra_rpc::config::mining::MinerAddressType::Transparent,
+            ),
+        )
+        .expect("the hard-coded transparent address is valid"),
+    );
+
+    let (templates, published, requests) = super::super::block_template::BlockTemplates::new(
+        mempool.network.clone(),
+        Some(miner_params),
+        admission_read_state(mempool.state.clone(), &mempool.network),
+        Buffer::new(BoxService::new(verifier.clone()), 1),
+    );
+    mempool.block_templates = templates;
+
+    (verifier, published, requests)
+}
+
 /// Keep historical network fixtures focused on their caller behavior, not block consensus.
 pub(crate) fn admission_read_state<State: zebra_state::State>(
     state: State,
@@ -166,6 +199,58 @@ async fn rejected_proposal_never_releases_outputs_or_gossip() {
             zebra_node_services::mempool::MempoolChange::added([id].into_iter().collect())
         );
     }
+}
+
+/// Checks that a transaction which fails verification doesn't make Zebra rebuild and revalidate
+/// the block template.
+///
+/// Such a transaction never entered the verified set, so the template still describes it
+/// correctly. Rebuilding anyway re-runs selection, constructs a candidate block, and submits the
+/// whole block to `CheckProposal`, revalidating every script and shielded proof in it. A peer can
+/// pace invalid transactions to keep Zebra doing that: re-signing a v5 transaction gives each
+/// attempt a fresh `UnminedTxId` with the same effects, so exact rejection caching doesn't stop
+/// the stream.
+#[tokio::test]
+async fn a_failed_verification_does_not_rebuild_the_template() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let (mut proposals, _published, _requests) = mock_templates(&mut mempool);
+
+    // The scheduler builds and validates a template for the current tip. Answering it leaves the
+    // template clean, so any later validation can only come from a rebuild.
+    let first_build = drive(
+        &mut mempool,
+        proposals.expect_request_that(|request| {
+            matches!(request, zebra_consensus::Request::CheckProposal(_))
+        }),
+    )
+    .await;
+    first_build.respond(block::Hash([0; 32]));
+
+    let tx = candidate();
+    let Response::Queued(mut queued) = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
+        .await
+        .unwrap()
+    else {
+        panic!("Queue response expected")
+    };
+    let mut result = queued.remove(0).unwrap();
+
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond_error(zebra_consensus::error::TransactionError::WrongVersion);
+
+    // The queued transaction's caller learns it failed.
+    assert!(drive(&mut mempool, &mut result).await.unwrap().is_err());
+
+    // The verified set never changed, so nothing should be rebuilt or revalidated. The mempool
+    // has to keep being polled while we check, or the scheduler never runs at all.
+    drive(&mut mempool, proposals.expect_no_requests()).await;
 }
 
 #[tokio::test]
