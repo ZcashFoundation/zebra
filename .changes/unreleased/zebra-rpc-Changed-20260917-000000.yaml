@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The JSON-RPC compatibility middleware that rewrites `InvalidParams` error codes to the `zcashd`-compatible `Misc` code now changes only the error code, preserving the original error''s `data` field (previously dropped) instead of rebuilding the response by hand ([#9097](https://github.com/ZcashFoundation/zebra/issues/9097)).'
+time: 2026-09-17T00:00:00.000000000Z
