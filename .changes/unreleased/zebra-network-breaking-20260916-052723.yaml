@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`Response::BlockHashes` is now a struct variant with `hashes` and `feedback` fields instead of a tuple variant. Update constructors and match patterns to use the named fields ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).'
+time: 2026-09-16T05:27:23.138240654Z

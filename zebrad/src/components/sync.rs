@@ -39,6 +39,7 @@ use crate::{
 
 mod downloads;
 pub mod end_of_support;
+mod find_response_progress;
 mod gossip;
 mod progress;
 mod recent_sync_lengths;
@@ -48,6 +49,7 @@ mod status;
 mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
+use find_response_progress::FindResponseProgress;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
@@ -429,6 +431,9 @@ where
     /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     block_reobtain_retries: HashMap<block::Hash, u8>,
 
+    /// Response classifications waiting for the outcome of each accepted hash.
+    find_response_progress: HashMap<block::Hash, Vec<FindResponseProgress>>,
+
     /// `TransparentInputNotFound` drops since the last verified block, bounded by the
     /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
     utxo_race_drops: usize,
@@ -580,6 +585,7 @@ where
             misbehavior_sender,
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
+            find_response_progress: HashMap::new(),
             utxo_race_drops: 0,
         };
 
@@ -594,9 +600,11 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
-                self.downloads.cancel_all();
-            }
+            let _result = self.try_to_sync().await;
+
+            // Release any unresolved response feedback neutrally before restarting,
+            // including feedback for hashes never queued for download.
+            self.cancel_downloads();
 
             self.update_metrics();
 
@@ -612,6 +620,14 @@ where
             );
             sleep(restart_delay).await;
         }
+    }
+
+    /// Cancels active work and releases attribution for queued and deferred hashes.
+    fn cancel_downloads(&mut self) {
+        self.downloads.cancel_all();
+        self.find_response_progress.clear();
+        self.reobtain_hashes.clear();
+        self.block_reobtain_retries.clear();
     }
 
     /// Tries to synchronize the chain as far as it can.
@@ -658,7 +674,26 @@ where
                 .and_then(convert::identity)?;
         }
 
+        // Finish pending block work so its outcomes classify response feedback,
+        // even if later rounds find no new tips and never poll these downloads.
+        while self.downloads.in_flight() > 0 || !self.reobtain_hashes.is_empty() {
+            timeout(BLOCK_VERIFY_TIMEOUT, self.finish_pending_download()).await??;
+        }
+
         info!("exhausted prospective tip set");
+
+        Ok(())
+    }
+
+    /// Drives final retries and processes one remaining download outcome.
+    async fn finish_pending_download(&mut self) -> Result<(), BlockDownloadVerifyError> {
+        self.reobtain_missing_blocks().await?;
+
+        if let Some(response) = self.downloads.next().await {
+            self.handle_download_response(response)?;
+        }
+
+        self.update_metrics();
 
         Ok(())
     }
@@ -680,11 +715,11 @@ where
             // Some temporary errors are ignored, and syncing continues with other blocks.
             // If it turns out they were actually important, syncing will run out of blocks, and
             // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
+            self.handle_download_response(rsp)?;
         }
         // Re-request any blocks that just failed with `NotFound`, before pausing
         // on the lookahead limit (#5709).
-        self.reobtain_missing_blocks().await;
+        self.reobtain_missing_blocks().await?;
         self.update_metrics();
 
         // Pause new downloads while the syncer or downloader are past their lookahead limits.
@@ -706,11 +741,11 @@ where
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
-            self.handle_block_response(response)?;
+            self.handle_download_response(response)?;
             // A block that just failed with `NotFound` is what unblocks the
             // verifier, so re-request it now rather than waiting for the pause
             // loop to clear — which it cannot until this block arrives (#5709).
-            self.reobtain_missing_blocks().await;
+            self.reobtain_missing_blocks().await?;
             self.update_metrics();
         }
 
@@ -754,19 +789,28 @@ where
     /// checkpoint verifier from advancing. Waiting for the lookahead pause to
     /// clear would deadlock — the pause cannot clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
-    async fn reobtain_missing_blocks(&mut self) {
+    ///
+    /// Non-duplicate enqueue failures resolve the hash's feedback and propagate
+    /// according to the existing sync restart policy.
+    async fn reobtain_missing_blocks(&mut self) -> Result<(), BlockDownloadVerifyError> {
         if self.reobtain_hashes.is_empty() {
-            return;
+            return Ok(());
         }
 
         for hash in std::mem::take(&mut self.reobtain_hashes) {
             // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it. A residual duplicate/queue error is
-            // benign — it means the block is already being handled.
-            if let Err(error) = self.downloads.download_and_verify(hash).await {
-                trace!(?hash, ?error, "re-download of missing block not queued");
+            // failed, so this re-queues it. Only a duplicate guarantees that
+            // an existing task still owns the work and can resolve feedback.
+            match self.downloads.download_and_verify(hash).await {
+                Ok(()) => {}
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                    trace!(?hash, "re-download of missing block already queued");
+                }
+                Err(error) => self.handle_download_response(Err((error, hash)))?,
             }
         }
+
+        Ok(())
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -830,11 +874,17 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes(hashes)) => {
+                Ok(zn::Response::BlockHashes {
+                    hashes,
+                    mut feedback,
+                }) => {
                     trace!(?hashes);
 
                     let hashes = hashes.as_slice();
                     if hashes.is_empty() {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     }
 
@@ -851,6 +901,9 @@ where
                     let unknown_hashes = if let Some(index) = first_unknown {
                         &hashes[index..]
                     } else {
+                        if let Some(feedback) = feedback.take() {
+                            feedback.mark_stalled();
+                        }
                         continue;
                     };
 
@@ -893,6 +946,8 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+
+                    self.track_find_response(unknown_hashes, feedback.take());
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -902,13 +957,25 @@ where
 
         debug!(?self.prospective_tips);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
+        // Known hashes can follow unknown ones or become known while responses arrive.
+        // Settle their feedback without aborting downloads from this or other peers.
+        let mut unknown_downloads = IndexSet::new();
+        for hash in download_set {
             debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+            if self.state_contains(hash).await? {
+                if let Some(responses) = self.find_response_progress.remove(&hash) {
+                    for response in responses {
+                        // Known blocks can still be queued for validation, so this is
+                        // not proof of committed progress. Other missing or invalid
+                        // hashes in the response can still produce a stall.
+                        response.record_abandoned_hash();
+                    }
+                }
+            } else {
+                unknown_downloads.insert(hash);
             }
         }
+        let download_set = unknown_downloads;
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
@@ -958,14 +1025,17 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
+                    Ok(zn::Response::BlockHashes {
+                        hashes,
+                        mut feedback,
+                    }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
                         // Legacy zcashd nodes could prepend an unrelated hash
                         // to their response. Check the first hash against the
                         // previous response, and discard mismatches.
-                        let unknown_hashes = match hashes.as_slice() {
+                        let continuation_hashes = match hashes.as_slice() {
                             [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
                             }
@@ -980,12 +1050,20 @@ where
                                 rest
                             }
                             // We ignore these responses
-                            [] => continue,
+                            [] => {
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
+                                continue;
+                            }
                             [single_hash] => {
                                 debug!(?single_hash,
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response containing a single unexpected hash");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                             [first_hash, second_hash, rest @ ..] => {
@@ -995,12 +1073,31 @@ where
                                                 ?tip.expected_next,
                                                 ?tip.tip,
                                                 "discarding response that starts with two unexpected hashes");
+                                if let Some(feedback) = feedback.take() {
+                                    feedback.mark_stalled();
+                                }
                                 continue;
                             }
                         };
 
+                        let mut unknown_hashes = Vec::new();
+                        for &hash in continuation_hashes {
+                            if !self.state_contains(hash).await? {
+                                unknown_hashes.push(hash);
+                            }
+                        }
+                        let unknown_hashes = unknown_hashes.as_slice();
+
                         if unknown_hashes.is_empty() {
-                            debug!(?tip.tip, "response contained no new hashes after the expected overlap");
+                            debug!(
+                                ?tip.tip,
+                                "response contained no new hashes after the expected overlap",
+                            );
+
+                            if let Some(feedback) = feedback.take() {
+                                feedback.mark_stalled();
+                            }
+
                             continue;
                         }
 
@@ -1043,6 +1140,8 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+
+                        self.track_find_response(unknown_hashes, feedback.take());
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -1125,7 +1224,7 @@ where
 
         let response = self.downloads.next().await.expect("downloads is nonempty");
 
-        Ok(response)
+        Ok(response.map_err(|(error, _hash)| error))
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.
@@ -1197,6 +1296,49 @@ where
         }
     }
 
+    /// Handles an attributed result from the downloader stream.
+    fn handle_download_response(
+        &mut self,
+        response: Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        let (error, hash) = match response {
+            Ok(success) => return self.handle_block_response(Ok(success)),
+            Err(error_details) => error_details,
+        };
+
+        let missing = matches!(&error, BlockDownloadVerifyError::DownloadFailed { error, .. }
+            if format!("{error:?}").contains("NotFound"));
+
+        // Only consensus errors with an established peer penalty prove invalidity.
+        // Other verifier errors can reflect local failures or superseded requests.
+        let invalid = match &error {
+            BlockDownloadVerifyError::Invalid { error, .. } => error.misbehavior_score() != 0,
+            BlockDownloadVerifyError::InvalidHeight { .. } => true,
+            _ => false,
+        };
+
+        let result = self.handle_block_response(Err(error));
+
+        // Any scheduled retry can still resolve this hash's pending feedback.
+        if self.reobtain_hashes.contains(&hash) {
+            return result;
+        }
+
+        if let Some(responses) = self.find_response_progress.remove(&hash) {
+            for response in responses {
+                if missing {
+                    response.record_missing_hash();
+                } else if invalid {
+                    response.record_invalid_hash();
+                } else {
+                    response.record_abandoned_hash();
+                }
+            }
+        }
+
+        result
+    }
+
     /// Handles a response for a requested block.
     ///
     /// See [`Self::handle_response`] for more details.
@@ -1212,6 +1354,12 @@ where
                 // The block arrived, so forget any re-request bookkeeping for it.
                 self.block_reobtain_retries.remove(&hash);
                 self.utxo_race_drops = 0;
+
+                if let Some(responses) = self.find_response_progress.remove(&hash) {
+                    for response in responses {
+                        response.record_verified_hash();
+                    }
+                }
 
                 return Ok(());
             }
@@ -1352,6 +1500,27 @@ where
             BlockDownloadVerifyError::ValidationRequestError { error, .. }
                 if error.is::<tokio::time::error::Elapsed>()
         )
+    }
+
+    /// Associates each unique accepted hash with its response's pending feedback.
+    fn track_find_response(
+        &mut self,
+        hashes: &[block::Hash],
+        feedback: Option<zn::FindResponseFeedback>,
+    ) {
+        let Some(feedback) = feedback else {
+            return;
+        };
+
+        let unique_hashes = HashSet::<_>::from_iter(hashes.iter().copied());
+        let progress = FindResponseProgress::new(unique_hashes.len(), feedback);
+
+        for hash in unique_hashes {
+            self.find_response_progress
+                .entry(hash)
+                .or_default()
+                .push(progress.clone());
+        }
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.

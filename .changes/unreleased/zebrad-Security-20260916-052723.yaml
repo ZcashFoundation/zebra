@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: During initial synchronization, Zebra now detects peers that repeatedly advertise only already-known or nonexistent blocks instead of letting those responses disguise a stalled connection ([#11187](https://github.com/ZcashFoundation/zebra/pull/11187)).
+time: 2026-09-16T05:27:23.090971633Z
