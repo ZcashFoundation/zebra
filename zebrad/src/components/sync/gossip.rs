@@ -135,11 +135,32 @@ where
         };
 
         info!(?height, ?request, log_msg);
-        let broadcast_fut = broadcast_network
-            .ready()
-            .await
-            .map_err(PeerSetReadiness)?
-            .call(request);
+
+        // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
+        // If there are no ready peers, waiting for readiness without a timeout would stop this
+        // task from consuming the mined block channel, and `submitblock` would eventually fail
+        // with a full channel even though the block was committed. So we bound readiness too.
+        let Ok(ready_result) =
+            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, broadcast_network.ready()).await
+        else {
+            // Any queued mined block announcements are stale by now, and waiting for readiness
+            // for each of them would let the channel fill up faster than we can drain it.
+            let skipped_mined_blocks = mined_block_receiver
+                .as_mut()
+                .map_or(0, drain_mined_block_receiver);
+
+            info!(
+                ?height,
+                ?hash,
+                skipped_mined_blocks,
+                timeout = ?TIPS_RESPONSE_TIMEOUT,
+                "skipping block broadcast: no ready peers",
+            );
+
+            continue;
+        };
+
+        let broadcast_fut = ready_result.map_err(PeerSetReadiness)?.call(request);
 
         // Await the broadcast future in a spawned task to avoid waiting on
         // `AdvertiseBlockToAll` requests when there are unready peers.
@@ -159,4 +180,16 @@ where
             chain_state.mark_last_change_hash(hash);
         }
     }
+}
+
+/// Discards all mined block announcements that are currently queued in `mined_block_receiver`,
+/// returning the number of discarded announcements.
+fn drain_mined_block_receiver(
+    mined_block_receiver: &mut mpsc::Receiver<(block::Hash, block::Height)>,
+) -> usize {
+    let mut drained = 0;
+    while mined_block_receiver.try_recv().is_ok() {
+        drained += 1;
+    }
+    drained
 }
