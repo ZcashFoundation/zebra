@@ -150,7 +150,11 @@ impl<S> HttpRequestMiddleware<S> {
             };
         Ok((
             version,
-            HttpRequest::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())),
+            // `HttpBody` is built from a `Vec<u8>`. Convert the `Bytes` with
+            // `Vec::from`, which reclaims the buffer in place when it is uniquely
+            // owned (the common case here, e.g. the re-serialized request) rather
+            // than always allocating and copying like `bytes.as_ref().to_vec()`.
+            HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
         ))
     }
     /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
