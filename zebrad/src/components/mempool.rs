@@ -767,6 +767,17 @@ impl Service<Request> for Mempool {
             let mut invalidated_ids = HashSet::<_>::new();
             let mut mined_mempool_ids = HashSet::<_>::new();
 
+            // Whether the verified set changed, so the block template is worth rebuilding.
+            //
+            // # Security
+            //
+            // This is not the same as `invalidated_ids` being non-empty: that set also reports
+            // transactions that failed verification and were never in the mempool. Rebuilding for
+            // those lets a peer pace invalid transactions to make Zebra re-select, re-construct
+            // and re-validate a whole block on every one of them, and re-signing a v5 transaction
+            // gives each attempt a fresh `UnminedTxId` that exact rejection caching won't stop.
+            let mut verified_set_changed = false;
+
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Handle best chain tip changes
@@ -787,6 +798,8 @@ impl Service<Request> for Mempool {
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
 
+                verified_set_changed |= !mined.is_empty() || !invalidated.is_empty();
+
                 mined_mempool_ids.extend(mined);
                 invalidated_ids.extend(invalidated);
             }
@@ -798,6 +811,8 @@ impl Service<Request> for Mempool {
             if let Some(tip_height) = best_tip_height {
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
                 if !expired_transactions.is_empty() {
+                    verified_set_changed = true;
+
                     tracing::debug!(
                         ?expired_transactions,
                         "removed expired transactions from the mempool",
@@ -894,10 +909,12 @@ impl Service<Request> for Mempool {
                     });
                     if result.is_ok() {
                         send_to_peers_ids.insert(tx_id);
+                        verified_set_changed = true;
                     } else {
+                        // A transaction that failed to enter the mempool doesn't change what the
+                        // next template should contain.
                         invalidated_ids.insert(tx_id);
                     }
-                    self.block_templates.mark_changed();
                     if let Some(response) = pending.response {
                         let _ = response.send(result);
                     }
@@ -906,7 +923,7 @@ impl Service<Request> for Mempool {
                 self.background_work.notify.notify_one();
             }
 
-            if !invalidated_ids.is_empty() || !mined_mempool_ids.is_empty() {
+            if verified_set_changed {
                 self.block_templates.mark_changed();
             }
 

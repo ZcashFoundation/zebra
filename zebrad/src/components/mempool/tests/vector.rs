@@ -2506,3 +2506,90 @@ async fn verification_timeout_releases_peer_slot() {
         .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
         .expect("a further transaction from the same source should queue after slots are freed");
 }
+
+/// Checks that a transaction mined while its verification was finishing is dropped rather than
+/// admitted.
+///
+/// A task's success is queued in `pending` before the stream consumes it, and `cancel()` runs in
+/// between when a block arrives that mines the same transaction. Cancellation can't reach a task
+/// that has already finished, and the mined-id filter only skips the transaction recorded in
+/// `admission`, which isn't set until the stream consumes the result. So the accounting entry is
+/// removed while the success is still queued.
+///
+/// Yielding it then admits a mined transaction, and leaves `finish_admission()` with no
+/// accounting to release, where it hits its `unreachable!`: a remote peer can crash the node by
+/// submitting a transaction that is mined while it verifies.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn mined_transaction_is_dropped_rather_than_admitted() {
+    use std::collections::HashSet;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::downloads::{
+        Downloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    };
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let mut state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mut tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state.clone(),
+    ));
+
+    let verified = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("a vector transaction");
+    let mined_id = verified.transaction.id.mined_id();
+
+    // The task checks the best chain and reads the tip before it verifies.
+    let state_responder = tokio::spawn(async move {
+        loop {
+            state
+                .expect_request_that(|_| true)
+                .await
+                .respond_with(|request| match request {
+                    zs::Request::Transaction(_) => zs::Response::Transaction(None),
+                    zs::Request::Tip => zs::Response::Tip(None),
+                    other => panic!("unexpected state request: {other:?}"),
+                });
+        }
+    });
+
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(verified.transaction.clone()), None, None)
+        .expect("queue the transaction");
+
+    // Let the task reach the verifier, and answer it, so its success is queued in `pending`.
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(transaction::MempoolResponse::from(verified));
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+
+    // A block mines the transaction before the stream consumes that success.
+    downloads.cancel(&HashSet::from([mined_id]));
+
+    let admitted = downloads.as_mut().next().now_or_never();
+
+    state_responder.abort();
+
+    assert!(
+        !matches!(admitted, Some(Some(Ok(Ok(_))))),
+        "a transaction mined while it was verifying must not be admitted: its download \
+         accounting is already gone, so admitting it panics the mempool in finish_admission()"
+    );
+    assert_eq!(
+        downloads.transaction_requests().count(),
+        0,
+        "the mined transaction's accounting should stay released"
+    );
+}
