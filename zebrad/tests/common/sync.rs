@@ -177,6 +177,12 @@ impl MempoolBehavior {
 ///
 /// On success, returns the associated `TempDir`. Returns an error if
 /// the child exits or `timeout` elapses before `stop_regex` is found.
+///
+/// `timeout` only bounds the mempool behaviours that check the logs as they arrive.
+/// With `MempoolBehavior::ShouldNotActivate`, `zebrad` has to exit by itself so its
+/// whole output can be collected, and the wait for that exit is unbounded, because
+/// `TestChild::with_timeout` does not apply to `wait_with_output`. A stalled sync in
+/// those tests is caught by the per-test `slow-timeout` in `.config/nextest.toml`.
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(reuse_tempdir))]
 pub fn sync_until(
