@@ -107,7 +107,7 @@ where
         .in_current_span();
 
         // TODO: Move this logic for selecting the first ready future and updating `chain_state` to its own method.
-        let (((hash, height), log_msg, updated_chain_state), is_block_submission) =
+        let (((mut hash, mut height), log_msg, updated_chain_state), mut is_block_submission) =
             if let Some(mined_block_receiver) = mined_block_receiver.as_mut() {
                 tokio::select! {
                     tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
@@ -126,6 +126,44 @@ where
 
         // TODO: Move logic for calling the peer set to its own method.
 
+        info!(?height, ?hash, is_block_submission, log_msg);
+
+        // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
+        // If there are no ready peers, only waiting for readiness would stop this task from
+        // consuming the mined block channel, and `submitblock` would eventually fail with a full
+        // channel even though the block was committed.
+        //
+        // So we keep receiving mined blocks while we wait, and only broadcast the latest one.
+        // The pending broadcast is kept until peers are ready, so the latest block is still
+        // advertised after a temporary lack of ready peers.
+        let mut superseded_blocks: usize = 0;
+        let ready_result = loop {
+            tokio::select! {
+                biased;
+
+                // Dropping an unfinished `Ready` future doesn't affect the service's readiness,
+                // and we call the service straight after it becomes ready.
+                ready_result = broadcast_network.ready() => break ready_result.map(|_| ()),
+
+                Some(mined_block) = recv_mined_block(&mut mined_block_receiver) => {
+                    (hash, height) = mined_block;
+                    is_block_submission = true;
+                    superseded_blocks = superseded_blocks.saturating_add(1);
+                }
+            }
+        };
+
+        ready_result.map_err(PeerSetReadiness)?;
+
+        if superseded_blocks > 0 {
+            info!(
+                ?height,
+                ?hash,
+                superseded_blocks,
+                "peers were not ready for block broadcasts, only sending the latest mined block",
+            );
+        }
+
         // block broadcasts inform other nodes about new blocks,
         // so our internal Grow or Reset state doesn't matter to them
         let request = if is_block_submission {
@@ -134,33 +172,7 @@ where
             zn::Request::AdvertiseBlock(hash, None)
         };
 
-        info!(?height, ?request, log_msg);
-
-        // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
-        // If there are no ready peers, waiting for readiness without a timeout would stop this
-        // task from consuming the mined block channel, and `submitblock` would eventually fail
-        // with a full channel even though the block was committed. So we bound readiness too.
-        let Ok(ready_result) =
-            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, broadcast_network.ready()).await
-        else {
-            // Any queued mined block announcements are stale by now, and waiting for readiness
-            // for each of them would let the channel fill up faster than we can drain it.
-            let skipped_mined_blocks = mined_block_receiver
-                .as_mut()
-                .map_or(0, drain_mined_block_receiver);
-
-            info!(
-                ?height,
-                ?hash,
-                skipped_mined_blocks,
-                timeout = ?TIPS_RESPONSE_TIMEOUT,
-                "skipping block broadcast: no ready peers",
-            );
-
-            continue;
-        };
-
-        let broadcast_fut = ready_result.map_err(PeerSetReadiness)?.call(request);
+        let broadcast_fut = broadcast_network.call(request);
 
         // Await the broadcast future in a spawned task to avoid waiting on
         // `AdvertiseBlockToAll` requests when there are unready peers.
@@ -182,14 +194,14 @@ where
     }
 }
 
-/// Discards all mined block announcements that are currently queued in `mined_block_receiver`,
-/// returning the number of discarded announcements.
-fn drain_mined_block_receiver(
-    mined_block_receiver: &mut mpsc::Receiver<(block::Hash, block::Height)>,
-) -> usize {
-    let mut drained = 0;
-    while mined_block_receiver.try_recv().is_ok() {
-        drained += 1;
+/// Receives the next mined block from `mined_block_receiver`.
+///
+/// Never resolves if there is no receiver, so it can be used in a `select!` with other futures.
+async fn recv_mined_block(
+    mined_block_receiver: &mut Option<mpsc::Receiver<(block::Hash, block::Height)>>,
+) -> Option<(block::Hash, block::Height)> {
+    match mined_block_receiver {
+        Some(mined_block_receiver) => mined_block_receiver.recv().await,
+        None => std::future::pending().await,
     }
-    drained
 }
