@@ -52,7 +52,11 @@ fn mock_templates(
     tokio::sync::watch::Receiver<Option<Arc<zebra_rpc::BlockTemplateResponse>>>,
     tokio::sync::mpsc::Sender<zebra_rpc::BlockTemplateRequest>,
 ) {
-    let verifier: ProposalVerifier = MockService::build().for_unit_tests();
+    // The scheduler can wait out a retry delay before it rebuilds, which is longer than the
+    // mock's default request deadline.
+    let verifier: ProposalVerifier = MockService::build()
+        .with_max_request_delay(Duration::from_secs(10))
+        .for_unit_tests();
     let miner_params = zebra_rpc::MinerParams::from(
         zcash_keys::address::Address::decode(
             &mempool.network,
@@ -248,9 +252,94 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
     // The queued transaction's caller learns it failed.
     assert!(drive(&mut mempool, &mut result).await.unwrap().is_err());
 
-    // The verified set never changed, so nothing should be rebuilt or revalidated. The mempool
-    // has to keep being polled while we check, or the scheduler never runs at all.
-    drive(&mut mempool, proposals.expect_no_requests()).await;
+    // The verified set never changed, so the rejection must not trigger a rebuild. A dirty
+    // template is rebuilt as soon as the mempool is polled, so a window well under the
+    // scheduler's own refresh interval separates the two. The mempool has to keep being polled
+    // while we wait, or the scheduler never runs at all.
+    let rebuilt = drive(
+        &mut mempool,
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            proposals.expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposal(_))
+            }),
+        ),
+    )
+    .await;
+
+    assert!(
+        rebuilt.is_err(),
+        "a transaction that never entered the mempool must not rebuild and revalidate the template"
+    );
+}
+
+/// Checks that an insertion which evicts transactions and then reports an error still rebuilds
+/// the block template.
+///
+/// `Storage::insert()` evicts transactions to stay under the cost limit, and returns
+/// `RandomlyEvicted` when the incoming transaction or one of its ancestors was among them — after
+/// it has already removed the others. So an error doesn't mean the verified set is unchanged, and
+/// keying the rebuild on a successful insertion leaves the template describing transactions the
+/// mempool no longer holds.
+#[tokio::test]
+async fn an_evicting_insertion_rebuilds_the_template() {
+    // A zero cost limit makes every insertion evict.
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, 0, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let (mut proposals, _published, _requests) = mock_templates(&mut mempool);
+
+    let first_build = drive(
+        &mut mempool,
+        proposals.expect_request_that(|request| {
+            matches!(request, zebra_consensus::Request::CheckProposal(_))
+        }),
+    )
+    .await;
+    first_build.respond(block::Hash([0; 32]));
+
+    let tx = candidate();
+    let Response::Queued(mut queued) = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
+        .await
+        .unwrap()
+    else {
+        panic!("Queue response expected")
+    };
+    let mut result = queued.remove(0).unwrap();
+
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx));
+
+    // Admission validates the transaction against `setup()`'s auto-approving verifier, not the
+    // scheduler's, so the next request this mock sees can only be a rebuild.
+
+    // The transaction passed admission, then the cost limit evicted it on the way in.
+    assert!(
+        drive(&mut mempool, &mut result).await.unwrap().is_err(),
+        "the zero cost limit should evict the transaction during insertion"
+    );
+
+    // Eviction moved the verified set, so the template has to be rebuilt. The window stays well
+    // under the scheduler's refresh interval, which would otherwise rebuild on its own and hide
+    // whether the eviction was noticed at all.
+    let rebuild = drive(
+        &mut mempool,
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            proposals.expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposal(_))
+            }),
+        ),
+    )
+    .await
+    .expect("an eviction should rebuild the template, without waiting for the refresh");
+
+    rebuild.respond(block::Hash([0; 32]));
 }
 
 #[tokio::test]
