@@ -1,4 +1,0 @@
-project: zebra-script
-kind: breaking
-body: 'Removed `CachedFfiTransaction::inputs()` since it returned a copy of the inputs which could cause quadratic memory consumption, and it is no longer needed inside Zebra. Eventually it might be replaced by a method that returns a reference to the original zcash_transparent Inputs ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).'
-time: 2026-08-26T23:34:48.000000000Z
