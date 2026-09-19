@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'New [zcashd API Migration Guide](https://zebra.zfnd.org/user/zcashd-api-migration-guide.html) book page, recording which component owns each of the 135 RPC methods `zcashd` 6.20.0 registers, plus its ZMQ topics, REST interface, and notification hooks: Zebra, a named external component, the `zcashd`-compat bridge, or nobody. Zebra''s rows document every field-level divergence from `zcashd` ([#11021](https://github.com/ZcashFoundation/zebra/issues/11021)).'
+time: 2026-08-21T12:00:00.000000000Z
