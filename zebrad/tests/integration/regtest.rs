@@ -202,6 +202,193 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     Ok(())
 }
 
+/// Block templates must include the mempool's transactions in dependency order, and the
+/// resulting block must be accepted.
+///
+/// This is the only test that puts real, signed transactions through the mining RPCs. Every other
+/// template test in the tree uses an empty mempool, so before this test nothing asserted that a
+/// transaction which reached the mempool would ever reach a block. The second transaction spends
+/// an unmined output of the first, so the template's ordering is asserted, not only inclusion.
+#[tokio::test]
+async fn block_template_includes_mempool_transactions_in_dependency_order() -> Result<()> {
+    use zebra_chain::{
+        amount::Amount,
+        parameters::NetworkKind,
+        transaction::{Transaction, TransparentSigningKey},
+    };
+    use zebra_rpc::{
+        client::{
+            BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource,
+            SendRawTransactionResponse,
+        },
+        proposal_block_from_template,
+    };
+
+    /// Coinbase outputs can be spent once this many blocks are on top of them.
+    const COINBASE_MATURITY: u32 = zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
+
+    /// How long to wait for a sent transaction to show up in a block template.
+    const TEMPLATE_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let key = TransparentSigningKey::random();
+    let miner_address = key.address(NetworkKind::Regtest);
+
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+    config.mining.miner_address = Some(miner_address.into());
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+
+    // Mine a coinbase to our key at height 1, then enough blocks for it to mature.
+    client.generate(COINBASE_MATURITY + 1).await?;
+    let next_height = Height(COINBASE_MATURITY + 2);
+
+    let block_1 = client
+        .get_block(1)
+        .await
+        .map_err(|err| eyre!(err))?
+        .ok_or_else(|| eyre!("block 1 must exist after generate"))?;
+    let coinbase = &block_1.transactions[0];
+    let (index, coinbase_output) = coinbase
+        .outputs()
+        .into_iter()
+        .enumerate()
+        .find(|(_, output)| output.lock_script == miner_address.script())
+        .ok_or_else(|| eyre!("the coinbase must pay the configured miner address"))?;
+    let coinbase_outpoint = transparent::OutPoint {
+        hash: coinbase.hash(),
+        index: index as u32,
+    };
+
+    // Transaction A spends the mature coinbase; transaction B spends A's first output while A is
+    // still unmined, so B can only be valid in a block that also contains A, before it.
+    let send_amount = Amount::try_from(100_000_000)?;
+    let tx_a = Transaction::signed_transparent(
+        &network,
+        next_height,
+        &key,
+        &[(coinbase_outpoint, coinbase_output)],
+        &[(miner_address, send_amount)],
+    )
+    .map_err(|err| eyre!(err))?;
+    let tx_a_outpoint = transparent::OutPoint {
+        hash: tx_a.hash(),
+        index: 0,
+    };
+    let tx_b = Transaction::signed_transparent(
+        &network,
+        next_height,
+        &key,
+        &[(tx_a_outpoint, tx_a.outputs()[0].clone())],
+        &[(miner_address, Amount::try_from(50_000_000)?)],
+    )
+    .map_err(|err| eyre!(err))?;
+
+    for tx in [&tx_a, &tx_b] {
+        let raw_tx = hex::encode(tx.zcash_serialize_to_vec()?);
+        let response: SendRawTransactionResponse = client
+            .json_result_from_call("sendrawtransaction", format!(r#"["{raw_tx}"]"#))
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert_eq!(
+            response.hash(),
+            tx.hash(),
+            "sendrawtransaction must accept the transaction"
+        );
+    }
+
+    let expected_order = vec![tx_a.hash(), tx_b.hash()];
+    let deadline = std::time::Instant::now() + TEMPLATE_TIMEOUT;
+    let template: BlockTemplateResponse = loop {
+        let template: BlockTemplateResponse = client
+            .json_result_from_call("getblocktemplate", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        if template.transactions().len() == expected_order.len() {
+            break template;
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(eyre!(
+                "the template must include both mempool transactions within {TEMPLATE_TIMEOUT:?}, got {:?}",
+                template.transactions()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    let template_order: Vec<_> = template.transactions().iter().map(|tx| tx.hash()).collect();
+    assert_eq!(
+        template_order, expected_order,
+        "the template must list a transaction after the transaction it spends from",
+    );
+
+    let proposal_block =
+        proposal_block_from_template(&template, BlockTemplateTimeSource::default(), &network)?;
+    let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+    let proposal_result: BlockProposalResponse = client
+        .json_result_from_call(
+            "getblocktemplate",
+            format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
+        )
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        proposal_result,
+        BlockProposalResponse::Valid,
+        "a template carrying the mempool transactions must be a valid block proposal",
+    );
+
+    client.submit_block(proposal_block).await?;
+
+    let mined_block = client
+        .get_block(next_height.0 as i32)
+        .await
+        .map_err(|err| eyre!(err))?
+        .ok_or_else(|| eyre!("the submitted block must be readable at its height"))?;
+    let mined_order: Vec<_> = mined_block
+        .transactions
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+    assert_eq!(
+        mined_order[1..],
+        expected_order,
+        "the mined block must contain the template's transactions in order after the coinbase",
+    );
+
+    let mempool: Vec<String> = client
+        .json_result_from_call("getrawmempool", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert!(
+        mempool.is_empty(),
+        "mined transactions must leave the mempool, still queued: {mempool:?}",
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
 /// A rejected block body must not poison the children of a later valid block with the same header
 /// hash.
 ///

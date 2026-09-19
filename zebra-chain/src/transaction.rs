@@ -20,6 +20,10 @@ mod unmined;
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(clippy::unwrap_in_result)]
 pub mod arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+mod test_signing;
+#[cfg(test)]
+mod test_signing_tests;
 #[cfg(test)]
 mod tests;
 
@@ -35,6 +39,8 @@ pub use serialize::{
     MIN_TRANSPARENT_TX_V5_SIZE,
 };
 pub use sighash::{HashType, SigHash, SigHasher};
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use test_signing::TransparentSigningKey;
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
